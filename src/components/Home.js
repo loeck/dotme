@@ -5,6 +5,7 @@ import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 import Color from 'color'
 
+import isNaN from 'lodash/isNaN'
 import sample from 'lodash/sample'
 
 import Box from 'meh-components/Box'
@@ -12,9 +13,14 @@ import Box from 'meh-components/Box'
 import { getProxyUrl } from 'helpers/url'
 
 import ListTracks from 'components/ListTracks'
+import Me from 'components/Me'
+import Footer from 'components/Footer'
 
-const Wrapper = styled(Box).attrs({})`
-  background: ${p => p.bg || 'transparent'};
+const Wrapper = styled(Box).attrs({
+  style: p => ({
+    background: p.bg || 'transparent',
+  }),
+})`
   color: white;
   height: 100vh;
   position: relative;
@@ -39,32 +45,13 @@ const WrapperCanvas = styled(Box).attrs({
   }
 `
 
-const Me = styled(Box)`
-  color: ${p => (new Color(p.bg).isLight() ? 'white' : 'black')};
-  background: ${p => (new Color(p.bg).isLight() ? 'black' : 'white')};
-  position: fixed;
-  top: 100px;
-  left: 50px;
-  padding: 20px;
-  transition: all ease-in-out 0.1s;
-  user-select: none;
-  z-index: 2;
-
-  a {
-    background: ${p => (new Color(p.bg).isLight() ? 'white' : 'black')};
-    color: ${p => (new Color(p.bg).isLight() ? 'black' : 'white')};
-    display: inline-block;
-    padding: 2px;
-    margin: -2px 0;
-    text-decoration: none;
-    transition: all ease-in-out 0.1s;
-  }
-`
-
 class Home extends Component {
   state = {
-    duration: 30,
+    auto: false,
     currentTrack: {},
+    duration: 30,
+    playing: false,
+    volume: 1,
   }
 
   componentDidMount() {
@@ -73,40 +60,44 @@ class Home extends Component {
         const { auto } = this.state
 
         if (!auto) {
-          this.setTrack({})
+          this.resetTrack({ stop: true })
         }
       }
     })
 
-    this._player.addEventListener('canplay', () => this._player.play())
+    window.addEventListener('resize', this.setCanvasDimensions)
+
+    this._player.addEventListener('progress', e => {
+      const { duration } = e.target
+
+      if (e.target.networkState === 1) {
+        this.setState({
+          playing: true,
+        })
+        this._player.play()
+      }
+
+      if (!isNaN(duration)) {
+        this.setState({
+          duration,
+        })
+      }
+    })
     this._player.addEventListener('pause', () => {
       const { auto } = this.state
 
       if (auto) {
         this.setRandomTrack()
       } else {
-        this.setTrack({})
+        this.resetTrack()
       }
     })
-    this._player.addEventListener('playing', e => {
-      const { currentTrack } = this.state
-      const { duration } = e.target
 
-      this.setState({
-        duration,
-      })
-
-      this._ctx.strokeStyle = `rgba(${
-        new Color(currentTrack.color).isLight() ? '0, 0, 0' : '255, 255, 255'
-      }, 0.5)`
-    })
+    this.setCanvasDimensions()
 
     const audioContext = new window.AudioContext()
     const source = audioContext.createMediaElementSource(this._player)
     source.connect(audioContext.destination)
-
-    this._canvas.height = window.innerHeight
-    this._canvas.width = window.innerWidth
 
     this._ctx = this._canvas.getContext('2d')
     this._ctx.lineWidth = 2
@@ -114,23 +105,26 @@ class Home extends Component {
 
     const scope = new Oscilloscope(source)
     scope.animate(this._ctx)
-
-    this.setRandomTrack()
   }
 
   componentDidUpdate(prevProps, prevState) {
-    const { currentTrack } = this.state
+    const { currentTrack, volume } = this.state
 
     if (prevState.currentTrack !== currentTrack) {
       this._player.currentTime = 0
+      this._player.volume = volume
 
       if (currentTrack.preview) {
         this._player.src = getProxyUrl(currentTrack.preview)
       } else {
         this._player.src = ''
-        this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
       }
     }
+  }
+
+  setCanvasDimensions = () => {
+    this._canvas.height = window.innerHeight
+    this._canvas.width = window.innerWidth
   }
 
   setRandomTrack = () => {
@@ -148,9 +142,46 @@ class Home extends Component {
 
   setTrack = (t, options = {}) => {
     const { auto = false } = options
+
     this.setState({
       currentTrack: t,
       auto,
+    })
+
+    this._ctx.strokeStyle = `rgba(${
+      new Color(t.color).isLight() ? '0, 0, 0' : '255, 255, 255'
+    }, 0.5)`
+  }
+
+  resetTrack = (options = {}) => {
+    const { stop = false } = options
+
+    this.setState({
+      currentTrack: {},
+      playing: false,
+      auto: false,
+    })
+
+    this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
+
+    if (!stop) {
+      this.setRandomTrack()
+    }
+  }
+
+  handleChangePlaying = state => {
+    if (state) {
+      this.setRandomTrack()
+    } else {
+      this.resetTrack({ stop: true })
+    }
+  }
+
+  handleChangeVolume = volume => {
+    this._player.volume = volume
+
+    this.setState({
+      volume,
     })
   }
 
@@ -160,7 +191,10 @@ class Home extends Component {
 
   render() {
     const { tracks } = this.props
-    const { currentTrack, duration, auto } = this.state
+    const { currentTrack, duration, auto, playing, volume } = this.state
+
+    const { color: currentColor } = currentTrack
+    const bgIsLight = new Color(currentColor).isLight()
 
     return (
       <>
@@ -169,35 +203,23 @@ class Home extends Component {
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>
-          <Me bg={currentTrack.color} flow={10}>
-            <div>Hi, I&apos;m Loëck !</div>
-            <div>
-              I work in Paris at{' '}
-              <a href="https://ledger.fr" target="_blank" rel="noopener noreferrer">
-                Ledger
-              </a>{' '}
-              as a Senior Front-end Developer.
-            </div>
-            <div>
-              <a href="https://github.com/loeck" target="_blank" rel="noopener noreferrer">
-                Github
-              </a>{' '}
-              /{' '}
-              <a
-                href="https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550/"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                LinkedIn
-              </a>
-            </div>
-          </Me>
+          <Me bgIsLight={bgIsLight} />
+          <Footer
+            onTogglePlaying={this.handleChangePlaying}
+            onChangeVolume={this.handleChangeVolume}
+            volume={volume}
+            playing={playing}
+            bgIsLight={bgIsLight}
+          />
           <ListTracks
-            scrollTo={auto}
-            duration={duration}
+            bgIsLight={bgIsLight}
             currentTrack={currentTrack}
-            tracks={tracks}
+            duration={duration}
+            onResetTrack={this.resetTrack}
             onSetTrack={this.setTrack}
+            playing={playing}
+            scrollTo={auto}
+            tracks={tracks}
           />
         </Wrapper>
       </>
