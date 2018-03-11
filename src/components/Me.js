@@ -8,7 +8,7 @@ const Wrapper = styled(Box)`
   background: ${p => (p.bgIsLight ? 'black' : 'white')};
   position: fixed;
   top: 100px;
-  left: 50px;
+  left: 100px;
   padding: 20px;
   transition: all ease-in-out 0.1s;
   user-select: none;

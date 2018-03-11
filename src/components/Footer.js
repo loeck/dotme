@@ -15,7 +15,7 @@ const Wrapper = styled(Box).attrs({
   color: ${p => (p.bgIsLight ? 'black' : 'white')};
   position: fixed;
   top: 220px;
-  left: 50px;
+  left: 100px;
   transition: all ease-in-out 0.1s;
   user-select: none;
   z-index: 3;

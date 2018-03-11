@@ -17,7 +17,7 @@ const rotate360 = keyframes`
 `
 
 const Wrapper = styled(Box)`
-  padding: 100px 50px;
+  margin: 100px;
   position: relative;
   width: 500px;
   z-index: 2;
