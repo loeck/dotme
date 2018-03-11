@@ -20,7 +20,7 @@ const Wrapper = styled(Box)`
   margin-left: 50%;
   padding: 100px 50px;
   position: relative;
-  width: 50%;
+  width: 500px;
   z-index: 2;
 `
 const Track = styled(Box).attrs({
@@ -103,10 +103,10 @@ class ListTracks extends PureComponent {
   _track = {}
 
   render() {
-    const { tracks, currentTrack, onResetTrack, onSetTrack, duration, playing } = this.props
+    const { tracks, currentTrack, onSetTrack, duration, playing } = this.props
 
     return (
-      <Wrapper onMouseLeave={onResetTrack}>
+      <Wrapper>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
 

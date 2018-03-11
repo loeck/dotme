@@ -224,7 +224,6 @@ class Home extends Component {
             bgIsLight={bgIsLight}
             currentTrack={currentTrack}
             duration={duration}
-            onResetTrack={this.resetTrack}
             onSetTrack={this.setTrack}
             playing={playing}
             scrollTo={auto}
