@@ -29,11 +29,16 @@ const Track = styled(Box).attrs({
   }),
 })`
   color: ${p => (p.bgIsLight ? 'black' : 'white')};
+  cursor: pointer;
   padding: 20px;
   overflow: hidden;
   position: relative;
   transition: all ease-in-out 0.1s;
   user-select: none;
+
+  a {
+    text-decoration: none;
+  }
 
   &:after {
     background: rgba(${p => (p.bgIsLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
@@ -79,7 +84,7 @@ const TrackIcon = styled(Box).attrs({
   right: 0;
   top: 0;
   z-index: 2;
-  transform: translate3d(${p => (p.active ? 0 : 60)}px, 0, 0);
+  transform: translate3d(${p => (p.active ? 0 : 40)}px, 0, 0);
   transition: all ease-in-out 0.1s;
 
   svg {
@@ -120,18 +125,24 @@ class ListTracks extends PureComponent {
               onMouseEnter={() => onSetTrack(t)}
               playing={active && playing}
             >
-              <TrackContent>
-                <TrackImage>
-                  <img src={t.image.big} alt="" />
-                </TrackImage>
-                <Box flow={5}>
-                  <TrackName>{t.name}</TrackName>
-                  <TrackArtist>{t.artists.join(', ')}</TrackArtist>
-                </Box>
-              </TrackContent>
-              <TrackIcon bg={t.color} active={active}>
-                <IconDisc height={20} width={20} />
-              </TrackIcon>
+              <a
+                href={`https://open.spotify.com/track/${t.id}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <TrackContent>
+                  <TrackImage>
+                    <img src={t.image.big} alt="" />
+                  </TrackImage>
+                  <Box flow={5}>
+                    <TrackName>{t.name}</TrackName>
+                    <TrackArtist>{t.artists.join(', ')}</TrackArtist>
+                  </Box>
+                </TrackContent>
+                <TrackIcon bg={t.color} active={active}>
+                  <IconDisc height={20} width={20} />
+                </TrackIcon>
+              </a>
             </Track>
           )
         })}
