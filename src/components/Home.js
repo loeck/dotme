@@ -93,15 +93,14 @@ class Home extends Component {
       }
     })
 
+    this._ctx = this._canvas.getContext('2d')
+    this._ctx.lineWidth = 2
+
     this.setCanvasDimensions()
 
     const audioContext = new window.AudioContext()
     const source = audioContext.createMediaElementSource(this._player)
     source.connect(audioContext.destination)
-
-    this._ctx = this._canvas.getContext('2d')
-    this._ctx.lineWidth = 2
-    this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
 
     const scope = new Oscilloscope(source)
     scope.animate(this._ctx)
@@ -111,6 +110,8 @@ class Home extends Component {
     const { currentTrack, volume } = this.state
 
     if (prevState.currentTrack !== currentTrack) {
+      this.setCTXColor()
+
       this._player.currentTime = 0
       this._player.volume = volume
 
@@ -125,6 +126,8 @@ class Home extends Component {
   setCanvasDimensions = () => {
     this._canvas.height = window.innerHeight
     this._canvas.width = window.innerWidth
+
+    this.setCTXColor()
   }
 
   setRandomTrack = () => {
@@ -147,10 +150,18 @@ class Home extends Component {
       currentTrack: t,
       auto,
     })
+  }
 
-    this._ctx.strokeStyle = `rgba(${
-      new Color(t.color).isLight() ? '0, 0, 0' : '255, 255, 255'
-    }, 0.5)`
+  setCTXColor = () => {
+    const { currentTrack } = this.state
+
+    if (currentTrack.color) {
+      this._ctx.strokeStyle = `rgba(${
+        new Color(currentTrack.color).isLight() ? '0, 0, 0' : '255, 255, 255'
+      }, 0.5)`
+    } else {
+      this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
+    }
   }
 
   resetTrack = (options = {}) => {
@@ -161,8 +172,6 @@ class Home extends Component {
       playing: false,
       auto: false,
     })
-
-    this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
 
     if (!stop) {
       this.setRandomTrack()
