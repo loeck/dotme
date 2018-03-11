@@ -5,7 +5,6 @@ import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 import Color from 'color'
 
-import isNaN from 'lodash/isNaN'
 import sample from 'lodash/sample'
 
 import Box from 'meh-components/Box'
@@ -17,6 +16,7 @@ import Me from 'components/Me'
 import Footer from 'components/Footer'
 
 const Wrapper = styled(Box).attrs({
+  align: 'flex-end',
   style: p => ({
     background: p.bg || 'transparent',
   }),
@@ -50,6 +50,7 @@ class Home extends Component {
     auto: false,
     currentTrack: {},
     duration: 30,
+    progress: 0,
     playing: false,
     volume: 1,
   }
@@ -58,20 +59,20 @@ class Home extends Component {
     window.addEventListener('resize', this.setCanvasDimensions)
 
     this._player.addEventListener('progress', e => {
-      const { duration } = e.target
-
       if (e.target.networkState === 1) {
         this.setState({
           playing: true,
         })
         this._player.play()
       }
+    })
+    this._player.addEventListener('timeupdate', e => {
+      const { currentTime, duration } = e.target
 
-      if (!isNaN(duration)) {
-        this.setState({
-          duration,
-        })
-      }
+      this.setState({
+        duration,
+        progress: currentTime,
+      })
     })
     this._player.addEventListener('pause', () => {
       const { auto } = this.state
@@ -138,6 +139,7 @@ class Home extends Component {
 
     this.setState({
       currentTrack: t,
+      progress: 0,
       auto,
     })
   }
@@ -190,7 +192,7 @@ class Home extends Component {
 
   render() {
     const { tracks } = this.props
-    const { currentTrack, duration, auto, playing, volume } = this.state
+    const { currentTrack, auto, playing, volume, progress, duration } = this.state
 
     const { color: currentColor } = currentTrack
     const bgIsLight = new Color(currentColor).isLight()
@@ -216,6 +218,7 @@ class Home extends Component {
             duration={duration}
             onSetTrack={this.setTrack}
             playing={playing}
+            progress={progress}
             scrollTo={auto}
             tracks={tracks}
           />

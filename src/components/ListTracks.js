@@ -17,7 +17,6 @@ const rotate360 = keyframes`
 `
 
 const Wrapper = styled(Box)`
-  margin-left: 50%;
   padding: 100px 50px;
   position: relative;
   width: 500px;
@@ -39,18 +38,19 @@ const Track = styled(Box).attrs({
   a {
     text-decoration: none;
   }
-
-  &:after {
-    background: rgba(${p => (p.bgIsLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
-    bottom: 0;
-    content: ' ';
-    height: 2px;
-    left: 0;
-    position: absolute;
-    right: ${p => (p.playing ? 0 : '100%')};
-    transition: right linear ${p => (p.playing ? p.duration : 0)}s;
-    z-index: 3;
-  }
+`
+const TrackProgress = styled(Box).attrs({
+  style: p => ({
+    width: `${p.progress / p.duration * 100}%`,
+  }),
+})`
+  background: rgba(${p => (p.bgIsLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
+  bottom: 0;
+  content: ' ';
+  height: 2px;
+  left: 0;
+  position: absolute;
+  z-index: 3;
 `
 const TrackContent = styled(Box).attrs({
   align: 'center',
@@ -108,18 +108,18 @@ class ListTracks extends PureComponent {
   _track = {}
 
   render() {
-    const { tracks, currentTrack, onSetTrack, duration, playing } = this.props
+    const { tracks, currentTrack, progress, onSetTrack, duration, playing } = this.props
 
     return (
       <Wrapper>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
+          const bgIsLight = new Color(t.color).isLight()
 
           return (
             <Track
               bg={t.color}
-              bgIsLight={new Color(t.color).isLight()}
-              duration={duration}
+              bgIsLight={bgIsLight}
               innerRef={n => (this._track[t.id] = n)}
               key={t.id}
               onMouseEnter={() => onSetTrack(t)}
@@ -142,6 +142,10 @@ class ListTracks extends PureComponent {
                 <TrackIcon bg={t.color} active={active}>
                   <IconDisc height={20} width={20} />
                 </TrackIcon>
+                {playing &&
+                  active && (
+                    <TrackProgress bgIsLight={bgIsLight} progress={progress} duration={duration} />
+                  )}
               </a>
             </Track>
           )
