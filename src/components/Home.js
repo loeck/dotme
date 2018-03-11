@@ -55,16 +55,6 @@ class Home extends Component {
   }
 
   componentDidMount() {
-    window.document.addEventListener('mouseout', e => {
-      if (!e.relatedTarget && !e.toElement) {
-        const { auto } = this.state
-
-        if (!auto) {
-          this.resetTrack({ stop: true })
-        }
-      }
-    })
-
     window.addEventListener('resize', this.setCanvasDimensions)
 
     this._player.addEventListener('progress', e => {
