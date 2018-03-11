@@ -1,0 +1,26 @@
+{
+  "presets": [
+    [
+      "@babel/env",
+      {
+        "loose": true,
+        "targets": {
+          "browsers": ["last 2 versions", "ie >= 11"],
+          "node": "current"
+        }
+      }
+    ],
+    "@babel/react",
+    "@babel/stage-0"
+  ],
+  "plugins": [
+    "add-module-exports",
+    "styled-components",
+    [
+      "module-resolver",
+      {
+        "root": ["src"]
+      }
+    ]
+  ]
+}
