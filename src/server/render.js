@@ -26,6 +26,7 @@ export default stats => async (req, res) => {
 
     const stream = sheet.interleaveWithNodeStream(renderToNodeStream(page))
 
+    res.header('Content-Type', 'text/html')
     res.write('<!doctype html>')
 
     stream.pipe(res, { end: false })
