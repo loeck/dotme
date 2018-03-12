@@ -143,7 +143,7 @@ class Home extends Component {
   setTrack = (t, options = {}) => {
     const { auto = false } = options
 
-    this._countPlaying += 1
+    this.increaseCountPlaying()
 
     if (this._countPlaying >= COUNT_PLAYING_MAX) {
       this.fetchNewTracks()
@@ -167,6 +167,8 @@ class Home extends Component {
       this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
     }
   }
+
+  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 250)
 
   resetTrack = (options = {}) => {
     const { stop = false } = options
@@ -212,13 +214,7 @@ class Home extends Component {
     this.scrollToTrack(node)
   }
 
-  handleChangePlaying = state => {
-    if (state) {
-      this.setRandomTrack()
-    } else {
-      this.resetTrack({ stop: true })
-    }
-  }
+  handleChangePlaying = state => (state ? this.setRandomTrack() : this.resetTrack({ stop: true }))
 
   handleScroll = debounce(() => {
     if (this._listTrackOvered) {
@@ -245,17 +241,13 @@ class Home extends Component {
   render() {
     const { tracks, currentTrack, auto, playing, progress, duration } = this.state
 
-    const { color: currentColor } = currentTrack
+    const currentColor = currentTrack.color || tracks[0].color
     const bgIsLight = new Color(currentColor).isLight()
 
     return (
       <>
         <audio ref={n => (this._player = n)} style={{ display: 'none' }} />
-        <Wrapper
-          bg={currentTrack.color}
-          innerRef={n => (this._wrapper = n)}
-          onScroll={this.handleScroll}
-        >
+        <Wrapper bg={currentColor} innerRef={n => (this._wrapper = n)} onScroll={this.handleScroll}>
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>

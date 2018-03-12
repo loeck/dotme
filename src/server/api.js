@@ -6,7 +6,7 @@ import moment from 'moment'
 import path from 'path'
 import querystring from 'querystring'
 
-import sampleSize from 'lodash/sampleSize'
+import sample from 'lodash/sample'
 
 const {
   SPOTIFY_CLIENT_ID,
@@ -67,7 +67,16 @@ async function getSpotifyTracks(url, accessToken, tracks = []) {
 }
 
 async function getSampleTracks(tracks) {
-  let sampleTracks = sampleSize(tracks, SPOTIFY_SAMPLE_SIZE)
+  const ids = []
+  let sampleTracks = []
+
+  while (ids.length < SPOTIFY_SAMPLE_SIZE) {
+    const t = sample(tracks)
+    if (!ids.includes(t.id)) {
+      sampleTracks.push(t)
+      ids.push(t.id)
+    }
+  }
 
   const colors = await Promise.all(
     sampleTracks
@@ -160,7 +169,7 @@ router.get('/spotify', async (req, res) => {
         },
       }))
 
-      setCache('tracks', tracks)
+      cache.tracks = setCache('tracks', tracks)
 
       const sampleTracks = await getSampleTracks(tracks)
 

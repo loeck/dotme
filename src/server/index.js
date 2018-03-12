@@ -28,9 +28,9 @@ server.get('/proxy', (req, res) => {
   request.get(url).pipe(res)
 })
 
+server.use('/assets', express.static(paths.assetsFolder))
 server.use('/api', api)
 
-server.use('/assets', express.static(paths.assetsFolder))
 server.use(render(stats))
 
 server.listen(PORT, () => {
