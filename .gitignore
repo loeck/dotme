@@ -3,4 +3,4 @@
 *.log
 dist/
 node_modules/
-cache/
+cache/*.*
