@@ -15,6 +15,15 @@ import ListTracks from 'components/ListTracks'
 import Me from 'components/Me'
 import Footer from 'components/Footer'
 
+const WrapperAudio = styled.div`
+  left: 0;
+  opacity: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  z-index: -1;
+`
+
 const Wrapper = styled(Box).attrs({
   align: 'flex-end',
   style: p => ({
@@ -61,15 +70,13 @@ class Home extends Component {
   componentDidMount() {
     window.addEventListener('resize', this.setCanvasDimensions)
 
-    this._player.addEventListener('progress', async e => {
-      if (e.target.networkState === 1) {
-        this.setState({
-          playing: true,
-        })
-        try {
-          await this._player.play()
-        } catch (e) {} // eslint-disable-line no-empty
-      }
+    this._player.addEventListener('canplay', async () => {
+      this.setState({
+        playing: true,
+      })
+      try {
+        await this._player.play()
+      } catch (e) {} // eslint-disable-line no-empty
     })
     this._player.addEventListener('timeupdate', e => {
       const { currentTime, duration } = e.target
@@ -238,7 +245,9 @@ class Home extends Component {
 
     return (
       <>
-        <audio ref={n => (this._player = n)} style={{ display: 'none' }} />
+        <WrapperAudio>
+          <audio ref={n => (this._player = n)} preload="auto" />
+        </WrapperAudio>
         <Wrapper
           bg={currentColor.value}
           innerRef={n => (this._wrapper = n)}
