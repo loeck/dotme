@@ -123,10 +123,18 @@ class ListTracks extends PureComponent {
   _track = {}
 
   render() {
-    const { tracks, currentTrack, progress, onSetTrack, duration, playing } = this.props
+    const {
+      tracks,
+      currentTrack,
+      progress,
+      onSetTrack,
+      duration,
+      playing,
+      ...otherProps
+    } = this.props
 
     return (
-      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)}>
+      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)} {...otherProps}>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
           const bgIsLight = new Color(t.color).isLight()

@@ -5,6 +5,7 @@ import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 import Color from 'color'
 
+import debounce from 'lodash/debounce'
 import sample from 'lodash/sample'
 
 import Box from 'meh-components/Box'
@@ -58,12 +59,14 @@ class Home extends Component {
   componentDidMount() {
     window.addEventListener('resize', this.setCanvasDimensions)
 
-    this._player.addEventListener('progress', e => {
+    this._player.addEventListener('progress', async e => {
       if (e.target.networkState === 1) {
         this.setState({
           playing: true,
         })
-        this._player.play()
+        try {
+          await this._player.play()
+        } catch (e) {} // eslint-disable-line no-empty
       }
     })
     this._player.addEventListener('timeupdate', e => {
@@ -169,11 +172,17 @@ class Home extends Component {
     }
   }
 
-  handleChangeTrack = node =>
+  scrollToTrack = node =>
     this._wrapper.scrollBy({
       top: node.getBoundingClientRect().top - 100,
       behavior: 'smooth',
     })
+
+  handleChangeTrack = node => {
+    this._listTrackOvered = false
+    this._currentTrackNode = node
+    this.scrollToTrack(node)
+  }
 
   handleChangePlaying = state => {
     if (state) {
@@ -183,9 +192,26 @@ class Home extends Component {
     }
   }
 
-  _player = null
+  handleScroll = debounce(() => {
+    if (this._listTrackOvered) {
+      return
+    }
+
+    if (this._currentTrackNode) {
+      this.scrollToTrack(this._currentTrackNode)
+    } else {
+      this._wrapper.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      })
+    }
+  }, 500)
+
   _canvas = null
   _ctx = null
+  _currentTrackNode = null
+  _listTrackOvered = false
+  _player = null
 
   render() {
     const { tracks } = this.props
@@ -197,7 +223,11 @@ class Home extends Component {
     return (
       <>
         <audio ref={n => (this._player = n)} style={{ display: 'none' }} />
-        <Wrapper bg={currentTrack.color} innerRef={n => (this._wrapper = n)}>
+        <Wrapper
+          bg={currentTrack.color}
+          innerRef={n => (this._wrapper = n)}
+          onScroll={this.handleScroll}
+        >
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>
@@ -209,10 +239,11 @@ class Home extends Component {
             playing={playing}
           />
           <ListTracks
-            onChangeTrack={this.handleChangeTrack}
+            onMouseEnter={() => (this._listTrackOvered = true)}
             bgIsLight={bgIsLight}
             currentTrack={currentTrack}
             duration={duration}
+            onChangeTrack={this.handleChangeTrack}
             onSetTrack={this.setTrack}
             playing={playing}
             progress={progress}
