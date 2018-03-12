@@ -1,9 +1,13 @@
+/* eslint-disable react/no-danger */
+
 import React from 'react'
 
 import PropTypes from 'prop-types'
 import serialize from 'serialize-javascript'
 
 import webpackConfig from '../../webpack/base'
+
+const { GOOGLE_ANALYTICS } = process.env
 
 const Html = ({
   content,
@@ -27,12 +31,25 @@ const Html = ({
       />
     </head>
     <body>
-      <div
-        id="root"
-        dangerouslySetInnerHTML={{ __html: content }} // eslint-disable-line react/no-danger
-      />
+      <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
       {vendor && <script src={`/dist/${vendor}`} />}
       <script src={`/dist/${main}`} />
+      {GOOGLE_ANALYTICS && (
+        <div
+          id="root"
+          dangerouslySetInnerHTML={{
+            __html: `
+              <script async src="https://www.googletagmanager.com/gtag/js?id=UA-115579585-1"></script>
+              <script>
+                window.dataLayer = window.dataLayer || [];
+                function gtag(){dataLayer.push(arguments);}
+                gtag('js', new Date());
+                gtag('config', '${GOOGLE_ANALYTICS}');
+              </script>
+            `,
+          }}
+        />
+      )}
     </body>
   </html>
 )
