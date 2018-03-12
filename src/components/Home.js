@@ -2,6 +2,7 @@
 
 import React, { Component } from 'react'
 import styled from 'styled-components'
+import axios from 'axios'
 import Oscilloscope from 'oscilloscope'
 import Color from 'color'
 
@@ -24,7 +25,7 @@ const Wrapper = styled(Box).attrs({
 })`
   color: white;
   height: 100vh;
-  min-width: 875px;
+  min-width: 715px;
   overflow-x: hidden;
   overflow: scroll;
   position: relative;
@@ -47,13 +48,16 @@ const WrapperCanvas = styled(Box).attrs({
   }
 `
 
+const COUNT_PLAYING_MAX = 5
+
 class Home extends Component {
   state = {
     auto: false,
     currentTrack: {},
     duration: 30,
-    progress: 0,
     playing: false,
+    progress: 0,
+    tracks: this.props.tracks.slice(0, 20),
   }
 
   componentDidMount() {
@@ -125,7 +129,7 @@ class Home extends Component {
 
   setRandomTrack = () => {
     const { currentTrack } = this.state
-    const { tracks } = this.props
+    const { tracks } = this.state
 
     let sampleTrack = currentTrack
 
@@ -138,6 +142,12 @@ class Home extends Component {
 
   setTrack = (t, options = {}) => {
     const { auto = false } = options
+
+    this._countPlaying += 1
+
+    if (this._countPlaying >= COUNT_PLAYING_MAX) {
+      this.fetchNewTracks()
+    }
 
     this.setState({
       currentTrack: t,
@@ -174,8 +184,26 @@ class Home extends Component {
 
   scrollToTrack = node =>
     this._wrapper.scrollBy({
-      top: node.getBoundingClientRect().top - 100,
+      top: node.getBoundingClientRect().top - 105,
       behavior: 'smooth',
+    })
+
+  fetchNewTracks = () =>
+    axios.get('/api/spotify').then(({ data }) => {
+      const { tracks, currentTrack } = this.state
+
+      this._countPlaying = 0
+
+      const index = tracks.indexOf(currentTrack)
+
+      data = data.filter(d => d.id !== currentTrack.id)
+      data = data.slice(0, 20)
+
+      data[index] = currentTrack
+
+      this.setState({
+        tracks: data,
+      })
     })
 
   handleChangeTrack = node => {
@@ -207,6 +235,7 @@ class Home extends Component {
     }
   }, 500)
 
+  _countPlaying = 0
   _canvas = null
   _ctx = null
   _currentTrackNode = null
@@ -214,8 +243,7 @@ class Home extends Component {
   _player = null
 
   render() {
-    const { tracks } = this.props
-    const { currentTrack, auto, playing, progress, duration } = this.state
+    const { tracks, currentTrack, auto, playing, progress, duration } = this.state
 
     const { color: currentColor } = currentTrack
     const bgIsLight = new Color(currentColor).isLight()

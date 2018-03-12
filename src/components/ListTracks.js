@@ -17,9 +17,10 @@ const rotate360 = keyframes`
 `
 
 const Wrapper = styled(Box)`
-  margin: 100px;
-  padding-bottom: calc(100vh - 305px);
+  margin: 105px;
+  padding-bottom: calc(100vh - 315px);
   position: relative;
+  transition: all ease-in-out 0.1s;
   width: 500px;
   z-index: 2;
 
@@ -29,6 +30,10 @@ const Wrapper = styled(Box)`
 
   @media only screen and (max-width: 975px) {
     width: 300px;
+  }
+
+  @media only screen and (max-width: 875px) {
+    margin-right: 20px;
   }
 `
 const Track = styled(Box).attrs({

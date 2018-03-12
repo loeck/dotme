@@ -13,11 +13,15 @@ const Wrapper = styled(Box).attrs({
 })`
   color: ${p => (p.bgIsLight ? 'black' : 'white')};
   position: fixed;
-  top: 220px;
-  left: 100px;
+  top: 225px;
+  left: 105px;
   transition: all ease-in-out 0.1s;
   user-select: none;
   z-index: 3;
+
+  @media only screen and (max-width: 875px) {
+    left: 20px;
+  }
 
   svg {
     cursor: pointer;

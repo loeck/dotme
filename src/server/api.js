@@ -1,8 +1,10 @@
-import express from 'express'
 import axios from 'axios'
-import querystring from 'querystring'
-import NodeCache from 'node-cache'
+import express from 'express'
+import fs from 'fs'
 import getColors from 'get-image-colors'
+import moment from 'moment'
+import path from 'path'
+import querystring from 'querystring'
 
 import sampleSize from 'lodash/sampleSize'
 
@@ -13,14 +15,44 @@ const {
   SPOTIFY_PLAYLIST_ID,
 } = process.env
 
-const cache = new NodeCache()
+function getCache(name, defaultValues) {
+  let cache = {
+    lastModified: 0,
+    values: defaultValues,
+  }
 
-const SPOTIFY_SAMPLE_SIZE = 20
+  try {
+    cache = JSON.parse(fs.readFileSync(path.resolve(__dirname, `../../cache/${name}.json`)))
+  } catch (e) {} // eslint-disable-line no-empty
+
+  return cache
+}
+
+function setCache(name, values) {
+  const cache = {
+    lastModified: moment().format('DD-MM-YYYY'),
+    values,
+  }
+
+  fs.writeFileSync(
+    path.resolve(__dirname, `../../cache/${name}.json`),
+    JSON.stringify(cache, null, 2),
+  )
+
+  return cache
+}
+
+const cache = {
+  tracks: getCache('tracks', []),
+  colors: getCache('colors', {}),
+}
+
+const SPOTIFY_SAMPLE_SIZE = 21
 
 async function getSpotifyTracks(url, accessToken, tracks = []) {
   const { data } = await axios.get(url, {
     params: {
-      fields: 'next,items(track(id,name,preview_url,href,album(artists,images)))',
+      fields: 'next,items(track(id,name,preview_url,href,album(id,name,artists,images)))',
     },
     headers: {
       Authorization: `Bearer ${accessToken}`,
@@ -41,13 +73,13 @@ async function getSampleTracks(tracks) {
     sampleTracks
       .map(
         t =>
-          !cache.get(`color:${t.id}`) &&
+          !cache.colors.values[t.album.id] &&
           axios
             .get(t.image.small, {
               responseType: 'arraybuffer',
             })
             .then(({ data }) => ({
-              id: t.id,
+              id: t.album.id,
               value: data,
             })),
       )
@@ -63,11 +95,19 @@ async function getSampleTracks(tracks) {
     ),
   )
 
-  colors.forEach(c => cache.set(`color:${c.id}`, c.color))
+  if (colors.length > 0) {
+    cache.colors = setCache('colors', {
+      ...cache.colors.values,
+      ...colors.reduce((result, c) => {
+        result[c.id] = c.color
+        return result
+      }, {}),
+    })
+  }
 
   sampleTracks = sampleTracks.map(t => ({
     ...t,
-    color: cache.get(`color:${t.id}`),
+    color: cache.colors.values[t.album.id],
   }))
 
   return sampleTracks
@@ -76,10 +116,10 @@ async function getSampleTracks(tracks) {
 const router = express.Router()
 
 router.get('/spotify', async (req, res) => {
-  const cacheTracks = cache.get('tracks')
+  const cacheTracks = cache.tracks
 
-  if (cacheTracks) {
-    const sampleTracks = await getSampleTracks(cacheTracks)
+  if (cacheTracks.lastModified === moment().format('DD-MM-YYYY')) {
+    const sampleTracks = await getSampleTracks(cacheTracks.values)
 
     res.send(sampleTracks)
   } else {
@@ -107,6 +147,10 @@ router.get('/spotify', async (req, res) => {
 
       tracks = tracks.map(t => ({
         id: t.track.id,
+        album: {
+          id: t.track.album.id,
+          name: t.track.album.name,
+        },
         artists: t.track.album.artists.map(a => a.name),
         name: t.track.name,
         preview: t.track.preview_url,
@@ -116,7 +160,7 @@ router.get('/spotify', async (req, res) => {
         },
       }))
 
-      cache.set('tracks', tracks, 3600)
+      setCache('tracks', tracks)
 
       const sampleTracks = await getSampleTracks(tracks)
 

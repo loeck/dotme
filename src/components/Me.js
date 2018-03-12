@@ -7,12 +7,16 @@ const Wrapper = styled(Box)`
   color: ${p => (p.bgIsLight ? 'white' : 'black')};
   background: ${p => (p.bgIsLight ? 'black' : 'white')};
   position: fixed;
-  top: 100px;
-  left: 100px;
+  top: 105px;
+  left: 105px;
   padding: 20px;
   transition: all ease-in-out 0.1s;
   user-select: none;
   z-index: 2;
+
+  @media only screen and (max-width: 875px) {
+    left: 20px;
+  }
 
   a {
     background: ${p => (p.bgIsLight ? 'white' : 'black')};
