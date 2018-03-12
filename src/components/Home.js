@@ -106,8 +106,6 @@ class Home extends Component {
     const { currentTrack } = this.state
 
     if (prevState.currentTrack !== currentTrack) {
-      this.setCTXColor()
-
       this._player.currentTime = 0
 
       if (currentTrack.preview) {
@@ -121,8 +119,6 @@ class Home extends Component {
   setCanvasDimensions = () => {
     this._canvas.height = window.innerHeight
     this._canvas.width = window.innerWidth
-
-    this.setCTXColor()
   }
 
   setRandomTrack = () => {
@@ -154,15 +150,9 @@ class Home extends Component {
     })
   }
 
-  setCTXColor = () => {
-    const { currentTrack } = this.state
-
-    if (currentTrack.color) {
-      this._ctx.strokeStyle = `rgba(${
-        currentTrack.color.isLight ? '0, 0, 0' : '255, 255, 255'
-      }, 0.5)`
-    } else {
-      this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
+  setCTXColor = isLight => {
+    if (this._ctx) {
+      this._ctx.strokeStyle = `rgba(${isLight ? '0, 0, 0' : '255, 255, 255'}, 0.5)`
     }
   }
 
@@ -243,6 +233,8 @@ class Home extends Component {
 
     const currentColor = currentTrack.color || tracks[0].color
     const bgIsLight = currentColor.isLight
+
+    this.setCTXColor(bgIsLight)
 
     return (
       <>
