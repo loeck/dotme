@@ -31,10 +31,8 @@ const Wrapper = styled(Box).attrs({
   }),
 })`
   color: white;
-  height: 100vh;
+  height: 100%;
   min-width: 715px;
-  overflow-x: hidden;
-  overflow: scroll;
   position: relative;
   transition: all ease-in-out 0.1s;
   z-index: 2;
@@ -55,6 +53,16 @@ const WrapperCanvas = styled(Box).attrs({
   }
 `
 
+const TopLeft = styled(Box)`
+  position: fixed;
+  top: 105px;
+  left: 105px;
+
+  @media only screen and (max-width: 875px) {
+    left: 20px;
+  }
+`
+
 const COUNT_PLAYING_MAX = 5
 
 class Home extends Component {
@@ -68,6 +76,7 @@ class Home extends Component {
   }
 
   componentDidMount() {
+    window.addEventListener('scroll', this.handleScroll)
     window.addEventListener('resize', this.setCanvasDimensions)
 
     this._player.addEventListener('canplay', async () => {
@@ -163,7 +172,7 @@ class Home extends Component {
     }
   }
 
-  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 1)
+  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 500)
 
   resetTrack = (options = {}) => {
     const { stop = false } = options
@@ -180,7 +189,7 @@ class Home extends Component {
   }
 
   scrollToTrack = node =>
-    this._wrapper.scrollBy({
+    window.scrollBy({
       top: node.getBoundingClientRect().top - 105,
       behavior: 'smooth',
     })
@@ -221,7 +230,7 @@ class Home extends Component {
     if (this._currentTrackNode) {
       this.scrollToTrack(this._currentTrackNode)
     } else {
-      this._wrapper.scrollTo({
+      window.scrollTo({
         top: 0,
         behavior: 'smooth',
       })
@@ -248,21 +257,19 @@ class Home extends Component {
         <WrapperAudio>
           <audio ref={n => (this._player = n)} preload="auto" />
         </WrapperAudio>
-        <Wrapper
-          bg={currentColor.value}
-          innerRef={n => (this._wrapper = n)}
-          onScroll={this.handleScroll}
-        >
+        <Wrapper bg={currentColor.value}>
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>
-          <Me bgIsLight={bgIsLight} />
-          <Footer
-            bgIsLight={bgIsLight}
-            onChangeTrack={this.setRandomTrack}
-            onTogglePlaying={this.handleChangePlaying}
-            playing={playing}
-          />
+          <TopLeft>
+            <Me bgIsLight={bgIsLight} />
+            <Footer
+              bgIsLight={bgIsLight}
+              onChangeTrack={this.setRandomTrack}
+              onTogglePlaying={this.handleChangePlaying}
+              playing={playing}
+            />
+          </TopLeft>
           <ListTracks
             onMouseEnter={() => (this._listTrackOvered = true)}
             bgIsLight={bgIsLight}
