@@ -24,7 +24,7 @@ const Html = ({
       <meta httpEquiv="x-ua-compatible" content="ie=edge" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <link rel="icon" href="/assets/favicon.ico" type="image/x-icon" />
-      <link href="https://fonts.googleapis.com/css?family=Fira+Sans:300,400" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css?family=Fira+Sans:300" rel="stylesheet" />
       {styles}
       <script
         dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger

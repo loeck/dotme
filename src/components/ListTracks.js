@@ -159,7 +159,7 @@ class ListTracks extends PureComponent {
               >
                 <TrackContent>
                   <TrackImage>
-                    <img src={t.image.big} alt="" />
+                    <img src={t.image.small} alt="" />
                   </TrackImage>
                   <Box flow={5}>
                     <TrackName>{t.name}</TrackName>
