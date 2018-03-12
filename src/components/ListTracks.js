@@ -22,6 +22,14 @@ const Wrapper = styled(Box)`
   position: relative;
   width: 500px;
   z-index: 2;
+
+  @media only screen and (max-width: 1175px) {
+    width: 400px;
+  }
+
+  @media only screen and (max-width: 975px) {
+    width: 300px;
+  }
 `
 const Track = styled(Box).attrs({
   style: p => ({

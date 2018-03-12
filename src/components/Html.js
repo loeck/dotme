@@ -43,7 +43,7 @@ Html.defaultProps = {
   state: {},
   stats: {},
   styles: null,
-  title: 'Loëck Vézien',
+  title: 'loeck.me',
 }
 
 Html.propTypes = {

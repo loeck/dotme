@@ -23,11 +23,12 @@ const Wrapper = styled(Box).attrs({
 })`
   color: white;
   height: 100vh;
-  position: relative;
-  overflow: scroll;
+  min-width: 875px;
   overflow-x: hidden;
-  z-index: 2;
+  overflow: scroll;
+  position: relative;
   transition: all ease-in-out 0.1s;
+  z-index: 2;
 `
 
 const WrapperCanvas = styled(Box).attrs({
@@ -52,7 +53,6 @@ class Home extends Component {
     duration: 30,
     progress: 0,
     playing: false,
-    volume: 1,
   }
 
   componentDidMount() {
@@ -98,13 +98,12 @@ class Home extends Component {
   }
 
   componentDidUpdate(prevProps, prevState) {
-    const { currentTrack, volume } = this.state
+    const { currentTrack } = this.state
 
     if (prevState.currentTrack !== currentTrack) {
       this.setCTXColor()
 
       this._player.currentTime = 0
-      this._player.volume = volume
 
       if (currentTrack.preview) {
         this._player.src = getProxyUrl(currentTrack.preview)
@@ -184,21 +183,13 @@ class Home extends Component {
     }
   }
 
-  handleChangeVolume = volume => {
-    this._player.volume = volume
-
-    this.setState({
-      volume,
-    })
-  }
-
   _player = null
   _canvas = null
   _ctx = null
 
   render() {
     const { tracks } = this.props
-    const { currentTrack, auto, playing, volume, progress, duration } = this.state
+    const { currentTrack, auto, playing, progress, duration } = this.state
 
     const { color: currentColor } = currentTrack
     const bgIsLight = new Color(currentColor).isLight()
@@ -212,11 +203,10 @@ class Home extends Component {
           </WrapperCanvas>
           <Me bgIsLight={bgIsLight} />
           <Footer
-            onTogglePlaying={this.handleChangePlaying}
-            onChangeVolume={this.handleChangeVolume}
-            volume={volume}
-            playing={playing}
             bgIsLight={bgIsLight}
+            onChangeTrack={this.setRandomTrack}
+            onTogglePlaying={this.handleChangePlaying}
+            playing={playing}
           />
           <ListTracks
             onChangeTrack={this.handleChangeTrack}
