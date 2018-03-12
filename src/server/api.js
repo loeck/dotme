@@ -96,10 +96,18 @@ async function getSampleTracks(tracks) {
   ).then(results =>
     Promise.all(
       results.map(r =>
-        getColors(r.value, 'image/jpeg').then(colors => ({
-          id: r.id,
-          color: colors[0].hex(),
-        })),
+        getColors(r.value, 'image/jpeg').then(colors => {
+          const rgb = colors[0].rgb()
+          const yiq = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000
+
+          return {
+            id: r.id,
+            color: {
+              isLight: yiq > 128,
+              value: colors[0].hex(),
+            },
+          }
+        }),
       ),
     ),
   )

@@ -14,10 +14,16 @@
     "@babel/stage-0"
   ],
   "plugins": [
-    "add-module-exports",
-    "styled-components",
+    "babel-plugin-add-module-exports",
     [
-      "module-resolver",
+      "babel-plugin-styled-components",
+      {
+        "displayName": false,
+        "ssr": true
+      }
+    ],
+    [
+      "babel-plugin-module-resolver",
       {
         "root": ["src"]
       }

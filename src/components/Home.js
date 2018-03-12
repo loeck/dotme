@@ -2,9 +2,7 @@
 
 import React, { Component } from 'react'
 import styled from 'styled-components'
-import axios from 'axios'
 import Oscilloscope from 'oscilloscope'
-import Color from 'color'
 
 import debounce from 'lodash/debounce'
 import sample from 'lodash/sample'
@@ -161,14 +159,14 @@ class Home extends Component {
 
     if (currentTrack.color) {
       this._ctx.strokeStyle = `rgba(${
-        new Color(currentTrack.color).isLight() ? '0, 0, 0' : '255, 255, 255'
+        currentTrack.color.isLight ? '0, 0, 0' : '255, 255, 255'
       }, 0.5)`
     } else {
       this._ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)'
     }
   }
 
-  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 250)
+  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 1)
 
   resetTrack = (options = {}) => {
     const { stop = false } = options
@@ -191,22 +189,24 @@ class Home extends Component {
     })
 
   fetchNewTracks = () =>
-    axios.get('/api/spotify').then(({ data }) => {
-      const { tracks, currentTrack } = this.state
+    fetch('/api/spotify')
+      .then(res => res.json())
+      .then(data => {
+        const { tracks, currentTrack } = this.state
 
-      this._countPlaying = 0
+        this._countPlaying = 0
 
-      const index = tracks.indexOf(currentTrack)
+        const index = tracks.indexOf(currentTrack)
 
-      data = data.filter(d => d.id !== currentTrack.id)
-      data = data.slice(0, 20)
+        data = data.filter(d => d.id !== currentTrack.id)
+        data = data.slice(0, 20)
 
-      data[index] = currentTrack
+        data[index] = currentTrack
 
-      this.setState({
-        tracks: data,
+        this.setState({
+          tracks: data,
+        })
       })
-    })
 
   handleChangeTrack = node => {
     this._listTrackOvered = false
@@ -242,12 +242,16 @@ class Home extends Component {
     const { tracks, currentTrack, auto, playing, progress, duration } = this.state
 
     const currentColor = currentTrack.color || tracks[0].color
-    const bgIsLight = new Color(currentColor).isLight()
+    const bgIsLight = currentColor.isLight
 
     return (
       <>
         <audio ref={n => (this._player = n)} style={{ display: 'none' }} />
-        <Wrapper bg={currentColor} innerRef={n => (this._wrapper = n)} onScroll={this.handleScroll}>
+        <Wrapper
+          bg={currentColor.value}
+          innerRef={n => (this._wrapper = n)}
+          onScroll={this.handleScroll}
+        >
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>

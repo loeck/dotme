@@ -1,6 +1,5 @@
 import React, { PureComponent } from 'react'
 import styled, { keyframes } from 'styled-components'
-import Color from 'color'
 
 import Box from 'meh-components/Box'
 
@@ -142,11 +141,11 @@ class ListTracks extends PureComponent {
       <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)} {...otherProps}>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
-          const bgIsLight = new Color(t.color).isLight()
+          const bgIsLight = t.color.isLight
 
           return (
             <Track
-              bg={t.color}
+              bg={t.color.value}
               bgIsLight={bgIsLight}
               innerRef={n => (this._track[t.id] = n)}
               key={t.id}
@@ -167,7 +166,7 @@ class ListTracks extends PureComponent {
                     <TrackArtist>{t.artists.join(', ')}</TrackArtist>
                   </Box>
                 </TrackContent>
-                <TrackIcon bg={t.color} active={active}>
+                <TrackIcon bg={t.color.value} active={active}>
                   <IconDisc height={20} width={20} />
                 </TrackIcon>
                 {playing &&
