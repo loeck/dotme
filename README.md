@@ -1,6 +1,6 @@
 # dotme
 
-![image](https://user-images.githubusercontent.com/582703/37248279-1015e5ae-24ce-11e8-8c9b-a90632cbc5f1.png)
+![image](https://user-images.githubusercontent.com/582703/37285446-4ef5c76c-25ff-11e8-988f-eba08ebaca57.png)
 
 ## Requirements
 
