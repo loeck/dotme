@@ -23,6 +23,7 @@ injectGlobal`
     font-family: 'Fira Sans', Helvetica, Arial, sans-serif;
     font-weight: 300;
     font-size: 13px;
+    overflow: hidden;
   }
 `
 

@@ -170,6 +170,12 @@ class Home extends Component {
     }
   }
 
+  handleChangeTrack = node =>
+    this._wrapper.scrollBy({
+      top: node.getBoundingClientRect().top - 100,
+      behavior: 'smooth',
+    })
+
   handleChangePlaying = state => {
     if (state) {
       this.setRandomTrack()
@@ -200,7 +206,7 @@ class Home extends Component {
     return (
       <>
         <audio ref={n => (this._player = n)} style={{ display: 'none' }} />
-        <Wrapper bg={currentTrack.color}>
+        <Wrapper bg={currentTrack.color} innerRef={n => (this._wrapper = n)}>
           <WrapperCanvas>
             <canvas ref={n => (this._canvas = n)} />
           </WrapperCanvas>
@@ -213,6 +219,7 @@ class Home extends Component {
             bgIsLight={bgIsLight}
           />
           <ListTracks
+            onChangeTrack={this.handleChangeTrack}
             bgIsLight={bgIsLight}
             currentTrack={currentTrack}
             duration={duration}

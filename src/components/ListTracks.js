@@ -18,6 +18,7 @@ const rotate360 = keyframes`
 
 const Wrapper = styled(Box)`
   margin: 100px;
+  padding-bottom: calc(100vh - 305px);
   position: relative;
   width: 500px;
   z-index: 2;
@@ -97,11 +98,17 @@ class ListTracks extends PureComponent {
     const { currentTrack, scrollTo } = nextProps
 
     if (scrollTo && currentTrack !== this.props.currentTrack) {
-      const node = this._track[currentTrack.id]
+      this.changeTrack(currentTrack)
+    }
+  }
 
-      if (node) {
-        node.scrollIntoView({ behavior: 'smooth' })
-      }
+  changeTrack = currentTrack => {
+    const { onChangeTrack } = this.props
+
+    const node = this._track[currentTrack.id]
+
+    if (node) {
+      onChangeTrack(node)
     }
   }
 
@@ -111,7 +118,7 @@ class ListTracks extends PureComponent {
     const { tracks, currentTrack, progress, onSetTrack, duration, playing } = this.props
 
     return (
-      <Wrapper>
+      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)}>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
           const bgIsLight = new Color(t.color).isLight()
