@@ -185,6 +185,9 @@ class Home extends Component {
 
     if (!stop) {
       this.setRandomTrack()
+    } else {
+      this._currentTrackNode = null
+      this.handleScroll()
     }
   }
 
