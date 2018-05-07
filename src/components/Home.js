@@ -43,7 +43,7 @@ const WrapperCanvas = styled(Box).attrs({
   justify: 'center',
   sticky: true,
 })`
-  position: fixed;
+  position: fixed !important;
   pointer-events: none;
   z-index: 1;
 
@@ -68,6 +68,7 @@ const COUNT_PLAYING_MAX = 5
 class Home extends Component {
   state = {
     auto: false,
+    canPlay: false,
     currentTrack: {},
     duration: 30,
     playing: false,
@@ -110,9 +111,9 @@ class Home extends Component {
 
     this.setCanvasDimensions()
 
-    const audioContext = new window.AudioContext()
-    const source = audioContext.createMediaElementSource(this._player)
-    source.connect(audioContext.destination)
+    this._audioContext = new window.AudioContext()
+    const source = this._audioContext.createMediaElementSource(this._player)
+    source.connect(this._audioContext.destination)
 
     const scope = new Oscilloscope(source)
     scope.animate(this._ctx)
@@ -223,7 +224,22 @@ class Home extends Component {
     this.scrollToTrack(node)
   }
 
-  handleChangePlaying = state => (state ? this.setRandomTrack() : this.resetTrack({ stop: true }))
+  handleChangePlaying = async state => {
+    if (this._firstPlaying) {
+      await this._audioContext.resume()
+
+      this._firstPlaying = false
+      this.setState({
+        canPlay: true,
+      })
+    }
+
+    if (state) {
+      this.setRandomTrack()
+    } else {
+      this.resetTrack({ stop: true })
+    }
+  }
 
   handleScroll = debounce(() => {
     if (this._listTrackOvered) {
@@ -240,6 +256,8 @@ class Home extends Component {
     }
   }, 500)
 
+  _firstPlaying = true
+  _audioContext = null
   _countPlaying = 0
   _canvas = null
   _ctx = null
@@ -248,7 +266,7 @@ class Home extends Component {
   _player = null
 
   render() {
-    const { tracks, currentTrack, auto, playing, progress, duration } = this.state
+    const { canPlay, tracks, currentTrack, auto, playing, progress, duration } = this.state
 
     const currentColor = currentTrack.color || tracks[0].color
     const bgIsLight = currentColor.isLight
@@ -274,11 +292,12 @@ class Home extends Component {
             />
           </TopLeft>
           <ListTracks
-            onMouseEnter={() => (this._listTrackOvered = true)}
             bgIsLight={bgIsLight}
+            canPlay={canPlay}
             currentTrack={currentTrack}
             duration={duration}
             onChangeTrack={this.handleChangeTrack}
+            onMouseEnter={() => (this._listTrackOvered = true)}
             onSetTrack={this.setTrack}
             playing={playing}
             progress={progress}

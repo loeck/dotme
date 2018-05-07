@@ -134,6 +134,7 @@ class ListTracks extends PureComponent {
       onSetTrack,
       duration,
       playing,
+      canPlay,
       ...otherProps
     } = this.props
 
@@ -149,7 +150,7 @@ class ListTracks extends PureComponent {
               bgIsLight={bgIsLight}
               innerRef={n => (this._track[t.id] = n)}
               key={t.id}
-              onMouseEnter={() => onSetTrack(t)}
+              onMouseEnter={() => canPlay && onSetTrack(t)}
               playing={active && playing}
             >
               <a
