@@ -145,17 +145,15 @@ router.get('/spotify', async (req, res) => {
     })
 
     try {
-      const { data: { access_token: accessToken } } = await axios.post(
-        'https://accounts.spotify.com/api/token',
-        formData,
-        {
-          headers: {
-            Authorization: `Basic ${Buffer.from(
-              `${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`,
-            ).toString('base64')}`,
-          },
+      const {
+        data: { access_token: accessToken },
+      } = await axios.post('https://accounts.spotify.com/api/token', formData, {
+        headers: {
+          Authorization: `Basic ${Buffer.from(
+            `${SPOTIFY_CLIENT_ID}:${SPOTIFY_CLIENT_SECRET}`,
+          ).toString('base64')}`,
         },
-      )
+      })
 
       let tracks = await getSpotifyTracks(
         `	https://api.spotify.com/v1/users/${SPOTIFY_USER_ID}/playlists/${SPOTIFY_PLAYLIST_ID}/tracks`,

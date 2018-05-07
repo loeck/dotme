@@ -1,7 +1,7 @@
 {
   "presets": [
     [
-      "@babel/env",
+      "@babel/preset-env",
       {
         "loose": true,
         "targets": {
@@ -10,8 +10,13 @@
         }
       }
     ],
-    "@babel/react",
-    "@babel/stage-0"
+    "@babel/preset-react",
+    [
+      "@babel/preset-stage-0",
+      {
+        "decoratorsLegacy": true
+      }
+    ]
   ],
   "plugins": [
     "babel-plugin-add-module-exports",
