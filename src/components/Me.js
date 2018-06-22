@@ -28,10 +28,10 @@ const Me = ({ bgIsLight }) => (
     <div>Hi, I&apos;m Loëck !</div>
     <div>
       I work in Paris at{' '}
-      <a href="https://ledger.fr" target="_blank" rel="noopener noreferrer">
-        Ledger
+      <a href="https://livemon.com/" target="_blank" rel="noopener noreferrer">
+        LiveMon
       </a>{' '}
-      as a Senior Front-end Developer.
+      as a Lead Frontend Developer.
     </div>
     <div>
       <a href="https://github.com/loeck" target="_blank" rel="noopener noreferrer">
