@@ -1,5 +1,5 @@
 import React, { PureComponent } from 'react'
-import styled, { keyframes } from 'styled-components'
+import styled, { css, keyframes } from 'styled-components'
 
 import Box from 'meh-components/Box'
 
@@ -35,11 +35,11 @@ const Wrapper = styled(Box)`
     margin-right: 20px;
   }
 `
-const Track = styled(Box).attrs({
-  style: p => ({
+const Track = styled(Box).attrs(p => ({
+  style: {
     background: p.bg || 'black',
-  }),
-})`
+  },
+}))`
   color: ${p => (p.bgIsLight ? 'black' : 'white')};
   cursor: pointer;
   padding: 20px;
@@ -52,11 +52,11 @@ const Track = styled(Box).attrs({
     text-decoration: none;
   }
 `
-const TrackProgress = styled(Box).attrs({
-  style: p => ({
-    width: `${p.progress / p.duration * 100}%`,
-  }),
-})`
+const TrackProgress = styled(Box).attrs(p => ({
+  style: {
+    width: `${(p.progress / p.duration) * 100}%`,
+  },
+}))`
   background: rgba(${p => (p.bgIsLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
   bottom: 0;
   content: ' ';
@@ -84,13 +84,13 @@ const TrackImage = styled(Box)`
   }
 `
 
-const TrackIcon = styled(Box).attrs({
+const TrackIcon = styled(Box).attrs(p => ({
   align: 'center',
   justify: 'center',
-  style: p => ({
+  style: {
     background: p.bg || 'black',
-  }),
-})`
+  },
+}))`
   bottom: 0;
   padding: 20px;
   position: absolute;
@@ -101,13 +101,20 @@ const TrackIcon = styled(Box).attrs({
   transition: all ease-in-out 0.1s;
 
   svg {
-    animation: ${p => (p.active ? `${rotate360} 2s linear infinite;` : null)};
+    animation: ${p =>
+      p.active
+        ? css`
+            ${rotate360} 2s linear infinite;
+          `
+        : null};
   }
 `
 
 class ListTracks extends PureComponent {
-  componentWillReceiveProps(nextProps) {
-    const { currentTrack, scrollTo } = nextProps
+  _track = {}
+
+  componentDidUpdate() {
+    const { currentTrack, scrollTo } = this.props
 
     if (scrollTo && currentTrack !== this.props.currentTrack) {
       this.changeTrack(currentTrack)
@@ -124,8 +131,6 @@ class ListTracks extends PureComponent {
     }
   }
 
-  _track = {}
-
   render() {
     const {
       tracks,
@@ -135,20 +140,23 @@ class ListTracks extends PureComponent {
       duration,
       playing,
       canPlay,
+      onChangeTrack,
+      innerRef,
       ...otherProps
     } = this.props
 
     return (
-      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)} {...otherProps}>
+      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)} {...otherProps} ref={innerRef}>
         {tracks.map(t => {
           const active = t.id === currentTrack.id
           const bgIsLight = t.color.isLight
 
           return (
             <Track
+              data-id={t.id}
               bg={t.color.value}
               bgIsLight={bgIsLight}
-              innerRef={n => (this._track[t.id] = n)}
+              ref={n => (this._track[t.id] = n)}
               key={t.id}
               onMouseEnter={() => canPlay && onSetTrack(t)}
               playing={active && playing}
@@ -170,10 +178,9 @@ class ListTracks extends PureComponent {
                 <TrackIcon bg={t.color.value} active={active}>
                   <IconDisc height={20} width={20} />
                 </TrackIcon>
-                {playing &&
-                  active && (
-                    <TrackProgress bgIsLight={bgIsLight} progress={progress} duration={duration} />
-                  )}
+                {playing && active && (
+                  <TrackProgress bgIsLight={bgIsLight} progress={progress} duration={duration} />
+                )}
               </a>
             </Track>
           )

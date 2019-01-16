@@ -36,7 +36,6 @@ const Html = ({
       <script src={`/dist/${main}`} />
       {GOOGLE_ANALYTICS && (
         <div
-          id="root"
           dangerouslySetInnerHTML={{
             __html: `
               <script async src="https://www.googletagmanager.com/gtag/js?id=UA-115579585-1"></script>
