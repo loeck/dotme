@@ -24,12 +24,12 @@ const WrapperAudio = styled.div`
   z-index: -1;
 `
 
-const Wrapper = styled(Box).attrs({
+const Wrapper = styled(Box).attrs(p => ({
   align: 'flex-end',
-  style: p => ({
+  style: {
     background: p.bg || 'transparent',
-  }),
-})`
+  },
+}))`
   color: white;
   height: 100%;
   min-width: 715px;
@@ -57,6 +57,7 @@ const TopLeft = styled(Box)`
   position: fixed;
   top: 105px;
   left: 105px;
+  z-index: 1;
 
   @media only screen and (max-width: 875px) {
     left: 20px;
@@ -66,6 +67,16 @@ const TopLeft = styled(Box)`
 const COUNT_PLAYING_MAX = 5
 
 class Home extends Component {
+  _audioContext = null
+  _canvas = null
+  _countPlaying = 0
+  _ctx = null
+  _currentTrackNode = null
+  _firstPlaying = true
+  _listTrackOvered = false
+  _player = null
+  _tracks = null
+
   state = {
     auto: false,
     canPlay: false,
@@ -75,6 +86,23 @@ class Home extends Component {
     progress: 0,
     tracks: this.props.tracks.slice(0, 20),
   }
+
+  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 500)
+
+  handleScroll = debounce(() => {
+    if (this._listTrackOvered) {
+      return
+    }
+
+    if (this._currentTrackNode) {
+      this.scrollToTrack(this._currentTrackNode)
+    } else {
+      window.scrollTo({
+        top: 0,
+        behavior: 'smooth',
+      })
+    }
+  }, 500)
 
   componentDidMount() {
     window.addEventListener('scroll', this.handleScroll)
@@ -110,13 +138,6 @@ class Home extends Component {
     this._ctx.lineWidth = 2
 
     this.setCanvasDimensions()
-
-    this._audioContext = new window.AudioContext()
-    const source = this._audioContext.createMediaElementSource(this._player)
-    source.connect(this._audioContext.destination)
-
-    const scope = new Oscilloscope(source)
-    scope.animate(this._ctx)
   }
 
   componentDidUpdate(prevProps, prevState) {
@@ -165,6 +186,13 @@ class Home extends Component {
       progress: 0,
       auto,
     })
+
+    const node = this._tracks.querySelector(`[data-id="${t.id}"]`)
+
+    if (node) {
+      this._currentTrackNode = node
+      this.scrollToTrack(node)
+    }
   }
 
   setCTXColor = isLight => {
@@ -172,8 +200,6 @@ class Home extends Component {
       this._ctx.strokeStyle = `rgba(${isLight ? '0, 0, 0' : '255, 255, 255'}, 0.5)`
     }
   }
-
-  increaseCountPlaying = debounce(() => (this._countPlaying += 1), 500)
 
   resetTrack = (options = {}) => {
     const { stop = false } = options
@@ -226,6 +252,13 @@ class Home extends Component {
 
   handleChangePlaying = async state => {
     if (this._firstPlaying) {
+      this._audioContext = new window.AudioContext()
+      const source = this._audioContext.createMediaElementSource(this._player)
+      source.connect(this._audioContext.destination)
+
+      const scope = new Oscilloscope(source)
+      scope.animate(this._ctx)
+
       await this._audioContext.resume()
 
       this._firstPlaying = false
@@ -240,30 +273,6 @@ class Home extends Component {
       this.resetTrack({ stop: true })
     }
   }
-
-  handleScroll = debounce(() => {
-    if (this._listTrackOvered) {
-      return
-    }
-
-    if (this._currentTrackNode) {
-      this.scrollToTrack(this._currentTrackNode)
-    } else {
-      window.scrollTo({
-        top: 0,
-        behavior: 'smooth',
-      })
-    }
-  }, 500)
-
-  _firstPlaying = true
-  _audioContext = null
-  _countPlaying = 0
-  _canvas = null
-  _ctx = null
-  _currentTrackNode = null
-  _listTrackOvered = false
-  _player = null
 
   render() {
     const { canPlay, tracks, currentTrack, auto, playing, progress, duration } = this.state
@@ -296,6 +305,7 @@ class Home extends Component {
             canPlay={canPlay}
             currentTrack={currentTrack}
             duration={duration}
+            innerRef={n => (this._tracks = n)}
             onChangeTrack={this.handleChangeTrack}
             onMouseEnter={() => (this._listTrackOvered = true)}
             onSetTrack={this.setTrack}
