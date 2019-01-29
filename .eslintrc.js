@@ -6,9 +6,11 @@ module.exports = {
     __ENV__: false,
     window: false,
     fetch: false,
+    document: false,
   },
   rules: {
     'consistent-return': 0,
+    'default-case': 0,
     'global-require': 0,
     'import/no-cycle': 0,
     'import/no-extraneous-dependencies': 0,

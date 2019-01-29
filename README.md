@@ -4,8 +4,8 @@
 
 ## Requirements
 
-* nodejs v9.x (https://nodejs.org/en/)
-* yarn latest (https://yarnpkg.com/fr/docs/install)
+- nodejs v10.x (https://nodejs.org/en/)
+- yarn latest (https://yarnpkg.com/fr/docs/install)
 
 ## Installation
 

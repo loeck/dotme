@@ -1,9 +1,14 @@
-import React, { PureComponent } from 'react'
+import React, { useContext } from 'react'
 import styled, { css, keyframes } from 'styled-components'
-
+import { useSpring, animated } from 'react-spring/hooks.cjs'
 import Box from 'meh-components/Box'
 
-import IconDisc from 'icons/Disc'
+import { AppContext } from 'contexts/App'
+
+import IconDisk from 'icons/Disk'
+import IconLoading from 'icons/Loading'
+
+import HighlightLink from 'components/HighlightLink'
 
 const rotate360 = keyframes`
   from {
@@ -11,94 +16,58 @@ const rotate360 = keyframes`
   }
 
   to {
-    transform: rotate(360deg);
+    transform: rotate(-360deg);
   }
 `
 
 const Wrapper = styled(Box)`
-  margin: 105px;
-  padding-bottom: calc(100vh - 315px);
+  align-items: flex-end;
+  margin: 100px 100px calc(100vh - 210px) 0;
   position: relative;
-  transition: all ease-in-out 0.1s;
-  width: 500px;
-  z-index: 2;
-
-  @media only screen and (max-width: 1175px) {
-    width: 400px;
-  }
-
-  @media only screen and (max-width: 975px) {
-    width: 300px;
-  }
+  z-index: 9;
 
   @media only screen and (max-width: 875px) {
-    margin-right: 20px;
+    margin-right: 0;
+    margin-top: 200px;
+    margin-bottom: calc(100vh - 310px);
   }
 `
-const Track = styled(Box).attrs(p => ({
-  style: {
-    background: p.bg || 'black',
-  },
-}))`
-  color: ${p => (p.bgIsLight ? 'black' : 'white')};
-  cursor: pointer;
-  padding: 20px;
-  overflow: hidden;
-  position: relative;
-  transition: all ease-in-out 0.1s;
-  user-select: none;
 
-  a {
-    text-decoration: none;
-  }
-`
-const TrackProgress = styled(Box).attrs(p => ({
+const ListTracks = () => {
+  const {
+    state: { tracks, currentTrack, currentLoading, currentPlaying },
+  } = useContext(AppContext)
+  return (
+    <Wrapper>
+      {tracks.map(t => (
+        <Track
+          key={t.id}
+          active={currentTrack.id === t.id}
+          loading={currentLoading === t.id}
+          playing={currentPlaying === t.id}
+          {...t}
+        />
+      ))}
+    </Wrapper>
+  )
+}
+
+const WrapperTrack = styled(Box).attrs(p => ({
   style: {
-    width: `${(p.progress / p.duration) * 100}%`,
+    color: p.isLight ? 'black' : 'white',
+    backgroundColor: p.color,
   },
-}))`
-  background: rgba(${p => (p.bgIsLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
-  bottom: 0;
-  content: ' ';
-  height: 2px;
-  left: 0;
-  position: absolute;
-  z-index: 3;
-`
-const TrackContent = styled(Box).attrs({
-  align: 'center',
   horizontal: true,
-  flow: 20,
-})`
-  position: relative;
-  z-index: 1;
-`
-const TrackName = styled(Box)``
-const TrackArtist = styled(Box)`
-  font-size: 11px;
-`
-const TrackImage = styled(Box)`
-  img {
-    display: block;
-    height: 65px;
-  }
-`
-
-const TrackIcon = styled(Box).attrs(p => ({
-  align: 'center',
-  justify: 'center',
-  style: {
-    background: p.bg || 'black',
-  },
 }))`
-  bottom: 0;
   padding: 20px;
-  position: absolute;
-  right: 0;
-  top: 0;
-  z-index: 2;
-  transform: translate3d(${p => (p.active ? 0 : 40)}px, 0, 0);
-  transition: all ease-in-out 0.1s;
+  height: 110px;
+  position: relative;
+  overflow: hidden;
+  width: 410px;
+
+  @media only screen and (max-width: 875px) {
+    width: 100%;
+  }
 
   svg {
     animation: ${p =>
@@ -109,85 +78,58 @@ const TrackIcon = styled(Box).attrs(p => ({
         : null};
   }
 `
+const WrapperTrackImg = styled(Box)`
+  align-items: center;
+  justify-content: center;
+  width: 70px;
 
-class ListTracks extends PureComponent {
-  _track = {}
-
-  componentDidUpdate() {
-    const { currentTrack, scrollTo } = this.props
-
-    if (scrollTo && currentTrack !== this.props.currentTrack) {
-      this.changeTrack(currentTrack)
-    }
+  img {
+    max-height: 70px;
+    max-width: 70px;
   }
+`
+const WrapperInfos = styled(Box).attrs({
+  flow: 10,
+})`
+  margin-left: 20px;
+  justify-content: center;
+`
+const WrapperIcon = styled(animated.div)`
+  display: flex;
+  align-items: center;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 20px;
+`
 
-  changeTrack = currentTrack => {
-    const { onChangeTrack } = this.props
-
-    const node = this._track[currentTrack.id]
-
-    if (node) {
-      onChangeTrack(node)
-    }
-  }
-
-  render() {
-    const {
-      tracks,
-      currentTrack,
-      progress,
-      onSetTrack,
-      duration,
-      playing,
-      canPlay,
-      onChangeTrack,
-      innerRef,
-      ...otherProps
-    } = this.props
-
-    return (
-      <Wrapper onMouseLeave={() => this.changeTrack(currentTrack)} {...otherProps} ref={innerRef}>
-        {tracks.map(t => {
-          const active = t.id === currentTrack.id
-          const bgIsLight = t.color.isLight
-
-          return (
-            <Track
-              data-id={t.id}
-              bg={t.color.value}
-              bgIsLight={bgIsLight}
-              ref={n => (this._track[t.id] = n)}
-              key={t.id}
-              onMouseEnter={() => canPlay && onSetTrack(t)}
-              playing={active && playing}
-            >
-              <a
-                href={`https://open.spotify.com/track/${t.id}`}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <TrackContent>
-                  <TrackImage>
-                    <img src={t.image.small} alt="" />
-                  </TrackImage>
-                  <Box flow={5}>
-                    <TrackName>{t.name}</TrackName>
-                    <TrackArtist>{t.artists.join(', ')}</TrackArtist>
-                  </Box>
-                </TrackContent>
-                <TrackIcon bg={t.color.value} active={active}>
-                  <IconDisc height={20} width={20} />
-                </TrackIcon>
-                {playing && active && (
-                  <TrackProgress bgIsLight={bgIsLight} progress={progress} duration={duration} />
-                )}
-              </a>
-            </Track>
-          )
-        })}
-      </Wrapper>
-    )
-  }
+const Track = ({ artists, image, color, name, playing, loading, active }) => {
+  const { x } = useSpring({ x: playing || loading ? 0 : 48 })
+  const Icon = loading ? IconLoading : IconDisk
+  return (
+    <WrapperTrack active={active} color={color.value} isLight={color.isLight}>
+      <WrapperTrackImg>
+        <img src={image.big} alt={name} />
+      </WrapperTrackImg>
+      <WrapperInfos>
+        <Box>{name}</Box>
+        <Box horizontal flow={10}>
+          {artists.map(artist => (
+            <HighlightLink key={artist} isLight={!color.isLight}>
+              {artist}
+            </HighlightLink>
+          ))}
+        </Box>
+      </WrapperInfos>
+      <WrapperIcon
+        style={{
+          transform: x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+        }}
+      >
+        <Icon height={24} width={24} />
+      </WrapperIcon>
+    </WrapperTrack>
+  )
 }
 
 export default ListTracks
