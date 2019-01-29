@@ -38,6 +38,7 @@ const App = props => {
     currentPlaying: null,
     currentTrack: firstTrack,
     indexTrack: 0,
+    progressTrack: 0,
     tracks,
   }
 

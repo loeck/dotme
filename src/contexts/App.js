@@ -8,16 +8,18 @@ const reducer = (state, action) => {
       return {
         ...state,
         canPlaying: true,
-        currentTrack: { ...state.currentTrack },
         currentPlaying: state.currentTrack.id,
+        currentTrack: { ...state.currentTrack },
+        progressTrack: 0,
       }
 
     case 'stop-playing':
       return {
         ...state,
         canPlaying: false,
-        currentPlaying: null,
         currentLoading: null,
+        currentPlaying: null,
+        progressTrack: 0,
       }
 
     case 'next-track': {
@@ -34,7 +36,14 @@ const reducer = (state, action) => {
         currentColor: nextTrack.color,
         currentTrack: nextTrack,
         indexTrack: nextIndexTrack,
+        progressTrack: 0,
       }
+    }
+
+    case 'set-track': {
+      const indexTrack = state.tracks.findIndex(t => t.id === action.payload) || 0
+      const currentTrack = state.tracks[indexTrack]
+      return { ...state, currentTrack, indexTrack, currentColor: currentTrack.color }
     }
 
     case 'loading-track':
@@ -42,6 +51,9 @@ const reducer = (state, action) => {
 
     case 'playing-track':
       return { ...state, currentPlaying: action.payload }
+
+    case 'progress-track':
+      return { ...state, progressTrack: action.payload }
   }
 }
 

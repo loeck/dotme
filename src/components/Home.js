@@ -11,7 +11,7 @@ import PlayerAudio from 'components/PlayerAudio'
 const Wrapper = styled(animated.div)`
   bottom: 0;
   left: 0;
-  overflow: auto;
+  overflow: hidden;
   position: absolute;
   right: 0;
   top: 0;
@@ -20,22 +20,28 @@ const Wrapper = styled(animated.div)`
 const Home = () => {
   const {
     dispatch,
-    state: { canPlaying, currentLoading, currentPlaying, currentColor, indexTrack, currentTrack },
+    state: {
+      progressTrack,
+      canPlaying,
+      currentLoading,
+      currentPlaying,
+      currentColor,
+      indexTrack,
+      currentTrack,
+    },
   } = useContext(AppContext)
-  const { scrollTop, bg } = useSpring({
+  const { bg } = useSpring({
     bg: currentColor.value,
-    scrollTop: 110 * indexTrack,
-    from: { scrollTop: 0 },
   })
   const onLoadingTrack = id => dispatch({ type: 'loading-track', payload: id })
   const onPlayingTrack = id => dispatch({ type: 'playing-track', payload: id })
   const onNextTrack = () => dispatch({ type: 'next-track' })
+  const onProgressTrack = progress => dispatch({ type: 'progress-track', payload: progress })
   return (
     <Wrapper
       style={{
         backgroundColor: bg,
       }}
-      scrollTop={scrollTop}
     >
       <AboutMe />
       <ListTracks />
@@ -44,9 +50,12 @@ const Home = () => {
         currentLoading={currentLoading}
         currentPlaying={currentPlaying}
         currentTrack={currentTrack}
+        indexTrack={indexTrack}
         onLoadingTrack={onLoadingTrack}
         onNextTrack={onNextTrack}
         onPlayingTrack={onPlayingTrack}
+        onProgressTrack={onProgressTrack}
+        progressTrack={progressTrack}
       />
     </Wrapper>
   )

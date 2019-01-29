@@ -68,21 +68,12 @@ class PlayerAudio extends PureComponent {
         onLoadingTrack(null)
       }
     })
-    // this._player.current.addEventListener('timeupdate', e => {
-    //   // const { currentTime, duration } = e.target
-    //   // this.setState({
-    //   //   duration,
-    //   //   progress: currentTime,
-    //   // })
-    // })
-    // this._player.current.addEventListener('pause', () => {
-    //   // const { auto } = this.state
-    //   // if (auto) {
-    //   //   this.setRandomTrack()
-    //   // } else {
-    //   //   this.resetTrack()
-    //   // }
-    // })
+    this._player.current.addEventListener('timeupdate', e => {
+      const { onProgressTrack } = this.props
+      const { currentTime, duration } = e.target
+      const progress = (currentTime * 100) / duration
+      onProgressTrack(progress || 0)
+    })
     this._player.current.addEventListener('ended', () => {
       const { canPlaying, onNextTrack } = this.props
       canPlaying && onNextTrack()

@@ -1,7 +1,6 @@
 import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer'
 import { StatsWriterPlugin } from 'webpack-stats-plugin'
 import merge from 'webpack-merge'
-import UglifyJSPlugin from 'uglifyjs-webpack-plugin'
 import webpack from 'webpack'
 
 import webpackConfig from './base'
@@ -44,25 +43,6 @@ export default merge(webpackConfig, {
   },
 
   optimization: {
-    minimizer: [
-      new UglifyJSPlugin({
-        uglifyOptions: {
-          compress: true,
-          ecma: 8,
-          ie8: false,
-          keep_fnames: false,
-          mangle: true,
-          nameCache: null,
-          output: {
-            comments: false,
-            beautify: false,
-          },
-          safari10: false,
-          toplevel: false,
-          warnings: false,
-        },
-      }),
-    ],
     splitChunks: {
       cacheGroups: {
         vendor: {
