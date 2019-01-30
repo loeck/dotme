@@ -3,5 +3,5 @@ export function getProxyUrl(url) {
     return null
   }
 
-  return `/proxy?${url}`
+  return url
 }

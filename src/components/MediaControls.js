@@ -19,7 +19,9 @@ const Wrapper = styled(Box).attrs({
 
   @media only screen and (max-width: 875px) {
     background-color: ${p => p.color};
+    align-items: center;
     height: 90px;
+    padding-top: 0;
   }
 `
 const IconWrapper = styled.div`
@@ -29,7 +31,7 @@ const IconWrapper = styled.div`
   z-index: 10;
 `
 
-const MediaControls = () => {
+const MediaControls = React.memo(() => {
   const {
     dispatch,
     state: { currentTrack, currentPlaying, currentLoading },
@@ -65,6 +67,6 @@ const MediaControls = () => {
       </Wrapper>
     </animated.div>
   )
-}
+})
 
 export default MediaControls

@@ -27,7 +27,7 @@ const Wrapper = styled(Box).attrs({
   padding: 20px;
 `
 
-const AboutMe = () => {
+const AboutMe = React.memo(() => {
   const isLight = useIsLight()
   const { color, bg } = useSpring({
     bg: isLight ? 'black' : 'white',
@@ -72,6 +72,6 @@ const AboutMe = () => {
       <MediaControls />
     </Container>
   )
-}
+})
 
 export default AboutMe

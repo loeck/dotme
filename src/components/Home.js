@@ -17,7 +17,7 @@ const Wrapper = styled(animated.div)`
   top: 0;
 `
 
-const Home = () => {
+const Home = React.memo(() => {
   const {
     dispatch,
     state: {
@@ -59,6 +59,6 @@ const Home = () => {
       />
     </Wrapper>
   )
-}
+})
 
 export default Home
