@@ -61,6 +61,7 @@ const ListTracks = React.memo(() => {
       <animated.div
         style={{
           transform: y.interpolate(v => `translate3d(0, -${v}px, 0)`),
+          width: '100%',
         }}
       >
         {tracks.map(t => {
