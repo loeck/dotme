@@ -24,8 +24,9 @@ const rotate360 = keyframes`
   }
 `
 
-const Wrapper = styled(Box)`
+const Wrapper = styled(animated.div)`
   align-items: flex-end;
+  display: flex;
   margin: 100px 100px 0 0;
   position: relative;
   z-index: 9;
@@ -33,6 +34,7 @@ const Wrapper = styled(Box)`
   @media only screen and (max-width: 875px) {
     margin-right: 0;
     margin-top: 200px;
+    width: 100%;
   }
 `
 
@@ -57,13 +59,11 @@ const ListTracks = React.memo(() => {
     dispatch({ type: 'start-playing' })
   }
   return (
-    <Wrapper>
-      <animated.div
-        style={{
-          transform: y.interpolate(v => `translate3d(0, -${v}px, 0)`),
-          width: '100%',
-        }}
-      >
+    <Wrapper
+      style={{
+        transform: y.interpolate(v => `translate3d(0, -${v}px, 0)`)
+      }}
+    >
         {tracks.map(t => {
           const playing = canPlaying && currentPlaying === t.id
           const active = currentTrack.id === t.id
@@ -85,7 +85,6 @@ const ListTracks = React.memo(() => {
           )
           return track
         })}
-      </animated.div>
     </Wrapper>
   )
 })
