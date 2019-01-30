@@ -27,6 +27,7 @@ const rotate360 = keyframes`
 const Wrapper = styled(animated.div)`
   align-items: flex-end;
   display: flex;
+  flex-direction: column;
   margin: 100px 100px 0 0;
   position: relative;
   z-index: 9;
