@@ -7,12 +7,14 @@ import path from 'path'
 import querystring from 'querystring'
 
 import sample from 'lodash/sample'
+import shuffle from 'lodash/shuffle'
 
 const {
   SPOTIFY_CLIENT_ID,
   SPOTIFY_CLIENT_SECRET,
   SPOTIFY_USER_ID,
   SPOTIFY_PLAYLIST_ID,
+  SPOTIFY_SAMPLE_SIZE,
 } = process.env
 
 function getCache(name, defaultValues) {
@@ -34,10 +36,14 @@ function setCache(name, values) {
     values,
   }
 
-  fs.writeFileSync(
-    path.resolve(__dirname, `../../cache/${name}.json`),
-    JSON.stringify(cache, null, 2),
-  )
+  try {
+    fs.writeFileSync(
+      path.resolve(__dirname, `../../cache/${name}.json`),
+      JSON.stringify(cache, null, 2),
+    )
+  } catch (e) {
+    console.log('e', e) // eslint-disable-line
+  }
 
   return cache
 }
@@ -46,8 +52,6 @@ const cache = {
   tracks: getCache('tracks', []),
   colors: getCache('colors', {}),
 }
-
-const SPOTIFY_SAMPLE_SIZE = 21
 
 async function getSpotifyTracks(url, accessToken, tracks = []) {
   const { data } = await axios.get(url, {
@@ -70,13 +74,19 @@ async function getSampleTracks(tracks) {
   const ids = []
   let sampleTracks = []
 
-  while (ids.length < SPOTIFY_SAMPLE_SIZE) {
-    const t = sample(tracks)
-    if (!ids.includes(t.id)) {
-      sampleTracks.push(t)
-      ids.push(t.id)
+  if (SPOTIFY_SAMPLE_SIZE === 'all') {
+    sampleTracks = tracks
+  } else {
+    while (ids.length < SPOTIFY_SAMPLE_SIZE) {
+      const t = sample(tracks)
+      if (!ids.includes(t.id)) {
+        sampleTracks.push(t)
+        ids.push(t.id)
+      }
     }
   }
+
+  sampleTracks = shuffle(sampleTracks)
 
   const colors = await Promise.all(
     sampleTracks

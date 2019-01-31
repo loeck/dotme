@@ -29,7 +29,10 @@ export default stats => async (req, res) => {
     res.header('Content-Type', 'text/html')
     res.write('<!doctype html>')
 
-    stream.pipe(res, { end: false })
+    stream.pipe(
+      res,
+      { end: false },
+    )
     stream.on('end', () => res.end())
   } catch (err) {
     res.status(500).send(err.stack)

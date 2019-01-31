@@ -1,6 +1,3 @@
 {
-  "watch": ["src/server/*"],
-  "env": {
-    "BABEL_DISABLE_CACHE": 1
-  }
+  "watch": ["src/server/*"]
 }

@@ -69,7 +69,7 @@ const INITIAL_STATE = {
   indexTrack: 0,
   progressTrack: 0,
   tracks: [],
-  visualisation: 'waveform',
+  visualisation: 'bar',
 }
 
 export const AppProvider = ({ initialState, children }) => {
