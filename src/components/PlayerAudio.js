@@ -1,18 +1,20 @@
 /* eslint-disable jsx-a11y/media-has-caption */
 
-import React, { Component } from 'react'
+import React, { PureComponent } from 'react'
+import { animated } from 'react-spring/hooks.cjs'
 import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 
-import Box from 'meh-components/Box'
-
-const WrapperCanvas = styled(Box).attrs({
-  sticky: true,
-})`
+const WrapperCanvas = styled(animated.div)`
+  display: flex;
   align-items: center;
+  bottom: 0;
   justify-content: center;
-  position: fixed;
+  left: 0;
   pointer-events: none;
+  position: fixed;
+  right: 0;
+  top: 0;
   z-index: 1;
 
   canvas {
@@ -24,7 +26,7 @@ const WrapperCanvas = styled(Box).attrs({
     bottom: auto;
     height: 90px;
     top: 110px;
-    z-index: 20;
+    z-index: 9;
 
     canvas {
       height: 90px;
@@ -57,7 +59,7 @@ function webAudioTouchUnlock(context) {
   })
 }
 
-class PlayerAudio extends Component {
+class PlayerAudio extends PureComponent {
   _canvas = React.createRef()
 
   _analyser = null
@@ -213,6 +215,10 @@ class PlayerAudio extends Component {
   }
 
   draw = () => {
+    if (!this._canvas.current) {
+      return
+    }
+
     const { canPlaying } = this.props
 
     this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
@@ -267,9 +273,14 @@ class PlayerAudio extends Component {
   }
 
   render() {
-    const { visualisation } = this.props
+    const { bg, visualisation } = this.props
     return (
-      <WrapperCanvas visualisation={visualisation}>
+      <WrapperCanvas
+        visualisation={visualisation}
+        style={{
+          backgroundColor: bg,
+        }}
+      >
         <canvas ref={this._canvas} />
       </WrapperCanvas>
     )

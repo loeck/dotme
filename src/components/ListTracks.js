@@ -170,10 +170,12 @@ const TrackName = styled.div`
 
 const Track = React.memo(
   ({ onSetTrack, artists, image, color, name, playing, loading, active, progress, id }) => {
+    const animate = hoverTrack || playing || loading
     const [hoverSpotify, setHoverSpotify] = useState(false)
     const [hoverTrack, setHoverTrack] = useState(false)
-    const { x, w, opacity, scale } = useSpring({
-      x: hoverTrack || playing || loading ? 0 : 48,
+    const { o, x, w, opacity, scale } = useSpring({
+      x: animate ? 0 : 48,
+      o: animate ? 1 : 0,
       w: progress || 0,
       opacity: hoverSpotify ? 1 : 0,
       scale: hoverSpotify ? 1 : 0,
@@ -229,6 +231,7 @@ const Track = React.memo(
         <WrapperIcon
           animate={playing || loading}
           style={{
+            opacity: o,
             transform: x.interpolate(v => `translate3d(${v}px, 0, 0)`),
           }}
         >

@@ -20,22 +20,19 @@ const Wrapper = styled(Box).attrs({
   padding: 20px;
 
   @media only screen and (max-width: 875px) {
-    background-color: ${p => p.color};
     align-items: center;
     height: 90px;
     padding-top: 0;
     padding-bottom: 0;
   }
 `
-const IconWrapper = styled(({ front, ...props }) => <animated.div {...props} />).attrs(p => ({
-  style: {
-    backgroundColor: p.bg,
-  },
-}))`
+const IconWrapper = styled(({ front, ...props }) => <animated.div {...props} />)`
   border-radius: 50%;
   cursor: pointer;
-  user-select: none;
+  height: 24px;
   position: relative;
+  user-select: none;
+  width: 24px;
   z-index: ${p => (p.front ? 11 : 10)};
 `
 
@@ -66,20 +63,32 @@ const MediaControls = React.memo(() => {
         color,
       }}
     >
-      <Wrapper color={currentTrack.color.value}>
+      <Wrapper>
         {!canPlaying ? (
-          <IconWrapper bg={bg} onClick={onStartPlaying} front>
+          <IconWrapper
+            onClick={onStartPlaying}
+            front
+            style={{
+              backgroundColor: bg,
+            }}
+          >
             <IconPlay height={24} width={24} />
           </IconWrapper>
         ) : (
-          <IconWrapper bg={bg} onClick={onStopPlaying} front>
+          <IconWrapper
+            onClick={onStopPlaying}
+            front
+            style={{
+              backgroundColor: bg,
+            }}
+          >
             <IconStop height={24} width={24} />
           </IconWrapper>
         )}
         <IconWrapper
-          bg={bg}
           onClick={onNextTrack}
           style={{
+            backgroundColor: bg,
             pointerEvents,
             opacity,
             transform: x.interpolate(v => `translate3d(${v}px, 0, 0)`),
@@ -94,9 +103,9 @@ const MediaControls = React.memo(() => {
           }}
         >
           <IconWrapper
-            bg={bg}
             onClick={onToggleVisualisation}
             style={{
+              backgroundColor: bg,
               pointerEvents,
               opacity,
             }}

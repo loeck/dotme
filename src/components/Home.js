@@ -47,6 +47,7 @@ const Home = React.memo(() => {
       <AboutMe />
       <ListTracks />
       <PlayerAudio
+        bg={bg}
         canPlaying={canPlaying}
         currentLoading={currentLoading}
         currentPlaying={currentPlaying}
