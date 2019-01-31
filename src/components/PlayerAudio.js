@@ -6,19 +6,17 @@ import Oscilloscope from 'oscilloscope'
 
 import Box from 'meh-components/Box'
 
-import { getProxyUrl } from 'helpers/url'
-
 const WrapperCanvas = styled(Box).attrs({
-  align: 'center',
-  justify: 'center',
   sticky: true,
 })`
+  align-items: center;
+  justify-content: center;
   position: fixed;
   pointer-events: none;
   z-index: 1;
 
   canvas {
-    height: 200px;
+    height: ${p => (p.visualisation === 'waveform' ? 25 : 100)}%;
     width: 100%;
   }
 
@@ -62,35 +60,41 @@ function webAudioTouchUnlock(context) {
 class PlayerAudio extends Component {
   _canvas = React.createRef()
 
+  _analyser = null
+  _bufferLength = null
   _audioContext = null
   _audioSource = {}
   _controller = null
   _ctx = null
   _scope = null
   _requestProgress = null
+  _requestDraw = null
 
   _startTime = 0
   _duration = 0
 
   componentDidMount() {
-    this._audioContext = new (window.AudioContext || window.webkitAudioContext)()
-    webAudioTouchUnlock(this._audioContext)
+    this.initAudioContext()
 
     window.addEventListener('resize', this.setCanvasDimensions)
 
     this._ctx = this._canvas.current.getContext('2d')
-    this._ctx.lineWidth = 2
 
     this.setCanvasDimensions()
   }
 
   async componentDidUpdate(prevProps) {
-    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack } = this.props
+    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack, visualisation } = this.props
 
     if (canPlaying === false) {
-      this.stopAudioSource()
-      this._scope.stop()
       window.cancelAnimationFrame(this._requestProgress)
+
+      this.stopAudioSource()
+      this.stopVisualiser()
+    }
+
+    if (visualisation !== prevProps.visualisation) {
+      this.initVisualiser(this._audioSource[currentTrack.id])
     }
 
     if (canPlaying && currentTrack !== prevProps.currentTrack) {
@@ -102,19 +106,15 @@ class PlayerAudio extends Component {
       const { signal } = this._controller
 
       this.stopAudioSource()
+      this.stopVisualiser()
 
       onLoadingTrack(currentTrack.id)
       onPlayingTrack(null)
 
       window.cancelAnimationFrame(this._requestProgress)
-      this._scope && this._scope.stop()
-
-      this._ctx.strokeStyle = `rgba(${
-        currentTrack.color.isLight ? '0, 0, 0' : '255, 255, 255'
-      }, 0.5)`
 
       try {
-        const buffer = await fetch(getProxyUrl(currentTrack.preview), {
+        const buffer = await fetch(currentTrack.preview, {
           signal,
         })
           .then(res => res.arrayBuffer())
@@ -133,11 +133,15 @@ class PlayerAudio extends Component {
 
         const audioSource = this._audioSource[currentTrack.id]
 
-        this._scope = new Oscilloscope(audioSource)
-        this._scope.animate(this._ctx)
+        this.initVisualiser(audioSource, {
+          stop: visualisation !== prevProps.visualisation,
+        })
 
         audioSource.buffer = buffer
         audioSource.connect(this._audioContext.destination)
+        audioSource.connect(this._analyser)
+
+        this._bufferLength = this._analyser.frequencyBinCount
 
         this._startTime = this._audioContext.currentTime
         this._duration = buffer.duration
@@ -165,6 +169,86 @@ class PlayerAudio extends Component {
     }
   }
 
+  initAudioContext = () => {
+    if (!this._audioContext) {
+      this._audioContext = new (window.AudioContext || window.webkitAudioContext)()
+
+      this._analyser = this._audioContext.createAnalyser()
+      this._analyser.connect(this._audioContext.destination)
+
+      webAudioTouchUnlock(this._audioContext)
+    }
+  }
+
+  initVisualiser = (audioSource, options = {}) => {
+    const { visualisation } = this.props
+    const { stop = true } = options
+
+    this.setCtxStyle()
+
+    if (stop) {
+      this.stopVisualiser()
+    }
+
+    if (visualisation === 'waveform') {
+      this._scope = new Oscilloscope(audioSource)
+      this._scope.animate(this._ctx)
+    } else {
+      this.draw()
+    }
+  }
+
+  stopVisualiser = () => {
+    window.cancelAnimationFrame(this._requestDraw)
+    this._scope && this._scope.stop()
+    this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
+  }
+
+  getDataFromAudio = () => {
+    const freqByteData = new Uint8Array(this._analyser.fftSize / 2)
+    const timeByteData = new Uint8Array(this._analyser.fftSize / 2)
+    this._analyser.getByteFrequencyData(freqByteData)
+    this._analyser.getByteTimeDomainData(timeByteData)
+    return { f: freqByteData, t: timeByteData }
+  }
+
+  draw = () => {
+    const { canPlaying } = this.props
+
+    this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
+
+    const data = this.getDataFromAudio()
+    const dataLength = data.f.length
+    const barWidth = (250 / this._bufferLength) * 5
+
+    let x = 0
+
+    for (let i = 0; i < dataLength; i++) {
+      const barHeight = -data.f[i] * 1.5
+
+      this._ctx.fillRect(x, this._canvas.current.height, barWidth, barHeight)
+
+      x += barWidth + 10
+    }
+
+    if (canPlaying) {
+      this._requestDraw = window.requestAnimationFrame(this.draw)
+    }
+  }
+
+  setCtxStyle = () => {
+    const { visualisation, currentTrack } = this.props
+
+    const color = `rgba(${currentTrack.color.isLight ? '0, 0, 0' : '255, 255, 255'}, 0.5)`
+
+    if (visualisation === 'waveform') {
+      this._ctx.strokeStyle = color
+      this._ctx.lineWidth = 2
+    } else {
+      this._ctx.fillStyle = color
+    }
+  }
+
   stopAudioSource = () =>
     Object.keys(this._audioSource).forEach(id => {
       if (this._audioSource[id]) {
@@ -174,13 +258,18 @@ class PlayerAudio extends Component {
     })
 
   setCanvasDimensions = () => {
-    this._canvas.current.height = window.innerHeight
-    this._canvas.current.width = window.innerWidth
+    if (this._canvas.current) {
+      this._canvas.current.height = window.innerHeight
+      this._canvas.current.width = window.innerWidth
+
+      this.setCtxStyle()
+    }
   }
 
   render() {
+    const { visualisation } = this.props
     return (
-      <WrapperCanvas>
+      <WrapperCanvas visualisation={visualisation}>
         <canvas ref={this._canvas} />
       </WrapperCanvas>
     )

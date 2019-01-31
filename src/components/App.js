@@ -32,13 +32,8 @@ const App = props => {
   const firstTrack = tracks[0]
 
   const initialState = {
-    canPlaying: false,
     currentColor: firstTrack.color,
-    currentLoading: null,
-    currentPlaying: null,
     currentTrack: firstTrack,
-    indexTrack: 0,
-    progressTrack: 0,
     tracks,
   }
 

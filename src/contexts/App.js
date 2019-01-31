@@ -54,11 +54,26 @@ const reducer = (state, action) => {
 
     case 'progress-track':
       return { ...state, progressTrack: action.payload }
+
+    case 'set-visualisation':
+      return { ...state, visualisation: action.payload }
   }
 }
 
+const INITIAL_STATE = {
+  canPlaying: false,
+  currentColor: 'black',
+  currentLoading: null,
+  currentPlaying: null,
+  currentTrack: null,
+  indexTrack: 0,
+  progressTrack: 0,
+  tracks: [],
+  visualisation: 'waveform',
+}
+
 export const AppProvider = ({ initialState, children }) => {
-  const [state, dispatch] = useReducer(reducer, initialState)
+  const [state, dispatch] = useReducer(reducer, { ...INITIAL_STATE, ...initialState })
   const value = { state, dispatch }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

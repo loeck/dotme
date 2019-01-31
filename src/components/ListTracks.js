@@ -62,30 +62,30 @@ const ListTracks = React.memo(() => {
   return (
     <Wrapper
       style={{
-        transform: y.interpolate(v => `translate3d(0, -${v}px, 0)`)
+        transform: y.interpolate(v => `translate3d(0, -${v}px, 0)`),
       }}
     >
-        {tracks.map(t => {
-          const playing = canPlaying && currentPlaying === t.id
-          const active = currentTrack.id === t.id
-          const loading = currentLoading === t.id
-          const progress = playing && progressTrack
-          const track = useMemo(
-            () => (
-              <Track
-                key={t.id}
-                active={active}
-                loading={loading}
-                playing={playing}
-                progress={progress}
-                onSetTrack={onSetTrack}
-                {...t}
-              />
-            ),
-            [active, loading, playing, progress],
-          )
-          return track
-        })}
+      {tracks.map(t => {
+        const playing = canPlaying && currentPlaying === t.id
+        const active = currentTrack.id === t.id
+        const loading = currentLoading === t.id
+        const progress = playing && progressTrack
+        const track = useMemo(
+          () => (
+            <Track
+              key={t.id}
+              active={active}
+              loading={loading}
+              playing={playing}
+              progress={progress}
+              onSetTrack={onSetTrack}
+              {...t}
+            />
+          ),
+          [active, loading, playing, progress],
+        )
+        return track
+      })}
     </Wrapper>
   )
 })
@@ -97,10 +97,10 @@ const WrapperTrack = styled(Box).attrs(p => ({
   },
   horizontal: true,
 }))`
-  padding: 20px;
   height: 110px;
-  position: relative;
   overflow: hidden;
+  padding: 20px;
+  position: relative;
   width: 410px;
 
   @media only screen and (max-width: 875px) {
@@ -121,8 +121,12 @@ const WrapperTrackImg = styled(Box)`
 const WrapperInfos = styled(Box).attrs({
   flow: 10,
 })`
-  margin-left: 20px;
+  flex: 1;
   justify-content: center;
+  margin-left: 20px;
+  overflow: hidden;
+  padding-right: 40px;
+  white-space: nowrap;
 `
 const WrapperIcon = styled(({ animate, ...props }) => <animated.div {...props} />)`
   align-items: center;
@@ -158,6 +162,10 @@ const WrapperSpotify = styled(animated.a)`
   position: absolute;
   right: 0;
   top: 0;
+`
+const TrackName = styled.div`
+  overflow: hidden;
+  text-overflow: ellipsis;
 `
 
 const Track = React.memo(
@@ -201,7 +209,7 @@ const Track = React.memo(
           </WrapperSpotify>
         </WrapperTrackImg>
         <WrapperInfos>
-          <Box>{name}</Box>
+          <TrackName>{name}</TrackName>
           <Box horizontal flow={10}>
             {artists.map(artist => (
               <HighlightLink key={artist} isLight={!color.isLight}>
@@ -233,6 +241,7 @@ const Track = React.memo(
             }}
             style={{
               cursor: hoverTrack && !playing ? 'pointer' : 'default',
+              userSelect: 'none',
             }}
           >
             <Icon height={24} width={24} />

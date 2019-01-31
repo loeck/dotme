@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "build": "rm -rf dist && NODE_ENV=production webpack-cli --progress --hide-modules --config webpack/build.babel.js",
+    "build": "cross-env rimraf dist && NODE_ENV=production webpack-cli --progress --hide-modules --config webpack/build.babel.js",
     "dev": "cross-env NODE_ENV=development nodemon index.js",
     "lint": "eslint src webpack",
     "prettier": "prettier --write \"{webpack,src}/**/*.{js,json}\"",
@@ -58,6 +58,7 @@
     "nodemon": "^1.17.5",
     "prettier": "^1.16.2",
     "react-hot-loader": "^4.3.3",
+    "rimraf": "^2.6.3",
     "url-loader": "^1.0.1",
     "webpack": "^4.29.0",
     "webpack-bundle-analyzer": "^3.0.3",
