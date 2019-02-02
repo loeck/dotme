@@ -5,6 +5,7 @@ import Box from 'meh-components/Box'
 
 import { AppContext } from 'contexts/App'
 import useIsLight from 'hooks/useIsLight'
+import { mobile } from 'helpers/styles'
 
 import IconNext from 'icons/Next'
 import IconPlay from 'icons/Play'
@@ -19,12 +20,12 @@ const Wrapper = styled(Box).attrs({
   align-items: center;
   padding: 20px;
 
-  @media only screen and (max-width: 875px) {
+  ${mobile`
     align-items: center;
     height: 90px;
     padding-top: 0;
     padding-bottom: 0;
-  }
+  `}
 `
 const IconWrapper = styled(({ front, ...props }) => <animated.div {...props} />)`
   border-radius: 50%;

@@ -5,6 +5,8 @@ import { animated } from 'react-spring/hooks.cjs'
 import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 
+import { mobile } from 'helpers/styles'
+
 const WrapperCanvas = styled(animated.div)`
   display: flex;
   align-items: center;
@@ -22,7 +24,7 @@ const WrapperCanvas = styled(animated.div)`
     width: 100%;
   }
 
-  @media only screen and (max-width: 875px) {
+  ${mobile`
     bottom: auto;
     height: 90px;
     top: 110px;
@@ -31,7 +33,7 @@ const WrapperCanvas = styled(animated.div)`
     canvas {
       height: 90px;
     }
-  }
+  `}
 `
 
 function webAudioTouchUnlock(context) {

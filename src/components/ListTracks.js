@@ -6,6 +6,7 @@ import { useSpring, animated } from 'react-spring/hooks.cjs'
 import Box from 'meh-components/Box'
 
 import { AppContext } from 'contexts/App'
+import { mobile } from 'helpers/styles'
 
 import IconPlay from 'icons/Play'
 import IconDisk from 'icons/Disk'
@@ -32,11 +33,11 @@ const Wrapper = styled(animated.div)`
   position: relative;
   z-index: 9;
 
-  @media only screen and (max-width: 875px) {
+  ${mobile`
     margin-right: 0;
     margin-top: 200px;
     width: 100%;
-  }
+  `}
 `
 
 const ListTracks = React.memo(() => {
@@ -103,9 +104,9 @@ const WrapperTrack = styled(Box).attrs(p => ({
   position: relative;
   width: 410px;
 
-  @media only screen and (max-width: 875px) {
+  ${mobile`
     width: 100%;
-  }
+  `}
 `
 const WrapperTrackImg = styled(Box)`
   align-items: center;
@@ -170,9 +171,9 @@ const TrackName = styled.div`
 
 const Track = React.memo(
   ({ onSetTrack, artists, image, color, name, playing, loading, active, progress, id }) => {
-    const animate = hoverTrack || playing || loading
     const [hoverSpotify, setHoverSpotify] = useState(false)
     const [hoverTrack, setHoverTrack] = useState(false)
+    const animate = hoverTrack || playing || loading
     const { o, x, w, opacity, scale } = useSpring({
       x: animate ? 0 : 48,
       o: animate ? 1 : 0,

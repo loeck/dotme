@@ -4,6 +4,7 @@ import { useSpring, animated } from 'react-spring/hooks.cjs'
 import Box from 'meh-components/Box'
 
 import useIsLight from 'hooks/useIsLight'
+import { mobile } from 'helpers/styles'
 
 import HighlightLink from 'components/HighlightLink'
 import MediaControls from 'components/MediaControls'
@@ -14,11 +15,11 @@ const Container = styled(Box)`
   top: 100px;
   z-index: 10;
 
-  @media only screen and (max-width: 875px) {
+  ${mobile`
     left: 0;
     right: 0;
     top: 0;
-  }
+  `}
 `
 const Wrapper = styled(Box).attrs({
   flow: 10,
@@ -46,10 +47,10 @@ const AboutMe = React.memo(() => {
           <Box>Hi, I’m Loëck !</Box>
           <Box horizontal flow={5}>
             <Box>I work in Paris at</Box>
-            <HighlightLink isLight={isLight} href="https://www.livemon.com">
-              LiveMon
+            <HighlightLink isLight={isLight} href="https://www.sportheroes.group">
+              Sport Heroes Group
             </HighlightLink>
-            <Box>as a Lead Frontend Developer.</Box>
+            <Box>as a Engineering Manager.</Box>
           </Box>
           <Box horizontal flow={5}>
             <HighlightLink isLight={isLight} href="https://github.com/loeck">
