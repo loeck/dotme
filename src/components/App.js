@@ -6,25 +6,25 @@ import { AppProvider } from 'contexts/App'
 import Home from 'components/Home'
 
 const GlobalStyle = createGlobalStyle`
-* {
-  -webkit-font-smoothing: antialiased;
-  background: transparent;
-  border: none;
-  box-sizing: border-box;
-  color: inherit;
-  flex-shrink: 0;
-  font: inherit;
-  margin: 0;
-  padding: 0;
-}
+  * {
+    -webkit-font-smoothing: antialiased;
+    background: transparent;
+    border: none;
+    box-sizing: border-box;
+    color: inherit;
+    flex-shrink: 0;
+    font: inherit;
+    margin: 0;
+    padding: 0;
+  }
 
-body {
-  background: black;
-  font-family: 'Fira Sans', Helvetica, Arial, sans-serif;
-  font-weight: 300;
-  font-size: 13px;
-  overflow: hidden;
-}
+  body {
+    background: black;
+    font-family: 'Fira Sans', Helvetica, Arial, sans-serif;
+    font-weight: 300;
+    font-size: 13px;
+    overflow: hidden;
+  }
 `
 
 const App = props => {
