@@ -1,7 +1,7 @@
 /* eslint-disable jsx-a11y/media-has-caption */
 
 import React, { PureComponent } from 'react'
-import { animated } from 'react-spring/hooks.cjs'
+import { animated } from 'react-spring'
 import styled from 'styled-components'
 import Oscilloscope from 'oscilloscope'
 

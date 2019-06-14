@@ -1,12 +1,14 @@
 import React, { useContext } from 'react'
 import styled from 'styled-components'
-import { useSpring, animated } from 'react-spring/hooks.cjs'
+import { useSpring, animated } from 'react-spring'
+import loadable from '@loadable/component'
 
 import { AppContext } from 'contexts/App'
 
 import AboutMe from 'components/AboutMe'
-import ListTracks from 'components/ListTracks'
-import PlayerAudio from 'components/PlayerAudio'
+
+const ListTracks = loadable(() => import('components/ListTracks'))
+const PlayerAudio = loadable(() => import('components/PlayerAudio'))
 
 const Wrapper = styled(animated.div)`
   bottom: 0;

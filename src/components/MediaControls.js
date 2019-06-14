@@ -1,7 +1,6 @@
-import React, { useContext } from 'react'
+import React, { useContext, useCallback } from 'react'
 import styled from 'styled-components'
-import { useSpring, animated } from 'react-spring/hooks.cjs'
-import Box from 'meh-components/Box'
+import { useSpring, useTransition, animated } from 'react-spring'
 
 import { AppContext } from 'contexts/App'
 import useIsLight from 'hooks/useIsLight'
@@ -12,6 +11,8 @@ import IconPlay from 'icons/Play'
 import IconStop from 'icons/Stop'
 import IconWave1 from 'icons/Wave1'
 import IconWave2 from 'icons/Wave2'
+
+import Box from 'components/Box'
 
 const Wrapper = styled(Box).attrs({
   flow: 10,
@@ -27,7 +28,7 @@ const Wrapper = styled(Box).attrs({
     padding-bottom: 0;
   `}
 `
-const IconWrapper = styled(({ front, ...props }) => <animated.div {...props} />)`
+const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
   border-radius: 50%;
   cursor: pointer;
   height: 24px;
@@ -42,22 +43,44 @@ const MediaControls = React.memo(() => {
     dispatch,
     state: { currentTrack, visualisation, canPlaying },
   } = useContext(AppContext)
+
   const isLight = useIsLight()
-  const { pointerEvents, opacity, bg, x, color } = useSpring({
+
+  const { bg, color } = useSpring({
     bg: currentTrack.color.value,
     color: isLight ? 'black' : 'white',
-    x: canPlaying ? 0 : -34,
-    opacity: canPlaying ? 1 : 0,
-    pointerEvents: canPlaying ? 'all' : 'none',
   })
-  const onStartPlaying = () => dispatch({ type: 'start-playing' })
-  const onStopPlaying = () => dispatch({ type: 'stop-playing' })
-  const onNextTrack = () => dispatch({ type: 'next-track' })
-  const onToggleVisualisation = () =>
-    dispatch({
-      type: 'set-visualisation',
-      payload: visualisation === 'waveform' ? 'bar' : 'waveform',
-    })
+
+  const transitionPlaying = useTransition(canPlaying, null, {
+    from: {
+      x: -34,
+      opacity: 0,
+      pointerEvents: 'none',
+    },
+    enter: {
+      x: 0,
+      opacity: 1,
+      pointerEvents: 'all',
+    },
+    leave: {
+      x: -34,
+      opacity: 0,
+      pointerEvents: 'none',
+    },
+  })
+
+  const onStartPlaying = useCallback(() => dispatch({ type: 'start-playing' }), [])
+  const onStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [])
+  const onNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [])
+  const onToggleVisualisation = useCallback(
+    () =>
+      dispatch({
+        type: 'set-visualisation',
+        payload: visualisation === 'waveform' ? 'bar' : 'waveform',
+      }),
+    [visualisation],
+  )
+
   return (
     <animated.div
       style={{
@@ -86,38 +109,45 @@ const MediaControls = React.memo(() => {
             <IconStop height={24} width={24} />
           </IconWrapper>
         )}
-        <IconWrapper
-          onClick={onNextTrack}
-          style={{
-            backgroundColor: bg,
-            pointerEvents,
-            opacity,
-            transform: x.interpolate(v => `translate3d(${v}px, 0, 0)`),
-          }}
-        >
-          <IconNext height={24} width={24} />
-        </IconWrapper>
-        <Box
-          grow
-          style={{
-            alignItems: 'flex-end',
-          }}
-        >
-          <IconWrapper
-            onClick={onToggleVisualisation}
-            style={{
-              backgroundColor: bg,
-              pointerEvents,
-              opacity,
-            }}
-          >
-            {visualisation === 'waveform' ? (
-              <IconWave2 height={24} width={24} />
-            ) : (
-              <IconWave1 height={24} width={24} />
-            )}
-          </IconWrapper>
-        </Box>
+        {transitionPlaying.map(
+          ({ item, key, props }) =>
+            item && (
+              <React.Fragment key={key}>
+                <IconWrapper
+                  onClick={onNextTrack}
+                  style={{
+                    backgroundColor: bg,
+                    pointerEvents: props.pointerEvents,
+                    opacity: props.opacity,
+                    transform: props.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+                  }}
+                >
+                  <IconNext height={24} width={24} />
+                </IconWrapper>
+                <Box
+                  grow
+                  style={{
+                    alignItems: 'flex-end',
+                  }}
+                >
+                  <IconWrapper
+                    onClick={onToggleVisualisation}
+                    style={{
+                      backgroundColor: bg,
+                      pointerEvents: props.pointerEvents,
+                      opacity: props.opacity,
+                    }}
+                  >
+                    {visualisation === 'waveform' ? (
+                      <IconWave2 height={24} width={24} />
+                    ) : (
+                      <IconWave1 height={24} width={24} />
+                    )}
+                  </IconWrapper>
+                </Box>
+              </React.Fragment>
+            ),
+        )}
       </Wrapper>
     </animated.div>
   )

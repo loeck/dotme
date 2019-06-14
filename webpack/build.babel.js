@@ -2,14 +2,13 @@ import { BundleAnalyzerPlugin } from 'webpack-bundle-analyzer'
 import { StatsWriterPlugin } from 'webpack-stats-plugin'
 import merge from 'webpack-merge'
 import webpack from 'webpack'
+import TerserPlugin from 'terser-webpack-plugin'
 
 import webpackConfig from './base'
 
 const { BUNDLE_ANALYSER } = process.env
 
 const plugins = [
-  new webpack.optimize.ModuleConcatenationPlugin(),
-
   new StatsWriterPlugin({
     transform: data =>
       JSON.stringify({
@@ -17,6 +16,8 @@ const plugins = [
         vendor: data.assetsByChunkName.vendor,
       }),
   }),
+
+  new webpack.HashedModuleIdsPlugin(),
 ]
 
 if (BUNDLE_ANALYSER) {
@@ -27,7 +28,7 @@ export default merge(webpackConfig, {
   mode: 'production',
 
   output: {
-    filename: '[name]-[chunkhash].js',
+    filename: '[name]-[contenthash].js',
   },
 
   module: {
@@ -43,6 +44,31 @@ export default merge(webpackConfig, {
   },
 
   optimization: {
+    minimize: true,
+    minimizer: [
+      new TerserPlugin({
+        cache: true,
+        parallel: true,
+        sourceMap: true,
+        exclude: /\.min\.js/,
+        terserOptions: {
+          ie8: false,
+          mangle: {
+            safari10: true,
+          },
+          parse: {
+            ecma: 8,
+          },
+          compress: {
+            drop_console: true,
+            ecma: 5,
+          },
+          output: {
+            ecma: 5,
+          },
+        },
+      }),
+    ],
     splitChunks: {
       cacheGroups: {
         vendor: {
@@ -50,7 +76,11 @@ export default merge(webpackConfig, {
           chunks: 'initial',
           name: 'vendor',
         },
+        chunks: 'all',
       },
+    },
+    runtimeChunk: {
+      name: 'manifest',
     },
   },
 

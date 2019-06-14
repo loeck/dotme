@@ -25,6 +25,15 @@ const GlobalStyle = createGlobalStyle`
     font-size: 13px;
     overflow: hidden;
   }
+
+  .lazyload,
+  .lazyloading {
+  	opacity: 0;
+  }
+  .lazyloaded {
+  	opacity: 1;
+  	transition: opacity 300ms;
+  }
 `
 
 const App = props => {

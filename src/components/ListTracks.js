@@ -1,9 +1,8 @@
 /* eslint-disable react/no-multi-comp */
 
-import React, { useMemo, useState, useContext } from 'react'
+import React, { useMemo, useState, useContext, useCallback } from 'react'
 import styled, { css, keyframes } from 'styled-components'
-import { useSpring, animated } from 'react-spring/hooks.cjs'
-import Box from 'meh-components/Box'
+import { useSpring, useTransition, animated } from 'react-spring'
 
 import { AppContext } from 'contexts/App'
 import { mobile } from 'helpers/styles'
@@ -13,6 +12,7 @@ import IconDisk from 'icons/Disk'
 import IconLoading from 'icons/Loading'
 import IconSpotify from 'icons/Spotify'
 
+import Box from 'components/Box'
 import HighlightLink from 'components/HighlightLink'
 
 const rotate360 = keyframes`
@@ -91,7 +91,7 @@ const ListTracks = React.memo(() => {
   )
 })
 
-const WrapperTrack = styled(Box).attrs(p => ({
+const WrapperTrack = styled(({ color, ...p }) => <Box {...p} />).attrs(p => ({
   style: {
     color: p.isLight ? 'black' : 'white',
     backgroundColor: p.color,
@@ -129,7 +129,7 @@ const WrapperInfos = styled(Box).attrs({
   padding-right: 40px;
   white-space: nowrap;
 `
-const WrapperIcon = styled(({ animate, ...props }) => <animated.div {...props} />)`
+const WrapperIcon = styled(({ animate, ...p }) => <animated.div {...p} />)`
   align-items: center;
   bottom: 0;
   display: flex;
@@ -146,7 +146,7 @@ const WrapperIcon = styled(({ animate, ...props }) => <animated.div {...props} /
         : null};
   }
 `
-const ProgressTrack = styled(({ isLight, ...props }) => <animated.div {...props} />)`
+const ProgressTrack = styled(({ isLight, ...p }) => <animated.div {...p} />)`
   background-color: rgba(${p => (p.isLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
   bottom: 0;
   height: 2px;
@@ -173,19 +173,47 @@ const Track = React.memo(
   ({ onSetTrack, artists, image, color, name, playing, loading, active, progress, id }) => {
     const [hoverSpotify, setHoverSpotify] = useState(false)
     const [hoverTrack, setHoverTrack] = useState(false)
+
     const animate = hoverTrack || playing || loading
-    const { o, x, w, opacity, scale } = useSpring({
-      x: animate ? 0 : 48,
-      o: animate ? 1 : 0,
+
+    const { w, opacity } = useSpring({
       w: progress || 0,
       opacity: hoverSpotify ? 1 : 0,
-      scale: hoverSpotify ? 1 : 0,
     })
+
+    const transitionSpotify = useTransition(hoverSpotify, null, {
+      from: {
+        scale: 0,
+      },
+      enter: {
+        scale: 1,
+      },
+      leave: {
+        scale: 0,
+      },
+    })
+    const transitionIcon = useTransition(animate, null, {
+      from: {
+        x: 48,
+        opacity: 0,
+      },
+      enter: {
+        x: 0,
+        opacity: 1,
+      },
+      leave: {
+        x: 48,
+        opacity: 0,
+      },
+    })
+
     const Icon = hoverTrack && !playing ? IconPlay : loading ? IconLoading : IconDisk
-    const onMouseEnterSpotify = () => setHoverSpotify(true)
-    const onMouseLeaveSpotify = () => setHoverSpotify(false)
-    const onMouseEnterTrack = () => setHoverTrack(true)
-    const onMouseLeaveTrack = () => setHoverTrack(false)
+
+    const onMouseEnterSpotify = useCallback(() => setHoverSpotify(true), [])
+    const onMouseLeaveSpotify = useCallback(() => setHoverSpotify(false), [])
+    const onMouseEnterTrack = useCallback(() => setHoverTrack(true), [])
+    const onMouseLeaveTrack = useCallback(() => setHoverTrack(false), [])
+
     return (
       <WrapperTrack
         color={color.value}
@@ -194,21 +222,36 @@ const Track = React.memo(
         onMouseLeave={onMouseLeaveTrack}
       >
         <WrapperTrackImg onMouseEnter={onMouseEnterSpotify} onMouseLeave={onMouseLeaveSpotify}>
-          <img src={image.big} alt={name} />
+          <img
+            data-sizes="auto"
+            data-src={image.big}
+            src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+            alt={name}
+            className="lazyload"
+          />
           <WrapperSpotify
             href={`https://open.spotify.com/track/${id}`}
             target="_blank"
+            rel="noopener"
             style={{
               opacity,
             }}
           >
-            <animated.div
-              style={{
-                transform: scale.interpolate(v => `scale3d(${v}, ${v}, 1)`),
-              }}
-            >
-              <IconSpotify height={24} width={24} />
-            </animated.div>
+            {transitionSpotify.map(
+              ({ item, key, props }) =>
+                item && (
+                  <animated.div
+                    key={key}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'center',
+                      transform: props.scale.interpolate(v => `scale3d(${v}, ${v}, 1)`),
+                    }}
+                  >
+                    <IconSpotify height={24} width={24} />
+                  </animated.div>
+                ),
+            )}
           </WrapperSpotify>
         </WrapperTrackImg>
         <WrapperInfos>
@@ -229,28 +272,34 @@ const Track = React.memo(
             }}
           />
         )}
-        <WrapperIcon
-          animate={playing || loading}
-          style={{
-            opacity: o,
-            transform: x.interpolate(v => `translate3d(${v}px, 0, 0)`),
-          }}
-        >
-          <Box
-            onClick={() => {
-              if (hoverTrack && !playing) {
-                setHoverTrack(false)
-                onSetTrack(id)
-              }
-            }}
-            style={{
-              cursor: hoverTrack && !playing ? 'pointer' : 'default',
-              userSelect: 'none',
-            }}
-          >
-            <Icon height={24} width={24} />
-          </Box>
-        </WrapperIcon>
+        {transitionIcon.map(
+          ({ item, key, props }) =>
+            item && (
+              <WrapperIcon
+                key={key}
+                animate={playing || loading}
+                style={{
+                  opacity: props.opacity,
+                  transform: props.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+                }}
+              >
+                <Box
+                  onClick={() => {
+                    if (hoverTrack && !playing) {
+                      setHoverTrack(false)
+                      onSetTrack(id)
+                    }
+                  }}
+                  style={{
+                    cursor: hoverTrack && !playing ? 'pointer' : 'default',
+                    userSelect: 'none',
+                  }}
+                >
+                  <Icon height={24} width={24} />
+                </Box>
+              </WrapperIcon>
+            ),
+        )}
       </WrapperTrack>
     )
   },

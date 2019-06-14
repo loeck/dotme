@@ -1,13 +1,15 @@
 import React from 'react'
 import styled from 'styled-components'
-import { useSpring, animated } from 'react-spring/hooks.cjs'
-import Box from 'meh-components/Box'
+import { useSpring, animated } from 'react-spring'
+import loadable from '@loadable/component'
 
 import useIsLight from 'hooks/useIsLight'
 import { mobile } from 'helpers/styles'
 
+import Box from 'components/Box'
 import HighlightLink from 'components/HighlightLink'
-import MediaControls from 'components/MediaControls'
+
+const MediaControls = loadable(() => import('components/MediaControls'))
 
 const Container = styled(Box)`
   position: fixed;

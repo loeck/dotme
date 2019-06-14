@@ -14,7 +14,7 @@ const server = express()
 const stats = __ENV__ === 'production' ? require(path.join(paths.distFolder, 'stats.json')) : {} // eslint-disable-line import/no-dynamic-require
 
 if (__ENV__ === 'development') {
-  require('./webpack')(server)
+  require('./webpack').default(server)
 }
 
 if (__ENV__ === 'production') {
