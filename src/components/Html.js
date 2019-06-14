@@ -14,7 +14,7 @@ const Html = ({
   lang,
   state,
   styles,
-  stats: { main = webpackConfig.output.filename, vendor },
+  stats: { main = webpackConfig.output.filename, vendor, manifest },
   title,
 }) => (
   <html lang={lang}>
@@ -35,6 +35,7 @@ const Html = ({
     </head>
     <body>
       <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
+      {manifest && <script src={`/dist/${manifest}`} />}
       {vendor && <script src={`/dist/${vendor}`} />}
       <script src={`/dist/${main}`} />
       {GOOGLE_ANALYTICS && (

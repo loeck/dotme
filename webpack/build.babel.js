@@ -13,6 +13,7 @@ const plugins = [
     transform: data =>
       JSON.stringify({
         main: data.assetsByChunkName.main,
+        manifest: data.assetsByChunkName.manifest,
         vendor: data.assetsByChunkName.vendor,
       }),
   }),
