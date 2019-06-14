@@ -13,8 +13,8 @@ const MediaControls = loadable(() => import('components/MediaControls'))
 
 const Container = styled(Box)`
   position: fixed;
-  left: 100px;
-  top: 100px;
+  left: 110px;
+  top: 110px;
   z-index: 10;
 
   ${mobile`

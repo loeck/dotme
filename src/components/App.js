@@ -43,7 +43,13 @@ const App = props => {
   const initialState = {
     currentColor: firstTrack.color,
     currentTrack: firstTrack,
-    tracks,
+    indexTrack: 1,
+    tracks: [
+      {
+        empty: true,
+      },
+      ...tracks,
+    ],
   }
 
   return (

@@ -27,6 +27,7 @@
     "react": "16.8.6",
     "react-dom": "16.8.6",
     "react-spring": "^8.0.24",
+    "react-window": "^1.8.2",
     "serialize-javascript": "^1.7.0",
     "styled-components": "^4.3.1"
   },
