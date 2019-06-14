@@ -6,6 +6,8 @@ import { AppProvider } from 'contexts/App'
 import Home from 'components/Home'
 
 const GlobalStyle = createGlobalStyle`
+  @import url('https://fonts.googleapis.com/css?family=Fira+Sans:300&display=optional');
+
   * {
     -webkit-font-smoothing: antialiased;
     background: transparent;
@@ -19,7 +21,7 @@ const GlobalStyle = createGlobalStyle`
   }
 
   body {
-    background: black;
+    background: #000;
     font-family: 'Fira Sans', Helvetica, Arial, sans-serif;
     font-weight: 300;
     font-size: 13px;

@@ -24,10 +24,6 @@ const Html = ({
       <meta httpEquiv="x-ua-compatible" content="ie=edge" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <link rel="icon" href="/assets/favicon.ico" type="image/x-icon" />
-      <link
-        href="https://fonts.googleapis.com/css?family=Fira+Sans:300&display=optional"
-        rel="stylesheet"
-      />
       {styles}
       <script
         dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger
@@ -35,9 +31,9 @@ const Html = ({
     </head>
     <body>
       <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
-      {manifest && <script src={`/dist/${manifest}`} />}
-      {vendor && <script src={`/dist/${vendor}`} />}
-      <script src={`/dist/${main}`} />
+      {manifest && <script src={`/dist/${manifest}`} async />}
+      {vendor && <script src={`/dist/${vendor}`} async />}
+      <script src={`/dist/${main}`} async />
       {GOOGLE_ANALYTICS && (
         <div
           dangerouslySetInnerHTML={{
