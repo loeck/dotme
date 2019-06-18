@@ -3,7 +3,6 @@
 import React, { PureComponent } from 'react'
 import { animated } from 'react-spring'
 import styled from 'styled-components'
-import Oscilloscope from 'oscilloscope'
 
 import { mobile } from 'helpers/styles'
 
@@ -20,7 +19,7 @@ const WrapperCanvas = styled(animated.div)`
   z-index: 1;
 
   canvas {
-    height: ${p => (p.visualisation === 'waveform' ? 25 : 100)}%;
+    height: 100%;
     width: 100%;
   }
 
@@ -77,6 +76,8 @@ class PlayerAudio extends PureComponent {
   _startTime = 0
   _duration = 0
 
+  _isMobile = false
+
   componentDidMount() {
     this.initAudioContext()
 
@@ -88,17 +89,13 @@ class PlayerAudio extends PureComponent {
   }
 
   async componentDidUpdate(prevProps) {
-    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack, visualisation } = this.props
+    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack } = this.props
 
     if (canPlaying === false) {
       window.cancelAnimationFrame(this._requestProgress)
 
       this.stopAudioSource()
       this.stopVisualiser()
-    }
-
-    if (visualisation !== prevProps.visualisation) {
-      this.initVisualiser(this._audioSource[currentTrack.id])
     }
 
     if (canPlaying && currentTrack !== prevProps.currentTrack) {
@@ -137,9 +134,7 @@ class PlayerAudio extends PureComponent {
 
         const audioSource = this._audioSource[currentTrack.id]
 
-        this.initVisualiser(audioSource, {
-          stop: visualisation !== prevProps.visualisation,
-        })
+        this.initVisualiser()
 
         audioSource.buffer = buffer
         audioSource.connect(this._audioContext.destination)
@@ -184,22 +179,8 @@ class PlayerAudio extends PureComponent {
     }
   }
 
-  initVisualiser = (audioSource, options = {}) => {
-    const { visualisation } = this.props
-    const { stop = true } = options
-
-    this.setCtxStyle()
-
-    if (stop) {
-      this.stopVisualiser()
-    }
-
-    if (visualisation === 'waveform') {
-      this._scope = new Oscilloscope(audioSource)
-      this._scope.animate(this._ctx)
-    } else {
-      this.draw()
-    }
+  initVisualiser = () => {
+    this.draw()
   }
 
   stopVisualiser = () => {
@@ -232,11 +213,13 @@ class PlayerAudio extends PureComponent {
     let x = 0
 
     for (let i = 0; i < dataLength; i++) {
-      const barHeight = -data.f[i] * 1.5
+      const barHeight = -data.f[i]
 
+      this.setCtxStyle()
       this._ctx.fillRect(x, this._canvas.current.height, barWidth, barHeight)
+      this._ctx.fillRect(x, -(barHeight * (this._isMobile ? 1.6 : 2)), barWidth, 5)
 
-      x += barWidth + 10
+      x += barWidth + (this._isMobile ? 3 : 8)
     }
 
     if (canPlaying) {
@@ -245,16 +228,11 @@ class PlayerAudio extends PureComponent {
   }
 
   setCtxStyle = () => {
-    const { visualisation, currentTrack } = this.props
+    const { currentTrack } = this.props
 
     const color = `rgba(${currentTrack.color.isLight ? '0, 0, 0' : '255, 255, 255'}, 0.5)`
 
-    if (visualisation === 'waveform') {
-      this._ctx.strokeStyle = color
-      this._ctx.lineWidth = 2
-    } else {
-      this._ctx.fillStyle = color
-    }
+    this._ctx.fillStyle = color
   }
 
   stopAudioSource = () =>
@@ -266,19 +244,18 @@ class PlayerAudio extends PureComponent {
     })
 
   setCanvasDimensions = () => {
+    this._isMobile = window.innerWidth < 1100
+
     if (this._canvas.current) {
       this._canvas.current.height = window.innerHeight
       this._canvas.current.width = window.innerWidth
-
-      this.setCtxStyle()
     }
   }
 
   render() {
-    const { bg, visualisation } = this.props
+    const { bg } = this.props
     return (
       <WrapperCanvas
-        visualisation={visualisation}
         style={{
           backgroundColor: bg,
         }}

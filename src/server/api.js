@@ -12,9 +12,9 @@ import shuffle from 'lodash/shuffle'
 const {
   SPOTIFY_CLIENT_ID,
   SPOTIFY_CLIENT_SECRET,
-  SPOTIFY_USER_ID,
   SPOTIFY_PLAYLIST_ID,
   SPOTIFY_SAMPLE_SIZE,
+  SPOTIFY_USER_ID,
 } = process.env
 
 function getCache(name, defaultValues) {

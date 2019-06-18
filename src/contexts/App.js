@@ -27,8 +27,8 @@ const reducer = (state, action) => {
       let nextTrack = state.tracks[nextIndexTrack]
 
       if (!nextTrack) {
-        nextIndexTrack = 0
-        nextTrack = state.tracks[0] // eslint-disable-line prefer-destructuring
+        nextIndexTrack = 1
+        nextTrack = state.tracks[1] // eslint-disable-line prefer-destructuring
       }
 
       return {
@@ -54,9 +54,6 @@ const reducer = (state, action) => {
 
     case 'progress-track':
       return { ...state, progressTrack: action.payload }
-
-    case 'set-visualisation':
-      return { ...state, visualisation: action.payload }
   }
 }
 
@@ -69,7 +66,6 @@ const INITIAL_STATE = {
   indexTrack: 0,
   progressTrack: 0,
   tracks: [],
-  visualisation: 'bar',
 }
 
 export const AppProvider = ({ initialState, children }) => {

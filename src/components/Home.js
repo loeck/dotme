@@ -30,7 +30,6 @@ const Home = React.memo(() => {
       currentTrack,
       indexTrack,
       progressTrack,
-      visualisation,
     },
   } = useContext(AppContext)
   const { bg } = useSpring({
@@ -60,7 +59,6 @@ const Home = React.memo(() => {
         onPlayingTrack={onPlayingTrack}
         onProgressTrack={onProgressTrack}
         progressTrack={progressTrack}
-        visualisation={visualisation}
       />
     </Wrapper>
   )

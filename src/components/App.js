@@ -48,6 +48,7 @@ const App = props => {
     indexTrack: 1,
     tracks: [
       {
+        id: 'empty',
         empty: true,
       },
       ...tracks,

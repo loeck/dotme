@@ -9,8 +9,6 @@ import { mobile } from 'helpers/styles'
 import IconNext from 'icons/Next'
 import IconPlay from 'icons/Play'
 import IconStop from 'icons/Stop'
-import IconWave1 from 'icons/Wave1'
-import IconWave2 from 'icons/Wave2'
 
 import Box from 'components/Box'
 
@@ -41,7 +39,7 @@ const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
 const MediaControls = React.memo(() => {
   const {
     dispatch,
-    state: { currentTrack, visualisation, canPlaying },
+    state: { currentTrack, canPlaying },
   } = useContext(AppContext)
 
   const isLight = useIsLight()
@@ -72,14 +70,6 @@ const MediaControls = React.memo(() => {
   const onStartPlaying = useCallback(() => dispatch({ type: 'start-playing' }), [])
   const onStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [])
   const onNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [])
-  const onToggleVisualisation = useCallback(
-    () =>
-      dispatch({
-        type: 'set-visualisation',
-        payload: visualisation === 'waveform' ? 'bar' : 'waveform',
-      }),
-    [visualisation],
-  )
 
   return (
     <animated.div
@@ -124,27 +114,6 @@ const MediaControls = React.memo(() => {
                 >
                   <IconNext height={24} width={24} />
                 </IconWrapper>
-                <Box
-                  grow
-                  style={{
-                    alignItems: 'flex-end',
-                  }}
-                >
-                  <IconWrapper
-                    onClick={onToggleVisualisation}
-                    style={{
-                      backgroundColor: bg,
-                      pointerEvents: props.pointerEvents,
-                      opacity: props.opacity,
-                    }}
-                  >
-                    {visualisation === 'waveform' ? (
-                      <IconWave2 height={24} width={24} />
-                    ) : (
-                      <IconWave1 height={24} width={24} />
-                    )}
-                  </IconWrapper>
-                </Box>
               </React.Fragment>
             ),
         )}

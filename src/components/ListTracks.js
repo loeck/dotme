@@ -74,15 +74,20 @@ const ListTracks = React.memo(() => {
   const handleWindowResize = useCallback(() => {
     setWinHeight(window.innerHeight)
   }, [])
+  const itemKey = useCallback((index, data) => {
+    const item = data[index]
+    return item.id
+  }, [])
 
   return (
     <Wrapper>
       <List
-        ref={listRef}
         height={winHeight}
         itemCount={tracks.length}
         itemData={tracks}
+        itemKey={itemKey}
         itemSize={110}
+        ref={listRef}
         width="100%"
         style={{
           overflow: 'hidden',
