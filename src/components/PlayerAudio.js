@@ -213,11 +213,11 @@ class PlayerAudio extends PureComponent {
     let x = 0
 
     for (let i = 0; i < dataLength; i++) {
-      const barHeight = -data.f[i]
+      const barHeight = -data.f[i] * (this._isMobile ? 1.2 : 1.5)
 
       this.setCtxStyle()
       this._ctx.fillRect(x, this._canvas.current.height, barWidth, barHeight)
-      this._ctx.fillRect(x, -(barHeight * (this._isMobile ? 1.6 : 2)), barWidth, 5)
+      this._ctx.fillRect(x, 0, barWidth, -barHeight)
 
       x += barWidth + (this._isMobile ? 3 : 8)
     }
