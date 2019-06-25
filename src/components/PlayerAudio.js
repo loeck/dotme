@@ -69,7 +69,6 @@ class PlayerAudio extends PureComponent {
   _audioSource = {}
   _controller = null
   _ctx = null
-  _scope = null
   _requestProgress = null
   _requestDraw = null
 
@@ -79,8 +78,6 @@ class PlayerAudio extends PureComponent {
   _isMobile = false
 
   componentDidMount() {
-    this.initAudioContext()
-
     window.addEventListener('resize', this.setCanvasDimensions)
 
     this._ctx = this._canvas.current.getContext('2d')
@@ -94,11 +91,13 @@ class PlayerAudio extends PureComponent {
     if (canPlaying === false) {
       window.cancelAnimationFrame(this._requestProgress)
 
-      this.stopAudioSource()
       this.stopVisualiser()
+      this.stopAudioSource()
     }
 
     if (canPlaying && currentTrack !== prevProps.currentTrack) {
+      this.initAudioContext()
+
       if (this._controller) {
         this._controller.abort()
       }
@@ -107,7 +106,6 @@ class PlayerAudio extends PureComponent {
       const { signal } = this._controller
 
       this.stopAudioSource()
-      this.stopVisualiser()
 
       onLoadingTrack(currentTrack.id)
       onPlayingTrack(null)
@@ -185,16 +183,17 @@ class PlayerAudio extends PureComponent {
 
   stopVisualiser = () => {
     window.cancelAnimationFrame(this._requestDraw)
-    this._scope && this._scope.stop()
     this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
   }
 
   getDataFromAudio = () => {
+    if (!this._analyser) {
+      return Array.from(new Array(1000).keys())
+    }
+
     const freqByteData = new Uint8Array(this._analyser.fftSize / 2)
-    const timeByteData = new Uint8Array(this._analyser.fftSize / 2)
     this._analyser.getByteFrequencyData(freqByteData)
-    this._analyser.getByteTimeDomainData(timeByteData)
-    return { f: freqByteData, t: timeByteData }
+    return freqByteData
   }
 
   draw = () => {
@@ -207,23 +206,25 @@ class PlayerAudio extends PureComponent {
     this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
 
     const data = this.getDataFromAudio()
-    const dataLength = data.f.length
+    const dataLength = data.length
     const barWidth = (250 / this._bufferLength) * 5
 
     let x = 0
 
     for (let i = 0; i < dataLength; i++) {
-      const barHeight = -data.f[i] * (this._isMobile ? 1.2 : 1.5)
+      const barHeight = -data[i] * (this._isMobile ? 1.3 : 1.4)
 
       this.setCtxStyle()
       this._ctx.fillRect(x, this._canvas.current.height, barWidth, barHeight)
       this._ctx.fillRect(x, 0, barWidth, -barHeight)
 
-      x += barWidth + (this._isMobile ? 3 : 8)
+      x += barWidth + (this._isMobile ? 2 : 6)
     }
 
     if (canPlaying) {
       this._requestDraw = window.requestAnimationFrame(this.draw)
+    } else {
+      this._ctx.clearRect(0, 0, this._canvas.current.width, this._canvas.current.height)
     }
   }
 
