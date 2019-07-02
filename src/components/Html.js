@@ -1,22 +1,11 @@
 /* eslint-disable react/no-danger */
 
 import React from 'react'
-
-import PropTypes from 'prop-types'
 import serialize from 'serialize-javascript'
-
-import webpackConfig from '../../webpack/base'
 
 const { GOOGLE_ANALYTICS } = process.env
 
-const Html = ({
-  content,
-  lang,
-  state,
-  styles,
-  stats: { main = webpackConfig.output.filename, vendor, manifest },
-  title,
-}) => (
+const Html = ({ content, lang, state, styles, stats, title }) => (
   <html lang={lang}>
     <head>
       <title>{title}</title>
@@ -25,15 +14,15 @@ const Html = ({
       <meta name="viewport" content="width=device-width, initial-scale=1" />
       <link rel="icon" href="/assets/favicon.ico" type="image/x-icon" />
       {styles}
-      <script
-        dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger
-      />
     </head>
     <body>
       <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
-      {manifest && <script src={`/dist/${manifest}`} async />}
-      {vendor && <script src={`/dist/${vendor}`} async />}
-      <script src={`/dist/${main}`} async />
+      <script
+        dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger
+      />
+      {Object.keys(stats).map(v => (
+        <script key={v} src={`/dist/${stats[v]}`} async />
+      ))}
       {GOOGLE_ANALYTICS && (
         <div
           dangerouslySetInnerHTML={{
@@ -60,18 +49,6 @@ Html.defaultProps = {
   stats: {},
   styles: null,
   title: 'loeck.me',
-}
-
-Html.propTypes = {
-  content: PropTypes.string,
-  lang: PropTypes.string,
-  state: PropTypes.object,
-  stats: PropTypes.shape({
-    main: PropTypes.string,
-    vendor: PropTypes.string,
-  }),
-  styles: PropTypes.node,
-  title: PropTypes.string,
 }
 
 export default Html
