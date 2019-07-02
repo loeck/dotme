@@ -67,9 +67,9 @@ const MediaControls = React.memo(() => {
     },
   })
 
-  const onStartPlaying = useCallback(() => dispatch({ type: 'start-playing' }), [])
-  const onStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [])
-  const onNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [])
+  const handleStartPlaying = useCallback(() => dispatch({ type: 'start-playing' }), [dispatch])
+  const handleStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [dispatch])
+  const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
 
   return (
     <animated.div
@@ -80,7 +80,7 @@ const MediaControls = React.memo(() => {
       <Wrapper>
         {!canPlaying ? (
           <IconWrapper
-            onClick={onStartPlaying}
+            onClick={handleStartPlaying}
             front
             style={{
               backgroundColor: bg,
@@ -90,7 +90,7 @@ const MediaControls = React.memo(() => {
           </IconWrapper>
         ) : (
           <IconWrapper
-            onClick={onStopPlaying}
+            onClick={handleStopPlaying}
             front
             style={{
               backgroundColor: bg,
@@ -104,7 +104,7 @@ const MediaControls = React.memo(() => {
             item && (
               <React.Fragment key={key}>
                 <IconWrapper
-                  onClick={onNextTrack}
+                  onClick={handleNextTrack}
                   style={{
                     backgroundColor: bg,
                     pointerEvents: props.pointerEvents,

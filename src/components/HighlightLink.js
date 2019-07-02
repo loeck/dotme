@@ -18,6 +18,7 @@ const HighlightLink = React.memo(({ isLight, href, children }) => {
     <Wrapper
       href={href}
       target="_blank"
+      rel="noopener noreferrer"
       style={{
         backgroundColor: bg,
         color,

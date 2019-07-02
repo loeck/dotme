@@ -1,4 +1,4 @@
-import React, { useContext } from 'react'
+import React, { useContext, useCallback } from 'react'
 import styled from 'styled-components'
 import { useSpring, animated } from 'react-spring'
 import loadable from '@loadable/component'
@@ -32,13 +32,23 @@ const Home = React.memo(() => {
       progressTrack,
     },
   } = useContext(AppContext)
+
   const { bg } = useSpring({
     bg: currentColor.value,
   })
-  const onLoadingTrack = id => dispatch({ type: 'loading-track', payload: id })
-  const onPlayingTrack = id => dispatch({ type: 'playing-track', payload: id })
-  const onNextTrack = () => dispatch({ type: 'next-track' })
-  const onProgressTrack = progress => dispatch({ type: 'progress-track', payload: progress })
+
+  const handleLoadingTrack = useCallback(id => dispatch({ type: 'loading-track', payload: id }), [
+    dispatch,
+  ])
+  const handlePlayingTrack = useCallback(id => dispatch({ type: 'playing-track', payload: id }), [
+    dispatch,
+  ])
+  const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
+  const handleProgressTrack = useCallback(
+    progress => dispatch({ type: 'progress-track', payload: progress }),
+    [dispatch],
+  )
+
   return (
     <Wrapper
       style={{
@@ -54,10 +64,10 @@ const Home = React.memo(() => {
         currentPlaying={currentPlaying}
         currentTrack={currentTrack}
         indexTrack={indexTrack}
-        onLoadingTrack={onLoadingTrack}
-        onNextTrack={onNextTrack}
-        onPlayingTrack={onPlayingTrack}
-        onProgressTrack={onProgressTrack}
+        onLoadingTrack={handleLoadingTrack}
+        onNextTrack={handleNextTrack}
+        onPlayingTrack={handlePlayingTrack}
+        onProgressTrack={handleProgressTrack}
         progressTrack={progressTrack}
       />
     </Wrapper>
