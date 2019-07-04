@@ -1,8 +1,9 @@
 const { StatsWriterPlugin } = require('webpack-stats-plugin')
+const CopyPlugin = require('copy-webpack-plugin')
 const Dotenv = require('dotenv-webpack')
 const nodeExternals = require('webpack-node-externals')
-const webpack = require('webpack')
 const TerserPlugin = require('terser-webpack-plugin')
+const webpack = require('webpack')
 
 const paths = require('./src/paths')
 
@@ -20,6 +21,9 @@ const isEnvDevelopment = globals.__DEV__
 const makeWebpackConfig = minimize => ({
   mode: isEnvProduction ? 'production' : isEnvDevelopment && 'development',
   bail: isEnvProduction,
+
+  stats: 'errors-only',
+  performance: false,
 
   module: {
     rules: [
@@ -101,7 +105,7 @@ module.exports = [
     output: {
       chunkFilename: '[name].[chunkhash].js',
       filename: '[name].[hash].js',
-      path: isEnvProduction ? `${paths.distFolder}/client` : undefined,
+      path: `${paths.distFolder}/client`,
       pathinfo: isEnvDevelopment,
       publicPath: '/dist/',
     },
@@ -112,14 +116,16 @@ module.exports = [
       makeDefinePlugin(true),
 
       new StatsWriterPlugin({
+        filename: '../server/stats.json',
         transform: data =>
-          // Keep this order
           JSON.stringify({
             manifest: data.assetsByChunkName.manifest,
             vendor: data.assetsByChunkName.vendor,
             main: data.assetsByChunkName.main,
           }),
       }),
+
+      new CopyPlugin([{ from: 'src/assets', to: `${paths.distFolder}/client/assets` }]),
     ],
   },
 
@@ -138,8 +144,8 @@ module.exports = [
 
     output: {
       libraryTarget: 'umd',
-      filename: 'index.js',
-      path: isEnvProduction ? `${paths.distFolder}/server` : undefined,
+      filename: '[name].js',
+      path: `${paths.distFolder}/server`,
     },
 
     plugins: [new Dotenv(), makeDefinePlugin(false)],

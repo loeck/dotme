@@ -12,7 +12,7 @@ const Html = ({ content, lang, state, styles, stats, title }) => (
       <meta charSet="utf-8" />
       <meta httpEquiv="x-ua-compatible" content="ie=edge" />
       <meta name="viewport" content="width=device-width, initial-scale=1" />
-      <link rel="icon" href="/assets/favicon.ico" type="image/x-icon" />
+      <link rel="icon" href="/dist/assets/favicon.ico" type="image/x-icon" />
       {styles}
     </head>
     <body>
@@ -20,9 +20,9 @@ const Html = ({ content, lang, state, styles, stats, title }) => (
       <script
         dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger
       />
-      {Object.keys(stats).map(v => (
-        <script key={v} src={`/dist/${stats[v]}`} async />
-      ))}
+      {stats.manifest && <script src={`/dist/${stats.manifest}`} async />}
+      {stats.vendor && <script src={`/dist/${stats.vendor}`} async />}
+      {stats.main && <script src={`/dist/${stats.main}`} async />}
       {GOOGLE_ANALYTICS && (
         <div
           dangerouslySetInnerHTML={{
