@@ -1,0 +1,26 @@
+{
+  "version": 2,
+  "alias": ["loeck.me", "www.loeck.me"],
+  "builds": [
+    { "src": "dist/server/**/*", "use": "@now/node-server" },
+    { "src": "dist/client/**/*", "use": "@now/static" }
+  ],
+  "routes": [
+    {
+      "src": "/dist/(.*)",
+      "dest": "/dist/client/$1"
+    },
+    {
+      "src": "/.*",
+      "dest": "/dist/server/main.js"
+    }
+  ],
+  "env": {
+    "GOOGLE_ANALYTICS": "@dotme-ga",
+    "SPOTIFY_CLIENT_ID": "@dotme-spotify-client-id",
+    "SPOTIFY_CLIENT_SECRET": "@dotme-spotify-client-secret",
+    "SPOTIFY_PLAYLIST_ID": "@dotme-spotify-playlist-id",
+    "SPOTIFY_SAMPLE_SIZE": "all",
+    "SPOTIFY_USER_ID": "@dotme-spotify-user-id"
+  }
+}

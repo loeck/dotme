@@ -1,8 +1,7 @@
-import path from 'path'
+const path = require('path')
 
-export default {
-  assetsFolder: path.join(__dirname, './assets'),
-  distFolder: path.join(__dirname, '../dist'),
+module.exports = {
+  distFolder: path.resolve(__dirname, '../dist'),
   nodeModules: path.resolve(__dirname, '../node_modules'),
   src: path.resolve(__dirname, '../src'),
 }

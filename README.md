@@ -13,22 +13,19 @@
 yarn
 ```
 
+## Development
+
 ```
 cp .env.example .env
 ```
 
-## Development
-
 ```
+yarn build:development -w
 yarn dev
 ```
 
 ## Production
 
 ```
-yarn build
-```
-
-```
-NODE_ENV=production yarn start
+yarn deploy
 ```
