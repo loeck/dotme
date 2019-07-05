@@ -12,7 +12,10 @@
     },
     {
       "src": "/.*",
-      "dest": "/dist/server/main.js"
+      "dest": "/dist/server/main.js",
+      "headers": {
+        "Cache-Control": "s-maxage=86400, maxage=0"
+      }
     }
   ],
   "env": {
