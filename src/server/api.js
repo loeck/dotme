@@ -1,13 +1,14 @@
 import axios from 'axios'
-import express from 'express'
 import fs from 'fs'
 import getColors from 'get-image-colors'
 import moment from 'moment'
 import querystring from 'querystring'
-import tempDirectory from 'temp-dir'
+import tmp from 'tmp'
 
 import sample from 'lodash/sample'
 import shuffle from 'lodash/shuffle'
+
+process.noDeprecation = true
 
 const {
   SPOTIFY_CLIENT_ID,
@@ -17,7 +18,7 @@ const {
   SPOTIFY_USER_ID,
 } = process.env
 
-const cacheDir = `${tempDirectory}/dotme-cache`
+const { name: tmpDir } = tmp.dirSync()
 
 function getCache(name, defaultValues) {
   let cache = {
@@ -26,7 +27,7 @@ function getCache(name, defaultValues) {
   }
 
   try {
-    cache = JSON.parse(fs.readFileSync(`${cacheDir}/${name}.json`))
+    cache = JSON.parse(fs.readFileSync(`${tmpDir}/${name}.json`))
   } catch (e) {} // eslint-disable-line no-empty
 
   return cache
@@ -39,16 +40,15 @@ function setCache(name, values) {
   }
 
   try {
-    fs.mkdirSync(cacheDir)
-    fs.writeFileSync(`${cacheDir}/${name}.json`, JSON.stringify(cache, null, 2))
+    fs.writeFileSync(`${tmpDir}/${name}.json`, JSON.stringify(cache, null, 2))
   } catch (e) {} // eslint-disable-line no-empty
 
   return cache
 }
 
 const cache = {
-  tracks: getCache('tracks', []),
   colors: getCache('colors', {}),
+  tracks: getCache('tracks', []),
 }
 
 async function getSpotifyTracks(url, accessToken, tracks = []) {
@@ -104,22 +104,26 @@ async function getSampleTracks(tracks) {
       .filter(Boolean),
   ).then(results =>
     Promise.all(
-      results.map(r =>
-        getColors(r.value, 'image/jpeg')
-          .then(colors => {
-            const rgb = colors[0].rgb()
-            const yiq = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000
+      results
+        .map(
+          r =>
+            r &&
+            getColors(r.value, 'image/jpeg')
+              .then(colors => {
+                const rgb = colors[0].rgb()
+                const yiq = (rgb[0] * 299 + rgb[1] * 587 + rgb[2] * 114) / 1000
 
-            return {
-              id: r.id,
-              color: {
-                isLight: yiq > 128,
-                value: colors[0].hex(),
-              },
-            }
-          })
-          .catch(() => null),
-      ),
+                return {
+                  id: r.id,
+                  color: {
+                    isLight: yiq > 128,
+                    value: colors[0].hex(),
+                  },
+                }
+              })
+              .catch(() => null),
+        )
+        .filter(Boolean),
     ),
   )
 
@@ -141,9 +145,7 @@ async function getSampleTracks(tracks) {
   return sampleTracks
 }
 
-const router = express.Router()
-
-router.get('/spotify', async (req, res) => {
+export default async (req, res) => {
   const cacheTracks = cache.tracks
 
   if (cacheTracks.lastModified === moment().format('DD-MM-YYYY')) {
@@ -191,8 +193,8 @@ router.get('/spotify', async (req, res) => {
       const sampleTracks = await getSampleTracks(tracks)
 
       res.send(sampleTracks)
-    } catch (e) {} // eslint-disable-line no-empty
+    } catch (e) {
+      res.send({})
+    }
   }
-})
-
-export default router
+}

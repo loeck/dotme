@@ -8,6 +8,8 @@ import path from 'path'
 import Html from 'components/Html'
 import App from 'components/App'
 
+process.noDeprecation = true
+
 const stats =
   __ENV__ === 'production'
     ? JSON.parse(fs.readFileSync(path.resolve(__dirname, './stats.json')).toString())
@@ -34,7 +36,7 @@ export default async (req, res) => {
 
     const stream = sheet.interleaveWithNodeStream(renderToNodeStream(page))
 
-    res.header('Content-Type', 'text/html')
+    res.setHeader('Content-Type', 'text/html')
     res.write('<!doctype html>')
 
     stream.pipe(

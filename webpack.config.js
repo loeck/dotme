@@ -99,6 +99,7 @@ module.exports = [
     ...makeWebpackConfig(true),
 
     target: 'web',
+    watch: globals.__DEV__,
 
     entry: ['@babel/polyfill', './src/client'],
 
@@ -133,12 +134,17 @@ module.exports = [
     ...makeWebpackConfig(false),
 
     target: 'node',
+    watch: false,
     node: {
       __dirname: false,
       __filename: false,
     },
 
-    entry: ['@babel/polyfill', './src/server'],
+    entry: {
+      api: ['@babel/polyfill', './src/server/api'],
+      image: ['@babel/polyfill', './src/server/image'],
+      render: ['@babel/polyfill', './src/server/render'],
+    },
 
     externals: [nodeExternals()],
 

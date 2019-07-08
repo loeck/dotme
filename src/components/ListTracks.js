@@ -87,11 +87,12 @@ const ListTracks = React.memo(() => {
         itemData={tracks}
         itemKey={itemKey}
         itemSize={110}
+        overscanCount={5}
         ref={listRef}
-        width="100%"
         style={{
           overflow: 'hidden',
         }}
+        width="100%"
       >
         {ListTracksItem}
       </List>
@@ -214,11 +215,11 @@ const TrackName = styled.div`
 const Track = React.memo(props => {
   const {
     active,
+    image,
     artists,
     color,
     empty,
     id,
-    image,
     loading,
     name,
     onSetTrack,
@@ -269,23 +270,26 @@ const Track = React.memo(props => {
 
   const Icon = hoverTrack && !playing ? IconPlay : loading ? IconLoading : IconDisk
 
-  const onMouseEnterSpotify = useCallback(() => setHoverSpotify(true), [])
-  const onMouseLeaveSpotify = useCallback(() => setHoverSpotify(false), [])
-  const onMouseEnterTrack = useCallback(() => setHoverTrack(true), [])
-  const onMouseLeaveTrack = useCallback(() => setHoverTrack(false), [])
+  const handleMouseEnterSpotify = useCallback(() => setHoverSpotify(true), [])
+  const handleMouseLeaveSpotify = useCallback(() => setHoverSpotify(false), [])
+  const handleMouseEnterTrack = useCallback(() => setHoverTrack(true), [])
+  const handleMouseLeaveTrack = useCallback(() => setHoverTrack(false), [])
 
   return (
     <WrapperTrack
       style={style}
       color={color.value}
       isLight={color.isLight}
-      onMouseEnter={onMouseEnterTrack}
-      onMouseLeave={onMouseLeaveTrack}
+      onMouseEnter={handleMouseEnterTrack}
+      onMouseLeave={handleMouseLeaveTrack}
     >
-      <WrapperTrackImg onMouseEnter={onMouseEnterSpotify} onMouseLeave={onMouseLeaveSpotify}>
+      <WrapperTrackImg
+        onMouseEnter={handleMouseEnterSpotify}
+        onMouseLeave={handleMouseLeaveSpotify}
+      >
         <img
           data-sizes="auto"
-          data-src={image.big}
+          data-src={`/image?${image.big}`}
           src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
           alt={name}
           className="lazyload"

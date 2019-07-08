@@ -1,4 +1,4 @@
-import React, { useContext, useCallback } from 'react'
+import React, { useEffect, useContext, useCallback } from 'react'
 import styled from 'styled-components'
 import { useSpring, animated } from 'react-spring'
 import loadable from '@loadable/component'
@@ -17,6 +17,10 @@ const Wrapper = styled(animated.div)`
   position: absolute;
   right: 0;
   top: 0;
+`
+const WrapperAnimated = styled(animated.div)`
+  position: relative;
+  z-index: 2;
 `
 
 const Home = React.memo(() => {
@@ -37,6 +41,13 @@ const Home = React.memo(() => {
     bg: currentColor.value,
   })
 
+  const [springPositionLeft, setSpringPositionLeft] = useSpring(() => ({
+    xy: [0, 0],
+  }))
+  const [springPositionRight, setSpringPositionRight] = useSpring(() => ({
+    xy: [0, 0],
+  }))
+
   const handleLoadingTrack = useCallback(id => dispatch({ type: 'loading-track', payload: id }), [
     dispatch,
   ])
@@ -49,14 +60,58 @@ const Home = React.memo(() => {
     [dispatch],
   )
 
+  const handleDocumentMouseMove = useCallback(
+    e => {
+      setSpringPositionLeft({
+        xy: [e.clientX / 50, e.clientY / 50],
+      })
+      setSpringPositionRight({
+        xy: [e.clientX / 50, 0],
+      })
+    },
+    [setSpringPositionLeft, setSpringPositionRight],
+  )
+  const handleDocumentMouseOut = useCallback(() => {
+    setSpringPositionLeft({
+      xy: [0, 0],
+    })
+    setSpringPositionRight({
+      xy: [0, 0],
+    })
+  }, [setSpringPositionLeft, setSpringPositionRight])
+
+  useEffect(() => {
+    document.addEventListener('mousemove', handleDocumentMouseMove)
+    document.addEventListener('mouseout', handleDocumentMouseOut)
+
+    return () => {
+      document.removeEventListener('mousemove', handleDocumentMouseMove)
+      document.removeEventListener('mouseout', handleDocumentMouseOut)
+    }
+  }, [])
+
   return (
     <Wrapper
       style={{
         backgroundColor: bg,
       }}
     >
-      <AboutMe />
-      <ListTracks />
+      <WrapperAnimated
+        style={{
+          transform: springPositionLeft.xy.interpolate((x, y) => `translate3d(${x}px, ${y}px, 0)`),
+        }}
+      >
+        <AboutMe />
+      </WrapperAnimated>
+      <WrapperAnimated
+        style={{
+          transform: springPositionRight.xy.interpolate(
+            (x, y) => `translate3d(-${x}px, ${y}px, 0)`,
+          ),
+        }}
+      >
+        <ListTracks />
+      </WrapperAnimated>
       <PlayerAudio
         bg={bg}
         canPlaying={canPlaying}

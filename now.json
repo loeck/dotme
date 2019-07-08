@@ -1,21 +1,36 @@
 {
   "version": 2,
   "alias": ["loeck.me", "www.loeck.me"],
+  "regions": ["cdg", "bru"],
   "builds": [
-    { "src": "dist/server/**/*", "use": "@now/node-server" },
+    { "src": "dist/server/image.js", "use": "@now/node" },
+    { "src": "dist/server/api.js", "use": "@now/node" },
+    { "src": "dist/server/render.js", "use": "@now/node" },
     { "src": "dist/client/**/*", "use": "@now/static" }
   ],
   "routes": [
     {
       "src": "/dist/(.*)",
-      "dest": "/dist/client/$1"
-    },
-    {
-      "src": "/.*",
-      "dest": "/dist/server/main.js",
+      "dest": "/dist/client/$1",
       "headers": {
         "Cache-Control": "s-maxage=86400, maxage=0"
       }
+    },
+    {
+      "src": "/image",
+      "dest": "/dist/server/image.js",
+      "headers": {
+        "Content-Type": "image/jpeg",
+        "Cache-Control": "s-maxage=86400, maxage=0"
+      }
+    },
+    {
+      "src": "/api/spotify",
+      "dest": "/dist/server/api.js"
+    },
+    {
+      "src": "/",
+      "dest": "/dist/server/render.js"
     }
   ],
   "env": {
