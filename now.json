@@ -13,7 +13,7 @@
       "src": "/dist/(.*)",
       "dest": "/dist/client/$1",
       "headers": {
-        "Cache-Control": "s-maxage=86400, maxage=0"
+        "Cache-Control": "public, max-age=86400"
       }
     },
     {
@@ -21,7 +21,7 @@
       "dest": "/dist/server/image.js",
       "headers": {
         "Content-Type": "image/jpeg",
-        "Cache-Control": "s-maxage=86400, maxage=0"
+        "Cache-Control": "public, max-age=86400"
       }
     },
     {
