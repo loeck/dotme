@@ -39,13 +39,13 @@ const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
 const MediaControls = React.memo(() => {
   const {
     dispatch,
-    state: { currentTrack, canPlaying },
+    state: { canPlaying },
   } = useContext(AppContext)
 
   const isLight = useIsLight()
 
   const { bg, color } = useSpring({
-    bg: currentTrack.color.value,
+    bg: isLight ? 'white' : 'black',
     color: isLight ? 'black' : 'white',
   })
 

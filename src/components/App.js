@@ -21,7 +21,7 @@ const GlobalStyle = createGlobalStyle`
   }
 
   body {
-    background: #000;
+    background: #ffffff;
     font-family: 'Fira Sans', Helvetica, Arial, sans-serif;
     font-weight: 300;
     font-size: 13px;
@@ -38,28 +38,12 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const App = props => {
-  const { tracks } = props
-  const firstTrack = tracks[0]
-
-  const initialState = {
-    currentColor: firstTrack.color,
-    currentTrack: firstTrack,
-    indexTrack: 1,
-    tracks: [
-      {
-        id: 'empty',
-        empty: true,
-      },
-      ...tracks,
-    ],
-  }
-
+const App = () => {
   return (
     <>
       <GlobalStyle />
 
-      <AppProvider initialState={initialState}>
+      <AppProvider>
         <Home />
       </AppProvider>
     </>

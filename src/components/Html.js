@@ -1,11 +1,10 @@
 /* eslint-disable react/no-danger */
 
 import React from 'react'
-import serialize from 'serialize-javascript'
 
 const { GOOGLE_ANALYTICS } = process.env
 
-const Html = ({ content, lang, state, styles, stats, title }) => (
+const Html = ({ content, lang, styles, stats, title }) => (
   <html lang={lang}>
     <head>
       <title>{title}</title>
@@ -17,9 +16,6 @@ const Html = ({ content, lang, state, styles, stats, title }) => (
     </head>
     <body>
       <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
-      <script
-        dangerouslySetInnerHTML={{ __html: `window.__INITIAL_STATE__ = ${serialize(state)}` }} // eslint-disable-line react/no-danger
-      />
       {stats.manifest && <script src={`/dist/${stats.manifest}`} async />}
       {stats.vendor && <script src={`/dist/${stats.vendor}`} async />}
       {stats.main && <script src={`/dist/${stats.main}`} async />}
@@ -45,7 +41,6 @@ const Html = ({ content, lang, state, styles, stats, title }) => (
 Html.defaultProps = {
   content: '',
   lang: 'en',
-  state: {},
   stats: {},
   styles: null,
   title: 'loeck.me',

@@ -81,7 +81,9 @@ const makeWebpackConfig = minimize => ({
           name: 'manifest',
         },
       }
-    : {},
+    : {
+        minimize: false,
+      },
 })
 
 const makeDefinePlugin = browser =>
@@ -99,7 +101,6 @@ module.exports = [
     ...makeWebpackConfig(true),
 
     target: 'web',
-    watch: globals.__DEV__,
 
     entry: ['@babel/polyfill', './src/client'],
 

@@ -30,7 +30,10 @@
     },
     {
       "src": "/",
-      "dest": "/dist/server/render.js"
+      "dest": "/dist/server/render.js",
+      "headers": {
+        "Cache-Control": "s-maxage=86400, maxage=0"
+      }
     }
   ],
   "env": {

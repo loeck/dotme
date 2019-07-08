@@ -40,6 +40,24 @@ const reducer = (state, action) => {
       }
     }
 
+    case 'set-tracks': {
+      const [firstTrack] = action.payload
+
+      return {
+        ...state,
+        indexTrack: 1,
+        currentColor: firstTrack.color,
+        currentTrack: firstTrack,
+        tracks: [
+          {
+            id: 'empty',
+            empty: true,
+          },
+          ...action.payload,
+        ],
+      }
+    }
+
     case 'set-track': {
       const indexTrack = state.tracks.findIndex(t => t.id === action.payload) || 0
       const currentTrack = state.tracks[indexTrack]
@@ -59,7 +77,10 @@ const reducer = (state, action) => {
 
 const INITIAL_STATE = {
   canPlaying: false,
-  currentColor: 'black',
+  currentColor: {
+    isLight: false,
+    value: '#000000',
+  },
   currentLoading: null,
   currentPlaying: null,
   currentTrack: null,
@@ -68,8 +89,8 @@ const INITIAL_STATE = {
   tracks: [],
 }
 
-export const AppProvider = ({ initialState, children }) => {
-  const [state, dispatch] = useReducer(reducer, { ...INITIAL_STATE, ...initialState })
+export const AppProvider = ({ children }) => {
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
   const value = { state, dispatch }
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }

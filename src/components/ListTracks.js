@@ -1,6 +1,7 @@
 /* eslint-disable react/no-multi-comp */
 
 import React, { useRef, useEffect, useState, useContext, useCallback } from 'react'
+import axios from 'axios'
 import styled, { css, keyframes } from 'styled-components'
 import { useSpring, useTransition, animated } from 'react-spring'
 import { FixedSizeList as List } from 'react-window'
@@ -45,6 +46,7 @@ const Wrapper = styled(animated.div)`
 
 const ListTracks = React.memo(() => {
   const {
+    dispatch,
     state: { tracks, indexTrack },
   } = useContext(AppContext)
 
@@ -62,6 +64,10 @@ const ListTracks = React.memo(() => {
   })
 
   useEffect(() => {
+    axios
+      .get('/api/spotify')
+      .then(({ data: tracks }) => dispatch({ type: 'set-tracks', payload: tracks }))
+
     window.addEventListener('resize', handleWindowResize)
 
     handleWindowResize()
