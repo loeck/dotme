@@ -43,6 +43,8 @@ const AboutMe = React.memo(() => {
           height: '100%',
           backgroundColor: bg,
           color,
+          position: 'relative',
+          zIndex: 1,
         }}
       >
         <Wrapper>

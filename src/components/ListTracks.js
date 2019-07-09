@@ -85,46 +85,49 @@ const ListTracks = React.memo(() => {
     return item.id
   }, [])
 
-  const transitions = useTransition(true, null, {
+  const transitionWrapper = useTransition(tracks.length > 0, null, {
     from: {
       o: 0,
-      y: -55,
+      x: -55,
     },
     enter: {
       o: 1,
-      y: 0,
+      x: 0,
     },
     leave: {
       o: 0,
-      y: -55,
+      x: -55,
     },
   })
 
-  return transitions.map(({ props, key }) => (
-    <Wrapper
-      key={key}
-      style={{
-        opacity: props.o,
-        transform: props.y.interpolate(v => `translate3d(0, ${v}px, 0)`),
-      }}
-    >
-      <List
-        height={winHeight}
-        itemCount={tracks.length}
-        itemData={tracks}
-        itemKey={itemKey}
-        itemSize={110}
-        overscanCount={5}
-        ref={listRef}
-        style={{
-          overflow: 'hidden',
-        }}
-        width="100%"
-      >
-        {ListTracksItem}
-      </List>
-    </Wrapper>
-  ))
+  return transitionWrapper.map(
+    ({ item, props, key }) =>
+      item && (
+        <Wrapper
+          key={key}
+          style={{
+            opacity: props.o,
+            transform: props.x.interpolate(v => `translate3d(0, ${v}px, 0)`),
+          }}
+        >
+          <List
+            height={winHeight}
+            itemCount={tracks.length}
+            itemData={tracks}
+            itemKey={itemKey}
+            itemSize={110}
+            overscanCount={5}
+            ref={listRef}
+            style={{
+              overflow: 'hidden',
+            }}
+            width="100%"
+          >
+            {ListTracksItem}
+          </List>
+        </Wrapper>
+      ),
+  )
 })
 
 const ListTracksItem = React.memo(props => {

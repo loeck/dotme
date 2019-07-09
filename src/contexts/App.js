@@ -4,14 +4,18 @@ export const AppContext = React.createContext()
 
 const reducer = (state, action) => {
   switch (action.type) {
-    case 'start-playing':
-      return {
-        ...state,
-        canPlaying: true,
-        currentPlaying: state.currentTrack.id,
-        currentTrack: { ...state.currentTrack },
-        progressTrack: 0,
+    case 'start-playing': {
+      if (state.currentTrack) {
+        return {
+          ...state,
+          canPlaying: true,
+          currentPlaying: state.currentTrack.id,
+          currentTrack: { ...state.currentTrack },
+          progressTrack: 0,
+        }
       }
+      return state
+    }
 
     case 'stop-playing':
       return {
@@ -23,21 +27,24 @@ const reducer = (state, action) => {
       }
 
     case 'next-track': {
-      let nextIndexTrack = state.indexTrack + 1
-      let nextTrack = state.tracks[nextIndexTrack]
+      if (state.currentTrack) {
+        let nextIndexTrack = state.indexTrack + 1
+        let nextTrack = state.tracks[nextIndexTrack]
 
-      if (!nextTrack) {
-        nextIndexTrack = 1
-        nextTrack = state.tracks[1] // eslint-disable-line prefer-destructuring
-      }
+        if (!nextTrack) {
+          nextIndexTrack = 1
+          nextTrack = state.tracks[1] // eslint-disable-line prefer-destructuring
+        }
 
-      return {
-        ...state,
-        currentColor: nextTrack.color,
-        currentTrack: nextTrack,
-        indexTrack: nextIndexTrack,
-        progressTrack: 0,
+        return {
+          ...state,
+          currentColor: nextTrack.color,
+          currentTrack: nextTrack,
+          indexTrack: nextIndexTrack,
+          progressTrack: 0,
+        }
       }
+      return state
     }
 
     case 'set-tracks': {

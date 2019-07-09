@@ -39,7 +39,7 @@ const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
 const MediaControls = React.memo(() => {
   const {
     dispatch,
-    state: { canPlaying },
+    state: { canPlaying, tracks },
   } = useContext(AppContext)
 
   const isLight = useIsLight()
@@ -49,6 +49,20 @@ const MediaControls = React.memo(() => {
     color: isLight ? 'black' : 'white',
   })
 
+  const transitionWrapper = useTransition(tracks.length > 0, null, {
+    from: {
+      opacity: 0,
+      x: -100,
+    },
+    enter: {
+      opacity: 1,
+      x: 0,
+    },
+    leave: {
+      opacity: 0,
+      x: -100,
+    },
+  })
   const transitionPlaying = useTransition(canPlaying, null, {
     from: {
       x: -34,
@@ -71,54 +85,60 @@ const MediaControls = React.memo(() => {
   const handleStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [dispatch])
   const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
 
-  return (
-    <animated.div
-      style={{
-        color,
-      }}
-    >
-      <Wrapper>
-        {!canPlaying ? (
-          <IconWrapper
-            onClick={handleStartPlaying}
-            front
-            style={{
-              backgroundColor: bg,
-            }}
-          >
-            <IconPlay height={24} width={24} />
-          </IconWrapper>
-        ) : (
-          <IconWrapper
-            onClick={handleStopPlaying}
-            front
-            style={{
-              backgroundColor: bg,
-            }}
-          >
-            <IconStop height={24} width={24} />
-          </IconWrapper>
-        )}
-        {transitionPlaying.map(
-          ({ item, key, props }) =>
-            item && (
-              <React.Fragment key={key}>
-                <IconWrapper
-                  onClick={handleNextTrack}
-                  style={{
-                    backgroundColor: bg,
-                    pointerEvents: props.pointerEvents,
-                    opacity: props.opacity,
-                    transform: props.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
-                  }}
-                >
-                  <IconNext height={24} width={24} />
-                </IconWrapper>
-              </React.Fragment>
-            ),
-        )}
-      </Wrapper>
-    </animated.div>
+  return transitionWrapper.map(
+    ({ item, props, key }) =>
+      item && (
+        <animated.div
+          key={key}
+          style={{
+            color,
+            opacity: props.o,
+            transform: props.x.interpolate(v => `translate3d(0, ${v}px, 0)`),
+          }}
+        >
+          <Wrapper>
+            {!canPlaying ? (
+              <IconWrapper
+                onClick={handleStartPlaying}
+                front
+                style={{
+                  backgroundColor: bg,
+                }}
+              >
+                <IconPlay height={24} width={24} />
+              </IconWrapper>
+            ) : (
+              <IconWrapper
+                onClick={handleStopPlaying}
+                front
+                style={{
+                  backgroundColor: bg,
+                }}
+              >
+                <IconStop height={24} width={24} />
+              </IconWrapper>
+            )}
+            {transitionPlaying.map(
+              ({ item, key, props }) =>
+                item && (
+                  <React.Fragment key={key}>
+                    <IconWrapper
+                      onClick={handleNextTrack}
+                      style={{
+                        backgroundColor: bg,
+                        pointerEvents: props.pointerEvents,
+                        opacity: props.opacity,
+                        transform: props.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+                      }}
+                    >
+                      <IconNext height={24} width={24} />
+                    </IconWrapper>
+                  </React.Fragment>
+                ),
+            )}
+          </Wrapper>
+        </animated.div>
+      ),
   )
 })
 
