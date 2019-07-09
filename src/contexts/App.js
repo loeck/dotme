@@ -1,4 +1,5 @@
 import React, { useReducer } from 'react'
+import shuffle from 'lodash/shuffle'
 
 export const AppContext = React.createContext()
 
@@ -48,7 +49,9 @@ const reducer = (state, action) => {
     }
 
     case 'set-tracks': {
-      const [firstTrack] = action.payload
+      const tracks = shuffle(action.payload)
+
+      const [firstTrack] = tracks
 
       return {
         ...state,
@@ -60,7 +63,7 @@ const reducer = (state, action) => {
             id: 'empty',
             empty: true,
           },
-          ...action.payload,
+          ...tracks,
         ],
       }
     }

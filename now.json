@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "alias": ["loeck.me", "www.loeck.me"],
+
   "regions": ["cdg", "bru"],
   "builds": [
     { "src": "dist/server/image.js", "use": "@now/node" },
@@ -26,7 +26,10 @@
     },
     {
       "src": "/api/spotify",
-      "dest": "/dist/server/api.js"
+      "dest": "/dist/server/api.js",
+      "headers": {
+        "Cache-Control": "s-maxage=86400, maxage=0"
+      }
     },
     {
       "src": "/",
