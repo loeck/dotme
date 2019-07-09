@@ -20,7 +20,7 @@ const Wrapper = styled(animated.div)`
 `
 const WrapperAnimated = styled(animated.div)`
   position: relative;
-  z-index: 2;
+  z-index: 10;
 `
 
 const Home = React.memo(() => {

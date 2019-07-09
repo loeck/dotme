@@ -85,8 +85,29 @@ const ListTracks = React.memo(() => {
     return item.id
   }, [])
 
-  return (
-    <Wrapper>
+  const transitions = useTransition(true, null, {
+    from: {
+      o: 0,
+      y: -55,
+    },
+    enter: {
+      o: 1,
+      y: 0,
+    },
+    leave: {
+      o: 0,
+      y: -55,
+    },
+  })
+
+  return transitions.map(({ props, key }) => (
+    <Wrapper
+      key={key}
+      style={{
+        opacity: props.o,
+        transform: props.y.interpolate(v => `translate3d(0, ${v}px, 0)`),
+      }}
+    >
       <List
         height={winHeight}
         itemCount={tracks.length}
@@ -103,7 +124,7 @@ const ListTracks = React.memo(() => {
         {ListTracksItem}
       </List>
     </Wrapper>
-  )
+  ))
 })
 
 const ListTracksItem = React.memo(props => {
@@ -283,11 +304,11 @@ const Track = React.memo(props => {
 
   return (
     <WrapperTrack
-      style={style}
       color={color.value}
       isLight={color.isLight}
       onMouseEnter={handleMouseEnterTrack}
       onMouseLeave={handleMouseLeaveTrack}
+      style={style}
     >
       <WrapperTrackImg
         onMouseEnter={handleMouseEnterSpotify}
@@ -314,8 +335,14 @@ const Track = React.memo(props => {
                 <animated.div
                   key={key}
                   style={{
+                    bottom: 0,
                     display: 'flex',
                     justifyContent: 'center',
+                    alignItems: 'center',
+                    left: 0,
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
                     transform: props.scale.interpolate(v => `scale3d(${v}, ${v}, 1)`),
                   }}
                 >
