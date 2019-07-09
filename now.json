@@ -1,6 +1,6 @@
 {
   "version": 2,
-
+  "alias": ["loeck.me", "www.loeck.me"],
   "regions": ["cdg", "bru"],
   "builds": [
     { "src": "dist/server/image.js", "use": "@now/node" },
