@@ -25,7 +25,7 @@ const WrapperCanvas = styled(animated.div)`
     bottom: auto;
     height: 90px;
     top: 110px;
-    z-index: 9;
+    z-index: 10;
 
     canvas {
       height: 90px;

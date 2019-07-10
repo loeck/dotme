@@ -13,6 +13,7 @@ const MediaControls = loadable(() => import('components/MediaControls'))
 
 const Container = styled(Box)`
   position: fixed;
+  pointer-events: none;
   left: 110px;
   top: 110px;
   z-index: 10;
@@ -27,6 +28,7 @@ const Wrapper = styled(Box).attrs({
   flow: 10,
 })`
   height: 110px;
+  pointer-events: auto;
   padding: 20px;
 `
 

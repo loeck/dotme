@@ -58,7 +58,7 @@ const makeWebpackConfig = minimize => ({
                 ecma: 8,
               },
               compress: {
-                drop_console: true,
+                // drop_console: true,
                 ecma: 5,
               },
               output: {

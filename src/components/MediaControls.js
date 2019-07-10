@@ -32,6 +32,7 @@ const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
   height: 24px;
   position: relative;
   user-select: none;
+  pointer-events: auto;
   width: 24px;
   z-index: ${p => (p.front ? 11 : 10)};
 `

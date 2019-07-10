@@ -9,6 +9,8 @@ import { FixedSizeList as List } from 'react-window'
 import { AppContext } from 'contexts/App'
 import { mobile } from 'helpers/styles'
 
+import useMobile from 'hooks/useMobile'
+
 import IconPlay from 'icons/Play'
 import IconDisk from 'icons/Disk'
 import IconLoading from 'icons/Loading'
@@ -31,11 +33,19 @@ const Wrapper = styled(animated.div)`
   align-items: flex-end;
   display: flex;
   flex-direction: column;
-  margin: 0 110px 0 0;
   position: fixed;
   right: 0;
-  width: 410px;
+  left: 0;
   z-index: 9;
+
+  .v-list {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+
+    &::-webkit-scrollbar {
+      display: none;
+    }
+  }
 
   ${mobile`
     margin-right: 0;
@@ -47,21 +57,35 @@ const Wrapper = styled(animated.div)`
 const ListTracks = React.memo(() => {
   const {
     dispatch,
-    state: { tracks, indexTrack },
+    state: { canPlaying, tracks, indexTrack },
   } = useContext(AppContext)
 
+  const manualScroll = useRef(true)
   const listRef = useRef()
+  const listOuterRef = useRef()
 
   const [winHeight, setWinHeight] = useState(0)
 
-  useSpring({
-    y: 110 * (indexTrack - 1),
+  const [, setScroll] = useSpring(() => ({
+    immediate: false,
+    from: {
+      y: listOuterRef.current ? listOuterRef.current.scrollTop : 0,
+    },
     onFrame: s => {
-      if (listRef.current) {
-        listRef.current.scrollTo(Math.round(s.y))
+      if (listRef.current && !manualScroll.current) {
+        window.requestAnimationFrame(() => listRef.current.scrollTo(Math.round(s.y)))
       }
     },
-  })
+  }))
+
+  useEffect(() => {
+    if (listOuterRef.current && canPlaying && tracks.length > 0) {
+      manualScroll.current = false
+      setScroll({
+        y: 110 * (indexTrack - 1),
+      })
+    }
+  }, [canPlaying, indexTrack, tracks])
 
   useEffect(() => {
     axios
@@ -83,6 +107,11 @@ const ListTracks = React.memo(() => {
   const itemKey = useCallback((index, data) => {
     const item = data[index]
     return item.id
+  }, [])
+  const handleScroll = useCallback(({ scrollUpdateWasRequested }) => {
+    if (!scrollUpdateWasRequested) {
+      manualScroll.current = true
+    }
   }, [])
 
   const transitionWrapper = useTransition(tracks.length > 0, null, {
@@ -111,16 +140,16 @@ const ListTracks = React.memo(() => {
           }}
         >
           <List
+            className="v-list"
             height={winHeight}
             itemCount={tracks.length}
             itemData={tracks}
             itemKey={itemKey}
             itemSize={110}
+            onScroll={handleScroll}
+            outerRef={listOuterRef}
             overscanCount={5}
             ref={listRef}
-            style={{
-              overflow: 'hidden',
-            }}
             width="100%"
           >
             {ListTracksItem}
@@ -175,7 +204,6 @@ const WrapperTrack = styled(({ color, ...p }) => <Box {...p} />).attrs(p => ({
   overflow: hidden;
   padding: 20px;
   position: relative;
-  width: 410px;
 
   ${mobile`
     width: 100%;
@@ -258,8 +286,17 @@ const Track = React.memo(props => {
     style,
   } = props
 
+  const mobile = useMobile()
+
+  const s = {
+    ...style,
+    left: 'auto',
+    right: mobile ? 0 : 110,
+    width: mobile ? '100%' : 410,
+  }
+
   if (empty) {
-    return <div style={style} />
+    return <div style={s} />
   }
 
   const [hoverSpotify, setHoverSpotify] = useState(false)
@@ -311,7 +348,7 @@ const Track = React.memo(props => {
       isLight={color.isLight}
       onMouseEnter={handleMouseEnterTrack}
       onMouseLeave={handleMouseLeaveTrack}
-      style={style}
+      style={s}
     >
       <WrapperTrackImg
         onMouseEnter={handleMouseEnterSpotify}

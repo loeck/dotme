@@ -5,6 +5,8 @@ import loadable from '@loadable/component'
 
 import { AppContext } from 'contexts/App'
 
+import useMobile from 'hooks/useMobile'
+
 import AboutMe from 'components/AboutMe'
 
 const ListTracks = loadable(() => import('components/ListTracks'))
@@ -36,6 +38,8 @@ const Home = React.memo(() => {
       progressTrack,
     },
   } = useContext(AppContext)
+
+  const mobile = useMobile()
 
   const { bg } = useSpring({
     bg: currentColor.value,
@@ -81,14 +85,16 @@ const Home = React.memo(() => {
   }, [setSpringPositionLeft, setSpringPositionRight])
 
   useEffect(() => {
-    document.addEventListener('mousemove', handleDocumentMouseMove)
-    document.addEventListener('mouseout', handleDocumentMouseOut)
+    if (!mobile) {
+      document.addEventListener('mousemove', handleDocumentMouseMove)
+      document.addEventListener('mouseout', handleDocumentMouseOut)
 
-    return () => {
-      document.removeEventListener('mousemove', handleDocumentMouseMove)
-      document.removeEventListener('mouseout', handleDocumentMouseOut)
+      return () => {
+        document.removeEventListener('mousemove', handleDocumentMouseMove)
+        document.removeEventListener('mouseout', handleDocumentMouseOut)
+      }
     }
-  }, [])
+  }, [mobile])
 
   return (
     <Wrapper
@@ -99,6 +105,7 @@ const Home = React.memo(() => {
       <WrapperAnimated
         style={{
           transform: springPositionLeft.xy.interpolate((x, y) => `translate3d(${x}px, ${y}px, 0)`),
+          zIndex: 11,
         }}
       >
         <AboutMe />
