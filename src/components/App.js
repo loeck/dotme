@@ -38,16 +38,14 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const App = () => {
-  return (
-    <>
-      <GlobalStyle />
+const App = () => (
+  <>
+    <GlobalStyle />
 
-      <AppProvider>
-        <Home />
-      </AppProvider>
-    </>
-  )
-}
+    <AppProvider>
+      <Home />
+    </AppProvider>
+  </>
+)
 
 export default hot(module)(App)

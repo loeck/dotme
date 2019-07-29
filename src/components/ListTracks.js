@@ -265,6 +265,16 @@ const WrapperSpotify = styled(animated.a)`
   right: 0;
   top: 0;
 `
+const WrapperInnerSpotify = styled(animated.div)`
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  left: 0;
+  position: absolute;
+  right: 0;
+  top: 0;
+`
 const TrackName = styled.div`
   overflow: hidden;
   text-overflow: ellipsis;
@@ -372,22 +382,14 @@ const Track = React.memo(props => {
           {transitionSpotify.map(
             ({ item, key, props }) =>
               item && (
-                <animated.div
+                <WrapperInnerSpotify
                   key={key}
                   style={{
-                    bottom: 0,
-                    display: 'flex',
-                    justifyContent: 'center',
-                    alignItems: 'center',
-                    left: 0,
-                    position: 'absolute',
-                    right: 0,
-                    top: 0,
                     transform: props.scale.interpolate(v => `scale3d(${v}, ${v}, 1)`),
                   }}
                 >
                   <IconSpotify height={24} width={24} />
-                </animated.div>
+                </WrapperInnerSpotify>
               ),
           )}
         </WrapperSpotify>
@@ -422,6 +424,7 @@ const Track = React.memo(props => {
               }}
             >
               <Box
+                css="user-selecgt: none;"
                 onClick={() => {
                   if (hoverTrack && !playing) {
                     setHoverTrack(false)
@@ -430,7 +433,6 @@ const Track = React.memo(props => {
                 }}
                 style={{
                   cursor: hoverTrack && !playing ? 'pointer' : 'default',
-                  userSelect: 'none',
                 }}
               >
                 <Icon height={24} width={24} />

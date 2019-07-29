@@ -24,6 +24,11 @@ const Container = styled(Box)`
     top: 0;
   `}
 `
+const InnerContainer = styled(animated.div)`
+  height: 100%;
+  position: relative;
+  z-index: 1;
+`
 const Wrapper = styled(Box).attrs({
   flow: 10,
 })`
@@ -38,15 +43,13 @@ const AboutMe = React.memo(() => {
     bg: isLight ? 'black' : 'white',
     color: isLight ? 'white' : 'black',
   })
+
   return (
     <Container>
-      <animated.div
+      <InnerContainer
         style={{
-          height: '100%',
           backgroundColor: bg,
           color,
-          position: 'relative',
-          zIndex: 1,
         }}
       >
         <Wrapper>
@@ -75,7 +78,7 @@ const AboutMe = React.memo(() => {
             </HighlightLink>
           </Box>
         </Wrapper>
-      </animated.div>
+      </InnerContainer>
       <MediaControls />
     </Container>
   )

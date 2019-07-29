@@ -9,11 +9,14 @@ const Wrapper = styled(animated.a)`
   text-decoration: none;
 `
 
-const HighlightLink = React.memo(({ isLight, href, children }) => {
+const HighlightLink = React.memo(props => {
+  const { isLight, href, children } = props
+
   const { bg, color } = useSpring({
     bg: isLight ? 'white' : 'black',
     color: isLight ? 'black' : 'white',
   })
+
   return (
     <Wrapper
       href={href}
