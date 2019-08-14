@@ -1,4 +1,3 @@
-const { StatsWriterPlugin } = require('webpack-stats-plugin')
 const CopyPlugin = require('copy-webpack-plugin')
 const Dotenv = require('dotenv-webpack')
 const nodeExternals = require('webpack-node-externals')
@@ -58,7 +57,7 @@ const makeWebpackConfig = minimize => ({
                 ecma: 8,
               },
               compress: {
-                // drop_console: true,
+                drop_console: true,
                 ecma: 5,
               },
               output: {
@@ -105,8 +104,7 @@ module.exports = [
     entry: ['@babel/polyfill', './src/client'],
 
     output: {
-      chunkFilename: '[name].[chunkhash].js',
-      filename: '[name].[hash].js',
+      filename: '[name].js',
       path: `${paths.distFolder}/client`,
       pathinfo: isEnvDevelopment,
       publicPath: '/dist/',
@@ -116,16 +114,6 @@ module.exports = [
       new Dotenv(),
 
       makeDefinePlugin(true),
-
-      new StatsWriterPlugin({
-        filename: '../server/stats.json',
-        transform: data =>
-          JSON.stringify({
-            manifest: data.assetsByChunkName.manifest,
-            vendor: data.assetsByChunkName.vendor,
-            main: data.assetsByChunkName.main,
-          }),
-      }),
 
       new CopyPlugin([{ from: 'src/assets', to: `${paths.distFolder}/client/assets` }]),
     ],

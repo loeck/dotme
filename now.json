@@ -3,9 +3,7 @@
   "alias": ["loeck.me", "www.loeck.me"],
   "regions": ["cdg", "bru"],
   "builds": [
-    { "src": "dist/server/image.js", "use": "@now/node" },
-    { "src": "dist/server/api.js", "use": "@now/node" },
-    { "src": "dist/server/render.js", "use": "@now/node" },
+    { "src": "dist/server/**/*", "use": "@now/node" },
     { "src": "dist/client/**/*", "use": "@now/static" }
   ],
   "routes": [

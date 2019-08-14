@@ -4,7 +4,7 @@ import React from 'react'
 
 const { GOOGLE_ANALYTICS } = process.env
 
-const Html = ({ content, lang, styles, stats, title }) => (
+const Html = ({ content, lang, styles, title }) => (
   <html lang={lang}>
     <head>
       <title>{title}</title>
@@ -16,9 +16,11 @@ const Html = ({ content, lang, styles, stats, title }) => (
     </head>
     <body>
       <div id="root" dangerouslySetInnerHTML={{ __html: content }} />
-      {stats.manifest && <script src={`/dist/${stats.manifest}`} async />}
-      {stats.vendor && <script src={`/dist/${stats.vendor}`} async />}
-      {stats.main && <script src={`/dist/${stats.main}`} async />}
+
+      <script src="/dist/manifest.js" async />
+      <script src="/dist/vendor.js" async />
+      <script src="/dist/main.js" async />
+
       {GOOGLE_ANALYTICS && (
         <div
           dangerouslySetInnerHTML={{

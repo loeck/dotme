@@ -1,7 +1,10 @@
 import React from 'react'
 
 const SvgComponent = props => (
-  <svg viewBox="0 0 24 24" {...props}>
+  <svg
+    viewBox="0 0 24 24"
+    {...props} // eslint-disable-line react/jsx-props-no-spreading
+  >
     <path
       fill="#1DB954"
       fillRule="evenodd"

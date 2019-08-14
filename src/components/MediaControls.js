@@ -26,7 +26,11 @@ const Wrapper = styled(Box).attrs({
     padding-bottom: 0;
   `}
 `
-const IconWrapper = styled(({ front, ...p }) => <animated.div {...p} />)`
+const IconWrapper = styled(({ front, ...p }) => (
+  <animated.div
+    {...p} // eslint-disable-line react/jsx-props-no-spreading
+  />
+))`
   border-radius: 50%;
   cursor: pointer;
   height: 24px;

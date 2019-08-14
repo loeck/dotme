@@ -188,12 +188,16 @@ const ListTracksItem = React.memo(props => {
       playing={playing}
       progress={progress}
       onSetTrack={onSetTrack}
-      {...track}
+      {...track} // eslint-disable-line react/jsx-props-no-spreading
     />
   )
 })
 
-const WrapperTrack = styled(({ color, ...p }) => <Box {...p} />).attrs(p => ({
+const WrapperTrack = styled(({ color, ...p }) => (
+  <Box
+    {...p} // eslint-disable-line react/jsx-props-no-spreading
+  />
+)).attrs(p => ({
   style: {
     color: p.isLight ? 'black' : 'white',
     backgroundColor: p.color,
@@ -230,7 +234,11 @@ const WrapperInfos = styled(Box).attrs({
   padding-right: 40px;
   white-space: nowrap;
 `
-const WrapperIcon = styled(({ animate, ...p }) => <animated.div {...p} />)`
+const WrapperIcon = styled(({ animate, ...p }) => (
+  <animated.div
+    {...p} // eslint-disable-line react/jsx-props-no-spreading
+  />
+))`
   align-items: center;
   bottom: 0;
   display: flex;
@@ -247,7 +255,11 @@ const WrapperIcon = styled(({ animate, ...p }) => <animated.div {...p} />)`
         : null};
   }
 `
-const ProgressTrack = styled(({ isLight, ...p }) => <animated.div {...p} />)`
+const ProgressTrack = styled(({ isLight, ...p }) => (
+  <animated.div
+    {...p} // eslint-disable-line react/jsx-props-no-spreading
+  />
+))`
   background-color: rgba(${p => (p.isLight ? '0, 0, 0' : '255, 255, 255')}, 0.5);
   bottom: 0;
   height: 2px;
