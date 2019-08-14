@@ -65,7 +65,6 @@
     "eslint-plugin-import": "^2.18.2",
     "eslint-plugin-jsx-a11y": "^6.2.3",
     "eslint-plugin-react": "^7.14.3",
-    "nodemon": "^1.19.1",
     "prettier": "^1.18.2",
     "webpack-bundle-analyzer": "^3.4.1"
   }
