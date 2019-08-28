@@ -20,7 +20,7 @@ cp .env.example .env
 ```
 
 ```
-yarn build:development -w
+yarn dev:api
 yarn dev
 ```
 

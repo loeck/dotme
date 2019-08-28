@@ -1,14 +1,14 @@
-import Jimp from 'jimp'
-import fs from 'fs'
-import axios from 'axios'
-import tmp from 'tmp'
+const axios = require('axios')
+const fs = require('fs')
+const Jimp = require('jimp')
+const tmp = require('tmp')
 
 process.noDeprecation = true
 
 const { name: tmpDir } = tmp.dirSync()
 
-const readFileAsync = path =>
-  new Promise((resolve, reject) => {
+function readFileAsync(path) {
+  return new Promise((resolve, reject) => {
     fs.readFile(path, (err, data) => {
       if (err) {
         reject(err)
@@ -17,8 +17,9 @@ const readFileAsync = path =>
       }
     })
   })
+}
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
   const [imageUri] = Object.keys(req.query)
 
   const imageUriSegments = imageUri.split('/')

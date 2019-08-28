@@ -94,7 +94,7 @@ const Home = React.memo(() => {
         document.removeEventListener('mouseout', handleDocumentMouseOut)
       }
     }
-  }, [mobile])
+  }, [mobile, handleDocumentMouseMove, handleDocumentMouseOut])
 
   return (
     <Wrapper

@@ -3,20 +3,19 @@
   "alias": ["loeck.me", "www.loeck.me"],
   "regions": ["cdg", "bru"],
   "builds": [
-    { "src": "dist/server/**/*", "use": "@now/node" },
-    { "src": "dist/client/**/*", "use": "@now/static" }
+    { "src": "src/server/**/*", "use": "@now/node" },
+    {
+      "src": "package.json",
+      "use": "@now/static-build",
+      "config": {
+        "distDir": "public"
+      }
+    }
   ],
   "routes": [
     {
-      "src": "/dist/(.*)",
-      "dest": "/dist/client/$1",
-      "headers": {
-        "Cache-Control": "public, max-age=31536000"
-      }
-    },
-    {
       "src": "/image",
-      "dest": "/dist/server/image.js",
+      "dest": "/src/server/image.js",
       "headers": {
         "Content-Type": "image/jpeg",
         "Cache-Control": "public, max-age=31536000"
@@ -24,16 +23,12 @@
     },
     {
       "src": "/api/spotify",
-      "dest": "/dist/server/api.js",
+      "dest": "/src/server/api.js",
       "headers": {
-        "Cache-Control": "s-maxage=31536000, maxage=0"
-      }
-    },
-    {
-      "src": "/",
-      "dest": "/dist/server/render.js",
-      "headers": {
-        "Cache-Control": "s-maxage=31536000, maxage=0"
+        "Cache-Control": "s-maxage=31536000, maxage=0",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Headers": "Origin, X-Requested-With, Content-Type, Accept",
+        "Access-Control-Allow-Credentials": "true"
       }
     }
   ],

@@ -1,8 +1,6 @@
 import React from 'react'
-import { hot } from 'react-hot-loader'
 import { createGlobalStyle } from 'styled-components'
 
-import { AppProvider } from 'contexts/App'
 import Home from 'components/Home'
 
 const GlobalStyle = createGlobalStyle`
@@ -38,14 +36,12 @@ const GlobalStyle = createGlobalStyle`
   }
 `
 
-const App = () => (
+const IndexPage = () => (
   <>
     <GlobalStyle />
 
-    <AppProvider>
-      <Home />
-    </AppProvider>
+    <Home />
   </>
 )
 
-export default hot(module)(App)
+export default IndexPage

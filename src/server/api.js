@@ -1,12 +1,12 @@
-import axios from 'axios'
-import fs from 'fs'
-import getColors from 'get-image-colors'
-import moment from 'moment'
-import querystring from 'querystring'
-import tmp from 'tmp'
+const axios = require('axios')
+const fs = require('fs')
+const getColors = require('get-image-colors')
+const moment = require('moment')
+const querystring = require('querystring')
+const tmp = require('tmp')
 
-import sample from 'lodash/sample'
-import shuffle from 'lodash/shuffle'
+const sample = require('lodash/sample')
+const shuffle = require('lodash/shuffle')
 
 process.noDeprecation = true
 
@@ -145,7 +145,7 @@ async function getSampleTracks(tracks) {
   return sampleTracks
 }
 
-export default async (req, res) => {
+module.exports = async (req, res) => {
   const cacheTracks = cache.tracks
 
   if (cacheTracks.lastModified === moment().format('DD-MM-YYYY')) {
@@ -168,25 +168,25 @@ export default async (req, res) => {
         },
       })
 
-      let tracks = await getSpotifyTracks(
+      const tracks = await getSpotifyTracks(
         `https://api.spotify.com/v1/users/${SPOTIFY_USER_ID}/playlists/${SPOTIFY_PLAYLIST_ID}/tracks`,
         accessToken,
+      ).then(tracks =>
+        tracks.map(({ track }) => ({
+          id: track.id,
+          album: {
+            id: track.album.id,
+            name: track.album.name,
+          },
+          artists: track.album.artists.map(a => a.name),
+          name: track.name,
+          preview: track.preview_url,
+          image: {
+            big: track.album.images[1].url,
+            small: track.album.images[2].url,
+          },
+        })),
       )
-
-      tracks = tracks.map(t => ({
-        id: t.track.id,
-        album: {
-          id: t.track.album.id,
-          name: t.track.album.name,
-        },
-        artists: t.track.album.artists.map(a => a.name),
-        name: t.track.name,
-        preview: t.track.preview_url,
-        image: {
-          big: t.track.album.images[1].url,
-          small: t.track.album.images[2].url,
-        },
-      }))
 
       cache.tracks = setCache('tracks', tracks)
 

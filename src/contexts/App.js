@@ -1,3 +1,5 @@
+/* eslint-disable default-case */
+
 import React, { useReducer } from 'react'
 import shuffle from 'lodash/shuffle'
 

@@ -19,6 +19,8 @@ import IconSpotify from 'icons/Spotify'
 import Box from 'components/Box'
 import HighlightLink from 'components/HighlightLink'
 
+const { GATSBY_API_HOST = '' } = process.env
+
 const rotate360 = keyframes`
   from {
     transform: rotate(0deg);
@@ -78,29 +80,6 @@ const ListTracks = React.memo(() => {
     },
   }))
 
-  useEffect(() => {
-    if (listOuterRef.current && canPlaying && tracks.length > 0) {
-      manualScroll.current = false
-      setScroll({
-        y: 110 * (indexTrack - 1),
-      })
-    }
-  }, [canPlaying, indexTrack, tracks])
-
-  useEffect(() => {
-    axios
-      .get('/api/spotify')
-      .then(({ data: tracks }) => dispatch({ type: 'set-tracks', payload: tracks }))
-
-    window.addEventListener('resize', handleWindowResize)
-
-    handleWindowResize()
-
-    return () => {
-      window.removeEventListener('resize', handleWindowResize)
-    }
-  }, [])
-
   const handleWindowResize = useCallback(() => {
     setWinHeight(window.innerHeight)
   }, [])
@@ -114,7 +93,32 @@ const ListTracks = React.memo(() => {
     }
   }, [])
 
-  const transitionWrapper = useTransition(tracks.length > 0, null, {
+  useEffect(() => {
+    if (listOuterRef.current && canPlaying && tracks.length > 0) {
+      manualScroll.current = false
+      setScroll({
+        y: 110 * (indexTrack - 1),
+      })
+    }
+  }, [canPlaying, indexTrack, tracks, setScroll])
+
+  useEffect(() => {
+    axios.get(`${GATSBY_API_HOST}/api/spotify`).then(({ data: tracks }) => {
+      if (Array.isArray(tracks) && tracks.length > 0) {
+        dispatch({ type: 'set-tracks', payload: tracks })
+      }
+    })
+
+    window.addEventListener('resize', handleWindowResize)
+
+    handleWindowResize()
+
+    return () => {
+      window.removeEventListener('resize', handleWindowResize)
+    }
+  }, [dispatch, handleWindowResize])
+
+  const transitionWrapper = useTransition(tracks.length, null, {
     from: {
       o: 0,
       x: -55,
@@ -167,10 +171,13 @@ const ListTracksItem = React.memo(props => {
     state: { canPlaying, currentTrack, currentLoading, currentPlaying, progressTrack },
   } = useContext(AppContext)
 
-  const onSetTrack = useCallback(id => {
-    dispatch({ type: 'set-track', payload: id })
-    dispatch({ type: 'start-playing' })
-  }, [])
+  const onSetTrack = useCallback(
+    id => {
+      dispatch({ type: 'set-track', payload: id })
+      dispatch({ type: 'start-playing' })
+    },
+    [dispatch],
+  )
 
   const track = data[index]
 
@@ -378,7 +385,7 @@ const Track = React.memo(props => {
       >
         <img
           data-sizes="auto"
-          data-src={`/image?${image.big}`}
+          data-src={`${GATSBY_API_HOST}/image?${image.big}`}
           src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
           alt={name}
           className="lazyload"
