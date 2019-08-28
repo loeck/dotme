@@ -1,4 +1,5 @@
 import React from 'react'
+import { Helmet } from 'react-helmet'
 import { createGlobalStyle } from 'styled-components'
 
 import Home from 'components/Home'
@@ -39,6 +40,12 @@ const GlobalStyle = createGlobalStyle`
 const IndexPage = () => (
   <>
     <GlobalStyle />
+
+    <Helmet>
+      <meta charSet="utf-8" />
+      <title>loeck.me</title>
+      <link rel="canonical" href="https://loeck.me" />
+    </Helmet>
 
     <Home />
   </>

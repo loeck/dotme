@@ -1,8 +1,4 @@
 module.exports = {
-  siteMetadata: {
-    title: 'loeck.me',
-    author: 'Loëck Vézien',
-  },
   plugins: [
     {
       resolve: 'gatsby-plugin-styled-components',
