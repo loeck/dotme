@@ -59,7 +59,7 @@ const AboutMe = React.memo(() => {
             <HighlightLink isLight={isLight} href="https://www.sportheroes.group">
               Sport Heroes Group
             </HighlightLink>
-            <Box>as a Engineering Manager.</Box>
+            <Box>as an Engineering Manager.</Box>
           </Box>
           <Box horizontal flow={5}>
             <HighlightLink isLight={isLight} href="https://github.com/loeck">
