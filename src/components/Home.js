@@ -34,6 +34,7 @@ const Home = React.memo(() => {
       currentLoading,
       currentPlaying,
       currentTrack,
+      gain,
       indexTrack,
       progressTrack,
     },
@@ -125,6 +126,7 @@ const Home = React.memo(() => {
         currentLoading={currentLoading}
         currentPlaying={currentPlaying}
         currentTrack={currentTrack}
+        gain={gain}
         indexTrack={indexTrack}
         onLoadingTrack={handleLoadingTrack}
         onNextTrack={handleNextTrack}

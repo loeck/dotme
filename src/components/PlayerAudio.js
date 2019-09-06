@@ -62,13 +62,14 @@ class PlayerAudio extends PureComponent {
   _canvas = React.createRef()
 
   _analyser = null
-  _bufferLength = null
   _audioContext = null
   _audioSource = {}
+  _bufferLength = null
   _controller = null
   _ctx = null
-  _requestProgress = null
+  _gainNode = null
   _requestDraw = null
+  _requestProgress = null
 
   _startTime = 0
   _duration = 0
@@ -84,7 +85,7 @@ class PlayerAudio extends PureComponent {
   }
 
   async componentDidUpdate(prevProps) {
-    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack } = this.props
+    const { currentTrack, canPlaying, onPlayingTrack, onLoadingTrack, gain } = this.props
 
     if (canPlaying === false) {
       window.cancelAnimationFrame(this._requestProgress)
@@ -126,6 +127,8 @@ class PlayerAudio extends PureComponent {
               ),
           )
 
+        this._gainNode = this._audioContext.createGain()
+
         this._audioSource[currentTrack.id] = this._audioContext.createBufferSource()
 
         const audioSource = this._audioSource[currentTrack.id]
@@ -133,8 +136,10 @@ class PlayerAudio extends PureComponent {
         this.initVisualiser()
 
         audioSource.buffer = buffer
-        audioSource.connect(this._audioContext.destination)
-        audioSource.connect(this._analyser)
+        audioSource.connect(this._gainNode)
+
+        this._gainNode.connect(this._audioContext.destination)
+        this._gainNode.connect(this._analyser)
 
         this._bufferLength = this._analyser.frequencyBinCount
 
@@ -148,6 +153,10 @@ class PlayerAudio extends PureComponent {
         onPlayingTrack(currentTrack.id)
         onLoadingTrack(null)
       } catch (e) {} // eslint-disable-line no-empty
+    }
+
+    if (this._gainNode) {
+      this._gainNode.gain.value = gain / 100
     }
   }
 
@@ -212,7 +221,8 @@ class PlayerAudio extends PureComponent {
     this.setCtxStyle()
 
     for (let i = 0; i < dataLength; i++) {
-      const barHeight = -data[i] * (this._isMobile ? 1.3 : 1.4)
+      const v = data[i]
+      const barHeight = -v * (this._isMobile ? 1.3 : 1.4)
 
       this._ctx.fillRect(x, this._canvas.current.height, barWidth, barHeight)
       this._ctx.fillRect(x, 0, barWidth, -barHeight)

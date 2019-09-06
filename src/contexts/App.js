@@ -84,6 +84,9 @@ const reducer = (state, action) => {
 
     case 'progress-track':
       return { ...state, progressTrack: action.payload }
+
+    case 'set-gain':
+      return { ...state, gain: action.payload }
   }
 }
 
@@ -96,6 +99,7 @@ const INITIAL_STATE = {
   currentLoading: null,
   currentPlaying: null,
   currentTrack: null,
+  gain: 50,
   indexTrack: 0,
   progressTrack: 0,
   tracks: [],
