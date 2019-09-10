@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "alias": ["loeck.me", "www.loeck.me"],
   "regions": ["cdg", "bru"],
   "builds": [
     { "src": "src/server/**/*", "use": "@now/node" },
