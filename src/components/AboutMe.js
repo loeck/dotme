@@ -56,10 +56,10 @@ const AboutMe = React.memo(() => {
           <Box>Hi, I’m Loëck !</Box>
           <Box horizontal flow={5}>
             <Box>I work in Paris at</Box>
-            <HighlightLink isLight={isLight} href="https://www.sportheroes.group">
-              Sport Heroes Group
+            <HighlightLink isLight={isLight} href="https://hivebrite.com">
+              Hivebrite
             </HighlightLink>
-            <Box>as an Engineering Manager.</Box>
+            <Box>as an Lead Frontend Developer.</Box>
           </Box>
           <Box horizontal flow={5}>
             <HighlightLink isLight={isLight} href="https://github.com/loeck">
