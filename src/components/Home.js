@@ -54,29 +54,22 @@ const Home = React.memo(() => {
     xy: [0, 0],
   }))
 
-  const handleLoadingTrack = useCallback(id => dispatch({ type: 'loading-track', payload: id }), [
-    dispatch,
-  ])
-  const handlePlayingTrack = useCallback(id => dispatch({ type: 'playing-track', payload: id }), [
-    dispatch,
-  ])
-  const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
+  const handleLoadingTrack = useCallback(id => dispatch({ type: 'loading-track', payload: id }), [])
+  const handlePlayingTrack = useCallback(id => dispatch({ type: 'playing-track', payload: id }), [])
+  const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [])
   const handleProgressTrack = useCallback(
     progress => dispatch({ type: 'progress-track', payload: progress }),
-    [dispatch],
+    [],
   )
 
-  const handleDocumentMouseMove = useCallback(
-    e => {
-      setSpringPositionLeft({
-        xy: [e.clientX / 50, e.clientY / 50],
-      })
-      setSpringPositionRight({
-        xy: [e.clientX / 50, 0],
-      })
-    },
-    [setSpringPositionLeft, setSpringPositionRight],
-  )
+  const handleDocumentMouseMove = useCallback(e => {
+    setSpringPositionLeft({
+      xy: [e.clientX / 50, e.clientY / 50],
+    })
+    setSpringPositionRight({
+      xy: [e.clientX / 50, 0],
+    })
+  }, [])
   const handleDocumentMouseOut = useCallback(() => {
     setSpringPositionLeft({
       xy: [0, 0],
@@ -84,7 +77,7 @@ const Home = React.memo(() => {
     setSpringPositionRight({
       xy: [0, 0],
     })
-  }, [setSpringPositionLeft, setSpringPositionRight])
+  }, [])
 
   useEffect(() => {
     if (!mobile) {
@@ -96,7 +89,7 @@ const Home = React.memo(() => {
         document.removeEventListener('mouseout', handleDocumentMouseOut)
       }
     }
-  }, [mobile, handleDocumentMouseMove, handleDocumentMouseOut])
+  }, [mobile])
 
   return (
     <Wrapper
@@ -105,9 +98,9 @@ const Home = React.memo(() => {
       }}
     >
       <WrapperAnimated
+        css="z-index: 11"
         style={{
           transform: springPositionLeft.xy.interpolate((x, y) => `translate3d(${x}px, ${y}px, 0)`),
-          zIndex: 11,
         }}
       >
         <AboutMe />
