@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "engines": {
-    "node": ">=10.x"
+    "node": "12.x"
   },
   "scripts": {
     "build": "gatsby build",
@@ -14,23 +14,23 @@
     "serve": "gatsby serve"
   },
   "dependencies": {
-    "@loadable/component": "^5.10.2",
+    "@loadable/component": "^5.11.0",
     "babel-plugin-styled-components": "^1.10.6",
-    "gatsby": "^2.17.12",
-    "gatsby-image": "^2.2.32",
+    "gatsby": "^2.18.17",
+    "gatsby-image": "^2.2.37",
     "gatsby-plugin-favicon": "^3.1.6",
-    "gatsby-plugin-react-helmet": "^3.1.14",
-    "gatsby-plugin-styled-components": "^3.1.12",
+    "gatsby-plugin-react-helmet": "^3.1.18",
+    "gatsby-plugin-styled-components": "^3.1.16",
     "get-image-colors": "^2.0.0",
-    "jimp": "^0.8.5",
-    "lazysizes": "^5.1.2",
+    "jimp": "^0.9.3",
+    "lazysizes": "^5.2.0",
     "lodash": "^4.17.15",
     "moment": "^2.24.0",
-    "now": "^16.5.2",
+    "now": "^16.7.0",
     "prop-types": "^15.7.2",
     "querystring": "^0.2.0",
-    "react": "^16.11.0",
-    "react-dom": "^16.11.0",
+    "react": "^16.12.0",
+    "react-dom": "^16.12.0",
     "react-helmet": "^5.2.1",
     "react-spring": "^8.0.27",
     "react-window": "^1.8.5",
