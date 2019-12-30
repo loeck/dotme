@@ -22,6 +22,7 @@ const Wrapper = styled(animated.div)`
 `
 const WrapperAnimated = styled(animated.div)`
   position: relative;
+  will-change: transform;
   z-index: 10;
 `
 

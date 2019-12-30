@@ -31,10 +31,16 @@ const InnerContainer = styled(animated.div)`
 `
 const Wrapper = styled(Box).attrs({
   flow: 10,
+  horizontal: true,
 })`
   height: 110px;
   pointer-events: auto;
   padding: 20px;
+`
+const Avatar = styled.img`
+  border-radius: 50%;
+  height: 100%;
+  max-width: 100%;
 `
 
 const AboutMe = React.memo(() => {
@@ -53,29 +59,38 @@ const AboutMe = React.memo(() => {
         }}
       >
         <Wrapper>
-          <Box>Hi, I’m Loëck !</Box>
-          <Box horizontal flow={5}>
-            <Box>I work in Paris at</Box>
-            <HighlightLink isLight={isLight} href="https://hivebrite.com">
-              Hivebrite
-            </HighlightLink>
-            <Box>as an Lead Frontend Developer.</Box>
-          </Box>
-          <Box horizontal flow={5}>
-            <HighlightLink isLight={isLight} href="https://github.com/loeck">
-              Github
-            </HighlightLink>
-            <Box>/</Box>
-            <HighlightLink
-              isLight={isLight}
-              href="https://www.linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550"
-            >
-              LinkedIn
-            </HighlightLink>
-            <Box>/</Box>
-            <HighlightLink isLight={isLight} href="https://www.last.fm/user/NainPuissant">
-              Last.fm
-            </HighlightLink>
+          <Avatar
+            alt="Github Avatar"
+            className="lazyload"
+            data-sizes="auto"
+            data-src="https://github.com/loeck.png?size=100"
+            src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
+          />
+          <Box css="justify-content: space-between">
+            <Box>Hi, I’m Loëck !</Box>
+            <Box horizontal flow={5}>
+              <Box>I work in Paris at</Box>
+              <HighlightLink isLight={isLight} href="https://hivebrite.com">
+                Hivebrite
+              </HighlightLink>
+              <Box>as an Lead Frontend Developer.</Box>
+            </Box>
+            <Box horizontal flow={5}>
+              <HighlightLink isLight={isLight} href="https://github.com/loeck">
+                Github
+              </HighlightLink>
+              <Box>/</Box>
+              <HighlightLink
+                isLight={isLight}
+                href="https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550"
+              >
+                LinkedIn
+              </HighlightLink>
+              <Box>/</Box>
+              <HighlightLink isLight={isLight} href="https://last.fm/user/NainPuissant">
+                Last.fm
+              </HighlightLink>
+            </Box>
           </Box>
         </Wrapper>
       </InnerContainer>

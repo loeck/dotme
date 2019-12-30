@@ -384,11 +384,11 @@ const Track = React.memo(props => {
         onMouseLeave={handleMouseLeaveSpotify}
       >
         <img
-          data-sizes="auto"
-          data-src={`${GATSBY_API_HOST}/image?${image.big}`}
-          src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
           alt={name}
           className="lazyload"
+          data-sizes="auto"
+          data-src={`${GATSBY_API_HOST}/image?${image.big}`}
+          src="data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=="
         />
         <WrapperSpotify
           href={`https://open.spotify.com/track/${id}`}
