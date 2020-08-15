@@ -27,7 +27,7 @@ module.exports = async (req, res) => {
 
   const filePath = `${tmpDir}/${imageId}.jpg`
 
-  const sendBuffer = buffer => {
+  const sendBuffer = (buffer) => {
     res.setHeader('Content-Type', Jimp.MIME_JPEG)
     res.send(buffer)
   }
@@ -41,12 +41,7 @@ module.exports = async (req, res) => {
         responseType: 'arraybuffer',
       })
       .then(({ data }) => Jimp.read(data))
-      .then(img =>
-        img
-          .resize(140, 140)
-          .quality(100)
-          .write(filePath),
-      )
+      .then((img) => img.resize(70, 70).quality(85).write(filePath))
 
     img.getBuffer(Jimp.MIME_JPEG, (err, buffer) => sendBuffer(buffer))
   }

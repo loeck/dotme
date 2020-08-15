@@ -1,6 +1,6 @@
 import React from 'react'
 import { Helmet } from 'react-helmet'
-import { createGlobalStyle } from 'styled-components'
+import styled, { createGlobalStyle } from 'styled-components'
 
 import Home from 'components/Home'
 
@@ -46,13 +46,31 @@ const IndexPage = () => (
     <GlobalStyle />
 
     <Helmet>
+      <html lang="en" />
       <meta charSet="utf-8" />
       <title>loeck.me</title>
+      <meta name="description" content="Hi, I’m Loëck !" />
       <link rel="canonical" href="https://loeck.me" />
     </Helmet>
+
+    <SkipLink href="#main">Skip to main</SkipLink>
 
     <Home />
   </>
 )
 
 export default IndexPage
+
+const SkipLink = styled.a`
+  background: #000000;
+  color: #ffffff;
+  left: 0;
+  padding: 8px;
+  position: absolute;
+  top: -40px;
+  z-index: 10;
+
+  &:focus {
+    top: 0;
+  }
+`

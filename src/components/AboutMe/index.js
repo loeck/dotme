@@ -32,6 +32,7 @@ export const InnerAboutMe = ({ withMediaControls }) => {
   return (
     <>
       <InnerContainer
+        id="main"
         style={{
           backgroundColor: bg,
           color,
@@ -87,7 +88,7 @@ const Container = styled(Box)`
     top: 0;
   `}
 `
-const InnerContainer = styled(animated.div)`
+const InnerContainer = styled(animated.main)`
   height: 100%;
   position: relative;
   z-index: 1;
