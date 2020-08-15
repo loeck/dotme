@@ -1,4 +1,5 @@
 const path = require('path')
+const webpack = require('webpack')
 
 module.exports = {
   stories: ['../src/**/*.stories.js'],
@@ -8,6 +9,13 @@ module.exports = {
       ...config.resolve,
       modules: [...config.resolve.modules, path.resolve(__dirname, '../src')],
     }
+
+    config.plugins.push(
+      // Removing Speedy so the static storybook styling doesn't break
+      new webpack.DefinePlugin({
+        SC_DISABLE_SPEEDY: true,
+      }),
+    )
 
     return config
   },
