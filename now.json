@@ -36,7 +36,7 @@
     "SPOTIFY_CLIENT_ID": "@dotme-spotify-client-id",
     "SPOTIFY_CLIENT_SECRET": "@dotme-spotify-client-secret",
     "SPOTIFY_PLAYLIST_ID": "@dotme-spotify-playlist-id",
-    "SPOTIFY_SAMPLE_SIZE": "all",
+    "SPOTIFY_SAMPLE_SIZE": "20",
     "SPOTIFY_USER_ID": "@dotme-spotify-user-id"
   }
 }
