@@ -117,6 +117,7 @@ export const InnerTrack = (props) => {
             opacity,
           }}
         >
+          <SpotifyText>Listen on Spotify</SpotifyText>
           {transitionSpotify.map(
             ({ item, key, props }) =>
               item && (
@@ -277,6 +278,17 @@ const WrapperSpotify = styled(animated.a)`
   position: absolute;
   right: 0;
   top: 0;
+`
+const SpotifyText = styled.span`
+  border: 0px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(100%);
+  height: 1px;
+  overflow: hidden;
+  padding: 0px;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
 `
 const WrapperInnerSpotify = styled(animated.div)`
   bottom: 0;
