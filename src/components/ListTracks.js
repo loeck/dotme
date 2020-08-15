@@ -71,7 +71,7 @@ const ListTracks = React.memo(() => {
     }
   }, [dispatch, handleWindowResize])
 
-  const transitionWrapper = useTransition(tracks.length, null, {
+  const transitionWrapper = useTransition(tracks.length > 0, null, {
     from: {
       o: 0,
       x: -55,
