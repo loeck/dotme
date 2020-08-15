@@ -41,7 +41,7 @@ module.exports = async (req, res) => {
         responseType: 'arraybuffer',
       })
       .then(({ data }) => Jimp.read(data))
-      .then((img) => img.resize(50, 50).quality(85).write(filePath))
+      .then((img) => img.resize(70, 70).quality(70).write(filePath))
 
     img.getBuffer(Jimp.MIME_JPEG, (err, buffer) => sendBuffer(buffer))
   }
