@@ -4,35 +4,6 @@ import styled from 'styled-components'
 
 import { mobile } from 'helpers/styles'
 
-const WrapperCanvas = styled(animated.div)`
-  display: flex;
-  align-items: center;
-  bottom: 0;
-  justify-content: center;
-  left: 0;
-  pointer-events: none;
-  position: fixed;
-  right: 0;
-  top: 0;
-  z-index: 1;
-
-  canvas {
-    height: 100%;
-    width: 100%;
-  }
-
-  ${mobile`
-    bottom: auto;
-    height: 90px;
-    top: 110px;
-    z-index: 10;
-
-    canvas {
-      height: 90px;
-    }
-  `}
-`
-
 function webAudioTouchUnlock(context) {
   return new Promise((resolve, reject) => {
     if (context.state === 'suspended' && 'ontouchstart' in window) {
@@ -44,7 +15,7 @@ function webAudioTouchUnlock(context) {
 
             resolve(true)
           },
-          reason => {
+          (reason) => {
             reject(reason)
           },
         )
@@ -115,14 +86,14 @@ class PlayerAudio extends PureComponent {
         const buffer = await fetch(currentTrack.preview, {
           signal,
         })
-          .then(res => res.arrayBuffer())
+          .then((res) => res.arrayBuffer())
           .then(
-            res =>
+            (res) =>
               new Promise((resolve, reject) =>
                 this._audioContext.decodeAudioData(
                   res,
-                  buffer => resolve(buffer),
-                  err => reject(err),
+                  (buffer) => resolve(buffer),
+                  (err) => reject(err),
                 ),
               ),
           )
@@ -246,7 +217,7 @@ class PlayerAudio extends PureComponent {
   }
 
   stopAudioSource = () =>
-    Object.keys(this._audioSource).forEach(id => {
+    Object.keys(this._audioSource).forEach((id) => {
       if (this._audioSource[id]) {
         this._audioSource[id].stop()
         delete this._audioSource[id]
@@ -277,3 +248,32 @@ class PlayerAudio extends PureComponent {
 }
 
 export default PlayerAudio
+
+const WrapperCanvas = styled(animated.div)`
+  display: flex;
+  align-items: center;
+  bottom: 0;
+  justify-content: center;
+  left: 0;
+  pointer-events: none;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 1;
+
+  canvas {
+    height: 100%;
+    width: 100%;
+  }
+
+  ${mobile`
+    bottom: auto;
+    height: 90px;
+    top: 110px;
+    z-index: 10;
+
+    canvas {
+      height: 90px;
+    }
+  `}
+`

@@ -12,64 +12,6 @@ import IconStop from 'icons/Stop'
 
 import Box from 'components/Box'
 
-const Wrapper = styled(Box).attrs({
-  flow: 10,
-  horizontal: true,
-})`
-  align-items: center;
-  padding: 20px;
-
-  ${mobile`
-    align-items: center;
-    height: 90px;
-    padding-top: 0;
-    padding-bottom: 0;
-  `}
-`
-const IconWrapper = styled(({ front, ...p }) => (
-  <animated.div
-    {...p} // eslint-disable-line react/jsx-props-no-spreading
-  />
-))`
-  border-radius: 50%;
-  cursor: pointer;
-  height: 24px;
-  position: relative;
-  user-select: none;
-  pointer-events: auto;
-  width: 24px;
-  z-index: ${p => (p.front ? 11 : 10)};
-`
-
-const WrapperLvlSound = styled(animated.div)`
-  height: 2px;
-  margin-left: 10px;
-  position: relative;
-  width: 113px;
-  pointer-events: all;
-  user-select: none;
-`
-const WrapperSoundTick = styled(animated.div)`
-  cursor: pointer;
-  height: 12px;
-  left: 0;
-  pointer-events: all;
-  position: absolute;
-  top: -5px;
-  width: 13px;
-  z-index: 1;
-`
-const SoundTick = styled(animated.div)`
-  bottom: 0;
-  left: 0;
-  margin: 0 5px;
-  pointer-events: none;
-  position: absolute;
-  right: 0;
-  top: 0;
-  width: 3px;
-`
-
 const MediaControls = React.memo(() => {
   const {
     dispatch,
@@ -129,10 +71,10 @@ const MediaControls = React.memo(() => {
   const handleStartPlaying = useCallback(() => dispatch({ type: 'start-playing' }), [dispatch])
   const handleStopPlaying = useCallback(() => dispatch({ type: 'stop-playing' }), [dispatch])
   const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
-  const handleSetGain = useCallback(v => dispatch({ type: 'set-gain', payload: v }), [dispatch])
+  const handleSetGain = useCallback((v) => dispatch({ type: 'set-gain', payload: v }), [dispatch])
 
   const handleMouseMove = useCallback(
-    e =>
+    (e) =>
       window.requestAnimationFrame(() => {
         const { clientX } = e
 
@@ -149,7 +91,7 @@ const MediaControls = React.memo(() => {
 
         handleSetGain(parseInt(position, 10))
       }),
-    [setSpringSound, handleSetGain, gain],
+    [handleSetGain, setSpringSound, gain],
   )
 
   const handleMouseDown = useCallback(() => {
@@ -178,7 +120,7 @@ const MediaControls = React.memo(() => {
           style={{
             color,
             opacity: props.o,
-            transform: props.x.interpolate(v => `translate3d(0, ${v}px, 0)`),
+            transform: props.x.interpolate((v) => `translate3d(0, ${v}px, 0)`),
           }}
         >
           <Wrapper>
@@ -214,7 +156,7 @@ const MediaControls = React.memo(() => {
                           backgroundColor: bg,
                           pointerEvents: props.pointerEvents,
                           opacity: props.opacity,
-                          transform: props.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+                          transform: props.x.interpolate((v) => `translate3d(${v}px, 0, 0)`),
                         }}
                       >
                         <IconNext height={24} width={24} />
@@ -235,7 +177,7 @@ const MediaControls = React.memo(() => {
                   ref={refSoundTick}
                   onMouseDown={handleMouseDown}
                   style={{
-                    transform: springSound.x.interpolate(v => `translate3d(${v}px, 0, 0)`),
+                    transform: springSound.x.interpolate((v) => `translate3d(${v}px, 0, 0)`),
                   }}
                 >
                   <SoundTick
@@ -253,3 +195,61 @@ const MediaControls = React.memo(() => {
 })
 
 export default MediaControls
+
+const Wrapper = styled(Box).attrs({
+  flow: 10,
+  horizontal: true,
+})`
+  align-items: center;
+  padding: 20px;
+
+  ${mobile`
+    align-items: center;
+    height: 90px;
+    padding-top: 0;
+    padding-bottom: 0;
+  `}
+`
+const IconWrapper = styled(({ front, ...p }) => (
+  <animated.div
+    {...p} // eslint-disable-line react/jsx-props-no-spreading
+  />
+))`
+  border-radius: 50%;
+  cursor: pointer;
+  height: 24px;
+  position: relative;
+  user-select: none;
+  pointer-events: auto;
+  width: 24px;
+  z-index: ${(p) => (p.front ? 11 : 10)};
+`
+
+const WrapperLvlSound = styled(animated.div)`
+  height: 2px;
+  margin-left: 10px;
+  position: relative;
+  width: 113px;
+  pointer-events: all;
+  user-select: none;
+`
+const WrapperSoundTick = styled(animated.div)`
+  cursor: pointer;
+  height: 12px;
+  left: 0;
+  pointer-events: all;
+  position: absolute;
+  top: -5px;
+  width: 13px;
+  z-index: 1;
+`
+const SoundTick = styled(animated.div)`
+  bottom: 0;
+  left: 0;
+  margin: 0 5px;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+  top: 0;
+  width: 3px;
+`

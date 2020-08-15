@@ -2,14 +2,7 @@ import React from 'react'
 import { useSpring, animated } from 'react-spring'
 import styled from 'styled-components'
 
-const Wrapper = styled(animated.a)`
-  display: inline-flex;
-  margin-top: -3px;
-  padding: 3px;
-  text-decoration: none;
-`
-
-const HighlightLink = React.memo(props => {
+const HighlightLink = React.memo((props) => {
   const { isLight, href, children } = props
 
   const { bg, color } = useSpring({
@@ -33,3 +26,10 @@ const HighlightLink = React.memo(props => {
 })
 
 export default HighlightLink
+
+const Wrapper = styled(animated.a)`
+  display: inline-flex;
+  margin-top: -3px;
+  padding: 3px;
+  text-decoration: none;
+`

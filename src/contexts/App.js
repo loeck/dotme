@@ -1,6 +1,6 @@
 /* eslint-disable default-case */
 
-import React, { useReducer } from 'react'
+import React, { useReducer, useContext } from 'react'
 import shuffle from 'lodash/shuffle'
 
 export const AppContext = React.createContext()
@@ -71,7 +71,7 @@ const reducer = (state, action) => {
     }
 
     case 'set-track': {
-      const indexTrack = state.tracks.findIndex(t => t.id === action.payload) || 0
+      const indexTrack = state.tracks.findIndex((t) => t.id === action.payload) || 0
       const currentTrack = state.tracks[indexTrack]
       return { ...state, currentTrack, indexTrack, currentColor: currentTrack.color }
     }
@@ -90,7 +90,7 @@ const reducer = (state, action) => {
   }
 }
 
-const INITIAL_STATE = {
+export const INITIAL_STATE = {
   canPlaying: false,
   currentColor: {
     isLight: false,
@@ -105,11 +105,18 @@ const INITIAL_STATE = {
   tracks: [],
 }
 
-export const AppProvider = ({ children }) => {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
+export const AppProvider = ({ children, initialState = INITIAL_STATE, forceInitialState }) => {
+  const [state, dispatch] = useReducer(reducer, initialState)
   const value = { state, dispatch }
+
+  if (forceInitialState) {
+    value.state = initialState
+  }
+
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>
 }
+
+export const useAppContext = () => useContext(AppContext)
 
 const { Consumer } = AppContext
 

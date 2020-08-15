@@ -1,9 +1,9 @@
-import React, { useEffect, useContext, useCallback } from 'react'
+import React, { useEffect, useCallback } from 'react'
 import styled from 'styled-components'
 import { useSpring, animated } from 'react-spring'
 import loadable from '@loadable/component'
 
-import { AppContext } from 'contexts/App'
+import { useAppContext } from 'contexts/App'
 
 import useMobile from 'hooks/useMobile'
 
@@ -39,7 +39,7 @@ const Home = React.memo(() => {
       indexTrack,
       progressTrack,
     },
-  } = useContext(AppContext)
+  } = useAppContext()
 
   const mobile = useMobile()
 
@@ -54,20 +54,20 @@ const Home = React.memo(() => {
     xy: [0, 0],
   }))
 
-  const handleLoadingTrack = useCallback(id => dispatch({ type: 'loading-track', payload: id }), [
+  const handleLoadingTrack = useCallback((id) => dispatch({ type: 'loading-track', payload: id }), [
     dispatch,
   ])
-  const handlePlayingTrack = useCallback(id => dispatch({ type: 'playing-track', payload: id }), [
+  const handlePlayingTrack = useCallback((id) => dispatch({ type: 'playing-track', payload: id }), [
     dispatch,
   ])
   const handleNextTrack = useCallback(() => dispatch({ type: 'next-track' }), [dispatch])
   const handleProgressTrack = useCallback(
-    progress => dispatch({ type: 'progress-track', payload: progress }),
+    (progress) => dispatch({ type: 'progress-track', payload: progress }),
     [dispatch],
   )
 
   const handleDocumentMouseMove = useCallback(
-    e => {
+    (e) => {
       setSpringPositionLeft({
         xy: [e.clientX / 50, e.clientY / 50],
       })

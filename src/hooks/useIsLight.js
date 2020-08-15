@@ -1,12 +1,13 @@
-import { useContext } from 'react'
+import { useAppContext } from 'contexts/App'
 
-import { AppContext } from 'contexts/App'
-
-export default function useIsLight() {
+const useIsLight = () => {
   const {
     state: {
       currentColor: { isLight },
     },
-  } = useContext(AppContext)
+  } = useAppContext()
+
   return isLight
 }
+
+export default useIsLight

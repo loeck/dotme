@@ -4,7 +4,7 @@ import { createGlobalStyle } from 'styled-components'
 
 import Home from 'components/Home'
 
-const GlobalStyle = createGlobalStyle`
+export const style = `
   @import url('https://fonts.googleapis.com/css?family=Fira+Sans:300&display=optional');
 
   * {
@@ -29,12 +29,16 @@ const GlobalStyle = createGlobalStyle`
 
   .lazyload,
   .lazyloading {
-  	opacity: 0;
+    opacity: 0;
   }
   .lazyloaded {
-  	opacity: 1;
-  	transition: opacity 300ms;
+    opacity: 1;
+    transition: opacity 300ms;
   }
+`
+
+export const GlobalStyle = createGlobalStyle`
+  ${style}
 `
 
 const IndexPage = () => (
