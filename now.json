@@ -1,6 +1,5 @@
 {
   "version": 2,
-  "regions": ["cdg", "bru"],
   "builds": [
     { "src": "src/server/**/*", "use": "@now/node" },
     {
