@@ -47,7 +47,7 @@ export const InnerAboutMe = ({ withMediaControls }) => {
               <HighlightLink isLight={isLight} href="https://www.join-jump.com/">
                 Jump
               </HighlightLink>
-              <Box>as an Lead Frontend Developer.</Box>
+              <Box>as a Lead Frontend Developer.</Box>
             </Box>
             <Box horizontal flow={5}>
               <HighlightLink isLight={isLight} href="https://github.com/loeck">
