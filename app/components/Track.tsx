@@ -37,6 +37,8 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollContainer.current])
 
+  const activeTrack = currentTrack?.track?.id === track.id
+
   return (
     <>
       <div className="invisible absolute">
@@ -54,27 +56,24 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
           <m.div
             ref={nodeRef}
             className={
-              'flex p-6 gap-4 items-center h-[136px] w-[500px] overflow-hidden'
+              'relative flex p-6 gap-4 items-center h-[136px] w-[500px] overflow-hidden'
             }
             initial={{
               opacity: 0,
             }}
             animate={{
               opacity: 1,
-              backgroundColor:
-                currentTrack?.track?.id === track.id
-                  ? trackColor.rgba(0.5)
-                  : trackColor.rgba(1) ?? 'rgba(0, 0, 0, 0)',
+              zIndex: activeTrack ? 'auto' : 20,
             }}
             style={{
               color: colorVariant === 'light' ? '#000' : '#fff',
             }}
           >
-            <div className="shrink-0">
+            <div className="relative z-20 shrink-0">
               <ImageAlbum image={track.album.image.url} />
             </div>
 
-            <div className="flex flex-1 flex-col gap-2 overflow-hidden">
+            <div className="relative z-20 flex flex-1 flex-col gap-2 overflow-hidden">
               <div>{track.name}</div>
               <div className="flex gap-2 overflow-auto">
                 {track.artists.map((artist) => (
@@ -84,6 +83,24 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
                 ))}
               </div>
             </div>
+
+            {!activeTrack && (
+              <m.div
+                className="absolute inset-0 z-10 pointer-events-none"
+                initial={{
+                  opacity: 0,
+                }}
+                animate={{
+                  opacity: 1,
+                }}
+                exit={{
+                  opacity: 0,
+                }}
+                style={{
+                  backgroundColor: trackColor.rgba(1),
+                }}
+              />
+            )}
           </m.div>
         )}
       </AnimatePresence>

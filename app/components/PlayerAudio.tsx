@@ -129,11 +129,13 @@ export const PlayerAudio = ({ track, state, variant }) => {
         analyserRef.current.connect(audioContextRef.current.destination)
       }
 
-      return new Promise((resolve) =>
-        audioContextRef.current.decodeAudioData(data, (buffer) =>
-          resolve(buffer)
-        )
-      )
+      return new Promise((resolve) => {
+        try {
+          audioContextRef.current.decodeAudioData(data, (buffer) =>
+            resolve(buffer)
+          )
+        } catch (err) {}
+      })
     }
 
     const playAudio = async () => {
@@ -162,10 +164,10 @@ export const PlayerAudio = ({ track, state, variant }) => {
       handleProgress()
 
       gainNodeRef.current.connect(audioContextRef.current.destination)
-      // gainNodeRef.current.connect(this._analyser)
     }
 
     if (data) {
+      resetProgress()
       playAudio()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -205,10 +207,10 @@ export const PlayerAudio = ({ track, state, variant }) => {
   }, [state])
 
   return (
-    <div className="fixed inset-0 z-10">
+    <div className="fixed inset-0 z-10 pointer-events-none">
       <m.div
         animate={controlsProgress}
-        className="absolute inset-0"
+        className="absolute inset-0 z-10"
         style={{
           backgroundColor: 'rgba(0, 0, 0, 0.1)',
           width: 0,
@@ -217,6 +219,15 @@ export const PlayerAudio = ({ track, state, variant }) => {
           ease: 'linear',
         }}
       />
+
+      {state === 'play' && (
+        <div
+          className="absolute inset-0"
+          style={{
+            backdropFilter: 'blur(2px)',
+          }}
+        />
+      )}
 
       <canvas className="h-full w-full" ref={canvasRef} />
     </div>

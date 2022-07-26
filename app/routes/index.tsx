@@ -35,27 +35,34 @@ export const loader = async () => {
     }
   ).then((res) => res.json())
 
-  return json({
-    tracks: items
-      .map(({ track }) => ({
-        id: track.id,
-        name: track.name,
-        url: track.external_urls.spotify,
-        previewUrl: track.preview_url,
-        album: {
-          id: track.album.id,
-          name: track.album.name,
-          url: track.album.external_urls.spotify,
-          image: track.album.images.find((image) => image.height === 300),
-        },
-        artists: track.artists.map((artist) => ({
-          id: artist.id,
-          name: artist.name,
-          url: artist.external_urls.spotify,
-        })),
-      }))
-      .filter((track) => track.previewUrl !== null),
-  })
+  return json(
+    {
+      tracks: items
+        .map(({ track }) => ({
+          id: track.id,
+          name: track.name,
+          url: track.external_urls.spotify,
+          previewUrl: track.preview_url,
+          album: {
+            id: track.album.id,
+            name: track.album.name,
+            url: track.album.external_urls.spotify,
+            image: track.album.images.find((image) => image.height === 300),
+          },
+          artists: track.artists.map((artist) => ({
+            id: artist.id,
+            name: artist.name,
+            url: artist.external_urls.spotify,
+          })),
+        }))
+        .filter((track) => track.previewUrl !== null),
+    },
+    {
+      headers: {
+        'Cache-Control': 's-maxage=120, stale-while-revalidate=299',
+      },
+    }
+  )
 }
 
 export default function Index() {
@@ -75,10 +82,10 @@ export default function Index() {
           backgroundColor: 'rgba(0, 0, 0, 0)',
         }}
       >
-        <div className="h-screen w-screen relative z-20">
+        <div className="h-screen w-screen">
           <div
             className={
-              'fixed left-[100px] top-[100px] z-10 flex flex-col gap-3'
+              'fixed left-[100px] top-[100px] z-20 flex flex-col gap-3'
             }
           >
             <AboutMe variant={currentTrack?.colorVariant} />
