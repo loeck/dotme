@@ -12,7 +12,10 @@ export const ImageAlbum = ({ image, onLoadColor }) => {
   const handleLoad = (e) => {
     const rgb = getAverageRGB(e.target)
 
-    onLoadColor(`rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`)
+    onLoadColor({
+      rgb: `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`,
+      rgba: (alpha) => `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`,
+    })
   }
 
   return (

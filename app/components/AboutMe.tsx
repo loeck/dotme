@@ -2,7 +2,7 @@ import { m } from 'framer-motion'
 
 import { Highlight } from '~/components/Highlight'
 
-export const Author = ({ variant }) => (
+export const AboutMe = ({ variant }) => (
   <m.div
     className={'flex p-6 gap-4 bg-white text-black relative z-10'}
     animate={{

@@ -1,4 +1,4 @@
-import { m, AnimatePresence, useAnimationControls } from 'framer-motion'
+import { m, AnimatePresence } from 'framer-motion'
 import * as React from 'react'
 
 import { Highlight } from '~/components/Highlight'
@@ -23,7 +23,7 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
           if (nodeRef.current.getBoundingClientRect().top === 100) {
             onChange({
               track,
-              trackColor,
+              trackColor: trackColor.rgb,
               colorVariant,
             })
           }
@@ -44,7 +44,7 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
           image={track.album.image.url}
           onLoadColor={(color: string) => {
             setTrackColor(color)
-            setColorVariant(getColorVariant(color))
+            setColorVariant(getColorVariant(color.rgb))
           }}
         />
       </div>
@@ -63,8 +63,8 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
               opacity: 1,
               backgroundColor:
                 currentTrack?.track?.id === track.id
-                  ? 'transparent'
-                  : trackColor ?? 'transparent',
+                  ? trackColor.rgba(0.5)
+                  : trackColor.rgba(1) ?? 'rgba(0, 0, 0, 0)',
             }}
             style={{
               color: colorVariant === 'light' ? '#000' : '#fff',
