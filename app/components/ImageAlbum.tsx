@@ -23,6 +23,7 @@ export const ImageAlbum = ({ image, onLoadColor }) => {
       ref={imgRef}
       alt=""
       loading="lazy"
+      height={88}
       width={88}
       src={onLoadColor ? undefined : image}
       onLoad={onLoadColor ? handleLoad : undefined}

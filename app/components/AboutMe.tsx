@@ -17,6 +17,7 @@ export const AboutMe = ({ variant }) => (
         src="https://github.com/loeck.png?size=88"
         alt=""
         loading="lazy"
+        height={88}
         width={88}
       />
     </div>
