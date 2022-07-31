@@ -10,6 +10,11 @@
     "dev:remix": "remix dev",
     "generate:css": "npx tailwindcss -o ./app/tailwind.css"
   },
+  "engines": {
+    "node": ">=16",
+    "pnpm": ">=7"
+  },
+  "packageManager": "pnpm@7.6.0",
   "dependencies": {
     "@radix-ui/react-icons": "^1.1.1",
     "@remix-run/node": "^1.6.7",
