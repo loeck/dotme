@@ -20,7 +20,10 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
         clearTimeout(timeoutID)
 
         timeoutID = setTimeout(async () => {
-          if (nodeRef.current.getBoundingClientRect().top === 100) {
+          if (
+            nodeRef.current.getBoundingClientRect().top ===
+            (window.innerWidth >= 1280 ? 100 : 184)
+          ) {
             onChange({
               track,
               trackColor: trackColor.rgb,
@@ -56,7 +59,7 @@ export const Track = ({ currentTrack, scrollContainer, track, onChange }) => {
           <m.div
             ref={nodeRef}
             className={
-              'relative flex p-6 gap-4 items-center h-[136px] w-[500px] overflow-hidden'
+              'select-none relative flex p-6 gap-4 items-center h-[136px] xl:w-[500px] overflow-hidden z-20'
             }
             initial={{
               opacity: 0,

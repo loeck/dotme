@@ -23,13 +23,39 @@ export const AboutMe = ({ variant }) => (
     <div className="flex flex-col gap-2">
       <div>Hi, I'm Loëck !</div>
       <div>
-        I work in Paris at <Highlight variant={variant}>Jump</Highlight> as a
-        Lead Frontend Developer
+        I work in Paris at{' '}
+        <Highlight variant={variant}>
+          <a href="https://www.join-jump.com/" target="_blank" rel="noreferrer">
+            Jump
+          </a>
+        </Highlight>{' '}
+        as a Lead Frontend Developer
       </div>
       <div className="flex gap-2">
-        <Highlight variant={variant}>Github</Highlight>
-        <Highlight variant={variant}>Linkedin</Highlight>
-        <Highlight variant={variant}>Last.fm</Highlight>
+        <Highlight variant={variant}>
+          <a href="https://github.com/loeck" target="_blank" rel="noreferrer">
+            GitHub
+          </a>
+        </Highlight>
+        <Highlight variant={variant}>
+          <a
+            href="https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550"
+            target="_blank"
+            rel="noreferrer"
+          >
+            LinkedIn
+          </a>
+        </Highlight>
+        <Highlight variant={variant}>
+          <a
+            href="https://www.join-jump.com/"
+            target="_blank"
+            rel="noreferrer"
+            href="https://last.fm/user/NainPuissant"
+          >
+            Last.fm
+          </a>
+        </Highlight>
       </div>
     </div>
   </m.div>

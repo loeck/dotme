@@ -1,11 +1,16 @@
 import { m, AnimatePresence } from 'framer-motion'
-import { PlayIcon, StopIcon } from '@radix-ui/react-icons'
+import { PlayIcon, StopIcon, TrackNextIcon } from '@radix-ui/react-icons'
 
-export const ControlTrack = ({ variant, state, onClick }) => (
+export const ControlTrack = ({
+  variant,
+  state,
+  onChangeState,
+  onNextTrack,
+}) => (
   <AnimatePresence>
     {variant && (
       <m.div
-        className="px-3"
+        className="select-none px-3 flex gap-3"
         initial={{
           y: '-100%',
         }}
@@ -15,10 +20,10 @@ export const ControlTrack = ({ variant, state, onClick }) => (
         }}
       >
         <div
-          className={`inline-flex rounded-full p-2 cursor-pointer ${
+          className={`relative z-10 inline-flex rounded-full p-2 cursor-pointer ${
             variant === 'light' ? 'bg-white' : 'bg-black'
           }`}
-          onClick={onClick}
+          onClick={onChangeState}
         >
           {state === 'stop' ? (
             <PlayIcon height={20} width={20} />
@@ -26,6 +31,26 @@ export const ControlTrack = ({ variant, state, onClick }) => (
             <StopIcon height={20} width={20} />
           )}
         </div>
+
+        {state === 'play' && (
+          <m.div
+            className={`inline-flex rounded-full p-2 cursor-pointer ${
+              variant === 'light' ? 'bg-white' : 'bg-black'
+            }`}
+            onClick={onNextTrack}
+            initial={{
+              x: '-100%',
+            }}
+            animate={{
+              x: 0,
+            }}
+            exit={{
+              x: '-100%',
+            }}
+          >
+            <TrackNextIcon height={20} width={20} />
+          </m.div>
+        )}
       </m.div>
     )}
   </AnimatePresence>

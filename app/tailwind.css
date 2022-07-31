@@ -1,5 +1,5 @@
 /*
-! tailwindcss v3.1.6 | MIT License | https://tailwindcss.com
+! tailwindcss v3.1.7 | MIT License | https://tailwindcss.com
 */
 
 /*
@@ -593,6 +593,22 @@ video {
   top: 100px;
 }
 
+.right-0 {
+  right: 0px;
+}
+
+.left-0 {
+  left: 0px;
+}
+
+.top-0 {
+  top: 0px;
+}
+
+.top-\[136px\] {
+  top: 136px;
+}
+
 .z-10 {
   z-index: 10;
 }
@@ -601,12 +617,12 @@ video {
   z-index: 20;
 }
 
-.z-auto {
-  z-index: auto;
-}
-
 .z-30 {
   z-index: 30;
+}
+
+.mt-3 {
+  margin-top: 0.75rem;
 }
 
 .flex {
@@ -627,6 +643,14 @@ video {
 
 .h-screen {
   height: 100vh;
+}
+
+.h-\[320px\] {
+  height: 320px;
+}
+
+.h-\[186px\] {
+  height: 186px;
 }
 
 .w-full {
@@ -653,6 +677,13 @@ video {
   cursor: pointer;
 }
 
+.select-none {
+  -webkit-user-select: none;
+     -moz-user-select: none;
+      -ms-user-select: none;
+          user-select: none;
+}
+
 .resize {
   resize: both;
 }
@@ -668,6 +699,14 @@ video {
 
 .scroll-pt-\[100px\] {
   scroll-padding-top: 100px;
+}
+
+.scroll-pt-\[184px\] {
+  scroll-padding-top: 184px;
+}
+
+.scroll-pt-\[320px\] {
+  scroll-padding-top: 320px;
 }
 
 .flex-col {
@@ -700,6 +739,10 @@ video {
 
 .overflow-hidden {
   overflow: hidden;
+}
+
+.scroll-smooth {
+  scroll-behavior: smooth;
 }
 
 .whitespace-nowrap {
@@ -750,6 +793,18 @@ video {
   padding-bottom: calc(100vh - 236px);
 }
 
+.pt-\[184px\] {
+  padding-top: 184px;
+}
+
+.pt-\[320px\] {
+  padding-top: 320px;
+}
+
+.pb-\[calc\(100vh-136px\)\] {
+  padding-bottom: calc(100vh - 136px);
+}
+
 .text-base {
   font-size: 1rem;
   line-height: 1.5rem;
@@ -789,4 +844,61 @@ video {
   transition-property: color, background-color, border-color, text-decoration-color, fill, stroke, opacity, box-shadow, transform, filter, backdrop-filter, -webkit-text-decoration-color, -webkit-backdrop-filter;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
+}
+
+@media (min-width: 1280px) {
+  .xl\:visible {
+    visibility: visible;
+  }
+
+  .xl\:inset-0 {
+    top: 0px;
+    right: 0px;
+    bottom: 0px;
+    left: 0px;
+  }
+
+  .xl\:left-\[100px\] {
+    left: 100px;
+  }
+
+  .xl\:top-\[100px\] {
+    top: 100px;
+  }
+
+  .xl\:right-auto {
+    right: auto;
+  }
+
+  .xl\:z-20 {
+    z-index: 20;
+  }
+
+  .xl\:h-auto {
+    height: auto;
+  }
+
+  .xl\:w-\[500px\] {
+    width: 500px;
+  }
+
+  .xl\:scroll-pt-\[100px\] {
+    scroll-padding-top: 100px;
+  }
+
+  .xl\:items-end {
+    align-items: flex-end;
+  }
+
+  .xl\:pr-\[100px\] {
+    padding-right: 100px;
+  }
+
+  .xl\:pt-\[100px\] {
+    padding-top: 100px;
+  }
+
+  .xl\:pb-\[calc\(100vh-236px\)\] {
+    padding-bottom: calc(100vh - 236px);
+  }
 }

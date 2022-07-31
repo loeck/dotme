@@ -2,12 +2,13 @@ import * as React from 'react'
 import { m, useAnimationControls } from 'framer-motion'
 import { useQuery } from '@tanstack/react-query'
 
-export const PlayerAudio = ({ track, state, variant }) => {
+export const PlayerAudio = ({ track, state, variant, onTrackEnd }) => {
+  const wrapperRef = React.useRef(null)
   const canvasRef = React.useRef(null)
 
   const gainNodeRef = React.useRef<any>(null)
   const audioContextRef = React.useRef<any>(null)
-  const audioSourceRef = React.useRef<any>({})
+  const audioSourceRef = React.useRef<any>(null)
   const analyserRef = React.useRef<any>(null)
 
   const startTimeRef = React.useRef(null)
@@ -19,18 +20,22 @@ export const PlayerAudio = ({ track, state, variant }) => {
   const controlsProgress = useAnimationControls()
 
   const { data, isLoading } = useQuery(
-    ['track', { id: track.id, previewUrl: track.previewUrl }],
+    ['track', { id: track?.id, previewUrl: track?.previewUrl }],
     ({ queryKey }) => {
       const [, { previewUrl }] = queryKey
 
       return fetch(previewUrl).then((res) => res.arrayBuffer())
     },
     {
-      enabled: state === 'play',
+      enabled: Boolean(track && state === 'play'),
     }
   )
 
   const draw = () => {
+    if (requestIdDrawRef.current) {
+      cancelAnimationFrame(requestIdDrawRef.current)
+    }
+
     if (canvasRef.current) {
       const ctx = canvasRef.current.getContext('2d')
 
@@ -70,10 +75,10 @@ export const PlayerAudio = ({ track, state, variant }) => {
     }
   }
 
-  const stopAudioSource = () => {
-    Object.values(audioSourceRef.current).forEach((audioSource) => {
-      audioSource.stop()
-    })
+  const stopAudioSource = async () => {
+    if (audioSourceRef.current) {
+      await audioSourceRef.current.stop()
+    }
   }
 
   const getProgress = () =>
@@ -87,28 +92,15 @@ export const PlayerAudio = ({ track, state, variant }) => {
 
     if (progress >= 100) {
       resetProgress()
+      onTrackEnd()
     } else if (state === 'play') {
       requestIdProgressRef.current = requestAnimationFrame(handleProgress)
     }
-
-    // if (progress >= 100) {
-    //   onNextTrack()
-    // } else if (canPlaying) {
-    //   // onProgressTrack(progress || 0)
-    //   requestIdProgressRef.current window.requestAnimationFrame(this.handleProgress)
-    // }
   }
 
   const resetProgress = async (animate = false) => {
     if (requestIdProgressRef.current) {
       cancelAnimationFrame(requestIdProgressRef.current)
-    }
-
-    if (requestIdDrawRef.current) {
-      cancelAnimationFrame(requestIdDrawRef.current)
-
-      const ctx = canvasRef.current.getContext('2d')
-      ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height)
     }
 
     controlsProgress.stop()
@@ -129,24 +121,19 @@ export const PlayerAudio = ({ track, state, variant }) => {
         analyserRef.current.connect(audioContextRef.current.destination)
       }
 
-      return new Promise((resolve) => {
-        try {
-          audioContextRef.current.decodeAudioData(data, (buffer) =>
-            resolve(buffer)
-          )
-        } catch (err) {}
-      })
+      return audioContextRef.current.decodeAudioData(data)
     }
 
     const playAudio = async () => {
       const buffer = await getBuffer()
 
+      await stopAudioSource()
+
       gainNodeRef.current = audioContextRef.current.createGain()
 
-      audioSourceRef.current[track.id] =
-        audioContextRef.current.createBufferSource()
+      audioSourceRef.current = audioContextRef.current.createBufferSource()
 
-      const audioSource = audioSourceRef.current[track.id]
+      const audioSource = audioSourceRef.current
 
       draw()
 
@@ -176,8 +163,11 @@ export const PlayerAudio = ({ track, state, variant }) => {
   React.useEffect(() => {
     const handleResize = () => {
       if (canvasRef.current) {
-        canvasRef.current.height = window.innerHeight
-        canvasRef.current.width = window.innerWidth
+        const { height, width } =
+          canvasRef.current.parentNode.getBoundingClientRect()
+
+        canvasRef.current.height = height
+        canvasRef.current.width = width
       }
     }
 
@@ -192,7 +182,6 @@ export const PlayerAudio = ({ track, state, variant }) => {
 
   React.useEffect(() => {
     if (isLoading) {
-      stopAudioSource()
       resetProgress()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -207,7 +196,7 @@ export const PlayerAudio = ({ track, state, variant }) => {
   }, [state])
 
   return (
-    <div className="fixed inset-0 z-10 pointer-events-none">
+    <div className="fixed w-full h-full inset-0 z-10 pointer-events-none">
       <m.div
         animate={controlsProgress}
         className="absolute inset-0 z-10"
@@ -220,7 +209,7 @@ export const PlayerAudio = ({ track, state, variant }) => {
         }}
       />
 
-      {state === 'play' && (
+      {track && (
         <div
           className="absolute inset-0"
           style={{
@@ -229,7 +218,7 @@ export const PlayerAudio = ({ track, state, variant }) => {
         />
       )}
 
-      <canvas className="h-full w-full" ref={canvasRef} />
+      <canvas className="invisible xl:visible h-full w-full" ref={canvasRef} />
     </div>
   )
 }

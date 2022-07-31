@@ -71,6 +71,8 @@ export default function Index() {
   const [currentTrack, setCurrentTrack] = React.useState(null)
   const [playerState, setPlayerState] = React.useState('stop')
 
+  const tracksRef = React.useRef(null)
+
   return (
     <>
       <m.div
@@ -85,7 +87,7 @@ export default function Index() {
         <div className="h-screen w-screen">
           <div
             className={
-              'fixed left-[100px] top-[100px] z-20 flex flex-col gap-3'
+              'fixed right-0 left-0 xl:right-auto xl:left-[100px] xl:top-[100px] z-30 xl:z-20 flex flex-col gap-3'
             }
           >
             <AboutMe variant={currentTrack?.colorVariant} />
@@ -93,9 +95,10 @@ export default function Index() {
             {currentTrack && (
               <ControlTrack
                 variant={currentTrack?.colorVariant}
-                onClick={() =>
+                onChangeState={() =>
                   setPlayerState((prev) => (prev === 'play' ? 'stop' : 'play'))
                 }
+                onNextTrack={() => tracksRef.current.nextTrack()}
                 state={playerState}
               />
             )}
@@ -103,6 +106,7 @@ export default function Index() {
 
           {tracks && (
             <Tracks
+              ref={tracksRef}
               currentTrack={currentTrack}
               tracks={tracks}
               onChange={(v) => {
@@ -115,13 +119,19 @@ export default function Index() {
         </div>
       </m.div>
 
-      {currentTrack && (
-        <PlayerAudio
-          track={currentTrack?.track}
-          state={playerState}
-          variant={currentTrack?.colorVariant}
-        />
-      )}
+      <PlayerAudio
+        onTrackEnd={() => {
+          const hasNextTrack = tracksRef.current.nextTrack()
+          console.log('hasNextTrack', hasNextTrack)
+
+          if (!hasNextTrack) {
+            setPlayerState('stop')
+          }
+        }}
+        track={currentTrack?.track}
+        state={playerState}
+        variant={currentTrack?.colorVariant}
+      />
     </>
   )
 }
