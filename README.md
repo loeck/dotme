@@ -10,7 +10,7 @@
 ## Installation
 
 ```
-yarn
+pnpm install
 ```
 
 ## Development
