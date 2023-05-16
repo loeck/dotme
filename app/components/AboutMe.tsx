@@ -26,11 +26,11 @@ export const AboutMe = ({ variant }) => (
       <div>
         I work in Paris at{' '}
         <Highlight variant={variant}>
-          <a href="https://www.join-jump.com/" target="_blank" rel="noreferrer">
-            Jump
+          <a href="https://www.regate.io/" target="_blank" rel="noreferrer">
+            Regate
           </a>
         </Highlight>{' '}
-        as a Lead Frontend Developer
+        as a Lead Frontend Architect
       </div>
       <div className="flex gap-2">
         <Highlight variant={variant}>
