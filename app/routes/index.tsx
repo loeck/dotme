@@ -27,7 +27,7 @@ export const loader = async () => {
   ).then((res) => res.json())
 
   const { items } = await fetch(
-    `https://api.spotify.com/v1/users/${process.env.SPOTIFY_USER_ID}/playlists/${process.env.SPOTIFY_PLAYLIST_ID}/tracks`,
+    `https://api.spotify.com/v1/playlists/${process.env.SPOTIFY_PLAYLIST_ID}/tracks?market=FR&limit=50`,
     {
       headers: {
         Authorization: `Bearer ${accessToken}`,
