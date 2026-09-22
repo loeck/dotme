@@ -30,7 +30,7 @@ function LinkedinIcon(props: IconProps) {
 export function Profile() {
   return (
     <header
-      className="relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,10.5vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
+      className="relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
       aria-labelledby="profile-title"
     >
       <p className="m-0 text-xs tracking-[0.025em] text-[#8a919a]">{'//loeck.me'}</p>
@@ -57,7 +57,7 @@ export function Profile() {
           target="_blank"
           rel="noreferrer"
         >
-          <GithubIcon className="size-[1.1rem] shrink-0" />
+          <GithubIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
           <span>GitHub</span>
           <span className="sr-only">(opens in a new tab)</span>
         </a>
@@ -70,7 +70,7 @@ export function Profile() {
           target="_blank"
           rel="noreferrer"
         >
-          <LinkedinIcon className="size-[1.1rem] shrink-0" />
+          <LinkedinIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
           <span>LinkedIn</span>
           <span className="sr-only">(opens in a new tab)</span>
         </a>

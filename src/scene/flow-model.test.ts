@@ -1,15 +1,16 @@
 import { describe, expect, it } from 'vitest'
 
-import { FLOW_CURVES, FLOW_QUALITY, cubicPoint, filamentPath } from './flow-model'
+import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY, pathPoint } from './flow-model'
 
 describe('flow model', () => {
-  it('keeps the shared curve deterministic', () => {
-    expect(filamentPath('desktop', 0.25, 1.5)).toBe(filamentPath('desktop', 0.25, 1.5))
+  it('starts and ends on the configured control points', () => {
+    expect(pathPoint(FLOW_PATHS.desktop, 0)).toEqual(FLOW_PATHS.desktop[0].start)
+    expect(pathPoint(FLOW_PATHS.desktop, 1)).toEqual(FLOW_PATHS.desktop[2].end)
   })
 
-  it('starts and ends on the configured control points', () => {
-    expect(cubicPoint(FLOW_CURVES.desktop, 0)).toEqual(FLOW_CURVES.desktop.start)
-    expect(cubicPoint(FLOW_CURVES.desktop, 1)).toEqual(FLOW_CURVES.desktop.end)
+  it('passes exactly through both convergence nodes', () => {
+    expect(pathPoint(FLOW_PATHS.desktop, FLOW_BREAKS[0])).toEqual(FLOW_PATHS.desktop[0].end)
+    expect(pathPoint(FLOW_PATHS.desktop, FLOW_BREAKS[1])).toEqual(FLOW_PATHS.desktop[1].end)
   })
 
   it('ships the intended mobile quality budget', () => {

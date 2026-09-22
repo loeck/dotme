@@ -9,35 +9,65 @@ export type FlowCurve = Readonly<{
   end: Vec2
 }>
 
+export type FlowPath = readonly [FlowCurve, FlowCurve, FlowCurve]
+
+export const FLOW_BREAKS = [0.42, 0.7] as const
+
 /**
  * The visual source of truth for both WebGL and the server-rendered SVG.
  * Values live in a 0..1 composition space so the SVG needs no browser APIs.
  */
-export const FLOW_CURVES: Record<FlowVariant, FlowCurve> = {
-  desktop: {
-    start: { x: -0.12, y: 0.68 },
-    controlA: { x: 0.28, y: 0.79 },
-    controlB: { x: 0.56, y: 0.22 },
-    end: { x: 1.13, y: 0.43 },
-  },
-  mobile: {
-    start: { x: 0.18, y: 1.11 },
-    controlA: { x: 0.57, y: 0.85 },
-    controlB: { x: 0.38, y: 0.45 },
-    end: { x: 0.91, y: -0.1 },
-  },
+export const FLOW_PATHS: Record<FlowVariant, FlowPath> = {
+  desktop: [
+    {
+      start: { x: -0.08, y: 0.82 },
+      controlA: { x: 0.13, y: 0.77 },
+      controlB: { x: 0.34, y: 0.7 },
+      end: { x: 0.46, y: 0.62 },
+    },
+    {
+      start: { x: 0.46, y: 0.62 },
+      controlA: { x: 0.56, y: 0.553 },
+      controlB: { x: 0.63, y: 0.45 },
+      end: { x: 0.71, y: 0.355 },
+    },
+    {
+      start: { x: 0.71, y: 0.355 },
+      controlA: { x: 0.8, y: 0.25 },
+      controlB: { x: 0.96, y: 0.22 },
+      end: { x: 1.12, y: 0.31 },
+    },
+  ],
+  mobile: [
+    {
+      start: { x: 0.34, y: 1.1 },
+      controlA: { x: 0.42, y: 0.91 },
+      controlB: { x: 0.7, y: 0.82 },
+      end: { x: 0.64, y: 0.68 },
+    },
+    {
+      start: { x: 0.64, y: 0.68 },
+      controlA: { x: 0.5, y: 0.59 },
+      controlB: { x: 0.5, y: 0.43 },
+      end: { x: 0.69, y: 0.31 },
+    },
+    {
+      start: { x: 0.69, y: 0.31 },
+      controlA: { x: 0.78, y: 0.17 },
+      controlB: { x: 0.92, y: 0.04 },
+      end: { x: 0.88, y: -0.12 },
+    },
+  ],
 }
 
 export const FLOW_QUALITY = {
   desktop: {
-    connections: 18,
-    filaments: 64,
+    filaments: 52,
     segments: 128,
-    particles: 400,
+    particles: 260,
     maxPixelRatio: 1.5,
   },
   mobile: {
-    connections: 8,
     filaments: 32,
     segments: 96,
     particles: 160,
@@ -64,45 +94,16 @@ export function cubicPoint(curve: FlowCurve, t: number): Vec2 {
   }
 }
 
-export function cubicTangent(curve: FlowCurve, t: number): Vec2 {
-  const inverse = 1 - t
-  return {
-    x:
-      3 * inverse * inverse * (curve.controlA.x - curve.start.x) +
-      6 * inverse * t * (curve.controlB.x - curve.controlA.x) +
-      3 * t * t * (curve.end.x - curve.controlB.x),
-    y:
-      3 * inverse * inverse * (curve.controlA.y - curve.start.y) +
-      6 * inverse * t * (curve.controlB.y - curve.controlA.y) +
-      3 * t * t * (curve.end.y - curve.controlB.y),
+function pathSection(path: FlowPath, t: number): Readonly<{ curve: FlowCurve; t: number }> {
+  const [firstBreak, secondBreak] = FLOW_BREAKS
+  if (t < firstBreak) return { curve: path[0], t: t / firstBreak }
+  if (t < secondBreak) {
+    return { curve: path[1], t: (t - firstBreak) / (secondBreak - firstBreak) }
   }
+  return { curve: path[2], t: (t - secondBreak) / (1 - secondBreak) }
 }
 
-export function pointOnFilament(curve: FlowCurve, t: number, lane: number, phase = 0): Vec2 {
-  const point = cubicPoint(curve, t)
-  const tangent = cubicTangent(curve, t)
-  const length = Math.hypot(tangent.x, tangent.y) || 1
-  const normal = { x: -tangent.y / length, y: tangent.x / length }
-  const envelope = 0.055 + 0.22 * Math.sin(Math.PI * t) ** 1.4
-  const ripple = Math.sin(t * 10.4 + phase) * 0.012
-  const offset = lane * envelope + ripple
-
-  return { x: point.x + normal.x * offset, y: point.y + normal.y * offset }
-}
-
-export function filamentPath(
-  variant: FlowVariant,
-  lane: number,
-  phase: number,
-  width = 1200,
-  height = 800,
-  samples = 28,
-): string {
-  const curve = FLOW_CURVES[variant]
-  const points = Array.from({ length: samples + 1 }, (_, index) => {
-    const point = pointOnFilament(curve, index / samples, lane, phase)
-    return `${point.x * width} ${point.y * height}`
-  })
-
-  return `M ${points.join(' L ')}`
+export function pathPoint(path: FlowPath, t: number): Vec2 {
+  const section = pathSection(path, t)
+  return cubicPoint(section.curve, section.t)
 }

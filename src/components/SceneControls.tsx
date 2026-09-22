@@ -9,7 +9,7 @@ export function SceneControls({ available, paused, onToggle }: SceneControlsProp
 
   return (
     <aside
-      className="absolute right-[max(1.5rem,5vw)] bottom-[max(2rem,env(safe-area-inset-bottom))] z-20 flex items-center gap-5 text-[0.7rem] text-[#8a919a] max-sm:right-[max(1.25rem,env(safe-area-inset-right))] max-sm:left-[max(1.25rem,env(safe-area-inset-left))] max-sm:justify-between max-sm:gap-3 max-sm:text-[0.65rem] max-[380px]:flex-col max-[380px]:items-end"
+      className="absolute right-[max(1.5rem,5vw)] bottom-[max(3.5rem,6vh)] z-20 flex items-center gap-4 text-[0.7rem] text-[#8a919a] opacity-70 max-sm:right-[max(1.25rem,env(safe-area-inset-right))] max-sm:bottom-[max(2.75rem,env(safe-area-inset-bottom))] max-sm:left-[max(1.25rem,env(safe-area-inset-left))] max-sm:justify-between max-sm:gap-3 max-sm:text-[0.65rem] max-[380px]:flex-col max-[380px]:items-end"
       aria-label="Scene controls"
     >
       <p className="m-0 inline-flex items-center gap-3 whitespace-nowrap">

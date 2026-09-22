@@ -30,6 +30,7 @@ test('keeps the profile available with JavaScript disabled', async ({ browser })
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-  await expect(page.locator('[data-flow-fallback]')).toBeVisible()
+  await expect(page.locator('main')).toHaveCSS('background-color', 'rgb(8, 10, 13)')
+  await expect(page.locator('canvas')).toHaveCount(0)
   await context.close()
 })
