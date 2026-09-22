@@ -45,9 +45,6 @@ export const FLOW_QUALITY = {
   },
 } as const
 
-export const clamp = (value: number, min: number, max: number) =>
-  Math.min(Math.max(value, min), max)
-
 export function cubicPoint(curve: FlowCurve, t: number): Vec2 {
   const inverse = 1 - t
   const inverseSquared = inverse * inverse

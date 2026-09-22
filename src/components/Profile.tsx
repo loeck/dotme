@@ -2,6 +2,9 @@ import type { SVGProps } from 'react'
 
 type IconProps = SVGProps<SVGSVGElement>
 
+const SOCIAL_LINK_CLASS =
+  'inline-flex min-h-8 items-center gap-2.5 no-underline transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-[#e4e8ed] focus-visible:text-[#e4e8ed] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[#b9dfff] motion-reduce:transition-none'
+
 function GithubIcon(props: IconProps) {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
@@ -49,7 +52,7 @@ export function Profile() {
 
       <nav className="flex items-center gap-4 text-xs text-[#8a919a]" aria-label="Social links">
         <a
-          className="inline-flex min-h-8 items-center gap-2.5 no-underline transition-colors duration-150 ease-out hover:text-[#e4e8ed] focus-visible:text-[#e4e8ed] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[#b9dfff] motion-reduce:transition-none"
+          className={SOCIAL_LINK_CLASS}
           href="https://github.com/loeck"
           target="_blank"
           rel="noreferrer"
@@ -62,7 +65,7 @@ export function Profile() {
           |
         </span>
         <a
-          className="inline-flex min-h-8 items-center gap-2.5 no-underline transition-colors duration-150 ease-out hover:text-[#e4e8ed] focus-visible:text-[#e4e8ed] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[#b9dfff] motion-reduce:transition-none"
+          className={SOCIAL_LINK_CLASS}
           href="https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550"
           target="_blank"
           rel="noreferrer"
@@ -75,5 +78,3 @@ export function Profile() {
     </header>
   )
 }
-
-export default Profile

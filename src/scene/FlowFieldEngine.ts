@@ -68,10 +68,7 @@ const PARTICLE_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].part
 
 const CONNECTION_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].connections * 2)
 
-const LINE_VERTEX_SHADER = `
-attribute float aT;
-attribute float aLane;
-attribute float aPhase;
+const FLOW_VERTEX_COMMON = `
 uniform vec2 uStart;
 uniform vec2 uControlA;
 uniform vec2 uControlB;
@@ -84,7 +81,6 @@ uniform vec3 uPulseA;
 uniform vec3 uPulseB;
 uniform vec3 uPulseC;
 uniform vec3 uPulseD;
-varying float vIntensity;
 
 vec2 curve(float t) {
   float i = 1.0 - t;
@@ -113,6 +109,14 @@ float pulse(vec2 position, vec3 pulseData) {
   return exp(-pow((length(position - pulseData.xy) - age * 0.82) * 17.0, 2.0))
     * step(0.0, age) * step(age, 2.8);
 }
+`
+
+const LINE_VERTEX_SHADER = `
+attribute float aT;
+attribute float aLane;
+attribute float aPhase;
+${FLOW_VERTEX_COMMON}
+varying float vIntensity;
 
 void main() {
   vec2 p = curve(aT);
@@ -145,42 +149,8 @@ attribute float aT;
 attribute float aLane;
 attribute float aPhase;
 attribute float aSpeed;
-uniform vec2 uStart;
-uniform vec2 uControlA;
-uniform vec2 uControlB;
-uniform vec2 uEnd;
-uniform vec2 uPointer;
-uniform vec2 uDrag;
-uniform vec2 uDragOffset;
-uniform float uTime;
-uniform vec3 uPulseA;
-uniform vec3 uPulseB;
-uniform vec3 uPulseC;
-uniform vec3 uPulseD;
+${FLOW_VERTEX_COMMON}
 varying float vAlpha;
-
-vec2 curve(float t) {
-  float i = 1.0 - t;
-  return i*i*i*uStart + 3.0*i*i*t*uControlA + 3.0*i*t*t*uControlB + t*t*t*uEnd;
-}
-vec2 tangent(float t) {
-  float i = 1.0 - t;
-  return 3.0*i*i*(uControlA-uStart) + 6.0*i*t*(uControlB-uControlA) + 3.0*t*t*(uEnd-uControlB);
-}
-vec2 force(vec2 position, vec2 source, float amount) {
-  vec2 offset = position-source;
-  float reach = 1.0 - smoothstep(0.0, 0.72, length(offset));
-  return normalize(offset + vec2(0.0001)) * reach * amount;
-}
-vec2 pull(vec2 position, vec2 source, vec2 offset) {
-  float reach = 1.0 - smoothstep(0.0, 0.72, length(position - source));
-  return offset * reach * 0.82;
-}
-float pulse(vec2 position, vec3 pulseData) {
-  float age = uTime - pulseData.z;
-  return exp(-pow((length(position - pulseData.xy) - age * 0.82) * 17.0, 2.0))
-    * step(0.0, age) * step(age, 2.8);
-}
 void main() {
   float t = fract(aT + uTime * aSpeed);
   vec2 p = curve(t);
@@ -363,7 +333,7 @@ export class FlowFieldEngine {
     this.canvas.addEventListener('webglcontextlost', this.handleContextLost, false)
     document.addEventListener('visibilitychange', this.handleVisibilityChange)
     this.resize()
-    this.animationFrame = requestAnimationFrame(this.render)
+    this.updateAnimationLoop()
   }
 
   private createSegments(): BufferGeometry {
@@ -472,7 +442,6 @@ export class FlowFieldEngine {
     this.interaction.velocityX = 0
     this.interaction.velocityY = 0
     this.interaction.isDragging = false
-    this.canvas.setPointerCapture(event.pointerId)
   }
 
   private handlePointerMove = (event: PointerEvent) => {
@@ -493,6 +462,7 @@ export class FlowFieldEngine {
     )
     if (distance > 8 && !this.interaction.isDragging) {
       this.interaction.isDragging = true
+      this.canvas.setPointerCapture(event.pointerId)
     }
     if (this.interaction.isDragging) {
       this.interaction.targetX = x
@@ -565,10 +535,6 @@ export class FlowFieldEngine {
   }
 
   resize = () => {
-    this.resizeWithThree()
-  }
-
-  private resizeWithThree() {
     if (this.disposed) return
     const rect = this.canvas.getBoundingClientRect()
     this.width = Math.max(1, rect.width)
@@ -617,14 +583,12 @@ export class FlowFieldEngine {
 
     if (this.frameDurationTotal / this.frameSampleCount > 25) {
       this.reducedQuality = true
-      this.resizeWithThree()
+      this.resize()
     }
   }
 
   private updateInteraction(delta: number) {
     const interaction = this.interaction
-    const previousX = interaction.x
-    const previousY = interaction.y
     // Critically damped spring: direct under the pointer, quiet and no visible bounce on release.
     const stiffness = interaction.isDragging ? 120 : 36
     const damping = 2 * Math.sqrt(stiffness)
@@ -650,13 +614,6 @@ export class FlowFieldEngine {
     const offsetLength = Math.hypot(offsetX, offsetY)
     const offsetScale = offsetLength > 0.65 ? 0.65 / offsetLength : 1
     this.uniforms.uDragOffset.value = [offsetX * offsetScale, offsetY * offsetScale]
-    // Preserve a finite velocity if the scene is grabbed again between frames.
-    if (delta > 0) {
-      interaction.velocityX =
-        interaction.velocityX * 0.94 + ((interaction.x - previousX) / delta) * 0.06
-      interaction.velocityY =
-        interaction.velocityY * 0.94 + ((interaction.y - previousY) / delta) * 0.06
-    }
   }
 
   private render = (now: number) => {

@@ -3,22 +3,17 @@ import { useEffect, useRef, useState } from 'react'
 
 import { FlowFallbackSvg } from '../scene/FlowFallbackSvg'
 import type { FlowFieldEngine } from '../scene/FlowFieldEngine'
+import { SceneControls } from './SceneControls'
 
 const loadEngine = createClientOnlyFn(async () => {
   const engineModule = await import('../scene/FlowFieldEngine')
   return engineModule.FlowFieldEngine
 })
 
-type FlowFieldProps = Readonly<{
-  className?: string
-  onAvailabilityChange?: (available: boolean) => void
-  paused?: boolean
-}>
-
-export function FlowField({ className, onAvailabilityChange, paused = false }: FlowFieldProps) {
+export function FlowField() {
   const canvasHost = useRef<HTMLDivElement>(null)
   const engine = useRef<FlowFieldEngine | null>(null)
-  const pausedRef = useRef(paused)
+  const [paused, setPaused] = useState(false)
   const [webglReady, setWebglReady] = useState(false)
 
   useEffect(() => {
@@ -39,7 +34,6 @@ export function FlowField({ className, onAvailabilityChange, paused = false }: F
 
     const start = async () => {
       if (disposed || reducedMotion.matches || engine.current) {
-        if (reducedMotion.matches) onAvailabilityChange?.(false)
         return
       }
       try {
@@ -49,27 +43,22 @@ export function FlowField({ className, onAvailabilityChange, paused = false }: F
           container: host,
           onContextFailure: () => {
             setWebglReady(false)
-            onAvailabilityChange?.(false)
           },
           onFirstFrame: () => {
             setWebglReady(true)
-            onAvailabilityChange?.(true)
           },
         })
         engine.current = instance
-        instance.setPaused(pausedRef.current)
         resizeObserver = new ResizeObserver(instance.resize)
         resizeObserver.observe(host)
       } catch {
         setWebglReady(false)
-        onAvailabilityChange?.(false)
       }
     }
 
     const updateMotionPreference = () => {
       if (reducedMotion.matches) {
         stop()
-        onAvailabilityChange?.(false)
       } else void start()
     }
 
@@ -80,27 +69,30 @@ export function FlowField({ className, onAvailabilityChange, paused = false }: F
       reducedMotion.removeEventListener('change', updateMotionPreference)
       stop()
     }
-  }, [onAvailabilityChange])
+  }, [])
 
   useEffect(() => {
-    pausedRef.current = paused
     engine.current?.setPaused(paused)
   }, [paused])
 
   return (
-    <div
-      className={`pointer-events-none absolute inset-0 z-0 overflow-hidden ${className ?? ''}`}
-      aria-hidden="true"
-    >
-      <div
-        className={`absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none ${webglReady ? 'opacity-0' : 'opacity-100'}`}
-      >
-        <FlowFallbackSvg className="flow-fallback" />
+    <>
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+        <div
+          className={`absolute inset-0 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${webglReady ? 'opacity-0' : 'opacity-100'}`}
+        >
+          <FlowFallbackSvg />
+        </div>
+        <div
+          ref={canvasHost}
+          className={`pointer-events-auto absolute inset-0 transition-opacity duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:transition-none ${webglReady ? 'opacity-100' : 'opacity-0'}`}
+        />
       </div>
-      <div
-        ref={canvasHost}
-        className={`pointer-events-auto absolute inset-0 transition-opacity duration-500 ease-out motion-reduce:transition-none ${webglReady ? 'opacity-100' : 'opacity-0'}`}
+      <SceneControls
+        available={webglReady}
+        paused={paused}
+        onToggle={() => setPaused((value) => !value)}
       />
-    </div>
+    </>
   )
 }

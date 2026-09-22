@@ -1,6 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 test('renders the profile and interactive scene', async ({ page }) => {
+  const consoleErrors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') consoleErrors.push(message.text())
+  })
+
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
@@ -16,6 +21,7 @@ test('renders the profile and interactive scene', async ({ page }) => {
     'aria-pressed',
     'true',
   )
+  expect(consoleErrors).toEqual([])
 })
 
 test('keeps the profile available with JavaScript disabled', async ({ browser }) => {
@@ -24,6 +30,6 @@ test('keeps the profile available with JavaScript disabled', async ({ browser })
   await page.goto('/')
 
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-  await expect(page.locator('.flow-fallback')).toBeVisible()
+  await expect(page.locator('[data-flow-fallback]')).toBeVisible()
   await context.close()
 })

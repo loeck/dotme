@@ -1,10 +1,6 @@
 import { FLOW_CURVES, filamentPath, pointOnFilament } from './flow-model'
 import type { FlowVariant } from './flow-model'
 
-type FlowFallbackSvgProps = Readonly<{
-  className?: string
-}>
-
 const FALLBACK_FILAMENTS = 24
 
 function FallbackPaths({ variant }: Readonly<{ variant: FlowVariant }>) {
@@ -42,9 +38,9 @@ function FallbackPoints({ variant }: Readonly<{ variant: FlowVariant }>) {
   })
 }
 
-export function FlowFallbackSvg({ className }: FlowFallbackSvgProps) {
+export function FlowFallbackSvg() {
   return (
-    <div aria-hidden="true" className={`absolute inset-0 ${className ?? ''}`}>
+    <div aria-hidden="true" className="absolute inset-0" data-flow-fallback>
       <svg
         className="hidden h-full w-full md:block"
         fill="none"
