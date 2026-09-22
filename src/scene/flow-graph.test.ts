@@ -17,7 +17,7 @@ describe('flow graph', () => {
     const first = createFlowGraphData('desktop')
     const second = createFlowGraphData('desktop')
 
-    expect(first.count).toBeGreaterThan(2_000)
+    expect(first.count).toBeGreaterThan(700)
     expect(first.count % 2).toBe(0)
     expect(first.position.length).toBe(first.count * 3)
     expect(first.normal.length).toBe(first.count * 2)
@@ -33,7 +33,7 @@ describe('flow graph', () => {
     const graph = createFlowGraphData('desktop')
 
     expect(containsPoint(graph, 0.46, 0.62)).toBe(true)
-    expect(containsPoint(graph, 0.72, 0.335)).toBe(true)
+    expect(containsPoint(graph, 0.738, 0.335)).toBe(true)
   })
 
   it('keeps the mobile graph out of the upper-left text area', () => {

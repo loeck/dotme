@@ -76,15 +76,15 @@ const SEGMENT_RANGES = createDrawRanges((variant) => {
 
 const PARTICLE_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].particles)
 
-const BACKGROUND_COUNTS = { desktop: 110, mobile: 58 } as const
+const BACKGROUND_COUNTS = { desktop: 150, mobile: 58 } as const
 const BACKGROUND_RANGES = createDrawRanges((variant) => BACKGROUND_COUNTS[variant])
-const NETWORK_NODE_COUNTS = { desktop: 46, mobile: 26 } as const
+const NETWORK_NODE_COUNTS = { desktop: 58, mobile: 24 } as const
 const NETWORK_NODE_RANGES = createDrawRanges((variant) => NETWORK_NODE_COUNTS[variant])
 const NETWORK_EDGE_RANGES = createDrawRanges((variant) => (NETWORK_NODE_COUNTS[variant] - 2) * 2)
 const NETWORK_HUBS = {
   desktop: [
     [0.46, 0.62],
-    [0.72, 0.335],
+    [0.738, 0.335],
   ],
   mobile: [
     [0.63, 0.68],
@@ -162,13 +162,13 @@ vec2 screenNormal(float t) {
 }
 
 float envelope(float t) {
-  float base = 0.035
-    + 0.105 * pow(sin(3.14159265 * t), 1.2)
-    + 0.065 * (1.0 - smoothstep(0.0, 0.3, t))
-    + 0.14 * smoothstep(0.7, 1.0, t);
+  float base = 0.014
+    + 0.095 * pow(sin(3.14159265 * t), 1.35)
+    + 0.025 * (1.0 - smoothstep(0.0, 0.3, t))
+    + 0.085 * smoothstep(0.7, 1.0, t);
   float firstPinch = exp(-pow((t - ${FLOW_BREAKS[0].toFixed(2)}) / 0.055, 2.0));
   float secondPinch = exp(-pow((t - ${FLOW_BREAKS[1].toFixed(2)}) / 0.05, 2.0));
-  return base * (1.0 - firstPinch * 0.72) * (1.0 - secondPinch * 0.64);
+  return base * (1.0 - firstPinch * 0.78) * (1.0 - secondPinch * 0.72);
 }
 
 float fieldDistance(vec2 delta) {
@@ -223,6 +223,9 @@ void main() {
   float slowDrift = sin(aT * (2.4 + widthVariation) * 3.14159265 + aPhase) * 0.011
     + sin(aT * 7.3 + aPhase * 1.7) * 0.004;
   float lineSeed = fract(sin(aPhase * 53.17) * 43758.5453) - 0.5;
+  float irregular = step(0.68, fract(sin(aPhase * 29.71) * 43758.5453));
+  float weave = irregular * sin(aT * (11.0 + abs(lineSeed) * 13.0) + aPhase * 2.3)
+    * (0.016 + abs(lineSeed) * 0.032) * pow(sin(3.14159265 * aT), 1.4);
   float nodeCalm = 1.0
     - exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.045, 2.0)) * 0.58
     - exp(-pow((aT - ${FLOW_BREAKS[1].toFixed(2)}) / 0.04, 2.0)) * 0.48;
@@ -230,7 +233,7 @@ void main() {
     * (exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.06, 2.0))
       + exp(-pow((aT - ${FLOW_BREAKS[1].toFixed(2)}) / 0.055, 2.0)));
   float exitVariation = lineSeed * 0.038 * smoothstep(${FLOW_BREAKS[1].toFixed(2)}, 1.0, aT);
-  p += normal * (aLane * envelope(aT) * widthVariation + ripple + slowDrift * nodeCalm
+  p += normal * (aLane * envelope(aT) * widthVariation + ripple + slowDrift * nodeCalm + weave
     + nodeVariation + exitVariation);
   p += normal * sin(aT * 8.0 + aPhase + uTime * 0.2) * 0.0055;
   p += force(p, uPointer, 0.028);
@@ -240,13 +243,16 @@ void main() {
   float nodeLight = exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.012, 2.0)) * 0.9
     + exp(-pow((aT - ${FLOW_BREAKS[1].toFixed(2)}) / 0.011, 2.0)) * 1.05;
   float revealAt = revealTime(aT);
+  float startAt = fract(sin(aPhase * 17.31) * 43758.5453) * 0.12;
+  float foreground = step(0.8, fract(sin(aPhase * 43.17) * 43758.5453));
   float revealFront = exp(-pow((uReveal - revealAt) / 0.032, 2.0));
   float ignition = exp(-pow((uReveal - 0.09) / 0.055, 2.0))
     * exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.018, 2.0));
   vReveal = smoothstep(revealAt - 0.025, revealAt + 0.018, uReveal)
-    * mix(0.34, 1.0, smoothstep(0.0, 0.24, p.x));
+    * mix(0.2, 1.0, smoothstep(0.0, 0.24, p.x))
+    * smoothstep(startAt, startAt + 0.075, aT);
   vIntensity = 0.18 + 0.34 * (sin(aPhase * 5.1 + aT * 18.0) * 0.5 + 0.5)
-    + nodeLight + revealFront * 1.35 + ignition * 1.5 + pulseRing;
+    + foreground * 0.34 + nodeLight + revealFront * 1.35 + ignition * 1.5 + pulseRing;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, sin(aPhase) * 0.02, 1.0);
 }
 `
@@ -257,7 +263,7 @@ varying float vIntensity;
 varying float vReveal;
 void main() {
   float light = clamp(vIntensity, 0.0, 1.0);
-  vec3 color = mix(vec3(0.16, 0.43, 0.72), vec3(0.84, 0.93, 1.0), light);
+  vec3 color = mix(vec3(0.17, 0.33, 0.49), vec3(0.9, 0.95, 1.0), light);
   gl_FragColor = vec4(
     color,
     uOpacity * (0.44 + clamp(vIntensity, 0.0, 1.35) * 0.56) * vReveal
@@ -284,6 +290,9 @@ void main() {
   float slowDrift = sin(t * (2.4 + widthVariation) * 3.14159265 + aPhase) * 0.011
     + sin(t * 7.3 + aPhase * 1.7) * 0.004;
   float lineSeed = fract(sin(aPhase * 53.17) * 43758.5453) - 0.5;
+  float irregular = step(0.68, fract(sin(aPhase * 29.71) * 43758.5453));
+  float weave = irregular * sin(t * (11.0 + abs(lineSeed) * 13.0) + aPhase * 2.3)
+    * (0.016 + abs(lineSeed) * 0.032) * pow(sin(3.14159265 * t), 1.4);
   float nodeCalm = 1.0
     - exp(-pow((t - ${FLOW_BREAKS[0].toFixed(2)}) / 0.045, 2.0)) * 0.58
     - exp(-pow((t - ${FLOW_BREAKS[1].toFixed(2)}) / 0.04, 2.0)) * 0.48;
@@ -292,7 +301,7 @@ void main() {
       + exp(-pow((t - ${FLOW_BREAKS[1].toFixed(2)}) / 0.055, 2.0)));
   float exitVariation = lineSeed * 0.038 * smoothstep(${FLOW_BREAKS[1].toFixed(2)}, 1.0, t);
   float depthSpread = 1.0 + pow(aDepth, 6.0) * 1.35;
-  p += normal * (aLane * envelope(t) * widthVariation * depthSpread
+  p += normal * (aLane * envelope(t) * widthVariation * depthSpread + weave
     + sin(t * 11.2 + aPhase) * 0.007 + slowDrift * nodeCalm
     + nodeVariation + exitVariation);
   p += normal * sin(t * 8.0 + aPhase + uTime * 0.2) * 0.0055;
@@ -352,7 +361,8 @@ void main() {
   float radius = length(gl_PointCoord - vec2(0.5));
   float core = smoothstep(0.5, 0.0, radius);
   float glow = exp(-radius * radius * 10.0);
-  gl_FragColor = vec4(vec3(0.48, 0.72, 0.94), (core * 0.62 + glow * 0.38) * vAlpha);
+  vec3 color = mix(vec3(0.58, 0.76, 0.91), vec3(0.94, 0.97, 1.0), smoothstep(0.35, 0.72, vAlpha));
+  gl_FragColor = vec4(color, (core * 0.62 + glow * 0.38) * vAlpha);
 }
 `
 
@@ -400,7 +410,7 @@ void main() {
   float revealAlpha = smoothstep(revealAt - 0.035, revealAt + 0.025, uReveal);
   vFront = exp(-pow((uReveal - revealAt) / 0.045, 2.0));
   float edgeFade = mix(0.18, 1.0, smoothstep(0.08, 0.32, p.x));
-  vAlpha = aAlpha * revealAlpha * edgeFade
+  vAlpha = aAlpha * revealAlpha * edgeFade * smoothstep(0.0, 0.1, aProgress)
     * mix(0.55, 1.0, clamp(aLayer * 0.5, 0.0, 1.0));
   vLayer = aLayer;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, position.z, 1.0);
@@ -413,7 +423,7 @@ varying float vLayer;
 varying float vFront;
 void main() {
   float layer = clamp(vLayer * 0.5, 0.0, 1.0);
-  vec3 base = mix(vec3(0.08, 0.19, 0.31), vec3(0.28, 0.55, 0.78), layer);
+  vec3 base = mix(vec3(0.07, 0.14, 0.22), vec3(0.3, 0.5, 0.67), layer);
   vec3 color = mix(base, vec3(0.8, 0.92, 1.0), vFront * 0.62);
   gl_FragColor = vec4(color, vAlpha * (0.7 + vFront * 0.55));
 }
@@ -427,12 +437,21 @@ function seeded(index: number): number {
 function networkNodePosition(variant: FlowVariant, index: number): readonly [number, number] {
   const hubs = NETWORK_HUBS[variant]
   if (index < 2) return hubs[index]!
-  const hubIndex = index % 3 === 0 ? 0 : 1
-  const hub = hubs[hubIndex]
+  const isCoreCluster = index < 14
+  const hubIndex = networkHubIndex(index)
+  const hub = hubs[hubIndex]!
   const angle = seeded(index + (variant === 'mobile' ? 3101 : 3301)) * Math.PI * 2
-  const radius = 0.025 + Math.pow(seeded(index + 3401), 1.7) * 0.19
+  const radius = isCoreCluster
+    ? 0.005 + seeded(index + 3401) * 0.018
+    : 0.025 + Math.pow(seeded(index + 3401), 1.7) * 0.125
   const xScale = variant === 'mobile' ? 0.62 : 0.78
   return [hub[0] + Math.cos(angle) * radius * xScale, hub[1] + Math.sin(angle) * radius]
+}
+
+function networkHubIndex(index: number): 0 | 1 {
+  if (index < 2) return index as 0 | 1
+  if (index < 14) return ((index - 2) % 2) as 0 | 1
+  return index % 3 === 0 ? 0 : 1
 }
 
 function createDrawRanges(
@@ -582,7 +601,7 @@ export class FlowFieldEngine {
       depthWrite: false,
       fragmentShader: LINE_FRAGMENT_SHADER,
       transparent: true,
-      uniforms: { ...this.uniforms, uOpacity: { value: 0.21 } },
+      uniforms: { ...this.uniforms, uOpacity: { value: 0.235 } },
       vertexShader: LINE_VERTEX_SHADER,
     })
     this.scene.add(new LineSegments(this.segmentGeometry, this.lineMaterial))
@@ -641,12 +660,15 @@ export class FlowFieldEngine {
     let cursor = 0
     for (const variant of ['mobile', 'desktop'] as const) {
       const quality = FLOW_QUALITY[variant]
+      const bundleSize = variant === 'desktop' ? 4 : 3
+      const bundleCount = Math.ceil(quality.filaments / bundleSize)
       for (let filament = 0; filament < quality.filaments; filament += 1) {
-        const evenLane = (filament / (quality.filaments - 1)) * 2 - 1
-        const normalizedLane = Math.max(
-          -1,
-          Math.min(1, evenLane + (seeded(filament + 37) - 0.5) * 0.05),
-        )
+        const bundle = Math.floor(filament / bundleSize)
+        const withinBundle = filament % bundleSize
+        const bundleCenter = (bundle / Math.max(1, bundleCount - 1)) * 2 - 1
+        const intraBundle =
+          (withinBundle - (bundleSize - 1) * 0.5) * 0.075 + (seeded(filament + 37) - 0.5) * 0.035
+        const normalizedLane = Math.max(-1, Math.min(1, bundleCenter + intraBundle))
         const filamentPhase = seeded(filament + 3) * Math.PI * 2
         for (let segment = 0; segment < quality.segments; segment += 1) {
           const before = segment / quality.segments
@@ -711,13 +733,22 @@ export class FlowFieldEngine {
 
     for (const variant of ['mobile', 'desktop'] as const) {
       for (let index = 2; index < NETWORK_NODE_COUNTS[variant]; index += 1) {
-        const hubIndex = index % 3 === 0 ? 0 : 1
+        const hubIndex = networkHubIndex(index)
         const from = networkNodePosition(variant, index)
-        const target = networkNodePosition(variant, hubIndex)
+        const hub = networkNodePosition(variant, hubIndex)
+        const linkAmount = 0.38 + seeded(index + 4001) * 0.32
+        const tangentXToHub = hub[0] - from[0]
+        const tangentYToHub = hub[1] - from[1]
+        const tangentLengthToHub = Math.hypot(tangentXToHub, tangentYToHub) || 1
+        const side = (seeded(index + 4051) - 0.5) * 0.022
+        const target = [
+          from[0] + tangentXToHub * linkAmount - (tangentYToHub / tangentLengthToHub) * side,
+          from[1] + tangentYToHub * linkAmount + (tangentXToHub / tangentLengthToHub) * side,
+        ] as const
         const tangentX = target[0] - from[0]
         const tangentY = target[1] - from[1]
         const tangentLength = Math.hypot(tangentX, tangentY) || 1
-        const edgeAlpha = 0.055 + seeded(index + 4101) * 0.1
+        const edgeAlpha = 0.024 + seeded(index + 4101) * 0.052
         const edgeReveal = 0.32 + seeded(index + 4201) * 0.42
         const edgeSeed = seeded(index + 4301)
 
@@ -788,7 +819,7 @@ export class FlowFieldEngine {
     for (const variant of ['mobile', 'desktop'] as const) {
       const variantCount = BACKGROUND_COUNTS[variant]
       for (let index = 0; index < variantCount; index += 1) {
-        const alongFlow = seeded(index + (variant === 'mobile' ? 1301 : 1701)) < 0.7
+        const alongFlow = seeded(index + (variant === 'mobile' ? 1301 : 1701)) < 0.76
         let x: number
         let y: number
 
@@ -798,7 +829,7 @@ export class FlowFieldEngine {
           x = point.x + (seeded(index + 1901) - 0.5) * (variant === 'mobile' ? 0.38 : 0.22)
           y = point.y + (seeded(index + 2001) - 0.5) * (variant === 'mobile' ? 0.34 : 0.42)
         } else {
-          x = (variant === 'mobile' ? 0.42 : 0.16) + seeded(index + 2101) * 0.92
+          x = (variant === 'mobile' ? 0.42 : 0.34) + seeded(index + 2101) * 0.76
           y = 0.05 + seeded(index + 2201) * 0.9
         }
 
@@ -806,9 +837,25 @@ export class FlowFieldEngine {
         position[cursor * 3 + 1] = y
         position[cursor * 3 + 2] = 0.35
         const depth = seeded(index + 2301)
-        alpha[cursor] = 0.08 + seeded(index + 2401) * 0.28
+        const detailSeed = seeded(index + 2701)
+        const isBokeh = detailSeed > 0.95
+        const isSoft = detailSeed > 0.82 && !isBokeh
+        const isHighlight = detailSeed > 0.72 && !isSoft && !isBokeh
+        alpha[cursor] = isBokeh
+          ? 0.02 + seeded(index + 2401) * 0.06
+          : isSoft
+            ? 0.04 + seeded(index + 2401) * 0.06
+            : isHighlight
+              ? 0.42 + seeded(index + 2401) * 0.38
+              : 0.055 + seeded(index + 2401) * 0.25
         phase[cursor] = seeded(index + 2501) * Math.PI * 2
-        size[cursor] = 0.8 + seeded(index + 2601) * 1.9 + Math.pow(depth, 8) * 18
+        size[cursor] = isBokeh
+          ? 45 + seeded(index + 2601) * 45
+          : isSoft
+            ? 12 + seeded(index + 2601) * 23
+            : isHighlight
+              ? 1.5 + seeded(index + 2601) * 2.5
+              : 0.8 + seeded(index + 2601) * 3.4 + Math.pow(depth, 9) * 5
         cursor += 1
       }
     }
@@ -834,13 +881,22 @@ export class FlowFieldEngine {
       const variantCount = NETWORK_NODE_COUNTS[variant]
       for (let index = 0; index < variantCount; index += 1) {
         const point = networkNodePosition(variant, index)
-        const isCore = index < 2
+        const isHub = index < 2
+        const isCore = index < 14
         position[cursor * 3] = point[0]
         position[cursor * 3 + 1] = point[1]
         position[cursor * 3 + 2] = -0.04
-        alpha[cursor] = isCore ? 1 : 0.22 + seeded(index + 3501) * 0.46
+        alpha[cursor] = isCore
+          ? 0.7 + seeded(index + 3501) * 0.3
+          : 0.18 + seeded(index + 3501) * 0.42
         phase[cursor] = seeded(index + 3601) * Math.PI * 2
-        size[cursor] = isCore ? (index === 0 ? 8 : 9.5) : 1.4 + seeded(index + 3701) * 3.4
+        size[cursor] = isHub
+          ? index === 0
+            ? 10.5
+            : 12
+          : isCore
+            ? 2.2 + seeded(index + 3701) * 3.6
+            : 1.2 + seeded(index + 3701) * 3.2
         cursor += 1
       }
     }

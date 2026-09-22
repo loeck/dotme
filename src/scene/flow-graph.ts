@@ -43,20 +43,20 @@ type AttributeLists = {
 
 const DESKTOP_LAYOUT: GraphLayout = {
   hubA: { x: 0.46, y: 0.62 },
-  hubB: { x: 0.72, y: 0.335 },
+  hubB: { x: 0.738, y: 0.335 },
   inputs: [
-    { x: -0.1, y: 0.91 },
-    { x: -0.04, y: 0.78 },
-    { x: 0.02, y: 0.69 },
-    { x: 0.12, y: 0.76 },
-    { x: 0.18, y: 0.88 },
+    { x: 0.1, y: 0.545 },
+    { x: 0.12, y: 0.565 },
+    { x: 0.14, y: 0.59 },
+    { x: 0.16, y: 0.615 },
+    { x: 0.18, y: 0.635 },
   ],
   outputs: [
-    { x: 1.12, y: 0.15 },
-    { x: 1.15, y: 0.28 },
-    { x: 1.13, y: 0.43 },
-    { x: 1.1, y: 0.59 },
-    { x: 1.04, y: 0.73 },
+    { x: 1.1, y: 0.11 },
+    { x: 1.13, y: 0.2 },
+    { x: 1.12, y: 0.3 },
+    { x: 1.1, y: 0.4 },
+    { x: 1.06, y: 0.51 },
   ],
 }
 
@@ -153,18 +153,18 @@ function sampleRoute(route: Route): Point[] {
 }
 
 function makePrimaryRoutes(layout: GraphLayout, variant: FlowVariant, startSeed: number): Route[] {
-  const count = variant === 'desktop' ? 24 : 14
+  const count = variant === 'desktop' ? 12 : 9
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 13
     const input = layout.inputs[index % layout.inputs.length]!
     const output = layout.outputs[(index * 3) % layout.outputs.length]!
-    const drift = signedRandom(seed + 2) * (variant === 'desktop' ? 0.08 : 0.055)
-    const hubA = jitter(layout.hubA, seed + 3, 0.016)
-    const hubB = jitter(layout.hubB, seed + 5, 0.018)
+    const drift = signedRandom(seed + 2) * (variant === 'desktop' ? 0.045 : 0.055)
+    const hubA = jitter(layout.hubA, seed + 3, 0.012)
+    const hubB = jitter(layout.hubB, seed + 5, 0.025)
     return {
-      alpha: 0.15 + random(seed + 7) * 0.16,
+      alpha: 0.09 + random(seed + 7) * 0.12,
       anchors: [
-        jitter(input, seed, 0.045),
+        jitter(input, seed, variant === 'desktop' ? 0.025 : 0.045),
         midpoint(input, hubA, 0.5, drift),
         hubA,
         midpoint(hubA, hubB, 0.5, -drift * 0.45),
@@ -174,7 +174,7 @@ function makePrimaryRoutes(layout: GraphLayout, variant: FlowVariant, startSeed:
       ],
       layer: 2,
       reveal: 0.04 + random(seed + 11) * 0.1,
-      samplesPerSection: variant === 'desktop' ? 8 : 7,
+      samplesPerSection: variant === 'desktop' ? 9 : 7,
       seed: random(seed + 12),
     }
   })
@@ -185,12 +185,12 @@ function makeTributaryRoutes(
   variant: FlowVariant,
   startSeed: number,
 ): Route[] {
-  const count = variant === 'desktop' ? 15 : 9
+  const count = variant === 'desktop' ? 12 : 7
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 17
     const input = layout.inputs[(index + 2) % layout.inputs.length]!
-    const hubA = jitter(layout.hubA, seed + 3, 0.035)
-    const hubB = jitter(layout.hubB, seed + 5, 0.028)
+    const hubA = jitter(layout.hubA, seed + 3, 0.026)
+    const hubB = jitter(layout.hubB, seed + 5, 0.04)
     const direction = index % 3
     const exit =
       direction === 0
@@ -199,12 +199,12 @@ function makeTributaryRoutes(
           ? point(hubB.x + 0.28, hubB.y + 0.05)
           : point(hubB.x + 0.17, hubB.y + 0.2)
     return {
-      alpha: 0.08 + random(seed + 7) * 0.13,
+      alpha: 0.045 + random(seed + 7) * 0.075,
       anchors: [
-        jitter(input, seed, 0.07),
-        midpoint(input, hubA, 0.6, signedRandom(seed + 1) * 0.11),
+        jitter(input, seed, variant === 'desktop' ? 0.035 : 0.07),
+        midpoint(input, hubA, 0.6, signedRandom(seed + 1) * 0.075),
         hubA,
-        midpoint(hubA, hubB, 0.58, signedRandom(seed + 2) * 0.055),
+        midpoint(hubA, hubB, 0.58, signedRandom(seed + 2) * 0.045),
         hubB,
         jitter(exit, seed + 9, 0.07),
       ],
@@ -217,19 +217,16 @@ function makeTributaryRoutes(
 }
 
 function makeExitRoutes(layout: GraphLayout, variant: FlowVariant, startSeed: number): Route[] {
-  const count = variant === 'desktop' ? 14 : 8
+  const count = variant === 'desktop' ? 12 : 7
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 19
     const output = layout.outputs[index % layout.outputs.length]!
-    const hubB = jitter(layout.hubB, seed + 1, 0.035)
-    const branch = midpoint(hubB, output, 0.36, signedRandom(seed + 3) * 0.1)
+    const hubB = jitter(layout.hubB, seed + 1, 0.045)
+    const branch = midpoint(hubB, output, 0.36, signedRandom(seed + 3) * 0.075)
     return {
-      alpha: 0.06 + random(seed + 4) * 0.13,
+      alpha: 0.04 + random(seed + 4) * 0.085,
       anchors: [
-        point(
-          layout.hubA.x + signedRandom(seed) * 0.06,
-          layout.hubA.y + signedRandom(seed + 2) * 0.06,
-        ),
+        point(layout.hubB.x - 0.1, layout.hubB.y + signedRandom(seed + 2) * 0.075),
         hubB,
         branch,
         jitter(output, seed + 5, 0.075),
@@ -247,7 +244,7 @@ function makeBackgroundRoutes(
   variant: FlowVariant,
   startSeed: number,
 ): Route[] {
-  const count = variant === 'desktop' ? 11 : 7
+  const count = variant === 'desktop' ? 3 : 5
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 23
     const input = layout.inputs[index % layout.inputs.length]!
@@ -262,7 +259,7 @@ function makeBackgroundRoutes(
       mix(layout.hubB.y, output.y, 0.38) + (upper ? -0.13 : 0.13) + signedRandom(seed + 1) * 0.04,
     )
     return {
-      alpha: 0.025 + random(seed + 2) * 0.065,
+      alpha: 0.012 + random(seed + 2) * 0.024,
       anchors: [jitter(input, seed + 3, 0.09), sideA, sideB, jitter(output, seed + 4, 0.09)],
       layer: 0,
       reveal: 0.18 + random(seed + 5) * 0.3,
@@ -273,18 +270,18 @@ function makeBackgroundRoutes(
 }
 
 function makeNetworkRoutes(layout: GraphLayout, variant: FlowVariant, startSeed: number): Route[] {
-  const count = variant === 'desktop' ? 18 : 10
+  const count = variant === 'desktop' ? 44 : 8
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 29
     const hub = index % 3 === 0 ? layout.hubB : layout.hubA
-    const radius = 0.045 + random(seed) * 0.09
+    const radius = 0.025 + random(seed) * 0.085
     const angleA = random(seed + 1) * Math.PI * 2
     const angleB = angleA + 0.45 + random(seed + 2) * 1.4
     const from = point(hub.x + Math.cos(angleA) * radius, hub.y + Math.sin(angleA) * radius)
     const to = point(hub.x + Math.cos(angleB) * radius, hub.y + Math.sin(angleB) * radius)
     const middle = midpoint(from, to, 0.5, signedRandom(seed + 3) * 0.025)
     return {
-      alpha: 0.035 + random(seed + 4) * 0.07,
+      alpha: 0.03 + random(seed + 4) * 0.045,
       anchors: [from, middle, to],
       layer: 0,
       reveal: 0.36 + random(seed + 5) * 0.25,

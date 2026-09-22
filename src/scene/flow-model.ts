@@ -20,22 +20,22 @@ export const FLOW_BREAKS = [0.42, 0.7] as const
 export const FLOW_PATHS: Record<FlowVariant, FlowPath> = {
   desktop: [
     {
-      start: { x: -0.08, y: 0.82 },
-      controlA: { x: 0.13, y: 0.77 },
-      controlB: { x: 0.34, y: 0.7 },
+      start: { x: 0.08, y: 0.59 },
+      controlA: { x: 0.22, y: 0.57 },
+      controlB: { x: 0.38, y: 0.6 },
       end: { x: 0.46, y: 0.62 },
     },
     {
       start: { x: 0.46, y: 0.62 },
-      controlA: { x: 0.56, y: 0.553 },
-      controlB: { x: 0.63, y: 0.45 },
-      end: { x: 0.71, y: 0.355 },
+      controlA: { x: 0.56, y: 0.6 },
+      controlB: { x: 0.66, y: 0.42 },
+      end: { x: 0.738, y: 0.335 },
     },
     {
-      start: { x: 0.71, y: 0.355 },
-      controlA: { x: 0.8, y: 0.25 },
-      controlB: { x: 0.96, y: 0.22 },
-      end: { x: 1.12, y: 0.31 },
+      start: { x: 0.738, y: 0.335 },
+      controlA: { x: 0.82, y: 0.28 },
+      controlB: { x: 0.95, y: 0.18 },
+      end: { x: 1.1, y: 0.2 },
     },
   ],
   mobile: [
@@ -62,9 +62,9 @@ export const FLOW_PATHS: Record<FlowVariant, FlowPath> = {
 
 export const FLOW_QUALITY = {
   desktop: {
-    filaments: 36,
+    filaments: 38,
     segments: 128,
-    particles: 260,
+    particles: 250,
     maxPixelRatio: 1.5,
   },
   mobile: {

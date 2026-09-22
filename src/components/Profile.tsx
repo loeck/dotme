@@ -44,25 +44,28 @@ export function Profile() {
       className="relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
       aria-labelledby="profile-title"
     >
-      <p className="m-0 text-xs tracking-[0.025em] text-[#8a919a]">{'//loeck.me'}</p>
-      <span className="block h-6 leading-5 text-[#8a919a]" aria-hidden="true">
+      <p className="m-0 text-[0.8rem] tracking-[0.025em] text-[#8a919a]">{'//loeck.me'}</p>
+      <span className="mt-2 block h-8 leading-5 text-[#8a919a]" aria-hidden="true">
         _
       </span>
 
       <h1
         id="profile-title"
-        className="mt-0 mb-2 text-[clamp(1.15rem,1.5vw,1.35rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[#e4e8ed]"
+        className="mt-0 mb-2 text-[clamp(1.2rem,1.58vw,1.42rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[#e4e8ed]"
       >
         Hi, I’m Loëck.
       </h1>
-      <p className="m-0 text-xs text-[#8a919a]">Building some stuff in Paris.</p>
+      <div className="text-[0.8rem] leading-5 text-[#8a919a]">
+        <p className="m-0">Building some stuff in Paris.</p>
+        <p className="m-0">Mostly interfaces. Occasionally noise.</p>
+      </div>
 
-      <span className="block h-9 leading-8 text-[#8a919a]" aria-hidden="true">
+      <span className="block h-[3.75rem] leading-[3rem] text-[#8a919a]" aria-hidden="true">
         _
       </span>
 
       <nav
-        className="flex items-center gap-4 text-xs text-[#8a919a] max-sm:gap-2 max-sm:text-[0.7rem]"
+        className="flex items-center gap-4 text-[0.76rem] text-[#8a919a] max-sm:gap-2 max-sm:text-[0.7rem]"
         aria-label="Social links"
       >
         <a
