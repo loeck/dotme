@@ -1,4 +1,5 @@
 import {
+  ACESFilmicToneMapping,
   AdditiveBlending,
   BufferAttribute,
   BufferGeometry,
@@ -7,12 +8,24 @@ import {
   Points,
   Scene,
   ShaderMaterial,
+  Vector2,
   WebGLRenderer,
 } from 'three'
 import type { IUniform } from 'three'
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js'
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js'
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js'
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 
 import { createFlowGraphData } from './flow-graph'
-import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY, pathPoint } from './flow-model'
+import {
+  FLOW_BREAKS,
+  FLOW_PATHS,
+  FLOW_QUALITY,
+  TRANSMISSION_DURATION,
+  nearestPathProgress,
+  pathPoint,
+} from './flow-model'
 import type { FlowPath, FlowVariant } from './flow-model'
 
 export type FlowFieldEngineOptions = Readonly<{
@@ -56,6 +69,8 @@ type FlowUniforms = {
   uNodeB: Uniform
   uPixelRatio: Uniform
   uPointer: Uniform
+  uPointerEnergy: Uniform
+  uPointerVelocity: Uniform
   uPulseA: Uniform
   uPulseB: Uniform
   uPulseC: Uniform
@@ -63,11 +78,16 @@ type FlowUniforms = {
   uReveal: Uniform
   uStart: Uniform
   uTime: Uniform
+  uTransmission: Uniform
 }
 
 type DrawRange = Readonly<{ count: number; start: number }>
 
 const QUALITY_REDUCTION = 0.72
+const TRAIL_COUNTS = { desktop: 42, mobile: 22 } as const
+const TRAIL_SEGMENTS = { desktop: 8, mobile: 6 } as const
+const PULSE_BEADS_PER_WAVE = 8
+const PULSE_WAVE_COUNT = 4
 
 const SEGMENT_RANGES = createDrawRanges((variant) => {
   const quality = FLOW_QUALITY[variant]
@@ -75,6 +95,7 @@ const SEGMENT_RANGES = createDrawRanges((variant) => {
 })
 
 const PARTICLE_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].particles)
+const TRAIL_RANGES = createDrawRanges((variant) => TRAIL_COUNTS[variant] * TRAIL_SEGMENTS[variant])
 
 const BACKGROUND_COUNTS = { desktop: 178, mobile: 58 } as const
 const BACKGROUND_RANGES = createDrawRanges((variant) => BACKGROUND_COUNTS[variant])
@@ -112,11 +133,14 @@ uniform vec2 uExitA;
 uniform vec2 uExitB;
 uniform vec2 uEnd;
 uniform vec2 uPointer;
+uniform vec2 uPointerVelocity;
 uniform vec2 uDrag;
 uniform vec2 uDragOffset;
 uniform float uAspect;
+uniform float uPointerEnergy;
 uniform float uReveal;
 uniform float uTime;
+uniform float uTransmission;
 uniform vec3 uPulseA;
 uniform vec3 uPulseB;
 uniform vec3 uPulseC;
@@ -177,22 +201,31 @@ float fieldDistance(vec2 delta) {
 
 float revealTime(float t) {
   if (t < ${FLOW_BREAKS[0].toFixed(2)}) {
-    return mix(0.42, 0.08, t / ${FLOW_BREAKS[0].toFixed(2)});
+    return mix(0.08, 0.28, t / ${FLOW_BREAKS[0].toFixed(2)});
   }
   if (t < ${FLOW_BREAKS[1].toFixed(2)}) {
-    return mix(0.08, 0.56,
+    return mix(0.28, 0.54,
       (t - ${FLOW_BREAKS[0].toFixed(2)}) / ${(FLOW_BREAKS[1] - FLOW_BREAKS[0]).toFixed(2)});
   }
-  return mix(0.56, 0.94,
+  return mix(0.54, 0.92,
     (t - ${FLOW_BREAKS[1].toFixed(2)}) / ${(1 - FLOW_BREAKS[1]).toFixed(2)});
 }
 
-vec2 force(vec2 position, vec2 source, float amount) {
-  vec2 delta = position - source;
+vec2 lens(vec2 position, float layer) {
+  if (uPointerEnergy < 0.001) return vec2(0.0);
+  vec2 delta = position - uPointer;
   vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
-  float reach = 1.0 - smoothstep(0.0, 0.36, length(screenDelta));
+  float distance = length(screenDelta);
+  float reach = 1.0 - smoothstep(0.025, 0.2, distance);
   vec2 direction = normalize(screenDelta + vec2(0.0001));
-  return vec2(direction.x / uAspect, direction.y) * reach * amount;
+  vec2 tangentDirection = vec2(-direction.y / uAspect, direction.x);
+  vec2 radial = vec2(direction.x / uAspect, direction.y)
+    * reach * (0.012 + uPointerEnergy * 0.018) * layer;
+  float velocityAlong = dot(uPointerVelocity, tangentDirection);
+  float velocityDirection = sign(velocityAlong) * smoothstep(0.01, 0.08, abs(velocityAlong));
+  vec2 twist = tangentDirection * reach * reach * uPointerEnergy
+    * (0.007 + length(uPointerVelocity) * 0.025) * velocityDirection * layer;
+  return radial + twist;
 }
 
 vec2 pull(vec2 position, vec2 source, vec2 offset) {
@@ -200,10 +233,13 @@ vec2 pull(vec2 position, vec2 source, vec2 offset) {
   return offset * reach * 0.78;
 }
 
-float pulse(vec2 position, vec3 pulseData) {
-  float age = uTime - pulseData.z;
-  return exp(-pow((fieldDistance(position - pulseData.xy) - age * 0.38) * 34.0, 2.0))
-    * step(0.0, age) * step(age, 2.2);
+float pathPulse(float t, vec3 pulseData) {
+  float age = uTime - pulseData.y;
+  float center = pulseData.x + age * 0.34;
+  float head = exp(-pow((t - center) * 38.0, 2.0));
+  float wake = exp(-pow((t - center + 0.038) * 17.0, 2.0)) * 0.34;
+  return (head + wake) * pulseData.z * step(0.0, age) * step(age, 1.0)
+    * step(center, 1.08);
 }
 `
 
@@ -233,22 +269,25 @@ void main() {
     * (exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.06, 2.0))
       + exp(-pow((aT - ${FLOW_BREAKS[1].toFixed(2)}) / 0.055, 2.0)));
   float exitVariation = lineSeed * 0.038 * smoothstep(${FLOW_BREAKS[1].toFixed(2)}, 1.0, aT);
+  float foreground = step(0.8, fract(sin(aPhase * 43.17) * 43758.5453));
   p += normal * (aLane * envelope(aT) * widthVariation + ripple + slowDrift * nodeCalm + weave
     + nodeVariation + exitVariation);
   p += normal * sin(aT * 8.0 + aPhase + uTime * 0.2) * 0.0055;
-  p += force(p, uPointer, 0.028);
+  p += lens(p, 0.82 + foreground * 0.32);
   p += pull(p, uDrag, uDragOffset);
-  float pulseRing = pulse(p, uPulseA) + pulse(p, uPulseB) + pulse(p, uPulseC)
-    + pulse(p, uPulseD);
+  float pulseRing = pathPulse(aT, uPulseA) + pathPulse(aT, uPulseB)
+    + pathPulse(aT, uPulseC) + pathPulse(aT, uPulseD);
+  float pulseMask = step(0.79, fract(sin(aPhase * 67.13) * 43758.5453));
+  pulseRing *= pulseMask * 1.28;
   float nodeLight = exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.012, 2.0)) * 0.9
     + exp(-pow((aT - ${FLOW_BREAKS[1].toFixed(2)}) / 0.011, 2.0)) * 1.05;
   float revealAt = revealTime(aT);
   float startAt = fract(sin(aPhase * 17.31) * 43758.5453) * 0.12;
-  float foreground = step(0.8, fract(sin(aPhase * 43.17) * 43758.5453));
-  float revealFront = exp(-pow((uReveal - revealAt) / 0.032, 2.0));
-  float ignition = exp(-pow((uReveal - 0.09) / 0.055, 2.0))
+  float revealFront = exp(-pow((uTransmission - revealAt) / 0.026, 2.0));
+  float ignition = exp(-pow((uTransmission - 0.28) / 0.032, 2.0))
     * exp(-pow((aT - ${FLOW_BREAKS[0].toFixed(2)}) / 0.018, 2.0));
-  vReveal = smoothstep(revealAt - 0.025, revealAt + 0.018, uReveal)
+  vReveal = smoothstep(revealAt - 0.025, revealAt + 0.018, uTransmission)
+    * smoothstep(0.0, 0.7, uReveal)
     * mix(0.2, 1.0, smoothstep(0.0, 0.24, p.x))
     * smoothstep(startAt, startAt + 0.075, aT);
   vIntensity = 0.18 + 0.34 * (sin(aPhase * 5.1 + aT * 18.0) * 0.5 + 0.5)
@@ -305,13 +344,14 @@ void main() {
     + sin(t * 11.2 + aPhase) * 0.007 + slowDrift * nodeCalm
     + nodeVariation + exitVariation);
   p += normal * sin(t * 8.0 + aPhase + uTime * 0.2) * 0.0055;
-  p += force(p, uPointer, 0.028);
+  p += lens(p, mix(0.55, 1.15, aDepth));
   p += pull(p, uDrag, uDragOffset);
-  float pulseRing = pulse(p, uPulseA) + pulse(p, uPulseB) + pulse(p, uPulseC)
-    + pulse(p, uPulseD);
+  float pulseRing = pathPulse(t, uPulseA) + pathPulse(t, uPulseB)
+    + pathPulse(t, uPulseC) + pathPulse(t, uPulseD);
   vDepth = aDepth;
   float revealAt = revealTime(t);
-  vReveal = smoothstep(revealAt + 0.035, revealAt + 0.11, uReveal);
+  vReveal = smoothstep(revealAt + 0.018, revealAt + 0.085, uTransmission)
+    * smoothstep(0.05, 0.75, uReveal);
   vAlpha = 0.24 + fract(sin(aPhase * 91.73) * 43758.5453) * 0.58 + pulseRing;
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.05 + aDepth * 0.12, 1.0);
   gl_PointSize = (1.05 + vAlpha * 1.8 + pow(aDepth, 9.0) * 7.0) * uPixelRatio;
@@ -330,6 +370,151 @@ void main() {
 }
 `
 
+const TRAIL_VERTEX_SHADER = `
+attribute float aT;
+attribute float aLane;
+attribute float aPhase;
+attribute float aSpeed;
+attribute float aDepth;
+attribute float aTrail;
+uniform float uPixelRatio;
+${FLOW_VERTEX_COMMON}
+varying float vAlpha;
+varying float vHeat;
+
+void main() {
+  float trailLength = 0.022 + fract(sin(aPhase * 81.13) * 43758.5453) * 0.025;
+  float t = fract(aT + uTime * aSpeed - aTrail * trailLength);
+  vec2 p = curve(t);
+  vec2 normal = screenNormal(t);
+  float seed = fract(sin(aPhase * 53.17) * 43758.5453) - 0.5;
+  float spread = 1.0 + pow(aDepth, 5.0) * 0.7;
+  p += normal * (
+    aLane * envelope(t) * spread
+    + sin(t * 10.4 + aPhase + uTime * 0.18) * 0.006
+    + seed * 0.012 * pow(sin(3.14159265 * t), 1.6)
+  );
+  p += lens(p, mix(0.7, 1.2, aDepth));
+  p += pull(p, uDrag, uDragOffset);
+  float revealAt = revealTime(t);
+  float visible = smoothstep(revealAt + 0.01, revealAt + 0.08, uTransmission)
+    * smoothstep(0.05, 0.7, uReveal);
+  float pulseLight = pathPulse(t, uPulseA) + pathPulse(t, uPulseB)
+    + pathPulse(t, uPulseC) + pathPulse(t, uPulseD);
+  float tail = pow(1.0 - aTrail, 1.8);
+  vHeat = clamp(tail + pulseLight, 0.0, 1.6);
+  vAlpha = visible * tail * (0.3 + aDepth * 0.55 + pulseLight * 0.8);
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.08 + aDepth * 0.08, 1.0);
+  gl_PointSize = (1.4 + tail * 3.2 + pulseLight * 2.4) * uPixelRatio;
+}
+`
+
+const TRAIL_FRAGMENT_SHADER = `
+varying float vAlpha;
+varying float vHeat;
+void main() {
+  float radius = length(gl_PointCoord - vec2(0.5));
+  float core = smoothstep(0.42, 0.0, radius);
+  float halo = exp(-radius * radius * 13.0);
+  vec3 cold = vec3(0.48, 0.72, 0.94);
+  vec3 hot = vec3(1.0, 0.94, 0.82);
+  vec3 color = mix(cold, hot, smoothstep(0.72, 1.35, vHeat));
+  gl_FragColor = vec4(color, (core * 0.72 + halo * 0.28) * vAlpha);
+}
+`
+
+const PULSE_BEAD_VERTEX_SHADER = `
+attribute float aLane;
+attribute float aOffset;
+attribute float aSeed;
+attribute float aSlot;
+uniform float uPixelRatio;
+${FLOW_VERTEX_COMMON}
+varying float vAlpha;
+varying float vSeed;
+
+vec3 pulseForSlot(float slot) {
+  if (slot < 0.5) return uPulseA;
+  if (slot < 1.5) return uPulseB;
+  if (slot < 2.5) return uPulseC;
+  return uPulseD;
+}
+
+void main() {
+  vec3 pulse = pulseForSlot(aSlot);
+  float age = uTime - pulse.y;
+  float t = pulse.x + age * 0.34 + aOffset;
+  vec2 p = curve(clamp(t, 0.0, 1.0));
+  vec2 normal = screenNormal(clamp(t, 0.0, 1.0));
+  p += normal * aLane * (0.006 + envelope(clamp(t, 0.0, 1.0)) * 0.08);
+  p += lens(p, 1.05);
+  float alive = step(0.0, age) * step(age, 1.0) * step(t, 1.025);
+  float fade = 1.0 - smoothstep(0.64, 1.0, age);
+  vAlpha = alive * fade * pulse.z;
+  vSeed = aSeed;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, -0.24, 1.0);
+  gl_PointSize = (2.15 + aSeed * 1.7) * uPixelRatio;
+}
+`
+
+const PULSE_BEAD_FRAGMENT_SHADER = `
+varying float vAlpha;
+varying float vSeed;
+void main() {
+  float radius = length(gl_PointCoord - vec2(0.5));
+  float core = smoothstep(0.34, 0.0, radius);
+  float halo = exp(-radius * radius * 16.0);
+  vec3 color = mix(vec3(0.46, 0.75, 1.08), vec3(0.92, 0.98, 1.12), vSeed);
+  gl_FragColor = vec4(color * 1.42, (core * 0.78 + halo * 0.22) * vAlpha);
+}
+`
+
+const TRANSMISSION_HEAD_VERTEX_SHADER = `
+uniform float uPixelRatio;
+${FLOW_VERTEX_COMMON}
+varying float vAlpha;
+varying float vHeat;
+
+float transmissionProgress(float progress) {
+  if (progress < 0.28) {
+    return clamp((progress - 0.08) / 0.2, 0.0, 1.0) * ${FLOW_BREAKS[0].toFixed(2)};
+  }
+  if (progress < 0.54) {
+    return ${FLOW_BREAKS[0].toFixed(2)}
+      + clamp((progress - 0.28) / 0.26, 0.0, 1.0)
+        * ${(FLOW_BREAKS[1] - FLOW_BREAKS[0]).toFixed(2)};
+  }
+  return ${FLOW_BREAKS[1].toFixed(2)}
+    + clamp((progress - 0.54) / 0.38, 0.0, 1.0)
+      * ${(1 - FLOW_BREAKS[1]).toFixed(2)};
+}
+
+void main() {
+  float t = transmissionProgress(uTransmission);
+  vec2 p = curve(t);
+  float hubA = exp(-pow((uTransmission - 0.28) / 0.022, 2.0));
+  float hubB = exp(-pow((uTransmission - 0.54) / 0.022, 2.0));
+  float alive = smoothstep(0.06, 0.1, uTransmission)
+    * (1.0 - smoothstep(0.92, 0.98, uTransmission));
+  vHeat = max(hubA, hubB);
+  vAlpha = alive * (0.78 + vHeat * 0.35);
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, -0.2, 1.0);
+  gl_PointSize = (5.0 + vHeat * 6.0) * uPixelRatio;
+}
+`
+
+const TRANSMISSION_HEAD_FRAGMENT_SHADER = `
+varying float vAlpha;
+varying float vHeat;
+void main() {
+  float radius = length(gl_PointCoord - vec2(0.5));
+  float core = smoothstep(0.2, 0.0, radius);
+  float halo = exp(-radius * radius * 10.0);
+  vec3 color = mix(vec3(0.72, 0.9, 1.18), vec3(0.94, 0.99, 1.08), vHeat);
+  gl_FragColor = vec4(color * (1.15 + vHeat * 0.7), (core * 0.68 + halo * 0.32) * vAlpha);
+}
+`
+
 const BACKGROUND_VERTEX_SHADER = `
 attribute float aAlpha;
 attribute float aPhase;
@@ -339,6 +524,8 @@ uniform float uPixelRatio;
 uniform float uReveal;
 uniform float uTime;
 uniform vec2 uPointer;
+uniform vec2 uPointerVelocity;
+uniform float uPointerEnergy;
 varying float vAlpha;
 
 void main() {
@@ -352,9 +539,13 @@ void main() {
   p += drift;
   vec2 delta = p - uPointer;
   vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
-  float reach = 1.0 - smoothstep(0.0, 0.28, length(screenDelta));
+  float reach = (1.0 - smoothstep(0.025, 0.22, length(screenDelta))) * uPointerEnergy;
   vec2 direction = normalize(screenDelta + vec2(0.0001));
-  p += vec2(direction.x / uAspect, direction.y) * reach * 0.009;
+  vec2 tangentDirection = vec2(-direction.y / uAspect, direction.x);
+  p += vec2(direction.x / uAspect, direction.y) * reach * 0.005;
+  float velocityAlong = dot(uPointerVelocity, tangentDirection);
+  p += tangentDirection * reach * reach * sign(velocityAlong)
+    * smoothstep(0.01, 0.08, abs(velocityAlong)) * length(uPointerVelocity) * 0.008;
   float breathe = 0.82 + sin(uTime * speed * 1.4 + aPhase * 2.1) * 0.18;
   vAlpha = aAlpha * breathe * smoothstep(0.28, 0.86, uReveal);
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.35, 1.0);
@@ -373,6 +564,63 @@ void main() {
 }
 `
 
+const NODE_VERTEX_SHADER = `
+attribute float aAlpha;
+attribute float aPhase;
+attribute float aSize;
+attribute float aReveal;
+uniform float uAspect;
+uniform float uPixelRatio;
+uniform float uReveal;
+uniform float uTime;
+uniform float uTransmission;
+uniform vec2 uPointer;
+uniform vec2 uPointerVelocity;
+uniform float uPointerEnergy;
+varying float vAlpha;
+varying float vFlash;
+varying float vHub;
+
+void main() {
+  vec2 p = position.xy;
+  vec2 delta = p - uPointer;
+  vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
+  float reach = (1.0 - smoothstep(0.025, 0.21, length(screenDelta))) * uPointerEnergy;
+  vec2 direction = normalize(screenDelta + vec2(0.0001));
+  vec2 tangentDirection = vec2(-direction.y / uAspect, direction.x);
+  p += vec2(direction.x / uAspect, direction.y) * reach * 0.012;
+  float velocityAlong = dot(uPointerVelocity, tangentDirection);
+  p += tangentDirection * reach * reach * sign(velocityAlong)
+    * smoothstep(0.01, 0.08, abs(velocityAlong)) * length(uPointerVelocity) * 0.014;
+
+  float flash = exp(-pow((uTransmission - aReveal) / 0.026, 2.0));
+  float visible = smoothstep(aReveal - 0.04, aReveal + 0.025, uTransmission)
+    * smoothstep(0.0, 0.65, uReveal);
+  float breathe = 0.92 + sin(uTime * 0.7 + aPhase) * 0.08;
+  vFlash = flash;
+  vHub = step(8.0, aSize);
+  vAlpha = aAlpha * visible * breathe * (0.7 + flash * 0.75);
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, position.z, 1.0);
+  gl_PointSize = aSize * (1.0 + flash * 0.55) * uPixelRatio;
+}
+`
+
+const NODE_FRAGMENT_SHADER = `
+varying float vAlpha;
+varying float vFlash;
+varying float vHub;
+void main() {
+  float radius = length(gl_PointCoord - vec2(0.5));
+  float core = smoothstep(0.24, 0.0, radius);
+  float glow = exp(-radius * radius * 9.0);
+  vec3 cold = vec3(0.58, 0.78, 0.96);
+  vec3 hot = vec3(0.9, 0.97, 1.08);
+  vec3 color = mix(cold, hot, smoothstep(0.22, 1.0, vFlash));
+  float luminance = 1.0 + vHub * (0.9 + vFlash * 0.9) + vFlash * 0.25;
+  gl_FragColor = vec4(color * luminance, (core * 0.68 + glow * 0.32) * vAlpha);
+}
+`
+
 const GRAPH_VERTEX_SHADER = `
 attribute vec2 aNormal;
 attribute float aProgress;
@@ -383,7 +631,10 @@ attribute float aSeed;
 uniform float uAspect;
 uniform float uReveal;
 uniform float uTime;
+uniform float uTransmission;
 uniform vec2 uPointer;
+uniform vec2 uPointerVelocity;
+uniform float uPointerEnergy;
 uniform vec2 uDrag;
 uniform vec2 uDragOffset;
 uniform vec2 uNodeA;
@@ -395,12 +646,16 @@ float fieldDistance(vec2 delta) {
   return length(vec2(delta.x * uAspect, delta.y));
 }
 
-vec2 force(vec2 position, vec2 source, float amount) {
-  vec2 delta = position - source;
+vec2 lens(vec2 position, float layer) {
+  vec2 delta = position - uPointer;
   vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
-  float reach = 1.0 - smoothstep(0.0, 0.38, length(screenDelta));
+  float reach = (1.0 - smoothstep(0.035, 0.31, length(screenDelta))) * uPointerEnergy;
   vec2 direction = normalize(screenDelta + vec2(0.0001));
-  return vec2(direction.x / uAspect, direction.y) * reach * amount;
+  vec2 tangentDirection = vec2(-direction.y / uAspect, direction.x);
+  return vec2(direction.x / uAspect, direction.y) * reach * 0.015 * layer
+    + tangentDirection * reach * reach * sign(dot(uPointerVelocity, tangentDirection))
+      * smoothstep(0.01, 0.08, abs(dot(uPointerVelocity, tangentDirection)))
+      * length(uPointerVelocity) * 0.018 * layer;
 }
 
 void main() {
@@ -410,12 +665,13 @@ void main() {
   float depthMotion = mix(0.006, 0.002, clamp(aLayer * 0.5, 0.0, 1.0));
   p += normal * sin(aProgress * (13.0 + aSeed * 9.0) + aSeed * 31.0 + uTime * 0.16)
     * depthMotion;
-  p += force(p, uPointer, 0.018);
+  p += lens(p, mix(0.48, 0.92, clamp(aLayer * 0.5, 0.0, 1.0)));
   float dragReach = 1.0 - smoothstep(0.0, 0.44, fieldDistance(p - uDrag));
   p += uDragOffset * dragReach * 0.64;
-  float revealAt = 0.08 + fieldDistance(p - uNodeA) * 0.72 + aSeed * 0.025 + aReveal * 0.02;
-  float revealAlpha = smoothstep(revealAt - 0.035, revealAt + 0.025, uReveal);
-  vFront = exp(-pow((uReveal - revealAt) / 0.045, 2.0));
+  float revealAt = 0.11 + fieldDistance(p - uNodeA) * 0.72 + aSeed * 0.025 + aReveal * 0.02;
+  float revealAlpha = smoothstep(revealAt - 0.035, revealAt + 0.025, uTransmission)
+    * smoothstep(0.0, 0.75, uReveal);
+  vFront = exp(-pow((uTransmission - revealAt) / 0.038, 2.0));
   float edgeFade = mix(0.18, 1.0, smoothstep(0.08, 0.32, p.x));
   vAlpha = aAlpha * revealAlpha * edgeFade * smoothstep(0.0, 0.1, aProgress)
     * mix(0.55, 1.0, clamp(aLayer * 0.5, 0.0, 1.0));
@@ -500,9 +756,11 @@ export class FlowFieldEngine {
   private animationFrame = 0
   private backgroundGeometry: BufferGeometry
   private backgroundMaterial: ShaderMaterial
+  private bloomPass: UnrealBloomPass
   private camera: OrthographicCamera
   private canvas: HTMLCanvasElement
   private container: HTMLDivElement
+  private composer: EffectComposer
   private contextLost = false
   private disposed = false
   private firstFrame = true
@@ -519,12 +777,24 @@ export class FlowFieldEngine {
   private networkNodeMaterial: ShaderMaterial
   private particleMaterial: ShaderMaterial
   private particleGeometry: BufferGeometry
+  private pointerEnergy = 0
+  private pointerEnergyTarget = 0
+  private pointerVelocityX = 0
+  private pointerVelocityY = 0
+  private previousPointerX = 10
+  private previousPointerY = 10
+  private pulseBeadGeometry: BufferGeometry
+  private pulseBeadMaterial: ShaderMaterial
   private pulseCursor = 0
   private revealStartedAt = 0
   private reducedQuality = false
   private renderer: WebGLRenderer
   private scene: Scene
   private segmentGeometry: BufferGeometry
+  private trailGeometry: BufferGeometry
+  private trailMaterial: ShaderMaterial
+  private transmissionHeadGeometry: BufferGeometry
+  private transmissionHeadMaterial: ShaderMaterial
   private uniforms: FlowUniforms
   private variant: FlowVariant = 'desktop'
   private width = 1
@@ -559,6 +829,8 @@ export class FlowFieldEngine {
       antialias: true,
       powerPreference: 'high-performance',
     })
+    this.renderer.toneMapping = ACESFilmicToneMapping
+    this.renderer.toneMappingExposure = 0.86
     this.canvas = this.renderer.domElement
     this.canvas.setAttribute('aria-hidden', 'true')
     this.canvas.className = 'block h-full w-full origin-center [touch-action:pan-y_pinch-zoom]'
@@ -580,14 +852,17 @@ export class FlowFieldEngine {
       uAspect: { value: 1 },
       uPixelRatio: { value: 1 },
       uPointer: { value: [10, 10] },
+      uPointerEnergy: { value: 0 },
+      uPointerVelocity: { value: [0, 0] },
       uDrag: { value: [10, 10] },
       uDragOffset: { value: [0, 0] },
-      uPulseA: { value: [10, 10, -10] },
-      uPulseB: { value: [10, 10, -10] },
-      uPulseC: { value: [10, 10, -10] },
-      uPulseD: { value: [10, 10, -10] },
+      uPulseA: { value: [-10, -10, 0] },
+      uPulseB: { value: [-10, -10, 0] },
+      uPulseC: { value: [-10, -10, 0] },
+      uPulseD: { value: [-10, -10, 0] },
       uReveal: { value: 0 },
       uTime: { value: 0 },
+      uTransmission: { value: 0 },
     }
 
     this.graphGeometry = this.createGraph()
@@ -610,7 +885,7 @@ export class FlowFieldEngine {
       depthWrite: false,
       fragmentShader: LINE_FRAGMENT_SHADER,
       transparent: true,
-      uniforms: { ...this.uniforms, uOpacity: { value: 0.31 } },
+      uniforms: { ...this.uniforms, uOpacity: { value: 0.16 } },
       vertexShader: LINE_VERTEX_SHADER,
     })
     this.scene.add(new LineSegments(this.segmentGeometry, this.lineMaterial))
@@ -625,6 +900,43 @@ export class FlowFieldEngine {
       vertexShader: PARTICLE_VERTEX_SHADER,
     })
     this.scene.add(new Points(this.particleGeometry, this.particleMaterial))
+
+    this.trailGeometry = this.createTrails()
+    this.trailMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: TRAIL_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: TRAIL_VERTEX_SHADER,
+    })
+    this.scene.add(new Points(this.trailGeometry, this.trailMaterial))
+
+    this.pulseBeadGeometry = this.createPulseBeads()
+    this.pulseBeadMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: PULSE_BEAD_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: PULSE_BEAD_VERTEX_SHADER,
+    })
+    this.scene.add(new Points(this.pulseBeadGeometry, this.pulseBeadMaterial))
+
+    this.transmissionHeadGeometry = new BufferGeometry()
+    this.transmissionHeadGeometry.setAttribute(
+      'position',
+      new BufferAttribute(new Float32Array([0, 0, 0]), 3),
+    )
+    this.transmissionHeadMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: TRANSMISSION_HEAD_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: TRANSMISSION_HEAD_VERTEX_SHADER,
+    })
+    this.scene.add(new Points(this.transmissionHeadGeometry, this.transmissionHeadMaterial))
 
     this.backgroundGeometry = this.createBackgroundParticles()
     this.backgroundMaterial = new ShaderMaterial({
@@ -641,12 +953,18 @@ export class FlowFieldEngine {
     this.networkNodeMaterial = new ShaderMaterial({
       blending: AdditiveBlending,
       depthWrite: false,
-      fragmentShader: BACKGROUND_FRAGMENT_SHADER,
+      fragmentShader: NODE_FRAGMENT_SHADER,
       transparent: true,
       uniforms: this.uniforms,
-      vertexShader: BACKGROUND_VERTEX_SHADER,
+      vertexShader: NODE_VERTEX_SHADER,
     })
     this.scene.add(new Points(this.networkNodeGeometry, this.networkNodeMaterial))
+
+    this.composer = new EffectComposer(this.renderer)
+    this.composer.addPass(new RenderPass(this.scene, this.camera))
+    this.bloomPass = new UnrealBloomPass(new Vector2(1, 1), 0.58, 0.48, 0.88)
+    this.composer.addPass(this.bloomPass)
+    this.composer.addPass(new OutputPass())
 
     this.canvas.addEventListener('pointerdown', this.handlePointerDown)
     this.canvas.addEventListener('pointermove', this.handlePointerMove)
@@ -816,6 +1134,77 @@ export class FlowFieldEngine {
     return geometry
   }
 
+  private createTrails(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const count = TRAIL_RANGES.desktop.start + TRAIL_RANGES.desktop.count
+    const t = new Float32Array(count)
+    const lane = new Float32Array(count)
+    const phase = new Float32Array(count)
+    const speed = new Float32Array(count)
+    const depth = new Float32Array(count)
+    const trail = new Float32Array(count)
+    let cursor = 0
+
+    for (const variant of ['mobile', 'desktop'] as const) {
+      const particles = TRAIL_COUNTS[variant]
+      const samples = TRAIL_SEGMENTS[variant]
+      for (let particle = 0; particle < particles; particle += 1) {
+        const seed = particle + (variant === 'mobile' ? 5101 : 6101)
+        const baseT = seeded(seed)
+        const baseLane = seeded(seed + 101) * 2 - 1
+        const basePhase = seeded(seed + 211) * Math.PI * 2
+        const baseSpeed = 0.012 + seeded(seed + 307) * 0.023
+        const baseDepth = 0.35 + seeded(seed + 401) * 0.65
+        for (let sample = 0; sample < samples; sample += 1) {
+          t[cursor] = baseT
+          lane[cursor] = baseLane
+          phase[cursor] = basePhase
+          speed[cursor] = baseSpeed
+          depth[cursor] = baseDepth
+          trail[cursor] = sample / Math.max(1, samples - 1)
+          cursor += 1
+        }
+      }
+    }
+
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(count * 3), 3))
+    geometry.setAttribute('aT', new BufferAttribute(t, 1))
+    geometry.setAttribute('aLane', new BufferAttribute(lane, 1))
+    geometry.setAttribute('aPhase', new BufferAttribute(phase, 1))
+    geometry.setAttribute('aSpeed', new BufferAttribute(speed, 1))
+    geometry.setAttribute('aDepth', new BufferAttribute(depth, 1))
+    geometry.setAttribute('aTrail', new BufferAttribute(trail, 1))
+    geometry.setDrawRange(0, count)
+    return geometry
+  }
+
+  private createPulseBeads(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const count = PULSE_WAVE_COUNT * PULSE_BEADS_PER_WAVE
+    const lane = new Float32Array(count)
+    const offset = new Float32Array(count)
+    const seed = new Float32Array(count)
+    const slot = new Float32Array(count)
+
+    for (let wave = 0; wave < PULSE_WAVE_COUNT; wave += 1) {
+      for (let bead = 0; bead < PULSE_BEADS_PER_WAVE; bead += 1) {
+        const index = wave * PULSE_BEADS_PER_WAVE + bead
+        const centered = bead - (PULSE_BEADS_PER_WAVE - 1) * 0.5
+        lane[index] = centered / (PULSE_BEADS_PER_WAVE * 0.56)
+        offset[index] = (seeded(index + 7201) - 0.5) * 0.012
+        seed[index] = seeded(index + 7301)
+        slot[index] = wave
+      }
+    }
+
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(count * 3), 3))
+    geometry.setAttribute('aLane', new BufferAttribute(lane, 1))
+    geometry.setAttribute('aOffset', new BufferAttribute(offset, 1))
+    geometry.setAttribute('aSeed', new BufferAttribute(seed, 1))
+    geometry.setAttribute('aSlot', new BufferAttribute(slot, 1))
+    return geometry
+  }
+
   private createBackgroundParticles(): BufferGeometry {
     const geometry = new BufferGeometry()
     const count = BACKGROUND_RANGES.desktop.start + BACKGROUND_RANGES.desktop.count
@@ -884,6 +1273,7 @@ export class FlowFieldEngine {
     const alpha = new Float32Array(count)
     const phase = new Float32Array(count)
     const size = new Float32Array(count)
+    const reveal = new Float32Array(count)
     let cursor = 0
 
     for (const variant of ['mobile', 'desktop'] as const) {
@@ -899,6 +1289,11 @@ export class FlowFieldEngine {
           ? 0.7 + seeded(index + 3501) * 0.3
           : 0.18 + seeded(index + 3501) * 0.42
         phase[cursor] = seeded(index + 3601) * Math.PI * 2
+        const hubIndex = networkHubIndex(index)
+        reveal[cursor] =
+          hubIndex === 0
+            ? 0.28 + (isHub ? 0 : seeded(index + 3651) * 0.1)
+            : 0.54 + (isHub ? 0 : seeded(index + 3651) * 0.14)
         size[cursor] = isHub
           ? index === 0
             ? 10.5
@@ -914,6 +1309,7 @@ export class FlowFieldEngine {
     geometry.setAttribute('aAlpha', new BufferAttribute(alpha, 1))
     geometry.setAttribute('aPhase', new BufferAttribute(phase, 1))
     geometry.setAttribute('aSize', new BufferAttribute(size, 1))
+    geometry.setAttribute('aReveal', new BufferAttribute(reveal, 1))
     geometry.setDrawRange(0, count)
     return geometry
   }
@@ -948,6 +1344,7 @@ export class FlowFieldEngine {
 
     this.interaction.pointerX = x
     this.interaction.pointerY = y
+    this.pointerEnergyTarget = 1
     if (this.interaction.activePointerId === null) return
 
     const distance = Math.hypot(
@@ -981,6 +1378,7 @@ export class FlowFieldEngine {
     if (this.interaction.activePointerId === null) {
       this.interaction.pointerX = 10
       this.interaction.pointerY = 10
+      this.pointerEnergyTarget = 0
     }
   }
 
@@ -995,7 +1393,12 @@ export class FlowFieldEngine {
   private addPulse(x: number, y: number) {
     const slots = ['uPulseA', 'uPulseB', 'uPulseC', 'uPulseD'] as const
     const slot = slots[this.pulseCursor] ?? 'uPulseA'
-    this.uniforms[slot].value = [x, y, performance.now() / 1000]
+    const progress = nearestPathProgress(
+      FLOW_PATHS[this.variant],
+      { x, y },
+      this.width / this.height,
+    )
+    this.uniforms[slot].value = [progress, performance.now() / 1000, 1]
     this.pulseCursor = (this.pulseCursor + 1) % slots.length
   }
 
@@ -1041,6 +1444,9 @@ export class FlowFieldEngine {
     )
     this.renderer.setPixelRatio(pixelRatio)
     this.renderer.setSize(this.width * compositionScale, this.height * compositionScale, false)
+    this.composer.setPixelRatio(pixelRatio)
+    this.composer.setSize(this.width * compositionScale, this.height * compositionScale)
+    this.bloomPass.enabled = this.variant === 'desktop' && !this.reducedQuality
     setPathUniforms(this.uniforms, FLOW_PATHS[this.variant])
     this.uniforms.uAspect.value = aspect
     this.uniforms.uPixelRatio.value = pixelRatio
@@ -1055,6 +1461,7 @@ export class FlowFieldEngine {
     const graphRange = GRAPH_RANGES[this.variant]
     const networkEdgeRange = NETWORK_EDGE_RANGES[this.variant]
     const networkNodeRange = NETWORK_NODE_RANGES[this.variant]
+    const trailRange = TRAIL_RANGES[this.variant]
     const scale = this.reducedQuality ? QUALITY_REDUCTION : 1
     const filamentCount = Math.max(1, Math.floor(quality.filaments * scale))
 
@@ -1063,6 +1470,7 @@ export class FlowFieldEngine {
       particleRange.start,
       Math.max(1, Math.floor(particleRange.count * scale)),
     )
+    this.trailGeometry.setDrawRange(trailRange.start, this.reducedQuality ? 0 : trailRange.count)
     this.backgroundGeometry.setDrawRange(
       backgroundRange.start,
       Math.max(1, Math.floor(backgroundRange.count * scale)),
@@ -1083,6 +1491,12 @@ export class FlowFieldEngine {
 
   private samplePerformance(now: number, frameDuration: number) {
     if (this.reducedQuality || frameDuration <= 0 || frameDuration > 100) return
+    if (this.revealStartedAt === 0 || now - this.revealStartedAt < TRANSMISSION_DURATION + 500) {
+      this.frameDurationTotal = 0
+      this.frameSampleCount = 0
+      this.qualitySampleStartedAt = now
+      return
+    }
     this.frameDurationTotal += frameDuration
     this.frameSampleCount += 1
     if (now - this.qualitySampleStartedAt < 3000 || this.frameSampleCount < 60) return
@@ -1091,6 +1505,9 @@ export class FlowFieldEngine {
       this.reducedQuality = true
       this.resize()
     }
+    this.frameDurationTotal = 0
+    this.frameSampleCount = 0
+    this.qualitySampleStartedAt = now
   }
 
   private updateInteraction(delta: number) {
@@ -1113,7 +1530,28 @@ export class FlowFieldEngine {
       interaction.velocityX = 0
       interaction.velocityY = 0
     }
+    const velocityMix = Math.min(1, delta * 12)
+    const rawVelocityX = (interaction.pointerX - this.previousPointerX) / Math.max(delta, 0.001)
+    const rawVelocityY = (interaction.pointerY - this.previousPointerY) / Math.max(delta, 0.001)
+    this.pointerVelocityX += (rawVelocityX - this.pointerVelocityX) * velocityMix
+    this.pointerVelocityY += (rawVelocityY - this.pointerVelocityY) * velocityMix
+    this.previousPointerX = interaction.pointerX
+    this.previousPointerY = interaction.pointerY
+    const velocityLength = Math.hypot(
+      this.pointerVelocityX * (this.width / this.height),
+      this.pointerVelocityY,
+    )
+    const velocityScale = velocityLength > 1.4 ? 1.4 / velocityLength : 1
+    this.pointerEnergy +=
+      (this.pointerEnergyTarget - this.pointerEnergy) *
+      Math.min(1, delta * (this.pointerEnergyTarget ? 8 : 3.5))
+    const lensStrength = interaction.isDragging ? this.pointerEnergy * 0.35 : this.pointerEnergy
     this.uniforms.uPointer.value = [interaction.pointerX, interaction.pointerY]
+    this.uniforms.uPointerEnergy.value = lensStrength
+    this.uniforms.uPointerVelocity.value = [
+      this.pointerVelocityX * velocityScale,
+      this.pointerVelocityY * velocityScale,
+    ]
     this.uniforms.uDrag.value = [interaction.downX, interaction.downY]
     const offsetX = interaction.x - interaction.downX
     const offsetY = interaction.y - interaction.downY
@@ -1131,8 +1569,14 @@ export class FlowFieldEngine {
     this.updateInteraction(delta)
     this.uniforms.uTime.value = now / 1000
     if (this.revealStartedAt === 0) this.revealStartedAt = now
-    this.uniforms.uReveal.value = Math.min(1, (now - this.revealStartedAt) / 1650)
-    this.renderer.render(this.scene, this.camera)
+    const revealElapsed = now - this.revealStartedAt
+    this.uniforms.uReveal.value = Math.min(1, revealElapsed / 450)
+    this.uniforms.uTransmission.value = Math.min(1, revealElapsed / TRANSMISSION_DURATION)
+    if (this.variant === 'desktop') {
+      this.composer.render()
+    } else {
+      this.renderer.render(this.scene, this.camera)
+    }
     if (this.firstFrame) {
       this.firstFrame = false
       this.onFirstFrame()
@@ -1158,11 +1602,19 @@ export class FlowFieldEngine {
     this.networkEdgeGeometry.dispose()
     this.networkNodeGeometry.dispose()
     this.particleGeometry.dispose()
+    this.trailGeometry.dispose()
+    this.pulseBeadGeometry.dispose()
+    this.transmissionHeadGeometry.dispose()
     this.lineMaterial.dispose()
     this.backgroundMaterial.dispose()
     this.graphMaterial.dispose()
     this.networkNodeMaterial.dispose()
     this.particleMaterial.dispose()
+    this.trailMaterial.dispose()
+    this.pulseBeadMaterial.dispose()
+    this.transmissionHeadMaterial.dispose()
+    this.bloomPass.dispose()
+    this.composer.dispose()
     this.renderer.dispose()
     this.canvas.remove()
   }

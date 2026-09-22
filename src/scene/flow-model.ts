@@ -13,6 +13,8 @@ export type FlowPath = readonly [FlowCurve, FlowCurve, FlowCurve]
 
 export const FLOW_BREAKS = [0.42, 0.7] as const
 
+export const TRANSMISSION_DURATION = 3000
+
 /**
  * The visual source of truth for both WebGL and the server-rendered SVG.
  * Values live in a 0..1 composition space so the SVG needs no browser APIs.
@@ -106,4 +108,26 @@ function pathSection(path: FlowPath, t: number): Readonly<{ curve: FlowCurve; t:
 export function pathPoint(path: FlowPath, t: number): Vec2 {
   const section = pathSection(path, t)
   return cubicPoint(section.curve, section.t)
+}
+
+export function nearestPathProgress(
+  path: FlowPath,
+  target: Vec2,
+  aspect: number,
+  samples = 96,
+): number {
+  let nearest = 0
+  let nearestDistance = Number.POSITIVE_INFINITY
+
+  for (let index = 0; index <= samples; index += 1) {
+    const progress = index / samples
+    const candidate = pathPoint(path, progress)
+    const distance = Math.hypot((candidate.x - target.x) * aspect, candidate.y - target.y)
+    if (distance < nearestDistance) {
+      nearest = progress
+      nearestDistance = distance
+    }
+  }
+
+  return nearest
 }

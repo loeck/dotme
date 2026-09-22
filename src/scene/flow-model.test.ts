@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY, pathPoint } from './flow-model'
+import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY, nearestPathProgress, pathPoint } from './flow-model'
 
 describe('flow model', () => {
   it('starts and ends on the configured control points', () => {
@@ -20,5 +20,10 @@ describe('flow model', () => {
       particles: 160,
       segments: 96,
     })
+  })
+
+  it('finds the closest progress on the flow path', () => {
+    const point = pathPoint(FLOW_PATHS.desktop, 0.7)
+    expect(nearestPathProgress(FLOW_PATHS.desktop, point, 16 / 9)).toBeCloseTo(0.7, 1)
   })
 })
