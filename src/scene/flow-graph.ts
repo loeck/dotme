@@ -217,14 +217,14 @@ function makeTributaryRoutes(
 }
 
 function makeExitRoutes(layout: GraphLayout, variant: FlowVariant, startSeed: number): Route[] {
-  const count = variant === 'desktop' ? 12 : 7
+  const count = variant === 'desktop' ? 20 : 7
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 19
     const output = layout.outputs[index % layout.outputs.length]!
     const hubB = jitter(layout.hubB, seed + 1, 0.045)
     const branch = midpoint(hubB, output, 0.36, signedRandom(seed + 3) * 0.075)
     return {
-      alpha: 0.04 + random(seed + 4) * 0.085,
+      alpha: 0.045 + random(seed + 4) * 0.09,
       anchors: [
         point(layout.hubB.x - 0.1, layout.hubB.y + signedRandom(seed + 2) * 0.075),
         hubB,
@@ -244,7 +244,7 @@ function makeBackgroundRoutes(
   variant: FlowVariant,
   startSeed: number,
 ): Route[] {
-  const count = variant === 'desktop' ? 3 : 5
+  const count = variant === 'desktop' ? 18 : 5
   return Array.from({ length: count }, (_, index) => {
     const seed = startSeed + index * 23
     const input = layout.inputs[index % layout.inputs.length]!
@@ -259,7 +259,7 @@ function makeBackgroundRoutes(
       mix(layout.hubB.y, output.y, 0.38) + (upper ? -0.13 : 0.13) + signedRandom(seed + 1) * 0.04,
     )
     return {
-      alpha: 0.012 + random(seed + 2) * 0.024,
+      alpha: 0.014 + random(seed + 2) * 0.03,
       anchors: [jitter(input, seed + 3, 0.09), sideA, sideB, jitter(output, seed + 4, 0.09)],
       layer: 0,
       reveal: 0.18 + random(seed + 5) * 0.3,

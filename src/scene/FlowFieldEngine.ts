@@ -76,7 +76,7 @@ const SEGMENT_RANGES = createDrawRanges((variant) => {
 
 const PARTICLE_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].particles)
 
-const BACKGROUND_COUNTS = { desktop: 150, mobile: 58 } as const
+const BACKGROUND_COUNTS = { desktop: 178, mobile: 58 } as const
 const BACKGROUND_RANGES = createDrawRanges((variant) => BACKGROUND_COUNTS[variant])
 const NETWORK_NODE_COUNTS = { desktop: 58, mobile: 24 } as const
 const NETWORK_NODE_RANGES = createDrawRanges((variant) => NETWORK_NODE_COUNTS[variant])
@@ -425,7 +425,7 @@ void main() {
   float layer = clamp(vLayer * 0.5, 0.0, 1.0);
   vec3 base = mix(vec3(0.07, 0.14, 0.22), vec3(0.3, 0.5, 0.67), layer);
   vec3 color = mix(base, vec3(0.8, 0.92, 1.0), vFront * 0.62);
-  gl_FragColor = vec4(color, vAlpha * (0.7 + vFront * 0.55));
+  gl_FragColor = vec4(color, vAlpha * (0.84 + vFront * 0.62));
 }
 `
 
@@ -495,6 +495,7 @@ export class FlowFieldEngine {
   private backgroundMaterial: ShaderMaterial
   private camera: OrthographicCamera
   private canvas: HTMLCanvasElement
+  private container: HTMLDivElement
   private contextLost = false
   private disposed = false
   private firstFrame = true
@@ -541,6 +542,7 @@ export class FlowFieldEngine {
   private readonly onContextFailure: () => void
   private readonly onFirstFrame: () => void
   constructor({ container, onContextFailure, onFirstFrame }: FlowFieldEngineOptions) {
+    this.container = container
     this.onContextFailure = onContextFailure
     this.onFirstFrame = onFirstFrame
     this.isDocumentHidden = document.hidden
@@ -552,7 +554,7 @@ export class FlowFieldEngine {
     })
     this.canvas = this.renderer.domElement
     this.canvas.setAttribute('aria-hidden', 'true')
-    this.canvas.className = 'block h-full w-full [touch-action:pan-y_pinch-zoom]'
+    this.canvas.className = 'block h-full w-full origin-center [touch-action:pan-y_pinch-zoom]'
     container.append(this.canvas)
 
     this.scene = new Scene()
@@ -601,7 +603,7 @@ export class FlowFieldEngine {
       depthWrite: false,
       fragmentShader: LINE_FRAGMENT_SHADER,
       transparent: true,
-      uniforms: { ...this.uniforms, uOpacity: { value: 0.235 } },
+      uniforms: { ...this.uniforms, uOpacity: { value: 0.31 } },
       vertexShader: LINE_VERTEX_SHADER,
     })
     this.scene.add(new LineSegments(this.segmentGeometry, this.lineMaterial))
@@ -842,9 +844,9 @@ export class FlowFieldEngine {
         const isSoft = detailSeed > 0.82 && !isBokeh
         const isHighlight = detailSeed > 0.72 && !isSoft && !isBokeh
         alpha[cursor] = isBokeh
-          ? 0.02 + seeded(index + 2401) * 0.06
+          ? 0.04 + seeded(index + 2401) * 0.06
           : isSoft
-            ? 0.04 + seeded(index + 2401) * 0.06
+            ? 0.05 + seeded(index + 2401) * 0.06
             : isHighlight
               ? 0.42 + seeded(index + 2401) * 0.38
               : 0.055 + seeded(index + 2401) * 0.25
@@ -1016,11 +1018,14 @@ export class FlowFieldEngine {
 
   resize = () => {
     if (this.disposed) return
-    const rect = this.canvas.getBoundingClientRect()
+    const rect = this.container.getBoundingClientRect()
     this.width = Math.max(1, rect.width)
     this.height = Math.max(1, rect.height)
     const aspect = this.width / this.height
     this.variant = this.width < 768 ? 'mobile' : 'desktop'
+    const compositionScale =
+      this.variant === 'desktop' && (this.width < 1400 || aspect < 1.52) ? 1.14 : 1
+    this.canvas.style.transform = `scale(${compositionScale})`
     const quality = FLOW_QUALITY[this.variant]
     const pixelRatioScale = this.reducedQuality ? 0.75 : 1
     const pixelRatio = Math.min(
@@ -1028,7 +1033,7 @@ export class FlowFieldEngine {
       quality.maxPixelRatio * pixelRatioScale,
     )
     this.renderer.setPixelRatio(pixelRatio)
-    this.renderer.setSize(this.width, this.height, false)
+    this.renderer.setSize(this.width * compositionScale, this.height * compositionScale, false)
     setPathUniforms(this.uniforms, FLOW_PATHS[this.variant])
     this.uniforms.uAspect.value = aspect
     this.uniforms.uPixelRatio.value = pixelRatio
