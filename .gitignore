@@ -1,15 +1,12 @@
 node_modules
-
 .cache
 .env
+.env.*
+!.env.example
 .vercel
 .output
-
-/build/
-/public/build
-/api/index.js
-/api/index.js.map
-
-# custom
-/app/tailwind.css
-/api
+dist
+coverage
+playwright-report
+test-results
+.tanstack

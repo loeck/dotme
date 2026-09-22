@@ -1,20 +1,30 @@
-# dotme
+# loeck.me
 
-![image](https://user-images.githubusercontent.com/582703/182043045-015e53bd-da60-4981-9326-c17cd4928a1a.png)
+Personal site built with TanStack Start, React and Three.js. The profile is server-rendered and the
+interactive field is progressively loaded in the browser.
 
 ## Requirements
 
-- nodejs v16.x (https://nodejs.org/en/)
-- pnpm latest (https://pnpm.io/)
-
-## Installation
-
-```
-pnpm install
-```
+- Node.js 24.21.0
+- pnpm 12.5.1
 
 ## Development
 
-```
+```sh
+pnpm install
 pnpm dev
 ```
+
+## Verification
+
+```sh
+pnpm check
+pnpm exec playwright install chromium
+pnpm e2e
+```
+
+## Vercel
+
+The project uses TanStack Start with Nitro. Import the repository in Vercel with the repository root
+as the project root; framework detection and SSR functions are configured by `vercel.json` and
+`vite.config.ts`.

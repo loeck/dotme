@@ -1,37 +1,71 @@
 {
+  "name": "dotme",
+  "version": "0.0.0",
   "private": true,
-  "sideEffects": false,
+  "type": "module",
   "scripts": {
-    "build": "run-s \"build:*\"",
-    "build:css": "npm run generate:css -- --minify",
-    "build:remix": "remix build",
-    "dev": "run-p \"dev:*\"",
-    "dev:css": "npm run generate:css -- --watch",
-    "dev:remix": "remix dev",
-    "generate:css": "npx tailwindcss -o ./app/tailwind.css"
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "playwright test",
+    "lint": "oxlint",
+    "lint:fix": "oxlint --fix",
+    "fmt": "oxfmt .",
+    "fmt:check": "oxfmt --check .",
+    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm build",
+    "prepare": "husky"
   },
-  "packageManager": "pnpm@9.15.2",
   "dependencies": {
-    "@radix-ui/react-icons": "^1.1.1",
-    "@remix-run/node": "^1.6.7",
-    "@remix-run/react": "^1.6.7",
-    "@remix-run/vercel": "^1.6.7",
-    "@tanstack/react-query": "^4.0.10",
-    "@vercel/node": "^2.5.2",
-    "framer-motion": "^6.5.1",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "@tanstack/react-router": "1.170.38",
+    "@tanstack/react-start": "1.168.57",
+    "nitro": "3.0.260903-beta",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "three": "0.186.0"
   },
   "devDependencies": {
-    "@remix-run/dev": "^1.6.7",
-    "@remix-run/eslint-config": "^1.6.7",
-    "@remix-run/serve": "^1.6.7",
-    "@types/react": "^18.0.15",
-    "@types/react-dom": "^18.0.6",
-    "eslint": "^8.20.0",
-    "npm-run-all": "^4.1.5",
-    "prettier": "^2.7.1",
-    "tailwindcss": "^3.1.7",
-    "typescript": "^4.7.4"
-  }
+    "@playwright/test": "1.63.0",
+    "@rolldown/plugin-babel": "0.2.4",
+    "@tailwindcss/vite": "4.3.3",
+    "@testing-library/jest-dom": "7.0.1",
+    "@testing-library/react": "16.3.3",
+    "@types/node": "24.10.1",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/three": "0.186.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "babel-plugin-react-compiler": "1.0.0",
+    "happy-dom": "20.14.5",
+    "husky": "9.1.7",
+    "lint-staged": "17.5.1",
+    "oxfmt": "0.70.0",
+    "oxlint": "1.85.0",
+    "tailwindcss": "4.3.3",
+    "typescript": "7.0.2",
+    "vite": "8.3.0",
+    "vitest": "5.0.1"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,cjs,mjs,cts,mts}": [
+      "oxlint --fix",
+      "oxfmt"
+    ],
+    "*.{json,jsonc,css,md}": [
+      "oxfmt"
+    ]
+  },
+  "devEngines": {
+    "runtime": {
+      "name": "node",
+      "version": "24.21.0",
+      "onFail": "download"
+    }
+  },
+  "engines": {
+    "node": "24.x"
+  },
+  "packageManager": "pnpm@12.5.1"
 }

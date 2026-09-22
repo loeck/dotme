@@ -1,0 +1,8 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxfmt/configuration_schema.json",
+  "printWidth": 100,
+  "singleQuote": true,
+  "semi": false,
+  "sortImports": true,
+  "ignorePatterns": ["src/routeTree.gen.ts", ".output", ".vercel", "dist"]
+}
