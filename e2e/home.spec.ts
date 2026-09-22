@@ -14,13 +14,7 @@ test('renders the profile and interactive scene', async ({ page }) => {
     'https://github.com/loeck',
   )
   await expect(page.locator('canvas')).toBeVisible()
-
-  const pause = page.getByRole('button', { name: 'Pause animation' })
-  await pause.click()
-  await expect(page.getByRole('button', { name: 'Resume animation' })).toHaveAttribute(
-    'aria-pressed',
-    'true',
-  )
+  await expect(page.getByRole('button')).toHaveCount(0)
   expect(consoleErrors).toEqual([])
 })
 

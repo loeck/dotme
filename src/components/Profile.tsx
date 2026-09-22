@@ -27,6 +27,17 @@ function LinkedinIcon(props: IconProps) {
   )
 }
 
+function LastFmIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false" {...props}>
+      <path
+        d="M10.3 16.2c-1.1 1-2.5 1.6-4 1.6C2.8 17.8 0 15.2 0 12s2.8-5.8 6.3-5.8c3.8 0 5.2 2 6.4 5.4l.5 1.5c.8 2.3 1.3 3 2.5 3 .9 0 1.7-.7 1.7-1.5 0-1.1-.7-1.5-2.2-1.9l-1.1-.3-.6-1.8 2.1.6c2.8.8 4.1 1.8 4.1 3.7 0 2.2-1.8 3.8-4.1 3.8-2.7 0-3.9-1.3-5-4.4l-.5-1.5c-.9-2.6-1.8-4-3.9-4C4.3 8.8 2.8 10.2 2.8 12s1.5 3.2 3.4 3.2c1.2 0 2.2-.5 3-1.3l1.1 2.3Zm8.8-5.5c-.7-1.2-2-1.9-3.4-1.9-.8 0-1.5.2-2.1.7-.4-.8-.8-1.5-1.3-2 1-.8 2.2-1.3 3.5-1.3 3.5 0 6.3 2.6 6.3 5.8 0 .3 0 .6-.1.9-.7-.9-1.7-1.6-2.9-2.2Z"
+        fill="currentColor"
+      />
+    </svg>
+  )
+}
+
 export function Profile() {
   return (
     <header
@@ -44,13 +55,16 @@ export function Profile() {
       >
         Hi, I’m Loëck.
       </h1>
-      <p className="m-0 text-xs text-[#8a919a]">Based in Paris, France.</p>
+      <p className="m-0 text-xs text-[#8a919a]">Building some stuff in Paris.</p>
 
       <span className="block h-9 leading-8 text-[#8a919a]" aria-hidden="true">
         _
       </span>
 
-      <nav className="flex items-center gap-4 text-xs text-[#8a919a]" aria-label="Social links">
+      <nav
+        className="flex items-center gap-4 text-xs text-[#8a919a] max-sm:gap-2 max-sm:text-[0.7rem]"
+        aria-label="Social links"
+      >
         <a
           className={SOCIAL_LINK_CLASS}
           href="https://github.com/loeck"
@@ -72,6 +86,19 @@ export function Profile() {
         >
           <LinkedinIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
           <span>LinkedIn</span>
+          <span className="sr-only">(opens in a new tab)</span>
+        </a>
+        <span className="select-none text-[#525a64]" aria-hidden="true">
+          |
+        </span>
+        <a
+          className={SOCIAL_LINK_CLASS}
+          href="https://last.fm/user/NainPuissant"
+          target="_blank"
+          rel="noreferrer"
+        >
+          <LastFmIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
+          <span>Last.fm</span>
           <span className="sr-only">(opens in a new tab)</span>
         </a>
       </nav>

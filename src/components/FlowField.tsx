@@ -2,7 +2,6 @@ import { createClientOnlyFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 
 import type { FlowFieldEngine } from '../scene/FlowFieldEngine'
-import { SceneControls } from './SceneControls'
 
 const loadEngine = createClientOnlyFn(async () => {
   const engineModule = await import('../scene/FlowFieldEngine')
@@ -12,7 +11,6 @@ const loadEngine = createClientOnlyFn(async () => {
 export function FlowField() {
   const canvasHost = useRef<HTMLDivElement>(null)
   const engine = useRef<FlowFieldEngine | null>(null)
-  const [paused, setPaused] = useState(false)
   const [webglReady, setWebglReady] = useState(false)
 
   useEffect(() => {
@@ -70,28 +68,17 @@ export function FlowField() {
     }
   }, [])
 
-  useEffect(() => {
-    engine.current?.setPaused(paused)
-  }, [paused])
-
   return (
-    <>
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-        <div className={`absolute inset-0 ${webglReady ? 'opacity-100' : 'opacity-0'}`}>
-          <div
-            className={`absolute top-[35.5%] left-[71%] size-[22rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(59,130,191,0.07)_0%,rgba(14,32,50,0.025)_38%,transparent_72%)] blur-2xl transition-opacity delay-500 duration-1000 ease-out motion-reduce:transition-none max-md:top-[31%] max-md:left-[69%] max-md:size-[16rem] ${webglReady ? 'opacity-100' : 'opacity-0'}`}
-          />
-          <div
-            className={`absolute top-[62%] left-[46%] size-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(91,151,202,0.045)_0%,transparent_70%)] blur-xl transition-opacity delay-300 duration-700 ease-out motion-reduce:transition-none max-md:hidden ${webglReady ? 'opacity-100' : 'opacity-0'}`}
-          />
-          <div ref={canvasHost} className="pointer-events-auto absolute inset-0" />
-        </div>
+    <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
+      <div className={`absolute inset-0 ${webglReady ? 'opacity-100' : 'opacity-0'}`}>
+        <div
+          className={`absolute top-[35.5%] left-[71%] size-[22rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(59,130,191,0.11)_0%,rgba(14,32,50,0.04)_38%,transparent_72%)] blur-2xl transition-opacity delay-500 duration-1000 ease-out motion-reduce:transition-none max-md:top-[31%] max-md:left-[69%] max-md:size-[16rem] ${webglReady ? 'opacity-100' : 'opacity-0'}`}
+        />
+        <div
+          className={`absolute top-[62%] left-[46%] size-56 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[radial-gradient(circle,rgba(91,151,202,0.075)_0%,transparent_70%)] blur-xl transition-opacity delay-300 duration-700 ease-out motion-reduce:transition-none max-md:hidden ${webglReady ? 'opacity-100' : 'opacity-0'}`}
+        />
+        <div ref={canvasHost} className="pointer-events-auto absolute inset-0" />
       </div>
-      <SceneControls
-        available={webglReady}
-        paused={paused}
-        onToggle={() => setPaused((value) => !value)}
-      />
-    </>
+    </div>
   )
 }

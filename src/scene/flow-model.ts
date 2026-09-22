@@ -62,13 +62,13 @@ export const FLOW_PATHS: Record<FlowVariant, FlowPath> = {
 
 export const FLOW_QUALITY = {
   desktop: {
-    filaments: 52,
+    filaments: 36,
     segments: 128,
     particles: 260,
     maxPixelRatio: 1.5,
   },
   mobile: {
-    filaments: 32,
+    filaments: 24,
     segments: 96,
     particles: 160,
     maxPixelRatio: 1.25,

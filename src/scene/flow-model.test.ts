@@ -15,7 +15,7 @@ describe('flow model', () => {
 
   it('ships the intended mobile quality budget', () => {
     expect(FLOW_QUALITY.mobile).toMatchObject({
-      filaments: 32,
+      filaments: 24,
       maxPixelRatio: 1.25,
       particles: 160,
       segments: 96,

@@ -13,16 +13,16 @@ export const Route = createRootRoute({
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
-      { title: 'Loëck — Frontend developer in Paris' },
+      { title: 'Loëck | Building some stuff in Paris' },
       {
         name: 'description',
-        content: 'Loëck, frontend developer based in Paris, France.',
+        content: 'Loëck builds some stuff in Paris.',
       },
       { property: 'og:type', content: 'website' },
-      { property: 'og:title', content: 'Loëck — Frontend developer in Paris' },
+      { property: 'og:title', content: 'Loëck | Building some stuff in Paris' },
       {
         property: 'og:description',
-        content: 'Loëck, frontend developer based in Paris, France.',
+        content: 'Loëck builds some stuff in Paris.',
       },
       { property: 'og:url', content: 'https://loeck.me/' },
       { name: 'twitter:card', content: 'summary' },

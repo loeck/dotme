@@ -8,11 +8,15 @@ describe('Profile', () => {
     render(<Profile />)
 
     expect(screen.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-    expect(screen.getByText('Based in Paris, France.')).toBeVisible()
+    expect(screen.getByText('Building some stuff in Paris.')).toBeVisible()
     expect(screen.getByRole('link', { name: /GitHub/ })).toHaveAttribute(
       'href',
       'https://github.com/loeck',
     )
-    expect(screen.queryByText(/Spotify|Last.fm|Piana/i)).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Last.fm/ })).toHaveAttribute(
+      'href',
+      'https://last.fm/user/NainPuissant',
+    )
+    expect(screen.queryByText(/Spotify|Piana/i)).not.toBeInTheDocument()
   })
 })

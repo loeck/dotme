@@ -11,7 +11,8 @@ import {
 } from 'three'
 import type { IUniform } from 'three'
 
-import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY } from './flow-model'
+import { createFlowGraphData } from './flow-graph'
+import { FLOW_BREAKS, FLOW_PATHS, FLOW_QUALITY, pathPoint } from './flow-model'
 import type { FlowPath, FlowVariant } from './flow-model'
 
 export type FlowFieldEngineOptions = Readonly<{
@@ -74,6 +75,30 @@ const SEGMENT_RANGES = createDrawRanges((variant) => {
 })
 
 const PARTICLE_RANGES = createDrawRanges((variant) => FLOW_QUALITY[variant].particles)
+
+const BACKGROUND_COUNTS = { desktop: 110, mobile: 58 } as const
+const BACKGROUND_RANGES = createDrawRanges((variant) => BACKGROUND_COUNTS[variant])
+const NETWORK_NODE_COUNTS = { desktop: 46, mobile: 26 } as const
+const NETWORK_NODE_RANGES = createDrawRanges((variant) => NETWORK_NODE_COUNTS[variant])
+const NETWORK_EDGE_RANGES = createDrawRanges((variant) => (NETWORK_NODE_COUNTS[variant] - 2) * 2)
+const NETWORK_HUBS = {
+  desktop: [
+    [0.46, 0.62],
+    [0.72, 0.335],
+  ],
+  mobile: [
+    [0.63, 0.68],
+    [0.69, 0.31],
+  ],
+} as const
+const FLOW_GRAPH = {
+  mobile: createFlowGraphData('mobile'),
+  desktop: createFlowGraphData('desktop'),
+}
+const GRAPH_RANGES: Record<FlowVariant, DrawRange> = {
+  mobile: { count: FLOW_GRAPH.mobile.count, start: 0 },
+  desktop: { count: FLOW_GRAPH.desktop.count, start: FLOW_GRAPH.mobile.count },
+}
 
 const FLOW_VERTEX_COMMON = `
 uniform vec2 uStart;
@@ -296,9 +321,118 @@ void main() {
 }
 `
 
+const BACKGROUND_VERTEX_SHADER = `
+attribute float aAlpha;
+attribute float aPhase;
+attribute float aSize;
+uniform float uAspect;
+uniform float uPixelRatio;
+uniform float uReveal;
+uniform float uTime;
+uniform vec2 uPointer;
+varying float vAlpha;
+
+void main() {
+  vec2 p = position.xy;
+  p.y += sin(uTime * 0.12 + aPhase) * 0.0025;
+  vec2 delta = p - uPointer;
+  vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
+  float reach = 1.0 - smoothstep(0.0, 0.28, length(screenDelta));
+  vec2 direction = normalize(screenDelta + vec2(0.0001));
+  p += vec2(direction.x / uAspect, direction.y) * reach * 0.009;
+  vAlpha = aAlpha * smoothstep(0.28, 0.86, uReveal);
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.35, 1.0);
+  gl_PointSize = aSize * uPixelRatio;
+}
+`
+
+const BACKGROUND_FRAGMENT_SHADER = `
+varying float vAlpha;
+void main() {
+  float radius = length(gl_PointCoord - vec2(0.5));
+  float core = smoothstep(0.5, 0.0, radius);
+  float glow = exp(-radius * radius * 10.0);
+  gl_FragColor = vec4(vec3(0.48, 0.72, 0.94), (core * 0.62 + glow * 0.38) * vAlpha);
+}
+`
+
+const GRAPH_VERTEX_SHADER = `
+attribute vec2 aNormal;
+attribute float aProgress;
+attribute float aReveal;
+attribute float aAlpha;
+attribute float aLayer;
+attribute float aSeed;
+uniform float uAspect;
+uniform float uReveal;
+uniform float uTime;
+uniform vec2 uPointer;
+uniform vec2 uDrag;
+uniform vec2 uDragOffset;
+uniform vec2 uNodeA;
+varying float vAlpha;
+varying float vLayer;
+varying float vFront;
+
+float fieldDistance(vec2 delta) {
+  return length(vec2(delta.x * uAspect, delta.y));
+}
+
+vec2 force(vec2 position, vec2 source, float amount) {
+  vec2 delta = position - source;
+  vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
+  float reach = 1.0 - smoothstep(0.0, 0.38, length(screenDelta));
+  vec2 direction = normalize(screenDelta + vec2(0.0001));
+  return vec2(direction.x / uAspect, direction.y) * reach * amount;
+}
+
+void main() {
+  vec2 p = position.xy;
+  vec2 screenNormal = normalize(vec2(aNormal.x * uAspect, aNormal.y));
+  vec2 normal = vec2(screenNormal.x / uAspect, screenNormal.y);
+  float depthMotion = mix(0.006, 0.002, clamp(aLayer * 0.5, 0.0, 1.0));
+  p += normal * sin(aProgress * (13.0 + aSeed * 9.0) + aSeed * 31.0 + uTime * 0.16)
+    * depthMotion;
+  p += force(p, uPointer, 0.018);
+  float dragReach = 1.0 - smoothstep(0.0, 0.44, fieldDistance(p - uDrag));
+  p += uDragOffset * dragReach * 0.64;
+  float revealAt = 0.08 + fieldDistance(p - uNodeA) * 0.72 + aSeed * 0.025 + aReveal * 0.02;
+  float revealAlpha = smoothstep(revealAt - 0.035, revealAt + 0.025, uReveal);
+  vFront = exp(-pow((uReveal - revealAt) / 0.045, 2.0));
+  float edgeFade = mix(0.18, 1.0, smoothstep(0.08, 0.32, p.x));
+  vAlpha = aAlpha * revealAlpha * edgeFade
+    * mix(0.55, 1.0, clamp(aLayer * 0.5, 0.0, 1.0));
+  vLayer = aLayer;
+  gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, position.z, 1.0);
+}
+`
+
+const GRAPH_FRAGMENT_SHADER = `
+varying float vAlpha;
+varying float vLayer;
+varying float vFront;
+void main() {
+  float layer = clamp(vLayer * 0.5, 0.0, 1.0);
+  vec3 base = mix(vec3(0.08, 0.19, 0.31), vec3(0.28, 0.55, 0.78), layer);
+  vec3 color = mix(base, vec3(0.8, 0.92, 1.0), vFront * 0.62);
+  gl_FragColor = vec4(color, vAlpha * (0.7 + vFront * 0.55));
+}
+`
+
 function seeded(index: number): number {
   const value = Math.sin(index * 127.1 + 311.7) * 43758.5453123
   return value - Math.floor(value)
+}
+
+function networkNodePosition(variant: FlowVariant, index: number): readonly [number, number] {
+  const hubs = NETWORK_HUBS[variant]
+  if (index < 2) return hubs[index]!
+  const hubIndex = index % 3 === 0 ? 0 : 1
+  const hub = hubs[hubIndex]
+  const angle = seeded(index + (variant === 'mobile' ? 3101 : 3301)) * Math.PI * 2
+  const radius = 0.025 + Math.pow(seeded(index + 3401), 1.7) * 0.19
+  const xScale = variant === 'mobile' ? 0.62 : 0.78
+  return [hub[0] + Math.cos(angle) * radius * xScale, hub[1] + Math.sin(angle) * radius]
 }
 
 function createDrawRanges(
@@ -338,6 +472,8 @@ function setPathUniforms(uniforms: FlowUniforms, path: FlowPath) {
 /** A deterministic GPU-drawn field with no React state on its animation path. */
 export class FlowFieldEngine {
   private animationFrame = 0
+  private backgroundGeometry: BufferGeometry
+  private backgroundMaterial: ShaderMaterial
   private camera: OrthographicCamera
   private canvas: HTMLCanvasElement
   private contextLost = false
@@ -345,11 +481,15 @@ export class FlowFieldEngine {
   private firstFrame = true
   private frameDurationTotal = 0
   private frameSampleCount = 0
+  private graphGeometry: BufferGeometry
+  private graphMaterial: ShaderMaterial
   private height = 1
-  private isPaused = false
   private isDocumentHidden = false
   private lastFrameAt = performance.now()
   private lineMaterial: ShaderMaterial
+  private networkEdgeGeometry: BufferGeometry
+  private networkNodeGeometry: BufferGeometry
+  private networkNodeMaterial: ShaderMaterial
   private particleMaterial: ShaderMaterial
   private particleGeometry: BufferGeometry
   private pulseCursor = 0
@@ -422,13 +562,27 @@ export class FlowFieldEngine {
       uTime: { value: 0 },
     }
 
+    this.graphGeometry = this.createGraph()
+    this.graphMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: GRAPH_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: GRAPH_VERTEX_SHADER,
+    })
+    this.scene.add(new LineSegments(this.graphGeometry, this.graphMaterial))
+
+    this.networkEdgeGeometry = this.createNetworkEdges()
+    this.scene.add(new LineSegments(this.networkEdgeGeometry, this.graphMaterial))
+
     this.segmentGeometry = this.createSegments()
     this.lineMaterial = new ShaderMaterial({
       blending: AdditiveBlending,
       depthWrite: false,
       fragmentShader: LINE_FRAGMENT_SHADER,
       transparent: true,
-      uniforms: { ...this.uniforms, uOpacity: { value: 0.22 } },
+      uniforms: { ...this.uniforms, uOpacity: { value: 0.21 } },
       vertexShader: LINE_VERTEX_SHADER,
     })
     this.scene.add(new LineSegments(this.segmentGeometry, this.lineMaterial))
@@ -443,6 +597,28 @@ export class FlowFieldEngine {
       vertexShader: PARTICLE_VERTEX_SHADER,
     })
     this.scene.add(new Points(this.particleGeometry, this.particleMaterial))
+
+    this.backgroundGeometry = this.createBackgroundParticles()
+    this.backgroundMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: BACKGROUND_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: BACKGROUND_VERTEX_SHADER,
+    })
+    this.scene.add(new Points(this.backgroundGeometry, this.backgroundMaterial))
+
+    this.networkNodeGeometry = this.createNetworkNodes()
+    this.networkNodeMaterial = new ShaderMaterial({
+      blending: AdditiveBlending,
+      depthWrite: false,
+      fragmentShader: BACKGROUND_FRAGMENT_SHADER,
+      transparent: true,
+      uniforms: this.uniforms,
+      vertexShader: BACKGROUND_VERTEX_SHADER,
+    })
+    this.scene.add(new Points(this.networkNodeGeometry, this.networkNodeMaterial))
 
     this.canvas.addEventListener('pointerdown', this.handlePointerDown)
     this.canvas.addEventListener('pointermove', this.handlePointerMove)
@@ -494,6 +670,87 @@ export class FlowFieldEngine {
     return geometry
   }
 
+  private createGraph(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const totalCount = FLOW_GRAPH.mobile.count + FLOW_GRAPH.desktop.count
+
+    const merge = (name: keyof Omit<(typeof FLOW_GRAPH)['desktop'], 'count'>, itemSize: number) => {
+      const mobile = FLOW_GRAPH.mobile[name]
+      const desktop = FLOW_GRAPH.desktop[name]
+      const values = new Float32Array(mobile.length + desktop.length)
+      values.set(mobile)
+      values.set(desktop, mobile.length)
+      geometry.setAttribute(
+        name === 'position' ? name : `a${name[0]!.toUpperCase()}${name.slice(1)}`,
+        new BufferAttribute(values, itemSize),
+      )
+    }
+
+    merge('position', 3)
+    merge('normal', 2)
+    merge('progress', 1)
+    merge('reveal', 1)
+    merge('alpha', 1)
+    merge('layer', 1)
+    merge('seed', 1)
+    geometry.setDrawRange(0, totalCount)
+    return geometry
+  }
+
+  private createNetworkEdges(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const count = NETWORK_EDGE_RANGES.desktop.start + NETWORK_EDGE_RANGES.desktop.count
+    const position = new Float32Array(count * 3)
+    const normal = new Float32Array(count * 2)
+    const progress = new Float32Array(count)
+    const reveal = new Float32Array(count)
+    const alpha = new Float32Array(count)
+    const layer = new Float32Array(count)
+    const seed = new Float32Array(count)
+    let cursor = 0
+
+    for (const variant of ['mobile', 'desktop'] as const) {
+      for (let index = 2; index < NETWORK_NODE_COUNTS[variant]; index += 1) {
+        const hubIndex = index % 3 === 0 ? 0 : 1
+        const from = networkNodePosition(variant, index)
+        const target = networkNodePosition(variant, hubIndex)
+        const tangentX = target[0] - from[0]
+        const tangentY = target[1] - from[1]
+        const tangentLength = Math.hypot(tangentX, tangentY) || 1
+        const edgeAlpha = 0.055 + seeded(index + 4101) * 0.1
+        const edgeReveal = 0.32 + seeded(index + 4201) * 0.42
+        const edgeSeed = seeded(index + 4301)
+
+        for (const [point, value] of [
+          [from, 0],
+          [target, 1],
+        ] as const) {
+          position[cursor * 3] = point[0]
+          position[cursor * 3 + 1] = point[1]
+          position[cursor * 3 + 2] = 0.02
+          normal[cursor * 2] = -tangentY / tangentLength
+          normal[cursor * 2 + 1] = tangentX / tangentLength
+          progress[cursor] = value
+          reveal[cursor] = edgeReveal
+          alpha[cursor] = edgeAlpha
+          layer[cursor] = 0.35
+          seed[cursor] = edgeSeed
+          cursor += 1
+        }
+      }
+    }
+
+    geometry.setAttribute('position', new BufferAttribute(position, 3))
+    geometry.setAttribute('aNormal', new BufferAttribute(normal, 2))
+    geometry.setAttribute('aProgress', new BufferAttribute(progress, 1))
+    geometry.setAttribute('aReveal', new BufferAttribute(reveal, 1))
+    geometry.setAttribute('aAlpha', new BufferAttribute(alpha, 1))
+    geometry.setAttribute('aLayer', new BufferAttribute(layer, 1))
+    geometry.setAttribute('aSeed', new BufferAttribute(seed, 1))
+    geometry.setDrawRange(0, count)
+    return geometry
+  }
+
   private createParticles(): BufferGeometry {
     const geometry = new BufferGeometry()
     const count = PARTICLE_RANGES.desktop.start + PARTICLE_RANGES.desktop.count
@@ -515,6 +772,83 @@ export class FlowFieldEngine {
     geometry.setAttribute('aPhase', new BufferAttribute(phase, 1))
     geometry.setAttribute('aSpeed', new BufferAttribute(speed, 1))
     geometry.setAttribute('aDepth', new BufferAttribute(depth, 1))
+    geometry.setDrawRange(0, count)
+    return geometry
+  }
+
+  private createBackgroundParticles(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const count = BACKGROUND_RANGES.desktop.start + BACKGROUND_RANGES.desktop.count
+    const position = new Float32Array(count * 3)
+    const alpha = new Float32Array(count)
+    const phase = new Float32Array(count)
+    const size = new Float32Array(count)
+    let cursor = 0
+
+    for (const variant of ['mobile', 'desktop'] as const) {
+      const variantCount = BACKGROUND_COUNTS[variant]
+      for (let index = 0; index < variantCount; index += 1) {
+        const alongFlow = seeded(index + (variant === 'mobile' ? 1301 : 1701)) < 0.7
+        let x: number
+        let y: number
+
+        if (alongFlow) {
+          const t = seeded(index + 1801)
+          const point = pathPoint(FLOW_PATHS[variant], t)
+          x = point.x + (seeded(index + 1901) - 0.5) * (variant === 'mobile' ? 0.38 : 0.22)
+          y = point.y + (seeded(index + 2001) - 0.5) * (variant === 'mobile' ? 0.34 : 0.42)
+        } else {
+          x = (variant === 'mobile' ? 0.42 : 0.16) + seeded(index + 2101) * 0.92
+          y = 0.05 + seeded(index + 2201) * 0.9
+        }
+
+        position[cursor * 3] = x
+        position[cursor * 3 + 1] = y
+        position[cursor * 3 + 2] = 0.35
+        const depth = seeded(index + 2301)
+        alpha[cursor] = 0.08 + seeded(index + 2401) * 0.28
+        phase[cursor] = seeded(index + 2501) * Math.PI * 2
+        size[cursor] = 0.8 + seeded(index + 2601) * 1.9 + Math.pow(depth, 8) * 18
+        cursor += 1
+      }
+    }
+
+    geometry.setAttribute('position', new BufferAttribute(position, 3))
+    geometry.setAttribute('aAlpha', new BufferAttribute(alpha, 1))
+    geometry.setAttribute('aPhase', new BufferAttribute(phase, 1))
+    geometry.setAttribute('aSize', new BufferAttribute(size, 1))
+    geometry.setDrawRange(0, count)
+    return geometry
+  }
+
+  private createNetworkNodes(): BufferGeometry {
+    const geometry = new BufferGeometry()
+    const count = NETWORK_NODE_RANGES.desktop.start + NETWORK_NODE_RANGES.desktop.count
+    const position = new Float32Array(count * 3)
+    const alpha = new Float32Array(count)
+    const phase = new Float32Array(count)
+    const size = new Float32Array(count)
+    let cursor = 0
+
+    for (const variant of ['mobile', 'desktop'] as const) {
+      const variantCount = NETWORK_NODE_COUNTS[variant]
+      for (let index = 0; index < variantCount; index += 1) {
+        const point = networkNodePosition(variant, index)
+        const isCore = index < 2
+        position[cursor * 3] = point[0]
+        position[cursor * 3 + 1] = point[1]
+        position[cursor * 3 + 2] = -0.04
+        alpha[cursor] = isCore ? 1 : 0.22 + seeded(index + 3501) * 0.46
+        phase[cursor] = seeded(index + 3601) * Math.PI * 2
+        size[cursor] = isCore ? (index === 0 ? 8 : 9.5) : 1.4 + seeded(index + 3701) * 3.4
+        cursor += 1
+      }
+    }
+
+    geometry.setAttribute('position', new BufferAttribute(position, 3))
+    geometry.setAttribute('aAlpha', new BufferAttribute(alpha, 1))
+    geometry.setAttribute('aPhase', new BufferAttribute(phase, 1))
+    geometry.setAttribute('aSize', new BufferAttribute(size, 1))
     geometry.setDrawRange(0, count)
     return geometry
   }
@@ -612,13 +946,8 @@ export class FlowFieldEngine {
     this.updateAnimationLoop()
   }
 
-  setPaused(paused: boolean) {
-    this.isPaused = paused
-    this.updateAnimationLoop()
-  }
-
   private updateAnimationLoop() {
-    if (this.isPaused || this.isDocumentHidden) {
+    if (this.isDocumentHidden) {
       cancelAnimationFrame(this.animationFrame)
       this.animationFrame = 0
       return
@@ -654,6 +983,10 @@ export class FlowFieldEngine {
     const quality = FLOW_QUALITY[this.variant]
     const segmentRange = SEGMENT_RANGES[this.variant]
     const particleRange = PARTICLE_RANGES[this.variant]
+    const backgroundRange = BACKGROUND_RANGES[this.variant]
+    const graphRange = GRAPH_RANGES[this.variant]
+    const networkEdgeRange = NETWORK_EDGE_RANGES[this.variant]
+    const networkNodeRange = NETWORK_NODE_RANGES[this.variant]
     const scale = this.reducedQuality ? QUALITY_REDUCTION : 1
     const filamentCount = Math.max(1, Math.floor(quality.filaments * scale))
 
@@ -661,6 +994,22 @@ export class FlowFieldEngine {
     this.particleGeometry.setDrawRange(
       particleRange.start,
       Math.max(1, Math.floor(particleRange.count * scale)),
+    )
+    this.backgroundGeometry.setDrawRange(
+      backgroundRange.start,
+      Math.max(1, Math.floor(backgroundRange.count * scale)),
+    )
+    this.graphGeometry.setDrawRange(
+      graphRange.start,
+      Math.max(2, Math.floor((graphRange.count * scale) / 2) * 2),
+    )
+    this.networkEdgeGeometry.setDrawRange(
+      networkEdgeRange.start,
+      Math.max(2, Math.floor((networkEdgeRange.count * scale) / 2) * 2),
+    )
+    this.networkNodeGeometry.setDrawRange(
+      networkNodeRange.start,
+      Math.max(2, Math.floor(networkNodeRange.count * scale)),
     )
   }
 
@@ -706,7 +1055,7 @@ export class FlowFieldEngine {
   }
 
   private render = (now: number) => {
-    if (this.disposed || this.isPaused || this.isDocumentHidden || this.contextLost) return
+    if (this.disposed || this.isDocumentHidden || this.contextLost) return
     const frameDuration = now - this.lastFrameAt
     const delta = Math.min(frameDuration / 1000, 0.05)
     this.lastFrameAt = now
@@ -736,8 +1085,15 @@ export class FlowFieldEngine {
     this.canvas.removeEventListener('lostpointercapture', this.handlePointerCancel)
     this.canvas.removeEventListener('webglcontextlost', this.handleContextLost)
     this.segmentGeometry.dispose()
+    this.backgroundGeometry.dispose()
+    this.graphGeometry.dispose()
+    this.networkEdgeGeometry.dispose()
+    this.networkNodeGeometry.dispose()
     this.particleGeometry.dispose()
     this.lineMaterial.dispose()
+    this.backgroundMaterial.dispose()
+    this.graphMaterial.dispose()
+    this.networkNodeMaterial.dispose()
     this.particleMaterial.dispose()
     this.renderer.dispose()
     this.canvas.remove()
