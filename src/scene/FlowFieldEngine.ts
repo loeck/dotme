@@ -343,13 +343,20 @@ varying float vAlpha;
 
 void main() {
   vec2 p = position.xy;
-  p.y += sin(uTime * 0.12 + aPhase) * 0.0025;
+  float depth = smoothstep(8.0, 70.0, aSize);
+  float speed = mix(0.22, 0.075, depth);
+  vec2 drift = vec2(
+    sin(uTime * speed + aPhase * 1.7) * mix(0.005, 0.021, depth),
+    cos(uTime * speed * 0.73 + aPhase) * mix(0.007, 0.025, depth)
+  );
+  p += drift;
   vec2 delta = p - uPointer;
   vec2 screenDelta = vec2(delta.x * uAspect, delta.y);
   float reach = 1.0 - smoothstep(0.0, 0.28, length(screenDelta));
   vec2 direction = normalize(screenDelta + vec2(0.0001));
   p += vec2(direction.x / uAspect, direction.y) * reach * 0.009;
-  vAlpha = aAlpha * smoothstep(0.28, 0.86, uReveal);
+  float breathe = 0.82 + sin(uTime * speed * 1.4 + aPhase * 2.1) * 0.18;
+  vAlpha = aAlpha * breathe * smoothstep(0.28, 0.86, uReveal);
   gl_Position = vec4(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.35, 1.0);
   gl_PointSize = aSize * uPixelRatio;
 }

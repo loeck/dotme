@@ -13,10 +13,7 @@ describe('Profile', () => {
       'href',
       'https://github.com/loeck',
     )
-    expect(screen.getByRole('link', { name: /Last.fm/ })).toHaveAttribute(
-      'href',
-      'https://last.fm/user/NainPuissant',
-    )
+    expect(screen.queryByRole('link', { name: /Last.fm/ })).not.toBeInTheDocument()
     expect(screen.queryByText(/Spotify|Piana/i)).not.toBeInTheDocument()
   })
 })
