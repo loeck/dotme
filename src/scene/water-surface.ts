@@ -10,13 +10,15 @@ export const WIND_WAVES = [
   [0.83, 5.1, 0.014, 2.1],
   [0.31, 3.6, 0.011, 5.8],
   [0.97, 2.4, 0.008, 0.4],
-  [0.63, 1.61, 0.0058, 3.2],
-  [1.15, 1.07, 0.0039, 5.1],
-  [0.38, 0.72, 0.0026, 1.7],
-  [0.78, 0.49, 0.0017, 4.2],
-  [1.02, 0.33, 0.0011, 0.9],
-  [0.49, 0.22, 0.0007, 3.8],
-  [0.86, 0.145, 0.00042, 2.6],
+  // Calm wind: fade short, fast waves before they dominate the lamp glints.
+  // Keep this spectrum uniform across the lake, including the lit left bank.
+  [0.63, 1.61, 0.0048, 3.2],
+  [1.15, 1.07, 0.0024, 5.1],
+  [0.38, 0.72, 0.0012, 1.7],
+  [0.78, 0.49, 0.00055, 4.2],
+  [1.02, 0.33, 0.00025, 0.9],
+  [0.49, 0.22, 0.0001, 3.8],
+  [0.86, 0.145, 0.00004, 2.6],
 ] as const
 
 export function swellHeight(x: number, z: number, time: number) {

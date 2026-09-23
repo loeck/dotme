@@ -28,7 +28,9 @@ and emergency height/velocity limits (±0.22 m, ±1.5 m/s) prevent pathological 
 exploding the field. Ordinary motion stays well below those limits.
 
 The wind spectrum uses twelve incommensurate wavelengths between 12.7 and 0.145 m, with
-amplitudes between 24 and 0.42 mm, and deep-water dispersion omega=sqrt(9.81 k). Along-wave
+amplitudes between 24 and 0.04 mm, and deep-water dispersion omega=sqrt(9.81 k). Sub-metre
+waves taper strongly so fast specular glints do not dominate the lit bank; the same calm spectrum
+applies across the entire lake. Along-wave
 packets move at the group velocity; cross-wave envelopes localize crests and gently bend them.
 The packet modulation is an artistic approximation, not a full spectral fluid solution.
 Both the CPU picking function and GPU displacement use this same field. Fragment normals use
