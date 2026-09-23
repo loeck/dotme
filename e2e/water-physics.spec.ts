@@ -84,6 +84,19 @@ test('visible water receives gestures, stationary pointers and UI do not; resize
   await page.waitForTimeout(100)
   await page.mouse.down()
   await page.waitForTimeout(100)
+  await page.evaluate(() => {
+    window.dispatchEvent(
+      new PointerEvent('pointerup', { pointerId: 99, pointerType: 'touch', isPrimary: false }),
+    )
+  })
+  expect(
+    (
+      await page.evaluate(async () => {
+        const url = '/water-harness.js'
+        return (await import(url)).diagnostics()
+      })
+    ).dragging,
+  ).toBe(true)
   await page.mouse.move(point.x + 15, point.y - 4)
   await page.waitForTimeout(100)
   await page.mouse.move(point.x + 30, point.y - 8, { steps: 10 })
@@ -215,7 +228,7 @@ test('visible water receives gestures, stationary pointers and UI do not; resize
   expect(errors).toEqual([])
 })
 
-test('reduced motion stays static and unavailable float targets use analytic water', async ({
+test('reduced motion freezes simulation but permits pointer lighting; analytic fallback works', async ({
   page,
 }) => {
   test.setTimeout(120_000)
@@ -225,11 +238,21 @@ test('reduced motion stays static and unavailable float targets use analytic wat
   })
   await page.waitForTimeout(250)
   const before = await page.locator('canvas').screenshot()
-  await page.mouse.move(250, 500)
+  const point = await page.evaluate(async () => {
+    const url = '/water-harness.js'
+    return (await import(url)).findWater()
+  })
+  await page.mouse.move(point.x, point.y)
   await page.mouse.down()
-  await page.mouse.move(300, 550)
+  await page.mouse.move(point.x + 15, point.y)
   await page.mouse.up()
   await page.waitForTimeout(200)
+  const lit = await page.locator('canvas').screenshot()
+  expect(lit).not.toEqual(before)
+  await page.waitForTimeout(200)
+  expect(await page.locator('canvas').screenshot()).toEqual(lit)
+  await page.locator('canvas').dispatchEvent('pointerleave')
+  await page.waitForTimeout(100)
   expect(await page.locator('canvas').screenshot()).toEqual(before)
   const state = await page.evaluate(async () => {
     const url = '/water-harness.js'

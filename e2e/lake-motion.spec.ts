@@ -11,7 +11,9 @@ test('water motion at rest, slow hover, fast drag and release', async ({ page },
     if (message.type() === 'error') errors.push(message.text())
   })
   await page.goto('/?seed=9182')
-  await expect(page.locator('canvas').locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
+  await expect(page.locator('canvas[data-water-mode]').locator('..')).toHaveCSS('opacity', '1', {
+    timeout: 30_000,
+  })
   await page.waitForTimeout(2600)
   await page.screenshot({ path: testInfo.outputPath('wind-0.png') })
   await page.waitForTimeout(650)

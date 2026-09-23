@@ -12,14 +12,14 @@ test('lake visual and frame timing sample', async ({ page }, testInfo) => {
       errors.push(message.text())
   })
   await page.goto('/?seed=9182')
-  const canvas = page.locator('canvas')
+  const canvas = page.locator('canvas[data-water-mode]')
   await expect(canvas).toBeVisible()
   await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 60_000 })
   await testInfo.attach('motion', {
     body: JSON.stringify(
       await page.evaluate(() => ({
         reduced: matchMedia('(prefers-reduced-motion: reduce)').matches,
-        mode: document.querySelector('canvas')?.dataset.waterMode,
+        mode: document.querySelector('canvas[data-water-mode]')?.dataset.waterMode,
       })),
     ),
     contentType: 'application/json',
@@ -62,7 +62,7 @@ for (const seed of [0, 12]) {
       if (message.type() === 'error') errors.push(message.text())
     })
     await page.goto(`/?seed=${seed}`)
-    await expect(page.locator('canvas').locator('..')).toHaveCSS('opacity', '1', {
+    await expect(page.locator('canvas[data-water-mode]').locator('..')).toHaveCSS('opacity', '1', {
       timeout: 30_000,
     })
     await page.waitForTimeout(2300)

@@ -34,6 +34,7 @@ import {
 } from 'three'
 import type { WebGLRenderTarget } from 'three'
 
+import { CursorGlow } from './cursor-glow'
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -41,7 +42,7 @@ import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { createSkyMaterial } from './sky-material'
 import { SubmergedScene } from './submerged-scene'
-import type { Voxel, VoxelMaterial } from './voxel-world'
+import type { Voxel, VoxelLamp, VoxelMaterial } from './voxel-world'
 import { createVoxelWorld } from './voxel-world'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
@@ -77,8 +78,7 @@ void main() {
   float r = dot(p, p);
   float core = exp(-r * 39.0) * 0.76;
   float halo = exp(-r * 5.5) * 0.095;
-  float vertical = exp(-p.x * p.x * 100.0 - p.y * p.y * 8.0) * 0.055;
-  gl_FragColor = vec4(uColor * (core + halo + vertical) * uIntensity, 1.0);
+  gl_FragColor = vec4(uColor * (core + halo) * uIntensity, 1.0);
 }
 `
 
@@ -102,6 +102,7 @@ export class VoxelLandscapeEngine {
   private readonly rayNdc = new Vector2()
   private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
+  private readonly cursorGlow = new CursorGlow()
   private readonly pointer = new Vector2(0, 0)
   private readonly pointerClient = new Vector2(-1, -1)
   private readonly target = new Vector2(0, 0)
@@ -109,13 +110,14 @@ export class VoxelLandscapeEngine {
   private readonly objects: Object3D[] = []
   private readonly materials: Array<{ dispose: () => void }> = []
   private readonly geometries: Array<{ dispose: () => void }> = []
-  private readonly glows: Array<{
-    material: ShaderMaterial
-    cap: MeshBasicMaterial
+  private readonly lampLights: Array<{
+    source: VoxelLamp
+    light: PointLight
+    cube: Mesh<BoxGeometry, MeshBasicMaterial>
+    glow: Mesh<PlaneGeometry, ShaderMaterial>
     color: Color
-    base: number
+    glowStrength: { value: number }
   }> = []
-  private readonly lampLights: Array<{ light: PointLight; intensity: number; phase: number }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicMaterial> | null = null
   private readonly moteTransform = new Object3D()
@@ -215,12 +217,14 @@ export class VoxelLandscapeEngine {
     this.buildWorld((options.seed ?? 0) >>> 0)
     this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile)
     this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
+    this.cursorGlow.attachSurfaces(this.scene)
     this.scene.traverse((object) => {
       if ('isLight' in object) object.layers.enable(1)
     })
     const waterGeometry = createWaterGeometry(this.mobile)
     this.water = createLakeReflector(waterGeometry, this.mobile)
     const uniforms = this.water.material.uniforms
+    Object.assign(uniforms, this.cursorGlow.uniforms)
     uniforms.uState!.value = this.simulation.texture
     uniforms.uMask!.value = this.simulation.mask
     uniforms.uCell!.value = LAKE_BOUNDS.size / this.simulation.resolution
@@ -265,10 +269,6 @@ export class VoxelLandscapeEngine {
       ground: { roughness: 0.88, metalness: 0 },
       shore: { roughness: 0.24, metalness: 0.04 },
       rock: { roughness: 0.42, metalness: 0.02 },
-      treeTrunk: { roughness: 0.95, metalness: 0 },
-      treeLeaf: { roughness: 0.72, metalness: 0 },
-      lampPost: { roughness: 0.28, metalness: 0.65 },
-      lampGlow: { roughness: 0.4, metalness: 0 },
     }
     let offset = 0
     for (const kind of Object.keys(world.groups) as VoxelMaterial[]) {
@@ -279,8 +279,6 @@ export class VoxelLandscapeEngine {
         ...surfaces[kind],
         envMapIntensity: 0.8,
         flatShading: true,
-        transparent: true,
-        opacity: 0,
       })
       this.materials.push(material)
       // Spatial batches let each point-light face discard distant voxels.
@@ -310,56 +308,33 @@ export class VoxelLandscapeEngine {
         }
         mesh.instanceMatrix.needsUpdate = true
         mesh.computeBoundingSphere()
+        mesh.computeBoundingBox()
         this.voxelGroup.add(mesh)
         this.objects.push(mesh)
       }
     }
 
-    const poleGeometry = new BoxGeometry(0.055, 0.84, 0.055)
-    const capGeometry = new BoxGeometry(0.065, 0.28, 0.065)
-    const poleMaterial = new MeshStandardMaterial({
-      color: 0x42464c,
-      roughness: 0.28,
-      metalness: 0.55,
-    })
-    const glowGeometry = new PlaneGeometry(2.15, 2.15)
-    this.geometries.push(poleGeometry, capGeometry, glowGeometry)
-    this.materials.push(poleMaterial)
-    world.lamps.forEach((lamp, index) => {
-      const warm = lamp.warm
-      const pole = new Mesh(poleGeometry, poleMaterial)
-      pole.position.set(lamp.x, lamp.y + 0.42, lamp.z)
-      pole.castShadow = true
-      pole.receiveShadow = true
-      this.scene.add(pole)
-      this.objects.push(pole)
-      const cap = new Mesh(
-        capGeometry,
-        new MeshBasicMaterial({ color: warm ? 0xffd2a3 : 0xb4d9f5 }),
-      )
-      cap.position.set(lamp.x, lamp.y + 0.89, lamp.z)
+    const capGeometry = new BoxGeometry(0.17, 0.17, 0.17)
+    const glowGeometry = new PlaneGeometry(1.3, 1.3)
+    this.geometries.push(capGeometry, glowGeometry)
+    world.lamps.forEach((lamp) => {
+      const cap = new Mesh(capGeometry, new MeshBasicMaterial({ color: 0xb4d9f5 }))
+      cap.position.set(lamp.x, lamp.y, lamp.z)
       this.scene.add(cap)
       this.objects.push(cap)
       this.materials.push(cap.material)
-      const prominent = warm && lamp.intensity >= 0.95
-      const intensity = prominent ? 38 : warm ? 22 : 6.5
-      const light = new PointLight(
-        warm ? 0xffd5ad : 0xa5d4ee,
-        intensity,
-        prominent ? 11 : 8,
-        prominent ? 2 : 1.5,
-      )
+      const light = new PointLight(0xa5d4ee, 22 * lamp.intensity, 8, 2)
       light.position.copy(cap.position)
       this.configurePointShadow(light)
       this.scene.add(light)
       this.objects.push(light)
-      this.lampLights.push({ light, intensity, phase: index * 2.31 })
+      const glowStrength = { value: 0 }
       const glowMaterial = new ShaderMaterial({
         vertexShader: GLOW_VERTEX,
         fragmentShader: GLOW_FRAGMENT,
         uniforms: {
-          uColor: { value: new Color(warm ? 0xffd8b3 : 0xa5d9ff) },
-          uIntensity: { value: 0 },
+          uColor: { value: new Color(0xa5d9ff) },
+          uIntensity: glowStrength,
         },
         transparent: true,
         blending: AdditiveBlending,
@@ -368,16 +343,17 @@ export class VoxelLandscapeEngine {
       })
       const glow = new Mesh(glowGeometry, glowMaterial)
       glow.position.copy(cap.position)
-      glow.position.y += 0.01
       glow.frustumCulled = false
       this.scene.add(glow)
       this.objects.push(glow)
       this.materials.push(glowMaterial)
-      this.glows.push({
-        material: glowMaterial,
-        cap: cap.material,
+      this.lampLights.push({
+        source: lamp,
+        light,
+        cube: cap,
+        glow,
         color: cap.material.color.clone(),
-        base: prominent ? 1.05 : warm ? 0.78 : 0.58,
+        glowStrength,
       })
     })
 
@@ -433,9 +409,9 @@ export class VoxelLandscapeEngine {
     light.shadow.normalBias = 0.035
   }
 
-  private hitWater(clientX: number, clientY: number): Vector3 | null {
+  private hitWater(clientX: number, clientY: number, throughOverlay = false): Vector3 | null {
     const canvas = this.renderer.domElement
-    if (document.elementFromPoint(clientX, clientY) !== canvas) return null
+    if (!throughOverlay && document.elementFromPoint(clientX, clientY) !== canvas) return null
     const bounds = canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
@@ -456,7 +432,7 @@ export class VoxelLandscapeEngine {
     const distance = this.waterHit.distanceTo(this.camera.position)
     const index = lakeIndex(this.bed, this.waterHit.x, this.waterHit.z)
     if (distance > 130 || index < 0 || !this.bed.water[index]) return null
-    // Conservative raster of the actual solids includes stones and tree silhouettes.
+    // Conservative raster of the actual solids includes the banks and isolated stones.
     const cell = LAKE_BOUNDS.size / this.bed.resolution
     for (let d = 0; d < distance - 0.05; d += cell * 0.5) {
       const px = ray.origin.x + ray.direction.x * d
@@ -520,8 +496,50 @@ export class VoxelLandscapeEngine {
     }
   }
 
+  private updateCursorGlow(waterPoint: Vector3 | null): boolean {
+    if (!this.pointerActive) return false
+    const bounds = this.renderer.domElement.getBoundingClientRect()
+    if (
+      this.pointerClient.x < bounds.left ||
+      this.pointerClient.x > bounds.right ||
+      this.pointerClient.y < bounds.top ||
+      this.pointerClient.y > bounds.bottom
+    )
+      return false
+    // Transparent profile overlays must not hide the scene from the light picker.
+    // Water gestures still require direct contact with the canvas.
+    waterPoint ??= this.hitWater(this.pointerClient.x, this.pointerClient.y, true)
+    // hitWater has projected the cursor with this frame's camera.
+    // Test actual solid faces as well as water, including cliff faces and isolated rocks.
+    this.raycaster.far = 130
+    const candidates = this.voxelGroup.children.filter((child) => {
+      const mesh = child as InstancedMesh
+      return mesh.boundingBox && this.raycaster.ray.intersectsBox(mesh.boundingBox)
+    })
+    const solid = this.raycaster.intersectObjects(candidates, false)[0]
+    const position = this.cursorGlow.uniforms.uCursorGlowPosition.value
+    if (solid && (!waterPoint || solid.distance < this.camera.position.distanceTo(waterPoint))) {
+      position.copy(solid.point)
+    } else if (waterPoint) {
+      position.copy(waterPoint)
+    } else return false
+    // Keep the soft emitter on the visible side of the contact, slightly raised.
+    // This gives neighboring voxel faces distinct shading without a spotlight cone.
+    const source = this.cursorGlow.uniforms.uCursorGlowSource.value
+    source.copy(position).addScaledVector(this.raycaster.ray.direction, -2.4)
+    source.y += 0.8
+    return true
+  }
+
   private onPointerDown = (event: PointerEvent) => {
-    if (this.options.reducedMotion || event.button !== 0) return
+    if (event.button !== 0 || !event.isPrimary) return
+    this.pointerType = event.pointerType
+    this.pointerActive = true
+    this.pointerClient.set(event.clientX, event.clientY)
+    if (this.options.reducedMotion) {
+      if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+      return
+    }
     const point = this.hitWater(event.clientX, event.clientY)
     if (!point) return
     // Queue the contact immediately so a quick touch ending before the next frame still ripples.
@@ -537,16 +555,19 @@ export class VoxelLandscapeEngine {
   }
 
   private onPointerMove = (event: PointerEvent) => {
-    if (this.options.reducedMotion || (this.dragging && event.pointerId !== this.dragPointerId))
-      return
+    if (!event.isPrimary || (this.dragging && event.pointerId !== this.dragPointerId)) return
     this.pointerType = event.pointerType
-    this.pointerActive = event.pointerType !== 'touch' || this.dragging
+    this.pointerActive = event.pointerType !== 'touch' || event.buttons !== 0
     this.target.set(
       clamp((event.clientX / this.width) * 2 - 1, -1, 1),
       clamp((event.clientY / this.height) * 2 - 1, -1, 1),
     )
     if (this.pointerClient.x === event.clientX && this.pointerClient.y === event.clientY) return
     this.pointerClient.set(event.clientX, event.clientY)
+    if (this.options.reducedMotion) {
+      if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+      return
+    }
     if (!this.pointerActive || !this.hitWater(event.clientX, event.clientY)) {
       this.previousPointer = null
       this.pendingPointer = null
@@ -561,6 +582,11 @@ export class VoxelLandscapeEngine {
   }
 
   private onPointerUp = (event: PointerEvent) => {
+    if (!event.isPrimary) return
+    if (event.pointerType === 'touch' && event.pointerId !== this.dragPointerId) {
+      this.onPointerLeave()
+      return
+    }
     if (event.pointerId !== this.dragPointerId) return
     this.dragging = false
     this.dragPointerId = -1
@@ -582,6 +608,8 @@ export class VoxelLandscapeEngine {
     this.pendingPointer = null
     this.pointerRevision += 1
     this.waterPointerTarget.z = 0
+    if (this.options.reducedMotion && !this.disposed && this.frame === 0)
+      this.frame = requestAnimationFrame(this.render)
     if (pointerId >= 0 && this.renderer.domElement.hasPointerCapture(pointerId))
       this.renderer.domElement.releasePointerCapture(pointerId)
   }
@@ -611,15 +639,6 @@ export class VoxelLandscapeEngine {
     if (this.introStartedAt === null) this.introStartedAt = now
     this.intro = this.options.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
-    const envelope = smooth(0, 0.62, this.intro)
-    for (const child of this.voxelGroup.children) {
-      const mesh = child as InstancedMesh<BoxGeometry, MeshStandardMaterial>
-      mesh.material.opacity = envelope
-      if (envelope === 1 && mesh.material.transparent) {
-        mesh.material.transparent = false
-        mesh.material.needsUpdate = true
-      }
-    }
     const parallax = this.options.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
     this.pointer.lerp(this.target, parallax)
     const idleDrift = this.options.reducedMotion ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
@@ -633,6 +652,12 @@ export class VoxelLandscapeEngine {
       : null
     if (waterPoint) this.waterPointerTarget.set(waterPoint.x, waterPoint.z, 1)
     else this.waterPointerTarget.z = 0
+    const glowTarget = this.updateCursorGlow(waterPoint) ? 1 : 0
+    const cursorStrength = this.cursorGlow.uniforms.uCursorGlowStrength
+    cursorStrength.value +=
+      (glowTarget - cursorStrength.value) *
+      (this.options.reducedMotion ? 1 : 1 - Math.exp(-dt * (glowTarget ? 6 : 4)))
+    if (cursorStrength.value < 0.001) cursorStrength.value = 0
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
@@ -654,15 +679,33 @@ export class VoxelLandscapeEngine {
     // Only the optical reveal trails off; smoothing x/z makes the surface feel detached.
     waterPointer.x = this.waterPointerTarget.x
     waterPointer.y = this.waterPointerTarget.y
-    waterPointer.z += (this.waterPointerTarget.z - waterPointer.z) * (1 - Math.exp(-dt * 8))
+    waterPointer.z +=
+      (this.waterPointerTarget.z - waterPointer.z) *
+      (this.options.reducedMotion ? 1 : 1 - Math.exp(-dt * 8))
     for (const [index, lamp] of this.lampLights.entries()) {
-      const energy =
-        smooth(0.12 + index * 0.045, 0.55 + index * 0.045, this.intro) *
-        (1 + Math.sin(this.elapsed * 1.17 + lamp.phase) * (this.options.reducedMotion ? 0 : 0.035))
-      lamp.light.intensity = lamp.intensity * energy
-      const glow = this.glows[index]!
-      glow.material.uniforms.uIntensity!.value = glow.base * energy
-      glow.cap.color.copy(glow.color).multiplyScalar(energy)
+      const source = lamp.source
+      const motion = Math.sin(this.elapsed * source.speed + source.phase)
+      // Long, independent quiet intervals separate soft changes tied to the bobbing.
+      // A subset stays steady, so the bank never pulses as one synchronized light.
+      const active =
+        this.options.reducedMotion || source.phase < Math.PI * 0.45
+          ? 0
+          : smooth(0.15, 0.7, Math.sin(this.elapsed * source.speed * 0.29 + source.phase * 1.7))
+      const breathing = 1 + motion * (0.1 + source.amplitude * 0.6) * active
+      const energy = smooth(0.12 + index * 0.045, 0.55 + index * 0.045, this.intro) * breathing
+      const drift = this.options.reducedMotion ? 0 : motion * source.amplitude
+      const sway = this.options.reducedMotion ? 0 : source.driftRadius
+      lamp.cube.position.set(
+        source.x + Math.sin(this.elapsed * source.speed * 0.73 + source.phase) * sway,
+        source.y + drift,
+        source.z + Math.cos(this.elapsed * source.speed * 0.61 + source.phase * 1.3) * sway * 0.7,
+      )
+      lamp.light.position.copy(lamp.cube.position)
+      lamp.glow.position.copy(lamp.cube.position)
+      lamp.glow.quaternion.copy(this.camera.quaternion)
+      lamp.light.intensity = 22 * source.intensity * energy
+      lamp.glowStrength.value = 0.58 * energy
+      lamp.cube.material.color.copy(lamp.color).multiplyScalar(energy)
     }
     if (this.moteMesh) {
       this.moteMesh.material.opacity = smooth(0.25, 0.9, this.intro) * 0.2

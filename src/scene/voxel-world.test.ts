@@ -10,13 +10,11 @@ describe('voxel lake world', () => {
     expect(first.voxels.length).toBeGreaterThan(8_000)
     expect(first.voxels.length).toBeLessThan(70_000)
     expect(first.lamps.length).toBeGreaterThanOrEqual(4)
-    expect(
-      first.lamps.some((lamp) => lamp.x > -21 && lamp.x < -15 && lamp.z < -18 && lamp.z > -21),
-    ).toBe(true)
-    expect(
-      first.lamps.some((lamp) => lamp.x > 20 && lamp.x < 33 && lamp.z < -28 && lamp.z > -36),
-    ).toBe(true)
-    expect(first.groups.treeLeaf.count).toBeGreaterThan(0)
+    expect(first.lamps).toEqual(second.lamps)
+    expect(first.lamps.some((lamp) => lamp.x < 0)).toBe(true)
+    expect(first.lamps.some((lamp) => lamp.x > 0)).toBe(true)
+    expect(first.groups).not.toHaveProperty('treeLeaf')
+    expect(first.groups).not.toHaveProperty('treeTrunk')
     for (const material of ['ground', 'shore', 'rock'] as const) {
       const positions = first.groups[material].positions
       for (let index = 0; index < positions.length; index += 3) {
@@ -33,15 +31,135 @@ describe('voxel lake world', () => {
     expect(mobile.voxels.length).toBeLessThan(desktop.voxels.length)
     expect(mobile.voxels.length).toBeLessThan(22_000)
     expect(mobile.shoreCount).toBeGreaterThan(20)
-    expect(mobile.lamps.some((lamp) => lamp.x < -2 && lamp.x > -7)).toBe(true)
-    expect(mobile.lamps.some((lamp) => lamp.x > 7 && lamp.x < 15)).toBe(true)
-    const trunks = mobile.groups.treeTrunk.positions
-    expect(
-      Array.from({ length: trunks.length / 3 }, (_, index) => trunks[index * 3]!).some(
-        (x) => x > 7 && x < 10,
-      ),
-    ).toBe(true)
+    expect(mobile.lamps.some((lamp) => lamp.x < 0)).toBe(true)
+    expect(mobile.lamps.some((lamp) => lamp.x > 0)).toBe(true)
+    expect(mobile.groups).not.toHaveProperty('treeLeaf')
+    expect(mobile.groups).not.toHaveProperty('treeTrunk')
     expect(mobile.suggestedCamera.position).toEqual([0, 2.5, 16])
+  })
+
+  it('randomizes floating lights over solid land with independent safe motion', () => {
+    for (const mobile of [false, true]) {
+      const worlds = [0, 9182].map((seed) => createVoxelWorld(seed, mobile))
+      expect(worlds[0]!.lamps).not.toEqual(worlds[1]!.lamps)
+      for (const world of worlds) {
+        expect(
+          world.lamps.filter((lamp) => lamp.x < 0 && lamp.z < 0).length,
+        ).toBeGreaterThanOrEqual(2)
+        expect(
+          world.lamps.filter((lamp) => lamp.x > 0 && lamp.z < 0).length,
+        ).toBeGreaterThanOrEqual(2)
+        expect(world.lamps.filter((lamp) => lamp.z > 2).length).toBeLessThanOrEqual(1)
+        expect(world.lamps.length).toBeLessThanOrEqual(mobile ? 5 : 7)
+        expect(new Set(world.lamps.map((lamp) => lamp.speed)).size).toBe(world.lamps.length)
+        expect(new Set(world.lamps.map((lamp) => lamp.phase)).size).toBe(world.lamps.length)
+        const terrain = world.voxels.slice(
+          0,
+          world.groups.ground.count + world.groups.shore.count + world.groups.rock.count,
+        )
+        for (const [index, lamp] of world.lamps.entries()) {
+          for (const other of world.lamps.slice(index + 1)) {
+            const closestApproach =
+              Math.hypot(lamp.x - other.x, lamp.z - other.z) -
+              (lamp.driftRadius + other.driftRadius) * Math.hypot(1, 0.7)
+            expect(closestApproach).toBeGreaterThan(mobile ? 8 : 12)
+          }
+          for (const dx of [-lamp.driftRadius - 0.085, 0, lamp.driftRadius + 0.085])
+            for (const dz of [-lamp.driftRadius * 0.7 - 0.085, 0, lamp.driftRadius * 0.7 + 0.085]) {
+              const beneath = terrain.filter(
+                (voxel) =>
+                  Math.abs(lamp.x + dx - voxel.x) <= voxel.size / 2 + 1e-5 &&
+                  Math.abs(lamp.z + dz - voxel.z) <= voxel.size / 2 + 1e-5,
+              )
+              expect(beneath.length).toBeGreaterThan(0)
+              const ground = Math.max(...beneath.map((voxel) => voxel.y + voxel.size / 2))
+              expect(lamp.y - lamp.amplitude - 0.085).toBeGreaterThan(ground)
+            }
+        }
+      }
+    }
+  })
+
+  it('keeps the original voxel sizes and closes every exposed terrain column, including the far-grid seam', () => {
+    for (const mobile of [false, true]) {
+      const world = createVoxelWorld(9182, mobile)
+      expect(world.voxelSize).toBe(mobile ? 0.28 : 0.25)
+      const terrainEnd =
+        world.groups.ground.count + world.groups.shore.count + world.groups.rock.count
+      const terrain = world.voxels.slice(0, terrainEnd)
+      for (const foreground of [false, true]) {
+        const step = world.voxelSize * (foreground ? 0.5 : 1)
+        const originX = foreground ? (mobile ? -4.2 : -12) : 0
+        const originZ = foreground ? (mobile ? 5 : 3) : 7
+        const covered = new Map<string, { bottom: number; top: number }>()
+        for (const voxel of terrain) {
+          if (voxel.z > 2 !== foreground) continue
+          const span = Math.round(voxel.size / step)
+          const gx = (voxel.x - originX) / step - (span - 1) / 2
+          const gz = (voxel.z - originZ) / step - (span - 1) / 2
+          const top = voxel.y + voxel.size / 2
+          // Detached decorative stones are separate closed cubes, outside the terrain lattice.
+          if (
+            Math.abs(gx - Math.round(gx)) > 1e-4 ||
+            Math.abs(gz - Math.round(gz)) > 1e-4 ||
+            Math.abs(top / step - Math.round(top / step)) > 1e-4
+          )
+            continue
+          for (let dx = 0; dx < span; dx += 1)
+            for (let dz = 0; dz < span; dz += 1) {
+              const key = `${Math.round(gx) + dx}:${Math.round(gz) + dz}`
+              const column = covered.get(key)
+              covered.set(key, {
+                bottom: Math.min(column?.bottom ?? Infinity, voxel.y - voxel.size / 2),
+                top: Math.max(column?.top ?? -Infinity, top),
+              })
+            }
+        }
+        expect(covered.size).toBeGreaterThan(foreground ? 500 : 10_000)
+        let largestGap = 0
+        for (const [key, column] of covered) {
+          const [x, z] = key.split(':').map(Number) as [number, number]
+          const lowerNeighbor = Math.min(
+            ...[`${x - 1}:${z}`, `${x + 1}:${z}`, `${x}:${z - 1}`, `${x}:${z + 1}`].map(
+              (neighbor) => covered.get(neighbor)?.top ?? -0.4,
+            ),
+          )
+          largestGap = Math.max(largestGap, column.bottom - lowerNeighbor)
+        }
+        expect(largestGap).toBeLessThan(1e-5)
+      }
+    }
+  })
+
+  it('centers isolated rocks at Y = 0 with continuous support below the lowest water swell', () => {
+    for (const mobile of [false, true]) {
+      for (const seed of [0, 9182]) {
+        const world = createVoxelWorld(seed, mobile)
+        const terrainEnd =
+          world.groups.ground.count + world.groups.shore.count + world.groups.rock.count
+        const terrain = world.voxels.slice(0, terrainEnd)
+        for (const [px, z] of [
+          [-41, -8],
+          [-39, -10],
+          [-36, -8.5],
+          [-30, -9],
+          [-27, -7.5],
+        ] as const) {
+          const x = mobile ? px / 2.8 : px
+          const rocks = terrain
+            .filter((voxel) => Math.abs(voxel.x - x) < 1e-5 && Math.abs(voxel.z - z) < 1e-5)
+            .toSorted((a, b) => a.y - b.y)
+          expect(rocks.length).toBeGreaterThan(0)
+          expect(rocks[0]!.y - rocks[0]!.size / 2).toBeLessThanOrEqual(-0.4 + 1e-5)
+          expect(rocks.at(-1)!.y).toBe(0)
+          for (let index = 1; index < rocks.length; index += 1) {
+            const lower = rocks[index - 1]!
+            const upper = rocks[index]!
+            expect(upper.y - upper.size / 2).toBeLessThanOrEqual(lower.y + lower.size / 2 + 1e-5)
+          }
+        }
+      }
+    }
   })
 
   it('shapes two left headlands around a deep inlet and holds the right bank farther away', () => {
