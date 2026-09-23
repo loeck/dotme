@@ -59,10 +59,14 @@ float neighbor(vec2 uv, float center) {
 void main() {
   if (texture2D(uMask, vUv).r < 0.5) { gl_FragColor = vec4(0.0); return; }
   vec2 state = texture2D(uState, vUv).rg;
-  float laplacian = neighbor(vUv + vec2(uTexel.x, 0.0), state.x)
+  float cardinal = neighbor(vUv + vec2(uTexel.x, 0.0), state.x)
     + neighbor(vUv - vec2(uTexel.x, 0.0), state.x)
     + neighbor(vUv + vec2(0.0, uTexel.y), state.x)
-    + neighbor(vUv - vec2(0.0, uTexel.y), state.x) - 4.0 * state.x;
+    + neighbor(vUv - vec2(0.0, uTexel.y), state.x);
+  float diagonal = neighbor(vUv + uTexel, state.x) + neighbor(vUv - uTexel, state.x)
+    + neighbor(vUv + vec2(uTexel.x, -uTexel.y), state.x)
+    + neighbor(vUv + vec2(-uTexel.x, uTexel.y), state.x);
+  float laplacian = (4.0 * cardinal + diagonal - 20.0 * state.x) / 6.0;
   float edge = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
   float sponge = 1.0 - smoothstep(0.0, 0.055, edge);
   float decay = exp(-(${WATER_DAMPING.toFixed(2)} + sponge * 16.0) * uDt);
@@ -125,7 +129,10 @@ export class WaterSimulation {
         void main() { vUv = uv; gl_Position = vec4(uImpulse.xy * 2.0 - 1.0 + position.xy * uImpulse.z * 2.0, 0.0, 1.0); }`,
       fragmentShader: `uniform vec4 uImpulse; uniform sampler2D uMask; varying vec2 vUv;
         void main() { vec2 p = (vUv - 0.5) * 2.0;
-          float r = length(p); float profile = r < 1.0 ? 0.5 + 0.5 * cos(r * 3.14159265) : 0.0;
+          float q = dot(p, p);
+          // Compact, smooth, zero-integral pressure: the displaced center feeds
+          // a surrounding shoulder instead of excavating a persistent trench.
+          float profile = q < 1.0 ? (1.0-q) * (1.0-q) * (1.0-4.0*q) : 0.0;
           float wet = step(0.5, texture2D(uMask, uImpulse.xy + p * uImpulse.z).r);
           gl_FragColor = vec4(0.0, uImpulse.w * profile * wet, 0.0, 1.0); }`,
       uniforms: { uImpulse: { value: new Vector4() }, uMask: { value: this.mask } },
@@ -178,7 +185,7 @@ export class WaterSimulation {
       new Vector4(
         (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size,
         (z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size,
-        Math.max(radius, (LAKE_BOUNDS.size / this.resolution) * 2) / LAKE_BOUNDS.size,
+        Math.max(radius, (LAKE_BOUNDS.size / this.resolution) * 2.5) / LAKE_BOUNDS.size,
         Math.max(-0.65, Math.min(0.65, velocity)),
       ),
     )

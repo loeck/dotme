@@ -83,7 +83,9 @@ export class SubmergedScene {
     this.geometry.computeVertexNormals()
     this.geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
     const floor = new Mesh(this.geometry, this.material)
+    floor.receiveShadow = true
     const stones = new InstancedMesh(this.box, this.stoneMaterial, bed.stones.length)
+    stones.receiveShadow = true
     const transform = new Object3D()
     bed.stones.forEach((stone, i) => {
       transform.position.set(stone.x, stone.y, stone.z)
@@ -119,6 +121,9 @@ export class SubmergedScene {
   }
 
   dispose() {
+    this.group.traverse((object) => {
+      if (object instanceof InstancedMesh) object.dispose()
+    })
     this.group.removeFromParent()
     this.target.dispose()
     this.depthField.dispose()

@@ -1,4 +1,4 @@
-import { BackSide, ShaderMaterial } from 'three'
+import { BackSide, ShaderMaterial, Vector3 } from 'three'
 
 // The landscape is close to the camera; these distant silhouettes give the
 // valley depth without adding another band of visible geometry at the shore.
@@ -18,6 +18,8 @@ const fragmentShader = `
 uniform float uTime;
 uniform float uSeed;
 uniform float uMobile;
+uniform vec3 uMoonDirection;
+uniform float uMoonIntensity;
 varying vec3 vDirection;
 
 float hash(vec2 p) {
@@ -143,6 +145,11 @@ void main() {
   float mist = lowMist * (0.12 + mistNoise * 0.16 + mistDetail * 0.055 + valleyPool * 0.22);
   color = mix(color, vec3(0.023, 0.033, 0.044), mist);
 
+  // The visible moon and its halo track the same direction as the scene light.
+  float moonAngle = acos(clamp(dot(direction, uMoonDirection), -1.0, 1.0));
+  float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
+  float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
+  color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 + moonHalo) * uMoonIntensity;
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -155,6 +162,8 @@ export function createSkyMaterial(seed: number, mobile = false): ShaderMaterial 
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
+      uMoonDirection: { value: new Vector3(-35, 48, -20).normalize() },
+      uMoonIntensity: { value: 1.5 },
       uSeed: { value: (seed % 4096) / 379 },
       uMobile: { value: mobile ? 1 : 0 },
     },

@@ -28,6 +28,8 @@ export async function exerciseSimulation() {
     const target = state.targets[state.current]!
     const data = new Uint16Array(512 * 512 * 4)
     await renderer.readRenderTargetPixelsAsync(target, 0, 0, 512, 512, data)
+    let signedVolume = 0,
+      absoluteVolume = 0
     let energy = 0,
       peak = 0,
       beyond = 0,
@@ -37,6 +39,8 @@ export async function exerciseSimulation() {
         const h = DataUtils.fromHalfFloat(data[(z * 512 + x) * 4]!)
         const v = DataUtils.fromHalfFloat(data[(z * 512 + x) * 4 + 1]!)
         if (!Number.isFinite(h) || !Number.isFinite(v)) throw new Error('Non-finite GPU water')
+        signedVolume += h
+        absoluteVolume += Math.abs(h)
         energy += h * h + v * v
         peak = Math.max(peak, Math.abs(h))
         if (x >= 256) beyond = Math.max(beyond, Math.abs(h))
@@ -45,7 +49,13 @@ export async function exerciseSimulation() {
         if (Math.hypot(worldX + 2, worldZ + 32) > 1.3)
           propagated = Math.max(propagated, Math.abs(h))
       }
-    return { energy, peak, beyond, propagated }
+    return {
+      energy,
+      peak,
+      beyond,
+      propagated,
+      volumeImbalance: Math.abs(signedVolume) / Math.max(absoluteVolume, 1e-12),
+    }
   }
   const supported = simulation.available
   if (!supported) throw new Error('GPU simulation is unavailable in this test browser')
@@ -128,10 +138,16 @@ export function diagnostics() {
   }
 }
 export function findWater() {
-  for (const y of [0.85, 0.75, 0.65])
-    for (const x of [0.65, 0.55, 0.8, 0.35]) {
-      if (probe().hitWater(x * innerWidth, y * innerHeight))
-        return { x: x * innerWidth, y: y * innerHeight }
+  for (const y of [0.75, 0.8, 0.7, 0.85, 0.9])
+    for (const x of [0.5, 0.55, 0.45, 0.6, 0.65, 0.4, 0.7, 0.35, 0.75, 0.3, 0.8]) {
+      const px = x * innerWidth,
+        py = y * innerHeight
+      // The gesture travels 30px right and the camera eases during contact.
+      // Require an open patch, not just a single wet pixel beside a rock.
+      const open = [-10, 0, 40].every((dx) =>
+        [-12, 0, 12].every((dy) => probe().hitWater(px + dx, py + dy)),
+      )
+      if (open) return { x: px, y: py }
     }
   throw new Error('No visible water found')
 }
@@ -150,8 +166,8 @@ export function findBank() {
     bed: import('../src/scene/lake-bed').LakeBed
   }
   const bed = state.bed
-  for (let z = 6; z < 12; z += 0.5)
-    for (let x = -8; x < -0.5; x += 0.5) {
+  for (let z = 12; z > -50; z -= 0.5)
+    for (let x = -30; x < 30; x += 0.5) {
       const i =
         Math.floor(((z - LAKE_BOUNDS.minZ) / 160) * bed.resolution) * bed.resolution +
         Math.floor(((x - LAKE_BOUNDS.minX) / 160) * bed.resolution)
@@ -165,11 +181,11 @@ export function findBank() {
       if (
         px > 10 &&
         px < innerWidth - 10 &&
-        py > 10 &&
+        py > innerHeight * 0.5 &&
         py < innerHeight - 10 &&
         !state.hitWater(px, py)
       )
         return { x: px, y: py }
     }
-  throw new Error('No visible foreground bank')
+  throw new Error('No visible bank')
 }

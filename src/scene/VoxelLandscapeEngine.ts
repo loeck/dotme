@@ -3,20 +3,25 @@ import {
   AmbientLight,
   BoxGeometry,
   Color,
+  CubeCamera,
   DirectionalLight,
   DoubleSide,
   FogExp2,
   Group,
+  HalfFloatType,
   InstancedMesh,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
+  PCFShadowMap,
+  PMREMGenerator,
   PerspectiveCamera,
   Plane,
   PlaneGeometry,
   PointLight,
   Raycaster,
+  ReinhardToneMapping,
   SRGBColorSpace,
   Scene,
   ShaderMaterial,
@@ -24,9 +29,10 @@ import {
   UnsignedByteType,
   Vector2,
   Vector3,
-  Vector4,
+  WebGLCubeRenderTarget,
   WebGLRenderer,
 } from 'three'
+import type { WebGLRenderTarget } from 'three'
 
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
@@ -35,6 +41,7 @@ import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { createSkyMaterial } from './sky-material'
 import { SubmergedScene } from './submerged-scene'
+import type { Voxel, VoxelMaterial } from './voxel-world'
 import { createVoxelWorld } from './voxel-world'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
@@ -102,11 +109,22 @@ export class VoxelLandscapeEngine {
   private readonly objects: Object3D[] = []
   private readonly materials: Array<{ dispose: () => void }> = []
   private readonly geometries: Array<{ dispose: () => void }> = []
-  private readonly glows: Array<{ material: ShaderMaterial; phase: number; base: number }> = []
+  private readonly glows: Array<{
+    material: ShaderMaterial
+    cap: MeshBasicMaterial
+    color: Color
+    base: number
+  }> = []
   private readonly lampLights: Array<{ light: PointLight; intensity: number; phase: number }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicMaterial> | null = null
   private readonly moteTransform = new Object3D()
+  private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
+  private readonly moonDirection = new Vector3()
+  private readonly environmentTarget: WebGLCubeRenderTarget
+  private readonly environmentCamera: CubeCamera
+  private readonly environmentFilter: PMREMGenerator
+  private filteredEnvironment: WebGLRenderTarget | undefined
   private readonly drawingBufferSize = new Vector2()
   private readonly water: LakeReflector
   private readonly simulation: WaterSimulation
@@ -145,8 +163,22 @@ export class VoxelLandscapeEngine {
       powerPreference: 'high-performance',
     })
     this.renderer.setClearColor(0x080c11)
+    this.renderer.shadowMap.enabled = true
+    this.renderer.shadowMap.type = PCFShadowMap
+    // Update once per animation frame; all reflection cameras reuse these shadows.
+    this.renderer.shadowMap.autoUpdate = false
+    this.environmentTarget = new WebGLCubeRenderTarget(this.mobile ? 64 : 128, {
+      type: this.renderer.extensions.has('EXT_color_buffer_float')
+        ? HalfFloatType
+        : UnsignedByteType,
+    })
+    this.environmentFilter = new PMREMGenerator(this.renderer)
+    this.environmentTarget.texture.name = 'Live landscape environment'
+    this.environmentCamera = new CubeCamera(0.1, 500, this.environmentTarget)
+    this.environmentCamera.position.set(0, 3, -18)
     this.depthFocus = new DepthFocus(this.renderer, this.mobile)
     this.renderer.outputColorSpace = SRGBColorSpace
+    this.renderer.toneMapping = ReinhardToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
     this.renderer.domElement.dataset.seed = String((options.seed ?? 0) >>> 0)
     this.renderer.domElement.dataset.generatorVersion = 'voxel-landscape-v1'
@@ -154,13 +186,22 @@ export class VoxelLandscapeEngine {
     this.scene.fog = new FogExp2(0x14202a, 0.009)
     this.scene.background = new Color(0x080c11)
     this.scene.add(new AmbientLight(0x526074, 0.38))
-    // Grazing moonlight separates the top and side faces without lifting the sky.
-    const moonRim = new DirectionalLight(0xa3bfd6, 1.15)
-    moonRim.position.set(-35, 28, -48)
-    this.scene.add(moonRim)
-    const moon = new PointLight(0x758ba6, 11, 100, 1.4)
-    moon.position.set(-18, 20, -23)
-    this.scene.add(moon)
+    this.moon.position.set(-35, 48, -48)
+    this.moon.target.position.set(0, 0, -28)
+    this.moon.castShadow = true
+    this.moon.shadow.mapSize.setScalar(this.mobile ? 1024 : 2048)
+    Object.assign(this.moon.shadow.camera, {
+      left: -115,
+      right: 115,
+      top: 100,
+      bottom: -100,
+      near: 0.5,
+      far: 280,
+    })
+    this.moon.shadow.camera.updateProjectionMatrix()
+    this.moon.shadow.normalBias = 0.12
+    this.moon.shadow.bias = -0.00015
+    this.scene.add(this.moon, this.moon.target)
 
     this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile)
     const skyGeometry = new SphereGeometry(260, 32, 16)
@@ -190,6 +231,7 @@ export class VoxelLandscapeEngine {
     if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
     this.water.position.y = WATER_LEVEL
+    this.water.receiveShadow = true
     this.scene.add(this.water)
     this.objects.push(this.water)
     this.geometries.push(waterGeometry)
@@ -214,100 +256,80 @@ export class VoxelLandscapeEngine {
   private buildWorld(seed: number) {
     const world = createVoxelWorld(seed, this.mobile)
     this.bed = world.lakeBed
-    const terrainEnd =
-      world.groups.ground.count + world.groups.shore.count + world.groups.rock.count
-    const leafStart = terrainEnd + world.groups.treeTrunk.count
-    const leafEnd = leafStart + world.groups.treeLeaf.count
-    const groups = new Map<
-      string,
-      { color: number; level: number; warm: boolean; voxels: typeof world.voxels }
-    >()
-    for (let index = 0; index < world.voxels.length; index += 1) {
-      const voxel = world.voxels[index]!
-      const isTerrain = index < terrainEnd
-      const isLeaf = index >= leafStart && index < leafEnd
-      let light = 0
-      let warm = true
-      for (const lamp of world.lamps) {
-        const dx = voxel.x - lamp.x
-        const dz = voxel.z - lamp.z
-        const dy = voxel.y - lamp.y - 0.85
-        // The cap lights a few neighboring stones, not the full bank or tree crown.
-        if (voxel.y > lamp.y + (isLeaf ? 4.5 : 1.45)) continue
-        const distance = dx * dx + dz * dz + dy * dy * (isLeaf ? 0.75 : 1.8)
-        const prominent = lamp.warm && lamp.intensity >= 0.95
-        const influence =
-          lamp.intensity * (prominent ? 0.92 : 1) * Math.exp(-distance / (prominent ? 6.5 : 4.6))
-        if (influence > light) {
-          light = influence
-          warm = lamp.warm
-        }
-      }
-      const facetSeed =
-        Math.sin(voxel.x * 12.9898 + voxel.y * 78.233 + voxel.z * 37.719) * 43758.5453
-      const facet = facetSeed - Math.floor(facetSeed)
-      const lampLevel = light > 0.63 && facet > 0.84 ? 2 : light > 0.28 && facet > 0.52 ? 1 : 0
-      const moonFacet =
-        (isLeaf && voxel.y > 2 && facet > 0.82) ||
-        (isTerrain && voxel.y < 0.8 && voxel.z > -48 && facet > 0.91) ||
-        (isTerrain && voxel.y > 2 && voxel.x > 35 && voxel.z < -32 && facet > 0.91)
-      const level = Math.max(lampLevel, moonFacet ? 1 : 0)
-      if (lampLevel === 0 && moonFacet) warm = false
-      const key = `${voxel.color}:${level}:${warm ? 1 : 0}`
-      let group = groups.get(key)
-      if (!group) {
-        group = { color: voxel.color, level, warm, voxels: [] }
-        groups.set(key, group)
-      }
-      group.voxels.push(voxel)
-    }
     const box = new BoxGeometry(1, 1, 1)
     this.geometries.push(box)
     const dummy = new Object3D()
-    for (const { color, level, warm, voxels } of groups.values()) {
-      const lightColor = new Color(warm ? 0xb0a495 : 0x9aafbc)
-      const baseColor = new Color(color)
-      const lightAmount = level === 2 ? 0.22 : level === 1 ? 0.055 : 0
+    const color = new Color()
+    const surfaces: Record<VoxelMaterial, { roughness: number; metalness: number }> = {
+      ground: { roughness: 0.88, metalness: 0 },
+      shore: { roughness: 0.24, metalness: 0.04 },
+      rock: { roughness: 0.42, metalness: 0.02 },
+      treeTrunk: { roughness: 0.95, metalness: 0 },
+      treeLeaf: { roughness: 0.72, metalness: 0 },
+      lampPost: { roughness: 0.28, metalness: 0.65 },
+      lampGlow: { roughness: 0.4, metalness: 0 },
+    }
+    let offset = 0
+    for (const kind of Object.keys(world.groups) as VoxelMaterial[]) {
+      const count = world.groups[kind].count
+      if (count === 0) continue
+      // Instance colors contain only albedo. Illumination is evaluated by the GPU.
       const material = new MeshStandardMaterial({
-        color: baseColor.clone().lerp(lightColor, lightAmount * 0.28),
-        emissive: baseColor.clone().lerp(lightColor, lightAmount),
-        emissiveIntensity: level === 2 ? 0.35 : level === 1 ? 0.21 : 0.1,
-        roughness: 0.96,
-        metalness: 0.08,
+        ...surfaces[kind],
+        envMapIntensity: 0.8,
         flatShading: true,
         transparent: true,
         opacity: 0,
       })
       this.materials.push(material)
-      const mesh = new InstancedMesh(box, material, voxels.length)
-      for (let i = 0; i < voxels.length; i += 1) {
-        const voxel = voxels[i]!
-        dummy.position.set(voxel.x, voxel.y, voxel.z)
-        dummy.scale.setScalar(voxel.size)
-        dummy.updateMatrix()
-        mesh.setMatrixAt(i, dummy.matrix)
+      // Spatial batches let each point-light face discard distant voxels.
+      // One world-sized batch would submit all 50k cubes to every shadow camera.
+      const chunks = new Map<string, Voxel[]>()
+      for (let i = 0; i < count; i += 1) {
+        const voxel = world.voxels[offset + i]!
+        const key = `${Math.floor(voxel.x / 12)}:${Math.floor(voxel.z / 12)}`
+        let chunk = chunks.get(key)
+        if (!chunk) {
+          chunk = []
+          chunks.set(key, chunk)
+        }
+        chunk.push(voxel)
       }
-      mesh.instanceMatrix.needsUpdate = true
-      mesh.computeBoundingSphere()
-      this.voxelGroup.add(mesh)
-      this.objects.push(mesh)
+      offset += count
+      for (const voxels of chunks.values()) {
+        const mesh = new InstancedMesh(box, material, voxels.length)
+        mesh.castShadow = true
+        mesh.receiveShadow = true
+        for (const [index, voxel] of voxels.entries()) {
+          dummy.position.set(voxel.x, voxel.y, voxel.z)
+          dummy.scale.setScalar(voxel.size)
+          dummy.updateMatrix()
+          mesh.setMatrixAt(index, dummy.matrix)
+          mesh.setColorAt(index, color.setHex(voxel.color))
+        }
+        mesh.instanceMatrix.needsUpdate = true
+        mesh.computeBoundingSphere()
+        this.voxelGroup.add(mesh)
+        this.objects.push(mesh)
+      }
     }
 
     const poleGeometry = new BoxGeometry(0.055, 0.84, 0.055)
     const capGeometry = new BoxGeometry(0.065, 0.28, 0.065)
     const poleMaterial = new MeshStandardMaterial({
       color: 0x42464c,
-      roughness: 0.8,
+      roughness: 0.28,
       metalness: 0.55,
     })
-    const capMaterial = new MeshBasicMaterial({ color: 0xffd9a1 })
     const glowGeometry = new PlaneGeometry(2.15, 2.15)
     this.geometries.push(poleGeometry, capGeometry, glowGeometry)
-    this.materials.push(poleMaterial, capMaterial)
+    this.materials.push(poleMaterial)
     world.lamps.forEach((lamp, index) => {
       const warm = lamp.warm
       const pole = new Mesh(poleGeometry, poleMaterial)
       pole.position.set(lamp.x, lamp.y + 0.42, lamp.z)
+      pole.castShadow = true
+      pole.receiveShadow = true
       this.scene.add(pole)
       this.objects.push(pole)
       const cap = new Mesh(
@@ -327,6 +349,7 @@ export class VoxelLandscapeEngine {
         prominent ? 2 : 1.5,
       )
       light.position.copy(cap.position)
+      this.configurePointShadow(light)
       this.scene.add(light)
       this.objects.push(light)
       this.lampLights.push({ light, intensity, phase: index * 2.31 })
@@ -351,7 +374,8 @@ export class VoxelLandscapeEngine {
       this.materials.push(glowMaterial)
       this.glows.push({
         material: glowMaterial,
-        phase: index * 2.31,
+        cap: cap.material,
+        color: cap.material.color.clone(),
         base: prominent ? 1.05 : warm ? 0.78 : 0.58,
       })
     })
@@ -397,6 +421,15 @@ export class VoxelLandscapeEngine {
     this.objects.push(moteMesh)
     this.geometries.push(moteGeometry)
     this.materials.push(moteMaterial)
+  }
+
+  private configurePointShadow(light: PointLight) {
+    light.castShadow = true
+    light.shadow.mapSize.setScalar(this.mobile ? 256 : 512)
+    light.shadow.camera.near = 0.08
+    light.shadow.camera.far = light.distance || 30
+    light.shadow.bias = -0.001
+    light.shadow.normalBias = 0.035
   }
 
   private hitWater(clientX: number, clientY: number): Vector3 | null {
@@ -581,6 +614,10 @@ export class VoxelLandscapeEngine {
     for (const child of this.voxelGroup.children) {
       const mesh = child as InstancedMesh<BoxGeometry, MeshStandardMaterial>
       mesh.material.opacity = envelope
+      if (envelope === 1 && mesh.material.transparent) {
+        mesh.material.transparent = false
+        mesh.material.needsUpdate = true
+      }
     }
     const parallax = this.options.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
     this.pointer.lerp(this.target, parallax)
@@ -599,16 +636,13 @@ export class VoxelLandscapeEngine {
       this.previousPointer = null
     })
     const uniforms = this.water.material.uniforms
-    for (const [index, lamp] of this.lampLights.entries()) {
-      const light = lamp.light
-      ;(uniforms.uLamps!.value[index] as Vector4).set(
-        light.position.x,
-        light.position.y,
-        light.position.z,
-        light.intensity,
-      )
-      uniforms.uWarm!.value[index] = light.color.r > light.color.b ? 1 : 0
-    }
+    // Slow moon motion changes the grazing light, shadows and reflected sky together.
+    const orbit = this.elapsed * 0.035
+    this.moon.position.set(-35 + Math.sin(orbit) * 12, 48 + Math.sin(orbit * 0.7) * 4, -48)
+    this.moon.intensity = 1.5 * (0.94 + Math.sin(orbit * 1.3) * 0.06)
+    this.moonDirection.copy(this.moon.position).sub(this.moon.target.position).normalize()
+    this.skyMaterial.uniforms.uMoonDirection!.value.copy(this.moonDirection)
+    this.skyMaterial.uniforms.uMoonIntensity!.value = this.moon.intensity
     uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
     this.sky.position.copy(this.camera.position)
@@ -620,16 +654,14 @@ export class VoxelLandscapeEngine {
     waterPointer.x = this.waterPointerTarget.x
     waterPointer.y = this.waterPointerTarget.y
     waterPointer.z += (this.waterPointerTarget.z - waterPointer.z) * (1 - Math.exp(-dt * 8))
-    for (const [index, glow] of this.glows.entries()) {
-      glow.material.uniforms.uIntensity!.value =
+    for (const [index, lamp] of this.lampLights.entries()) {
+      const energy =
         smooth(0.12 + index * 0.045, 0.55 + index * 0.045, this.intro) *
-        glow.base *
-        (1 + Math.sin(this.elapsed * (1.1 + index * 0.13) + glow.phase) * 0.065)
-    }
-    for (const lamp of this.lampLights) {
-      lamp.light.intensity =
-        lamp.intensity *
         (1 + Math.sin(this.elapsed * 1.17 + lamp.phase) * (this.options.reducedMotion ? 0 : 0.035))
+      lamp.light.intensity = lamp.intensity * energy
+      const glow = this.glows[index]!
+      glow.material.uniforms.uIntensity!.value = glow.base * energy
+      glow.cap.color.copy(glow.color).multiplyScalar(energy)
     }
     if (this.moteMesh) {
       this.moteMesh.material.opacity = smooth(0.25, 0.9, this.intro) * 0.2
@@ -649,6 +681,28 @@ export class VoxelLandscapeEngine {
     }
     if (!this.options.reducedMotion) this.simulation.step(dt)
     uniforms.uState!.value = this.simulation.texture
+    this.renderer.shadowMap.needsUpdate = true
+    // Capture current lighting in all six directions every frame. Water has its
+    // own planar reflection and is excluded to avoid recursive mirror captures.
+    this.water.visible = false
+    const environmentIntensity = this.scene.environmentIntensity
+    this.scene.environmentIntensity = 0
+    try {
+      this.environmentCamera.update(this.renderer, this.scene)
+    } finally {
+      this.water.visible = true
+      this.scene.environmentIntensity = environmentIntensity
+    }
+    // Filter explicitly before the main render. Lazy filtering inside a
+    // material upload would nest renderer calls and disturb texture bindings.
+    if (this.simulation.available) {
+      this.filteredEnvironment = this.environmentFilter.fromCubemap(
+        this.environmentTarget.texture,
+        this.filteredEnvironment,
+      )
+      this.scene.environment = this.filteredEnvironment.texture
+    }
+    this.water.material.uniforms.uEnvironment!.value = this.environmentTarget.texture
     this.submerged.render(this.renderer, this.scene)
     this.depthFocus.render(this.renderer, this.scene, this.camera)
     if (!this.rendered) {
@@ -708,7 +762,16 @@ export class VoxelLandscapeEngine {
     this.renderer.domElement.removeEventListener('lostpointercapture', this.onLostCapture)
     window.removeEventListener('blur', this.onPointerLeave)
     document.removeEventListener('visibilitychange', this.onVisibilityChange)
-    for (const object of this.objects) this.scene.remove(object)
+    for (const object of this.objects) {
+      object.removeFromParent()
+      if (object instanceof InstancedMesh) object.dispose()
+    }
+    this.scene.environment = null
+    this.environmentTarget.dispose()
+    this.filteredEnvironment?.dispose()
+    this.environmentFilter.dispose()
+    this.moon.shadow.dispose()
+    for (const { light } of this.lampLights) light.shadow.dispose()
     this.pointerRevision += 1
     this.simulation.dispose()
     this.submerged.dispose()

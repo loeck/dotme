@@ -47,6 +47,7 @@ test('GPU propagation, damping, shore barriers, stability, reset and frame indep
     return exerciseSimulation()
   })
   expect(result.initial.peak).toBeGreaterThan(0.001)
+  expect(result.initial.volumeImbalance).toBeLessThan(0.02)
   expect(result.spread.propagated).toBeGreaterThan(0.0001)
   expect(result.spread.beyond).toBe(0)
   expect(result.settled.beyond).toBe(0)
@@ -89,6 +90,12 @@ test('visible water receives gestures, stationary pointers and UI do not; resize
     return (await import(url)).diagnostics()
   })
   expect(moving.impulses).toBeGreaterThan(1)
+  expect(
+    await page.evaluate(async ({ x, y }) => {
+      const url = '/water-harness.js'
+      return (await import(url)).hit(x + 30, y - 8)
+    }, point),
+  ).toBe(true)
   await expect
     .poll(async () =>
       page.evaluate(async () => {

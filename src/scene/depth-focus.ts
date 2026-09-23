@@ -70,6 +70,7 @@ void main() {
     color /= weight;
   }
   gl_FragColor = vec4(color, 1.0);
+  #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `
@@ -104,7 +105,7 @@ export class DepthFocus {
       },
       depthTest: false,
       depthWrite: false,
-      toneMapped: false,
+      toneMapped: true,
     })
     const quad = new Mesh(this.geometry, this.material)
     quad.frustumCulled = false
