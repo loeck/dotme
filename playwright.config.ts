@@ -9,7 +9,14 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        // Exercise the GPU renderer on macOS; software WebGL stalls the live shadow passes.
+        launchOptions: process.platform === 'darwin' ? { args: ['--use-angle=metal'] } : {},
+      },
+    },
     { name: 'mobile', use: { ...devices['iPhone 13'] } },
   ],
   webServer: {
