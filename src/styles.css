@@ -1,1 +1,148 @@
 @import 'tailwindcss';
+
+@media (hover: hover) and (pointer: fine) {
+  main,
+  main a {
+    cursor:
+      url('/light-cursor.svg') 20 20,
+      crosshair;
+  }
+
+  main[data-cursor-active='true'],
+  main[data-cursor-active='true'] a {
+    cursor: none;
+  }
+}
+
+.scene-cursor {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 50;
+  width: 40px;
+  height: 40px;
+  pointer-events: none;
+  opacity: 0;
+  --cursor-scale: 1;
+}
+
+.scene-cursor[data-visible='true'] {
+  opacity: 1;
+}
+.scene-cursor[data-interactive='true'] {
+  --cursor-scale: 1.1;
+}
+.scene-cursor[data-pressed='true'] {
+  --cursor-scale: 0.9;
+}
+
+.scene-cursor__halo {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: radial-gradient(circle, #c2e3ff30, #a8d6ff0c 45%, transparent 72%);
+  animation: cursor-breathe 4.5s ease-in-out infinite paused;
+}
+
+.scene-cursor__smoke {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 96px;
+  height: 96px;
+  translate: -50% -50%;
+}
+
+.scene-cursor__smoke,
+.scene-cursor__ring {
+  transform: perspective(240px) rotateX(calc(10deg + var(--cursor-tilt-x, 0deg)))
+    rotateY(calc(-8deg + var(--cursor-tilt-y, 0deg)));
+  scale: var(--cursor-scale);
+  transition: scale 180ms ease-out;
+}
+
+.scene-cursor__ring {
+  position: absolute;
+  inset: 8px;
+  border: 1px solid #bcdfff80;
+  border-radius: 50%;
+  box-shadow:
+    0 0 4px #b5dcff66,
+    inset 0 0 3px #b5dcff40;
+  transform-style: preserve-3d;
+}
+
+.scene-cursor__ring::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border: 1px solid #729dbb40;
+  border-radius: inherit;
+  transform: translateZ(-2px);
+}
+
+.scene-cursor__glint {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 35deg,
+    transparent 0deg,
+    #e4f5ffb0 45deg,
+    transparent 100deg,
+    transparent 210deg,
+    #b5dcff50 250deg,
+    transparent 290deg
+  );
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1px));
+  transform: translateZ(0.5px);
+  animation: cursor-glint 11s linear infinite paused;
+}
+
+.scene-cursor[data-visible='true'] .scene-cursor__halo,
+.scene-cursor[data-visible='true'] .scene-cursor__glint {
+  animation-play-state: running;
+}
+
+.scene-cursor__core {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(circle at 35% 25%, #fff 15%, #e4f7ff 45%, #8ebfdf 100%);
+  box-shadow:
+    0 0 4px #e7f7ff,
+    0 0 9px 2px #aedbff80;
+}
+
+@keyframes cursor-glint {
+  to {
+    transform: translateZ(0.5px) rotate(360deg);
+  }
+}
+@keyframes cursor-breathe {
+  50% {
+    opacity: 0.7;
+    transform: scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-cursor__halo,
+  .scene-cursor__glint {
+    animation: none;
+  }
+  .scene-cursor__smoke,
+  .scene-cursor__ring {
+    transition: none;
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .scene-cursor {
+    display: none;
+  }
+}

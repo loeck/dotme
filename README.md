@@ -23,10 +23,10 @@ selected, so agents can capture separate previews without a shared fixed port.
 
 Moonlight and lamps cast shadows on the voxel scenery and water. Each animation
 frame updates the light state, shadow maps, a six-face environment capture, and the lake's planar
-reflection before the final lens pass. Lamp caps, halos and water highlights share the same light
-intensity. Voxel materials store base colors without baked lamp illumination.
+reflection before the final lens pass. Floating light cubes, halos and water highlights share the
+same light intensity. Voxel materials store base colors without baked lamp illumination.
 
-Wet banks, stone, foliage, wood and metal have different roughness. The water evaluates live lights
+Wet banks, dry ground and stone have different roughness. The water evaluates live lights
 and their shadows with a GGX specular response; waves and pointer ripples distort the reflected scene.
 The lake combines a directional wind spectrum with a persistent GPU height/velocity field
 (1024² desktop, 512² mobile), stepped at 60 Hz independently of the display rate. Twelve wave
@@ -50,7 +50,9 @@ camera. This is a rasterized rendering pipeline with approximate indirect illumi
 
 Voxels are instanced in spatial batches so shadow cameras can cull distant terrain. Mobile uses
 smaller shadow maps and reflection targets; every rendered frame still refreshes lighting and
-reflections. Reduced motion renders a still scene and refreshes it on resize or visibility changes.
+reflections. Reduced motion freezes the simulation while allowing pointer lighting and refreshes
+on resize or visibility changes. A luminous cursor softly lights the terrain and water; its smoke
+and tilt pause when hidden or reduced motion is enabled.
 
 ## Verification
 

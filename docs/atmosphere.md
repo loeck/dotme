@@ -91,15 +91,18 @@ fine moving edges; no random per-frame jitter is used, avoiding temporal sparkle
 
 ## Shadows on the scene
 
-A pair of Beer–Lambert transmission maps integrates the same cloud bodies and noise
+Two Beer–Lambert transmission maps, packed into one 512×256 atlas, integrate the
+same cloud bodies and noise
 along the moon direction through the full layer. Each map shares its timestamp,
 wind displacement and lunar direction with a cubemap capture; interpolation uses
 the same blend. Both profiles use 256² maps with 32 integration steps in RGBA8,
-adding 512 KiB for the pair. The shared resolution preserves narrow shadow edges
+adding 512 KiB for the pair. A single sampler keeps water within the 16-texture
+limit even with seven floating lights; tile borders are clamped independently.
+The shared resolution preserves narrow shadow edges
 on mobile; only the capture rate follows its lower-frequency sky profile.
 
 Receivers are projected along the corresponding moon direction onto a fixed
-512-unit ground domain. This accounts for terrain elevation and instanced trees.
+512-unit ground domain. This accounts for terrain elevation and instanced voxels.
 A soft boundary returns to unshadowed lighting outside the map. Each surface
 samples this transmission once per fragment and reuses it for its lighting terms.
 Cloud transmission
@@ -109,8 +112,8 @@ by up to 65%, environment specular by up to 35%, and in-water scattering by up t
 75%, weighted by that same transmission. This makes passing shadows legible in
 the night scene where indirect illumination otherwise masks them. It is not a
 hemispherical sky-occlusion integral. Direct lamp lighting and emission remain
-unchanged. Terrain, trees, submerged objects
-and the water's analytic moon highlight share it, including reflection captures.
+unchanged. Terrain, submerged objects and the water's analytic moon highlight
+share it, including reflection captures.
 The existing reflected sky already contains cloud occlusion. This approximation
 assumes receivers below the cloud base and does not add volumetric light shafts
 or shadows to the decorative distant hills painted inside the sky shader.
@@ -119,7 +122,9 @@ or shadows to the decorative distant hills painted inside the sky shader.
 
 Wind and captures use the existing simulation clock. Hidden tabs do not advance
 it; resuming resets the frame timestamp. Reduced motion captures time zero once
-and leaves both clouds and water frozen, including after resize. Float-target
+and leaves both clouds and water frozen, including after resize. Pointer lighting
+can still update without advancing the simulation. Its material hook chains after
+cloud attenuation, so cloud shadows do not dim the local cursor light. Float-target
 fallback retains volumetric clouds and analytic water. Cloud targets, noise,
 geometry and material are disposed with the engine.
 
@@ -136,7 +141,8 @@ with a 96-step GPU volume integral, verify elevated-receiver projection and moti
 relative to the common wind, and render real instanced materials to confirm moon
 and sky-fill attenuation with exactly unchanged point-light contribution.
 
-The final `pnpm check` and `pnpm e2e` runs pass 14 unit tests and 26 browser tests.
+Before the solid-terrain/cursor integration, `pnpm check` and `pnpm e2e` passed
+14 unit tests and 26 browser tests.
 After the RG noise packing and shared shadow-sampling cleanup, all 16 fixed-time
 desktop/mobile captures are byte-identical to their pre-cleanup counterparts.
 Maximum CPU/GPU surface error is 0.00006190 with half-float readback. Cloud
@@ -151,6 +157,12 @@ Desktop/mobile screenshots and sampled video frames show distinct cloud bodies,
 lunar occlusion and smooth contours. Paired scene captures at 18 seconds show the
 passing shadow on the right bank with stable lamps. Visual artifacts are saved
 under `test-results/`, including weak/strong/reverse wind videos.
+
+The solid-terrain/cursor integration passes `pnpm check` (17 unit tests) and
+`pnpm e2e` (29 passed, one mouse-only cursor test skipped on mobile). The combined
+material test checks moon and sky-fill attenuation while point and cursor lighting
+remain unchanged. Seeds with seven floating lights render within the 16-sampler
+limit after packing the two cloud shadow captures into one atlas.
 
 ## Performance
 

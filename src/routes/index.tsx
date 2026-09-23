@@ -2,6 +2,7 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Landscape } from '../components/Landscape'
 import { Profile } from '../components/Profile'
+import { SceneCursor } from '../components/SceneCursor'
 
 export const Route = createFileRoute('/')({
   component: HomePage,
@@ -12,6 +13,7 @@ function HomePage() {
     <main className="relative isolate min-h-svh overflow-hidden bg-[#080a0d]">
       <Landscape />
       <Profile />
+      <SceneCursor />
     </main>
   )
 }

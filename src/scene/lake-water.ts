@@ -10,6 +10,7 @@ import {
 import type { PlaneGeometry } from 'three'
 import { Reflector } from 'three/addons/objects/Reflector.js'
 
+import { CURSOR_GLOW_GLSL, createCursorGlowUniforms } from './cursor-glow'
 import { WATER_LIGHTING_GLSL } from './water-lighting'
 import { WATER_FIELD_GLSL } from './water-surface'
 import { createWindUniforms } from './wind'
@@ -53,6 +54,7 @@ uniform samplerCube uEnvironment;
 varying vec3 vWorldPosition;
 varying vec4 vMirrorCoord;
 ${WATER_LIGHTING_GLSL}
+${CURSOR_GLOW_GLSL}
 float contactNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
@@ -138,6 +140,8 @@ void main() {
   float foam = contact * arrival * mix(0.3, 0.9, grain) * 0.65;
   color *= 1.0 - foam;
   color += waterLighting(normal, view, roughness, foam, cloudVisibility);
+  // Broad, low-energy sheen for the diffuse cursor field; no point-source glint.
+  color += cursorGlowAt(vWorldPosition, normal) * (0.004 + fresnel * 0.025);
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -174,6 +178,7 @@ export function createLakeReflector(geometry: PlaneGeometry, mobile: boolean): L
           uBedViewProjection: { value: new Matrix4() },
           uBedTexel: { value: new Vector2(1, 1) },
           uPointer: { value: new Vector3() },
+          ...createCursorGlowUniforms(),
           uEnvironment: { value: null },
         },
       ]),
