@@ -35,20 +35,16 @@ export function Profile() {
     >
       <p className="m-0 text-[0.8rem] tracking-[0.025em] text-[#8a919a]">{'//loeck.me'}</p>
       <div className="h-10" aria-hidden="true" />
-
       <h1
         id="profile-title"
         className="mt-0 mb-2 text-[clamp(1.2rem,1.58vw,1.42rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[#e4e8ed]"
       >
         Hi, I’m Loëck.
       </h1>
-      <div className="text-[0.8rem] leading-5 text-[#8a919a]">
-        <p className="m-0">Building some stuff in Paris.</p>
-        <p className="m-0">Mostly interfaces. Occasionally noise.</p>
-      </div>
-
+      <p className="m-0 text-[0.8rem] leading-5 text-[#8a919a]">
+        Building some stuff in Paris, still figuring out the rest.
+      </p>
       <div className="h-[3.75rem]" aria-hidden="true" />
-
       <nav
         className="flex items-center gap-4 text-[0.76rem] text-[#8a919a] max-sm:gap-2 max-sm:text-[0.7rem]"
         aria-label="Social links"

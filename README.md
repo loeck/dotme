@@ -1,7 +1,8 @@
 # loeck.me
 
-Personal site built with TanStack Start, React and Three.js. The profile is server-rendered and the
-interactive field is progressively loaded in the browser.
+Personal site built with TanStack Start, React and Three.js. The profile is server-rendered; the
+procedural voxel lake loads in the browser after hydration. Each visit gets a fresh landscape seed.
+Add `?seed=42` to the URL to reproduce one composition.
 
 ## Requirements
 
@@ -14,6 +15,9 @@ interactive field is progressively loaded in the browser.
 pnpm install
 pnpm dev
 ```
+
+For parallel visual work, start each preview with `pnpm dev --port 0`. Vite prints the free port it
+selected, so agents can capture separate previews without a shared fixed port.
 
 ## Verification
 

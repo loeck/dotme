@@ -8,7 +8,9 @@ describe('Profile', () => {
     render(<Profile />)
 
     expect(screen.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-    expect(screen.getByText('Building some stuff in Paris.')).toBeVisible()
+    expect(
+      screen.getByText('Building some stuff in Paris, still figuring out the rest.'),
+    ).toBeVisible()
     expect(screen.getByRole('link', { name: /GitHub/ })).toHaveAttribute(
       'href',
       'https://github.com/loeck',
