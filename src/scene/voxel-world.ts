@@ -1,3 +1,6 @@
+import { createLakeBed } from './lake-bed'
+import type { LakeBed } from './lake-bed'
+
 /**
  * Deterministic, renderer-agnostic voxel data for the low lake composition. Coordinates are
  * Three.js world coordinates: x horizontal, y up, z depth; water is the y = 0 plane.
@@ -32,6 +35,7 @@ export type VoxelWorldData = Readonly<{
   variant: VoxelWorldVariant
   seed: number
   voxelSize: number
+  lakeBed: LakeBed
   /** Material groups are deliberately separate so a renderer can use one InstancedMesh each. */
   groups: Readonly<Record<VoxelMaterial, VoxelGroup>>
   /** Top-most shoreline voxels, useful for a subtle wet edge or reflected-light pass. */
@@ -652,6 +656,12 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     voxelSize,
     groups: resultGroups,
     voxels,
+    lakeBed: createLakeBed(
+      voxels,
+      root,
+      mobile,
+      resultGroups.ground.count + resultGroups.shore.count + resultGroups.rock.count,
+    ),
     shores: new Float32Array(shores),
     shoreCount: shores.length / 3,
     lamps,

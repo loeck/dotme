@@ -21,6 +21,7 @@ import {
   Scene,
   ShaderMaterial,
   SphereGeometry,
+  UnsignedByteType,
   Vector2,
   Vector3,
   Vector4,
@@ -28,10 +29,15 @@ import {
 } from 'three'
 
 import { DepthFocus } from './depth-focus'
+import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
+import type { LakeBed } from './lake-bed'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { createSkyMaterial } from './sky-material'
+import { SubmergedScene } from './submerged-scene'
 import { createVoxelWorld } from './voxel-world'
+import { WaterSimulation } from './water-simulation'
+import { createWaterGeometry, swellHeight } from './water-surface'
 
 export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
@@ -87,31 +93,32 @@ export class VoxelLandscapeEngine {
   private readonly camera = new PerspectiveCamera(54, 1, 0.05, 500)
   private readonly raycaster = new Raycaster()
   private readonly rayNdc = new Vector2()
-  private readonly waterPlane = new Plane(new Vector3(0, 1, 0), 0)
+  private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
   private readonly pointer = new Vector2(0, 0)
   private readonly pointerClient = new Vector2(-1, -1)
   private readonly target = new Vector2(0, 0)
-  private readonly targetCamera = new Vector2(0, 0)
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
-  private readonly dragOrigin = new Vector2(0, 0)
   private readonly objects: Object3D[] = []
   private readonly materials: Array<{ dispose: () => void }> = []
   private readonly geometries: Array<{ dispose: () => void }> = []
   private readonly glows: Array<{ material: ShaderMaterial; phase: number; base: number }> = []
   private readonly lampLights: Array<{ light: PointLight; intensity: number; phase: number }> = []
-  private readonly cursorLight = new PointLight(0xa2c7e8, 0, 15, 2)
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicMaterial> | null = null
   private readonly moteTransform = new Object3D()
-  private readonly reflectionLamps: Vector4[] = Array.from(
-    { length: 7 },
-    () => new Vector4(0, 0, 0, 0),
-  )
-  private readonly lampContacts: Array<{ position: Vector3; intensity: number; warm: boolean }> = []
-  private readonly projectedContact = new Vector3()
   private readonly drawingBufferSize = new Vector2()
   private readonly water: LakeReflector
+  private readonly simulation: WaterSimulation
+  private readonly submerged: SubmergedScene
+  private bed!: LakeBed
+  private pointerActive = false
+  private pointerType = 'mouse'
+  private pointerHeight = 0
+  private pointerRevision = 0
+  private pointerBusy = false
+  private pendingPointer: { x: number; y: number; time: number } | null = null
+  private previousPointer: { x: number; y: number; time: number } | null = null
   private readonly skyMaterial: ShaderMaterial
   private readonly sky: Mesh<SphereGeometry, ShaderMaterial>
   private readonly voxelGroup = new Group()
@@ -122,10 +129,6 @@ export class VoxelLandscapeEngine {
   private introStartedAt: number | null = null
   private dragging = false
   private dragPointerId = -1
-  private dragDistance = 0
-  private rippleIndex = 0
-  private lastRippleAt = -10
-  private lastPointerAt = -10
   private disposed = false
   private rendered = false
   private width = 1
@@ -158,8 +161,6 @@ export class VoxelLandscapeEngine {
     const moon = new PointLight(0x758ba6, 11, 100, 1.4)
     moon.position.set(-18, 20, -23)
     this.scene.add(moon)
-    this.cursorLight.position.set(0, 1.7, 0)
-    this.scene.add(this.cursorLight)
 
     this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile)
     const skyGeometry = new SphereGeometry(260, 32, 16)
@@ -171,10 +172,24 @@ export class VoxelLandscapeEngine {
 
     this.scene.add(this.voxelGroup)
     this.buildWorld((options.seed ?? 0) >>> 0)
-    const waterGeometry = new PlaneGeometry(1000, 1000, 96, 96)
-    this.water = createLakeReflector(waterGeometry, this.reflectionLamps, this.mobile)
+    this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile)
+    this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
+    this.scene.traverse((object) => {
+      if ('isLight' in object) object.layers.enable(1)
+    })
+    const waterGeometry = createWaterGeometry(this.mobile)
+    this.water = createLakeReflector(waterGeometry, this.mobile)
+    const uniforms = this.water.material.uniforms
+    uniforms.uState!.value = this.simulation.texture
+    uniforms.uMask!.value = this.simulation.mask
+    uniforms.uCell!.value = LAKE_BOUNDS.size / this.simulation.resolution
+    uniforms.uBedColor!.value = this.submerged.target.texture
+    uniforms.uBedDepth!.value = this.submerged.target.depthTexture
+    uniforms.uBedHeight!.value = this.submerged.depthField
+    this.renderer.domElement.dataset.waterMode = this.simulation.available ? 'gpu' : 'analytic'
+    if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
-    this.water.position.y = -0.035
+    this.water.position.y = WATER_LEVEL
     this.scene.add(this.water)
     this.objects.push(this.water)
     this.geometries.push(waterGeometry)
@@ -187,6 +202,9 @@ export class VoxelLandscapeEngine {
     window.addEventListener('pointermove', this.onPointerMove, { passive: true })
     window.addEventListener('pointerup', this.onPointerUp)
     window.addEventListener('pointercancel', this.onPointerUp)
+    this.renderer.domElement.addEventListener('pointerleave', this.onPointerLeave)
+    this.renderer.domElement.addEventListener('lostpointercapture', this.onLostCapture)
+    window.addEventListener('blur', this.onPointerLeave)
     document.addEventListener('visibilitychange', this.onVisibilityChange)
     this.renderer.domElement.addEventListener('webglcontextlost', this.onContextLost)
     this.lastFrameAt = performance.now()
@@ -195,6 +213,7 @@ export class VoxelLandscapeEngine {
 
   private buildWorld(seed: number) {
     const world = createVoxelWorld(seed, this.mobile)
+    this.bed = world.lakeBed
     const terrainEnd =
       world.groups.ground.count + world.groups.shore.count + world.groups.rock.count
     const leafStart = terrainEnd + world.groups.treeTrunk.count
@@ -335,12 +354,6 @@ export class VoxelLandscapeEngine {
         phase: index * 2.31,
         base: prominent ? 1.05 : warm ? 0.78 : 0.58,
       })
-      if (index < this.reflectionLamps.length)
-        this.lampContacts.push({
-          position: new Vector3(lamp.x, 0, lamp.z),
-          intensity: lamp.intensity,
-          warm: lamp.warm,
-        })
     })
 
     // A few dim, square flecks drift in depth. They provide a living scale cue without
@@ -387,70 +400,160 @@ export class VoxelLandscapeEngine {
   }
 
   private hitWater(clientX: number, clientY: number): Vector3 | null {
-    const bounds = this.renderer.domElement.getBoundingClientRect()
+    const canvas = this.renderer.domElement
+    if (document.elementFromPoint(clientX, clientY) !== canvas) return null
+    const bounds = canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
+    if (Math.abs(x) > 1 || Math.abs(y) > 1) return null
     this.rayNdc.set(x, y)
     this.raycaster.setFromCamera(this.rayNdc, this.camera)
-    return this.raycaster.ray.intersectPlane(this.waterPlane, this.waterHit)
+    const ray = this.raycaster.ray
+    this.waterPlane.constant = -WATER_LEVEL
+    if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
+    for (let i = 0; i < 3; i++) {
+      this.waterPlane.constant = -(
+        WATER_LEVEL +
+        this.pointerHeight +
+        swellHeight(this.waterHit.x, this.waterHit.z, this.elapsed)
+      )
+      if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
+    }
+    const distance = this.waterHit.distanceTo(this.camera.position)
+    const index = lakeIndex(this.bed, this.waterHit.x, this.waterHit.z)
+    if (distance > 130 || index < 0 || !this.bed.water[index]) return null
+    // Conservative raster of the actual solids includes stones and tree silhouettes.
+    const cell = LAKE_BOUNDS.size / this.bed.resolution
+    for (let d = 0; d < distance - 0.05; d += cell * 0.5) {
+      const px = ray.origin.x + ray.direction.x * d
+      const pz = ray.origin.z + ray.direction.z * d
+      const i = lakeIndex(this.bed, px, pz)
+      if (i >= 0 && this.bed.obstacle[i]! >= ray.origin.y + ray.direction.y * d) return null
+    }
+    return this.waterHit.clone()
   }
 
-  private addRipple(clientX: number, clientY: number, strength = 1) {
-    if (this.options.reducedMotion) return
-    const point = this.hitWater(clientX, clientY)
-    if (!point || point.distanceTo(this.camera.position) > 130) return
-    const impulses = this.water.material.uniforms.uImpulses!.value as Vector4[]
-    impulses[this.rippleIndex]!.set(point.x, point.z, this.elapsed, strength)
-    this.rippleIndex = (this.rippleIndex + 1) % impulses.length
+  private async processPointer() {
+    const event = this.pendingPointer
+    if (!event || this.pointerBusy || this.disposed) return
+    this.pendingPointer = null
+    this.pointerBusy = true
+    const revision = this.pointerRevision
+    try {
+      let point = this.hitWater(event.x, event.y)
+      if (!point) {
+        this.previousPointer = null
+        return
+      }
+      this.pointerHeight = await this.simulation.heightAt(point.x, point.z)
+      if (this.disposed || revision !== this.pointerRevision) return
+      point = this.hitWater(event.x, event.y)
+      if (!point) {
+        this.previousPointer = null
+        return
+      }
+      const previous = this.previousPointer
+      if (previous && (event.x !== previous.x || event.y !== previous.y)) {
+        // Reproject both client positions with the SAME camera. Parallax is never input energy.
+        const start = this.hitWater(previous.x, previous.y)
+        if (start) {
+          const distance = start.distanceTo(point)
+          const seconds = Math.max(0.008, (event.time - previous.time) / 1000)
+          const speed = Math.min(25, distance / seconds)
+          const samples = Math.min(48, Math.ceil(distance / 0.22))
+          for (let i = 1; i <= samples; i++) {
+            const t = i / samples
+            // Screen-space samples are visibility checked; a long stroke cannot cross a bank.
+            const contact = this.hitWater(
+              previous.x + (event.x - previous.x) * t,
+              previous.y + (event.y - previous.y) * t,
+            )
+            if (contact)
+              this.simulation.addImpulse(
+                contact.x,
+                contact.z,
+                this.dragging ? 0.48 : 0.36,
+                -Math.min(0.45, 0.018 + speed * 0.018) *
+                  (this.dragging ? 1.5 : 0.55) *
+                  Math.min(1, distance / Math.max(1, samples) / 0.22),
+              )
+          }
+        }
+      }
+      this.previousPointer = event
+    } finally {
+      this.pointerBusy = false
+    }
   }
 
   private onPointerDown = (event: PointerEvent) => {
     if (this.options.reducedMotion || event.button !== 0) return
+    const point = this.hitWater(event.clientX, event.clientY)
+    if (!point) return
+    // Queue the contact immediately so a quick touch ending before the next frame still ripples.
+    this.simulation.addImpulse(point.x, point.z, 0.48, -0.4)
     this.dragging = true
     this.dragPointerId = event.pointerId
-    this.dragOrigin.set(event.clientX, event.clientY)
-    this.dragDistance = 0
+    this.pointerType = event.pointerType
+    this.pointerActive = true
     this.pointerClient.set(event.clientX, event.clientY)
-    this.lastPointerAt = this.elapsed
-    this.addRipple(event.clientX, event.clientY, 0.85)
-    this.lastRippleAt = this.elapsed
+    this.previousPointer = { x: event.clientX, y: event.clientY, time: event.timeStamp }
+    this.pendingPointer = { x: event.clientX, y: event.clientY, time: event.timeStamp }
     this.renderer.domElement.setPointerCapture(event.pointerId)
   }
 
   private onPointerMove = (event: PointerEvent) => {
-    if (this.options.reducedMotion) return
-    const x = (event.clientX / Math.max(1, this.width)) * 2 - 1
-    const y = (event.clientY / Math.max(1, this.height)) * 2 - 1
+    if (this.options.reducedMotion || (this.dragging && event.pointerId !== this.dragPointerId))
+      return
+    this.pointerType = event.pointerType
+    this.pointerActive = event.pointerType !== 'touch' || this.dragging
+    this.target.set(
+      clamp((event.clientX / this.width) * 2 - 1, -1, 1),
+      clamp((event.clientY / this.height) * 2 - 1, -1, 1),
+    )
+    if (this.pointerClient.x === event.clientX && this.pointerClient.y === event.clientY) return
     this.pointerClient.set(event.clientX, event.clientY)
-    this.lastPointerAt = this.elapsed
-    this.target.set(clamp(x, -1, 1), clamp(y, -1, 1))
-    if (this.dragging && event.pointerId === this.dragPointerId) {
-      const dx = event.clientX - this.dragOrigin.x
-      const dy = event.clientY - this.dragOrigin.y
-      this.dragDistance = Math.max(this.dragDistance, Math.hypot(dx, dy))
-      this.targetCamera.set(
-        clamp(-dx / (this.mobile ? 58 : 85), this.mobile ? -4.2 : -3.2, this.mobile ? 4.2 : 3.2),
-        clamp(dy / (this.mobile ? 165 : 220), this.mobile ? -0.75 : -0.5, this.mobile ? 0.75 : 0.5),
-      )
-      if (this.elapsed - this.lastRippleAt > 0.16 && this.dragDistance > 10) {
-        this.addRipple(event.clientX, event.clientY, 0.6)
-        this.lastRippleAt = this.elapsed
-      }
+    if (!this.pointerActive || !this.hitWater(event.clientX, event.clientY)) {
+      this.previousPointer = null
+      this.pendingPointer = null
+      this.pointerRevision += 1
+      return
+    }
+    this.pendingPointer = {
+      x: event.clientX,
+      y: event.clientY,
+      time: event.timeStamp,
     }
   }
 
   private onPointerUp = (event: PointerEvent) => {
     if (event.pointerId !== this.dragPointerId) return
-    if (event.type !== 'pointercancel' && this.dragDistance >= 12)
-      this.addRipple(event.clientX, event.clientY, 0.75)
     this.dragging = false
     this.dragPointerId = -1
-    this.lastPointerAt = this.elapsed
+    if (event.type === 'pointercancel' || this.pointerType === 'touch') this.onPointerLeave()
     if (this.renderer.domElement.hasPointerCapture(event.pointerId))
       this.renderer.domElement.releasePointerCapture(event.pointerId)
   }
 
+  private onLostCapture = () => {
+    if (this.dragging) this.onPointerLeave()
+  }
+
+  private onPointerLeave = () => {
+    const pointerId = this.dragPointerId
+    this.pointerActive = false
+    this.dragging = false
+    this.dragPointerId = -1
+    this.previousPointer = null
+    this.pendingPointer = null
+    this.pointerRevision += 1
+    this.waterPointerTarget.z = 0
+    if (pointerId >= 0 && this.renderer.domElement.hasPointerCapture(pointerId))
+      this.renderer.domElement.releasePointerCapture(pointerId)
+  }
+
   private onVisibilityChange = () => {
+    this.onPointerLeave()
     if (document.hidden) return
     this.lastFrameAt = performance.now()
     if (this.options.reducedMotion && this.frame === 0)
@@ -479,53 +582,41 @@ export class VoxelLandscapeEngine {
       const mesh = child as InstancedMesh<BoxGeometry, MeshStandardMaterial>
       mesh.material.opacity = envelope
     }
-    if (!this.dragging) this.targetCamera.multiplyScalar(Math.exp(-dt * 0.55))
-    const parallax = 1 - Math.exp(-dt * (this.dragging ? 10 : 2.8))
+    const parallax = this.options.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
     this.pointer.lerp(this.target, parallax)
     const idleDrift = this.options.reducedMotion ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
-    this.camera.position.x +=
-      (this.pointer.x * 1.9 + this.targetCamera.x + idleDrift - this.camera.position.x) * parallax
-    this.camera.position.y +=
-      (2.3 + this.pointer.y * -0.16 + this.targetCamera.y - this.camera.position.y) * parallax
+    this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
+    this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
     this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
-    if (this.elapsed - this.lastPointerAt <= 4.5) {
-      const waterPoint = this.hitWater(this.pointerClient.x, this.pointerClient.y)
-      if (waterPoint && waterPoint.distanceTo(this.camera.position) < 115)
-        this.waterPointerTarget.set(waterPoint.x, waterPoint.z, 1)
-      else this.waterPointerTarget.z = 0
-    } else this.waterPointerTarget.z = 0
-    this.cursorLight.position.set(this.waterPointerTarget.x, 1.7, this.waterPointerTarget.y)
-    const cursorLightTarget = this.options.reducedMotion
-      ? 0
-      : this.waterPointerTarget.z * (this.dragging ? 15 : 9)
-    this.cursorLight.intensity +=
-      (cursorLightTarget - this.cursorLight.intensity) * (1 - Math.exp(-dt * 7))
-    for (const [index, lamp] of this.lampContacts.entries()) {
-      this.projectedContact.copy(lamp.position).project(this.camera)
-      const screenX = (this.projectedContact.x + 1) * 0.5
-      const screenY = (1 - this.projectedContact.y) * 0.5
-      const visible =
-        this.projectedContact.z > -1 &&
-        this.projectedContact.z < 1 &&
-        screenX > 0 &&
-        screenX < 1 &&
-        screenY > 0 &&
-        screenY < 1
-      this.reflectionLamps[index]!.set(
-        screenX,
-        screenY,
-        visible ? lamp.intensity : 0,
-        lamp.warm ? 1 : 0,
+    const waterPoint = this.pointerActive
+      ? this.hitWater(this.pointerClient.x, this.pointerClient.y)
+      : null
+    if (waterPoint) this.waterPointerTarget.set(waterPoint.x, waterPoint.z, 1)
+    else this.waterPointerTarget.z = 0
+    void this.processPointer().catch(() => {
+      this.previousPointer = null
+    })
+    const uniforms = this.water.material.uniforms
+    for (const [index, lamp] of this.lampLights.entries()) {
+      const light = lamp.light
+      ;(uniforms.uLamps!.value[index] as Vector4).set(
+        light.position.x,
+        light.position.y,
+        light.position.z,
+        light.intensity,
       )
+      uniforms.uWarm!.value[index] = light.color.r > light.color.b ? 1 : 0
     }
+    uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
+    uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
     this.sky.position.copy(this.camera.position)
     this.skyMaterial.uniforms.uTime!.value = this.elapsed
     this.water.material.uniforms.uTime!.value = this.elapsed
     const waterPointer = this.water.material.uniforms.uPointer!.value as Vector3
     // The contact point must stay under the cursor while the camera eases.
-    // Only the light strength trails off; smoothing x/z makes the surface feel detached.
+    // Only the optical reveal trails off; smoothing x/z makes the surface feel detached.
     waterPointer.x = this.waterPointerTarget.x
     waterPointer.y = this.waterPointerTarget.y
     waterPointer.z += (this.waterPointerTarget.z - waterPointer.z) * (1 - Math.exp(-dt * 8))
@@ -556,6 +647,9 @@ export class VoxelLandscapeEngine {
         this.moteMesh.instanceMatrix.needsUpdate = true
       }
     }
+    if (!this.options.reducedMotion) this.simulation.step(dt)
+    uniforms.uState!.value = this.simulation.texture
+    this.submerged.render(this.renderer, this.scene)
     this.depthFocus.render(this.renderer, this.scene, this.camera)
     if (!this.rendered) {
       this.rendered = true
@@ -581,9 +675,13 @@ export class VoxelLandscapeEngine {
       this.width,
       this.height,
     )
-    this.water.material.uniforms.uResolution!.value.copy(this.drawingBufferSize)
+    this.submerged.resize(this.mobile)
+    this.water.material.uniforms.uBedTexel!.value.set(
+      1 / this.submerged.target.width,
+      1 / this.submerged.target.height,
+    )
     const reflectionScale = Math.min(
-      this.mobile ? 1 : 0.46,
+      this.mobile ? 0.4 : 0.46,
       768 / this.drawingBufferSize.x,
       832 / this.drawingBufferSize.y,
     )
@@ -606,8 +704,14 @@ export class VoxelLandscapeEngine {
     window.removeEventListener('pointermove', this.onPointerMove)
     window.removeEventListener('pointerup', this.onPointerUp)
     window.removeEventListener('pointercancel', this.onPointerUp)
+    this.renderer.domElement.removeEventListener('pointerleave', this.onPointerLeave)
+    this.renderer.domElement.removeEventListener('lostpointercapture', this.onLostCapture)
+    window.removeEventListener('blur', this.onPointerLeave)
     document.removeEventListener('visibilitychange', this.onVisibilityChange)
     for (const object of this.objects) this.scene.remove(object)
+    this.pointerRevision += 1
+    this.simulation.dispose()
+    this.submerged.dispose()
     this.water.dispose()
     this.depthFocus.dispose()
     for (const material of this.materials) material.dispose()

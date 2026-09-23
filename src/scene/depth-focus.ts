@@ -7,6 +7,7 @@ import {
   Scene,
   ShaderMaterial,
   UnsignedIntType,
+  UnsignedByteType,
   Vector2,
   WebGLRenderTarget,
 } from 'three'
@@ -36,7 +37,7 @@ float viewDistance(vec2 uv) {
 float circleOfConfusion(float distance) {
   // The near stones sit 5–11 units from the lens. The tree and both lamp
   // banks share a broad focus plane; only the distant valley softens again.
-  float nearBlur = 9.0 * (1.0 - smoothstep(5.0, 21.0, distance));
+  float nearBlur = 1.25 * (1.0 - smoothstep(5.0, 21.0, distance));
   float farBlur = 1.35 * smoothstep(90.0, 180.0, distance);
   return max(nearBlur, farBlur);
 }
@@ -84,7 +85,7 @@ export class DepthFocus {
   constructor(renderer: WebGLRenderer, mobile: boolean) {
     this.target = new WebGLRenderTarget(1, 1, {
       // Linear 8-bit storage visibly bands this nearly black sky.
-      type: HalfFloatType,
+      type: renderer.extensions.has('EXT_color_buffer_float') ? HalfFloatType : UnsignedByteType,
       depthTexture: new DepthTexture(1, 1, UnsignedIntType),
       samples: mobile ? 0 : Math.min(2, renderer.capabilities.maxSamples),
       stencilBuffer: false,

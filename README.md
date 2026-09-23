@@ -23,9 +23,12 @@ selected, so agents can capture separate previews without a shared fixed port.
 
 ```sh
 pnpm check
-pnpm exec playwright install chromium
+pnpm exec playwright install chromium webkit
 pnpm e2e
 ```
+
+See [lake rendering notes](docs/lake-water.md) for physical parameters, input behavior,
+GPU validation, performance methodology and approximations.
 
 ## Vercel
 
