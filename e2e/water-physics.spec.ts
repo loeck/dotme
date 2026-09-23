@@ -57,6 +57,9 @@ test('GPU propagation, damping, shore barriers, stability, reset and frame indep
   expect(result.edgeEnergy[0]).toBeLessThan(result.edgeEnergy[1] * 0.1)
   expect(result.sampled[0]).toBeCloseTo(result.sampled[1], 7)
   expect(result.sampled[1]).toBeCloseTo(result.sampled[2], 7)
+  expect(result.windContact.energy).toBeGreaterThan(0.001)
+  expect(result.windContact.peak).toBeLessThan(0.15)
+  expect(result.openWind.energy).toBe(0)
 })
 
 test('visible water receives gestures, stationary pointers and UI do not; resize and cancellation recover', async ({

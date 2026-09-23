@@ -227,6 +227,7 @@ export class VoxelLandscapeEngine {
     uniforms.uBedColor!.value = this.submerged.target.texture
     uniforms.uBedDepth!.value = this.submerged.target.depthTexture
     uniforms.uBedHeight!.value = this.submerged.depthField
+    uniforms.uShore!.value = this.submerged.shoreField
     this.renderer.domElement.dataset.waterMode = this.simulation.available ? 'gpu' : 'analytic'
     if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
@@ -679,7 +680,7 @@ export class VoxelLandscapeEngine {
         this.moteMesh.instanceMatrix.needsUpdate = true
       }
     }
-    if (!this.options.reducedMotion) this.simulation.step(dt)
+    if (!this.options.reducedMotion) this.simulation.step(dt, this.elapsed)
     uniforms.uState!.value = this.simulation.texture
     this.renderer.shadowMap.needsUpdate = true
     // Capture current lighting in all six directions every frame. Water has its

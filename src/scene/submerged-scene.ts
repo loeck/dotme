@@ -31,6 +31,7 @@ export class SubmergedScene {
     stencilBuffer: false,
   })
   readonly depthField: DataTexture
+  readonly shoreField: DataTexture
   readonly viewProjection = new Matrix4()
   readonly inverseViewProjection = new Matrix4()
   private readonly camera = new OrthographicCamera(-80, 80, 80, -80, 0.1, 80)
@@ -64,6 +65,12 @@ export class SubmergedScene {
     this.depthField = new DataTexture(depths, n, n, RedFormat, HalfFloatType)
     this.depthField.minFilter = this.depthField.magFilter = LinearFilter
     this.depthField.needsUpdate = true
+    const shore = new Uint16Array(bed.shore.length)
+    for (let i = 0; i < shore.length; i++) shore[i] = DataUtils.toHalfFloat(bed.shore[i]!)
+    const shoreSize = Math.sqrt(shore.length)
+    this.shoreField = new DataTexture(shore, shoreSize, shoreSize, RedFormat, HalfFloatType)
+    this.shoreField.minFilter = this.shoreField.magFilter = LinearFilter
+    this.shoreField.needsUpdate = true
     this.geometry = new PlaneGeometry(LAKE_BOUNDS.size, LAKE_BOUNDS.size, n - 1, n - 1)
     const positions = this.geometry.attributes.position!
     const colors = new Float32Array(n * n * 3)
@@ -127,6 +134,7 @@ export class SubmergedScene {
     this.group.removeFromParent()
     this.target.dispose()
     this.depthField.dispose()
+    this.shoreField.dispose()
     this.geometry.dispose()
     this.box.dispose()
     this.material.dispose()

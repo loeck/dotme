@@ -43,6 +43,7 @@ uniform mat4 textureMatrix;
 uniform sampler2D uBedColor;
 uniform sampler2D uBedDepth;
 uniform sampler2D uBedHeight;
+uniform sampler2D uShore;
 uniform mat4 uBedInverseViewProjection;
 uniform mat4 uBedViewProjection;
 uniform vec2 uBedTexel;
@@ -51,6 +52,14 @@ uniform samplerCube uEnvironment;
 varying vec3 vWorldPosition;
 varying vec4 vMirrorCoord;
 ${WATER_LIGHTING_GLSL}
+float contactNoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  vec4 corners = vec4(dot(i, vec2(127.1,311.7)), dot(i+vec2(1,0), vec2(127.1,311.7)),
+    dot(i+vec2(0,1), vec2(127.1,311.7)), dot(i+vec2(1,1), vec2(127.1,311.7)));
+  vec4 values = fract(sin(corners) * 43758.5453);
+  return mix(mix(values.x, values.y, f.x), mix(values.z, values.w, f.x), f.y);
+}
 vec3 bottomAt(vec2 uv) {
   vec4 view = uBedInverseViewProjection * vec4(uv * 2.0 - 1.0, texture2D(uBedDepth, uv).r * 2.0 - 1.0, 1.0);
   return view.xyz / view.w;
@@ -61,7 +70,8 @@ void main() {
   float e = max(uCell, footprint * 0.5);
   vec2 rippleSlope = vec2(interactionHeight(p + vec2(e,0.0)) - interactionHeight(p - vec2(e,0.0)),
     interactionHeight(p + vec2(0.0,e)) - interactionHeight(p - vec2(0.0,e))) / (2.0 * e);
-  vec2 slope = windField(p, footprint).yz + rippleSlope;
+  vec4 wind = windField(p, footprint);
+  vec2 slope = wind.yz + rippleSlope;
   vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 view = normalize(cameraPosition - vWorldPosition);
   float ndv = clamp(dot(normal, view), 0.0, 1.0);
@@ -113,7 +123,18 @@ void main() {
   vec3 transmitted = mix(scatter, bed * transmission + scatter * (1.0 - transmission), valid);
   vec3 color = mix(transmitted, reflection, fresnel);
 
-  color += waterLighting(normal, view, roughness);
+  // A narrow, broken foam line follows the real rock footprint and rises
+  // with the arriving crest. No permanent white outline or emissive foam.
+  float shore = texture2D(uShore, clamp(fieldUv(p), 0.0, 1.0)).r;
+  float contact = 1.0 - smoothstep(0.04, 0.38 + min(0.2, footprint), max(0.0, shore));
+  vec2 state = texture2D(uState, clamp(fieldUv(p), 0.0, 1.0)).rg;
+  float arrival = smoothstep(-0.016, 0.032, wind.x + state.x)
+    * smoothstep(-0.025, 0.045, wind.w + state.y * 0.5);
+  float grain = mix(contactNoise(p * 7.0 + vec2(uTime * 0.06, 0.0)), 0.5,
+    smoothstep(0.08, 0.3, footprint));
+  float foam = contact * arrival * mix(0.3, 0.9, grain) * 0.65;
+  color *= 1.0 - foam;
+  color += waterLighting(normal, view, roughness, foam);
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -144,6 +165,7 @@ export function createLakeReflector(geometry: PlaneGeometry, mobile: boolean): L
           uBedColor: { value: null },
           uBedDepth: { value: null },
           uBedHeight: { value: null },
+          uShore: { value: null },
           uBedInverseViewProjection: { value: new Matrix4() },
           uBedViewProjection: { value: new Matrix4() },
           uBedTexel: { value: new Vector2(1, 1) },

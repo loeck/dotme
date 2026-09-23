@@ -6,7 +6,7 @@ parameters; the landscape remains a stylized, nocturnal voxel scene.
 
 ## Simulation
 
-`WaterSimulation` exposes `step(seconds)`, `addImpulse(x, z, radius, velocity)`, `reset()`,
+`WaterSimulation` exposes `step(seconds, windTime?)`, `addImpulse(x, z, radius, velocity)`, `reset()`,
 `dispose()` and `texture`. Two RGBA16F targets store height (R, metres) and vertical velocity
 (G, metres/second). B/A are unused. Resolution is 1024² on desktop, 512² below 768 CSS pixels
 at mount. The domain is fixed at x=[-80,80], z=[-112,48], independent of camera movement.
@@ -26,6 +26,13 @@ Its continuous area integral is zero: displaced water feeds a surrounding should
 persistent depressed trail. Their support is at least 2.5 simulation cells. A bounded queue (128 splats)
 and emergency height/velocity limits (±0.22 m, ±1.5 m/s) prevent pathological input from
 exploding the field. Ordinary motion stays well below those limits.
+
+When `windTime` is supplied, solid neighbors also contribute the missing incident-wind
+slope to the boundary stencil (coupling 0.8). This approximates a no-flux boundary on the
+combined wind and simulated surface: ambient waves now generate reflected disturbances
+around rocks, even without pointer input. Open water receives no additional forcing.
+The scattered field keeps the solver's 2.4 m/s propagation speed, so this is an approximate
+coupling to the dispersive wind spectrum, not a full fluid solver.
 
 The wind spectrum uses twelve incommensurate wavelengths between 12.7 and 0.145 m, with
 amplitudes between 24 and 0.04 mm, and deep-water dispersion omega=sqrt(9.81 k). Sub-metre
@@ -72,6 +79,16 @@ moon and individual shadow maps, with GGX visibility and Fresnel; surface diffus
 excluded because volume scattering already supplies the water body color. Reinhard tone mapping
 is applied once in the final lens pass. Voxel colors contain albedo without baked lamp light.
 
+A separate signed shore-distance texture (1024² desktop / 512² mobile) follows actual
+terrain footprints instead of the conservative collision raster. A broken contact foam band
+extends roughly 0.38 m into water, gated by the current surface height and upward velocity.
+Wind velocity uses the analytic time derivative of the same wave packets; simulated velocity
+contributes to the impact. Foam has diffuse albedo and increased roughness, lit and shadowed
+by the scene lights, with no emission. Its fine pattern is filtered at a distance. This is
+a restrained artistic approximation of lapping/aeration, not particle spray or simulated bubbles.
+Trees and fully submerged stones do not create a contact outline. The shore texture needs
+about 2 MB on desktop / 0.5 MB on mobile and is disposed with the submerged pass.
+
 ## Input and lifecycle
 
 Only actual client-coordinate motion generates a wake. Both ends of a stroke are reprojected
@@ -99,7 +116,8 @@ available if WebGL itself fails.
 `pnpm check` runs type checking, lint, formatting, unit tests and the production build.
 `pnpm e2e` exercises the production page in Chromium and portrait WebKit, with a separately
 bundled test harness for reading real GPU state and inspecting input behavior. It checks
-propagation, damping, barriers, finite values, reset, 30/60/144 Hz equality, static input,
+propagation, damping, barriers, finite values, reset, 30/60/144 Hz equality, ambient wave
+scattering only at obstacles, contact placement, static input,
 UI exclusion, reduced motion and float-target fallback. The harness is served only through
 Playwright routes and is not part of the application bundle.
 

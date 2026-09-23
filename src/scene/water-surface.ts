@@ -42,14 +42,10 @@ export function swellHeight(x: number, z: number, time: number) {
 const gl = (n: number) => n.toFixed(9)
 /** Height and exact wind derivatives share the same spectrum. Small normal
  * waves are evaluated analytically, independently of the simulation's cell size. */
-export const WATER_FIELD_GLSL = `
-uniform sampler2D uState;
-uniform sampler2D uMask;
+export const WIND_FIELD_GLSL = `
 uniform float uTime;
-uniform float uCell;
-vec2 fieldUv(vec2 p) { return (p - vec2(${gl(LAKE_BOUNDS.minX)}, ${gl(LAKE_BOUNDS.minZ)})) / ${gl(LAKE_BOUNDS.size)}; }
-vec3 windField(vec2 p, float footprint) {
-  vec3 field = vec3(0.0);
+vec4 windField(vec2 p, float footprint) {
+  vec4 field = vec4(0.0);
   ${WIND_WAVES.map(([angle, length, amplitude, phase]) => {
     const k = (Math.PI * 2) / length,
       omega = Math.sqrt(9.81 * k)
@@ -69,10 +65,22 @@ vec3 windField(vec2 p, float footprint) {
       float amplitude = ${gl(amplitude)} * (1.0 - smoothstep(${gl(length * 0.18)}, ${gl(length * 0.5)}, footprint));
       field.x += sin(phase) * amplitude * packet;
       field.yz += amplitude * (phaseGradient * cos(phase) * packet + sin(phase) * packetGradient);
+      float phaseVelocity = ${gl(-omega)} + ${gl(omega * 0.025 * 0.2394)} * cos(crossPhase * 0.57);
+      float packetVelocity = ${gl(omega * 0.0196)} * sin(groupPhase) * crossPacket
+        - ${gl(omega * 0.009)} * sin(crossPhase) * alongPacket;
+      field.w += amplitude * (cos(phase) * phaseVelocity * packet + sin(phase) * packetVelocity);
     }`
   }).join('\n')}
   return field;
 }
+`
+
+export const WATER_FIELD_GLSL = `
+${WIND_FIELD_GLSL}
+uniform sampler2D uState;
+uniform sampler2D uMask;
+uniform float uCell;
+vec2 fieldUv(vec2 p) { return (p - vec2(${gl(LAKE_BOUNDS.minX)}, ${gl(LAKE_BOUNDS.minZ)})) / ${gl(LAKE_BOUNDS.size)}; }
 float interactionHeight(vec2 p) {
   vec2 uv = fieldUv(p);
   float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);

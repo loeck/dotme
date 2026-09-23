@@ -16,6 +16,7 @@ export async function exerciseSimulation() {
     water: mask,
     depth: new Float32Array(n * n).fill(2),
     obstacle: new Float32Array(n * n),
+    shore: new Float32Array([2]),
     stones: [],
   }
   const simulation = new WaterSimulation(renderer, bed, true)
@@ -86,9 +87,18 @@ export async function exerciseSimulation() {
     // eslint-disable-next-line no-await-in-loop
     edgeEnergy.push((await read()).energy)
   }
+  simulation.reset()
+  for (let i = 0; i < 600; i++) simulation.step(1 / 60, i / 60)
+  const windContact = await read()
+  // Ambient swell must generate scattering only where a solid interrupts it.
+  mask.fill(255)
+  simulation.mask.needsUpdate = true
+  simulation.reset()
+  for (let i = 0; i < 120; i++) simulation.step(1 / 60, i / 60)
+  const openWind = await read()
   simulation.dispose()
   renderer.dispose()
-  return { supported, initial, spread, settled, reset, sampled, edgeEnergy }
+  return { supported, initial, spread, settled, reset, sampled, edgeEnergy, windContact, openWind }
 }
 
 import type { PerspectiveCamera, ShaderMaterial, Vector3 } from 'three'

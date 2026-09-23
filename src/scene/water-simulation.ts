@@ -22,6 +22,7 @@ import type { WebGLRenderer } from 'three'
 
 import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import { WIND_FIELD_GLSL } from './water-surface'
 
 export const WATER_STEP = 1 / 60
 export const WAVE_SPEED = 2.4
@@ -47,14 +48,23 @@ varying vec2 vUv;
 void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }
 `
 const fragmentShader = `
+${WIND_FIELD_GLSL}
 uniform sampler2D uState;
 uniform sampler2D uMask;
 uniform vec2 uTexel;
 uniform float uAcceleration;
 uniform float uDt;
+uniform float uWindContact;
 varying vec2 vUv;
+vec2 wallDirection = vec2(0.0);
 float neighbor(vec2 uv, float center) {
-  return texture2D(uMask, uv).r < 0.5 ? center : texture2D(uState, uv).r;
+  if (texture2D(uMask, uv).r < 0.5) {
+    vec2 offset = (uv - vUv) / uTexel;
+    float weight = abs(offset.x) + abs(offset.y) > 1.5 ? 1.0 : 4.0;
+    wallDirection -= offset * weight / 6.0;
+    return center;
+  }
+  return texture2D(uState, uv).r;
 }
 void main() {
   if (texture2D(uMask, vUv).r < 0.5) { gl_FragColor = vec4(0.0); return; }
@@ -67,6 +77,13 @@ void main() {
     + neighbor(vUv + vec2(uTexel.x, -uTexel.y), state.x)
     + neighbor(vUv + vec2(-uTexel.x, uTexel.y), state.x);
   float laplacian = (4.0 * cardinal + diagonal - 20.0 * state.x) / 6.0;
+  // Enforce the wall condition on wind + simulated height, not just on the
+  // pointer waves. The incident wind slope drives a reflected disturbance.
+  if (uWindContact > 0.0 && dot(wallDirection, wallDirection) > 0.001) {
+    float dx = uTexel.x * ${LAKE_BOUNDS.size.toFixed(1)};
+    vec2 p = vec2(${LAKE_BOUNDS.minX.toFixed(1)}, ${LAKE_BOUNDS.minZ.toFixed(1)}) + vUv * ${LAKE_BOUNDS.size.toFixed(1)};
+    laplacian += dot(windField(p, dx).yz, wallDirection) * dx * uWindContact;
+  }
   float edge = min(min(vUv.x, 1.0-vUv.x), min(vUv.y, 1.0-vUv.y));
   float sponge = 1.0 - smoothstep(0.0, 0.055, edge);
   float decay = exp(-(${WATER_DAMPING.toFixed(2)} + sponge * 16.0) * uDt);
@@ -120,6 +137,8 @@ export class WaterSimulation {
         uTexel: { value: new Vector2(1 / this.resolution, 1 / this.resolution) },
         uAcceleration: { value: (WAVE_SPEED ** 2 * WATER_STEP) / dx ** 2 },
         uDt: { value: WATER_STEP },
+        uTime: { value: 0 },
+        uWindContact: { value: 0 },
       },
       depthTest: false,
       depthWrite: false,
@@ -191,7 +210,7 @@ export class WaterSimulation {
     )
   }
 
-  step(delta: number) {
+  step(delta: number, windTime?: number) {
     if (!this.available || this.disposed) return
     const steps = this.clock.advance(delta)
     if (!steps) return
@@ -208,6 +227,8 @@ export class WaterSimulation {
       this.pending.length = 0
       this.quad.material = this.material
       for (let i = 0; i < steps; i++) {
+        this.material.uniforms.uTime!.value = (windTime ?? 0) - (steps - i - 1) * WATER_STEP
+        this.material.uniforms.uWindContact!.value = windTime === undefined ? 0 : 0.8
         this.material.uniforms.uState!.value = this.texture
         const next = 1 - this.current
         this.renderer.setRenderTarget(this.targets[next]!)

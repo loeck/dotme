@@ -9,6 +9,8 @@ export type LakeBed = Readonly<{
   depth: Float32Array
   /** Highest solid surface, including trees, for conservative visibility tests. */
   obstacle: Float32Array
+  /** Signed distance to actual terrain footprints, at twice the bed resolution. */
+  shore: Float32Array
   stones: readonly Voxel[]
 }>
 
@@ -32,7 +34,35 @@ export function createLakeBed(
   const water = new Uint8Array(count).fill(255)
   const obstacle = new Float32Array(count).fill(-100)
   const distance = new Float32Array(count).fill(LAKE_BOUNDS.size)
+  const shoreResolution = resolution * 2
+  const shoreCell = cell / 2
+  const shore = new Float32Array(shoreResolution ** 2).fill(2)
   for (const [voxelIndex, voxel] of voxels.entries()) {
+    if (voxelIndex < terrainCount && voxel.y + voxel.size / 2 >= WATER_LEVEL) {
+      // Exact rectangle distances keep the contact attached to voxel faces;
+      // the coarser conservative simulation mask would leave a visible gap.
+      const half = voxel.size / 2
+      const reach = half + 1.2
+      const sx0 = Math.max(0, Math.floor((voxel.x - reach - LAKE_BOUNDS.minX) / shoreCell))
+      const sx1 = Math.min(
+        shoreResolution - 1,
+        Math.ceil((voxel.x + reach - LAKE_BOUNDS.minX) / shoreCell),
+      )
+      const sz0 = Math.max(0, Math.floor((voxel.z - reach - LAKE_BOUNDS.minZ) / shoreCell))
+      const sz1 = Math.min(
+        shoreResolution - 1,
+        Math.ceil((voxel.z + reach - LAKE_BOUNDS.minZ) / shoreCell),
+      )
+      for (let z = sz0; z <= sz1; z++)
+        for (let x = sx0; x <= sx1; x++) {
+          const dx = Math.abs(LAKE_BOUNDS.minX + (x + 0.5) * shoreCell - voxel.x) - half
+          const dz = Math.abs(LAKE_BOUNDS.minZ + (z + 0.5) * shoreCell - voxel.z) - half
+          const signed =
+            Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dz), 0)
+          const i = z * shoreResolution + x
+          shore[i] = Math.min(shore[i]!, signed)
+        }
+    }
     const x0 = Math.max(0, Math.floor((voxel.x - voxel.size / 2 - LAKE_BOUNDS.minX) / cell))
     const x1 = Math.min(
       resolution - 1,
@@ -93,5 +123,5 @@ export function createLakeBed(
       stones.push({ x, z, y: WATER_LEVEL - depth[i]! + size * 0.25, size, color: 0x566166 })
     }
   }
-  return { resolution, water, depth, obstacle, stones }
+  return { resolution, water, depth, obstacle, shore, stones }
 }

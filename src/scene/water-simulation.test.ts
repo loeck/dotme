@@ -35,4 +35,31 @@ describe('lake field', () => {
     expect(createLakeBed(voxels, 20, false).depth).not.toEqual(a.depth)
     expect(lakeIndex(a, -200, 0)).toBe(-1)
   })
+
+  it('anchors shore contact to rock faces while excluding trees and submerged stones', () => {
+    const bed = createLakeBed(
+      [
+        { x: 0, z: 0, y: 0.2, size: 2, color: 0 },
+        { x: 8, z: 0, y: -2, size: 1, color: 0 },
+        { x: 16, z: 0, y: 4, size: 3, color: 0 },
+      ],
+      19,
+      false,
+      2,
+    )
+    const n = bed.resolution * 2
+    const sample = (x: number, z: number) => {
+      const ix = Math.floor(((x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * n)
+      const iz = Math.floor(((z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size) * n)
+      return {
+        distance: bed.shore[iz * n + ix]!,
+        x: LAKE_BOUNDS.minX + ((ix + 0.5) * LAKE_BOUNDS.size) / n,
+      }
+    }
+    const outside = sample(1.25, 0)
+    expect(outside.distance).toBeCloseTo(outside.x - 1, 5)
+    expect(sample(0, 0).distance).toBeLessThan(0)
+    expect(sample(8, 0).distance).toBe(2)
+    expect(sample(16, 0).distance).toBe(2)
+  })
 })
