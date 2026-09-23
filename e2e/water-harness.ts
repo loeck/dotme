@@ -2,6 +2,7 @@ import { DataUtils, WebGLRenderer } from 'three'
 
 import { LAKE_BOUNDS } from '../src/scene/lake-bed'
 import { WaterSimulation } from '../src/scene/water-simulation'
+import { WindModel, WIND_BEARING } from '../src/scene/wind'
 export { VoxelLandscapeEngine } from '../src/scene/VoxelLandscapeEngine'
 
 export async function exerciseSimulation() {
@@ -19,7 +20,7 @@ export async function exerciseSimulation() {
     shore: new Float32Array([2]),
     stones: [],
   }
-  const simulation = new WaterSimulation(renderer, bed, true)
+  let simulation = new WaterSimulation(renderer, bed, true)
   const read = async () => {
     // Test-only access to the actual GPU state, including velocity and the entire masked shore.
     const state = simulation as unknown as {
@@ -90,6 +91,27 @@ export async function exerciseSimulation() {
   simulation.reset()
   for (let i = 0; i < 600; i++) simulation.step(1 / 60, i / 60)
   const windContact = await read()
+  const windSampled: number[] = []
+  for (const hz of [30, 60, 144]) {
+    simulation.reset()
+    for (let i = 0; i < hz; i++) simulation.step(1 / hz, (i + 1) / hz)
+    // Equal elapsed time with forcing enabled, after each separate run.
+    // eslint-disable-next-line no-await-in-loop
+    windSampled.push((await read()).energy)
+  }
+  const windScenarios = []
+  for (const options of [
+    { meanSpeed: 0.6 },
+    { meanSpeed: 6 },
+    { meanSpeed: 6, bearing: WIND_BEARING + Math.PI },
+  ]) {
+    simulation.dispose()
+    simulation = new WaterSimulation(renderer, bed, true, new WindModel(9182, options))
+    for (let i = 0; i < 240; i++) simulation.step(1 / 60, (i + 1) / 60)
+    // Stability and solid barriers must also hold under stronger/reversed forcing.
+    // eslint-disable-next-line no-await-in-loop
+    windScenarios.push(await read())
+  }
   // Ambient swell must generate scattering only where a solid interrupts it.
   mask.fill(255)
   simulation.mask.needsUpdate = true
@@ -98,7 +120,19 @@ export async function exerciseSimulation() {
   const openWind = await read()
   simulation.dispose()
   renderer.dispose()
-  return { supported, initial, spread, settled, reset, sampled, edgeEnergy, windContact, openWind }
+  return {
+    supported,
+    initial,
+    spread,
+    settled,
+    reset,
+    sampled,
+    edgeEnergy,
+    windContact,
+    windSampled,
+    windScenarios,
+    openWind,
+  }
 }
 
 import type { PerspectiveCamera, ShaderMaterial, Vector3 } from 'three'
@@ -148,7 +182,7 @@ export function diagnostics() {
   }
 }
 export function findWater() {
-  for (const y of [0.75, 0.8, 0.7, 0.85, 0.9])
+  for (const y of [0.75, 0.8, 0.7, 0.95, 0.9])
     for (const x of [0.5, 0.55, 0.45, 0.6, 0.65, 0.4, 0.7, 0.35, 0.75, 0.3, 0.8]) {
       const px = x * innerWidth,
         py = y * innerHeight
@@ -198,4 +232,23 @@ export function findBank() {
         return { x: px, y: py }
     }
   throw new Error('No visible bank')
+}
+
+export {
+  exerciseAtmosphere,
+  startCloudExperiment,
+  renderCloudExperiment,
+  stopCloudExperiment,
+} from './atmosphere-harness'
+export { exerciseCloudShadows } from './cloud-shadow-harness'
+
+export function renderCloudShadowComparison(time: number, enabled: boolean) {
+  const state = engine as unknown as {
+    elapsed: number
+    clouds: import('../src/scene/volumetric-clouds').VolumetricClouds
+    render: (now: number) => void
+  }
+  state.elapsed = time
+  state.clouds.shadows.uniforms.uCloudShadowStrength.value = enabled ? 0.95 : 0
+  state.render(performance.now())
 }

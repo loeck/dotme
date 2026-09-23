@@ -12,6 +12,7 @@ import { Reflector } from 'three/addons/objects/Reflector.js'
 
 import { WATER_LIGHTING_GLSL } from './water-lighting'
 import { WATER_FIELD_GLSL } from './water-surface'
+import { createWindUniforms } from './wind'
 
 const vertexShader = `
 #include <common>
@@ -119,7 +120,9 @@ void main() {
   vec3 bed = texture2D(uBedColor, refractUv).rgb * 0.4;
   bed += texture2D(uBedColor, clamp(refractUv + bedBlur, 0.0, 1.0)).rgb * 0.3;
   bed += texture2D(uBedColor, clamp(refractUv - bedBlur, 0.0, 1.0)).rgb * 0.3;
-  vec3 scatter = vec3(0.0022, 0.0043, 0.0065);
+  // Cloud cover also shades the moonlit scattering inside the water.
+  float cloudVisibility = cloudShadow(vWorldPosition);
+  vec3 scatter = vec3(0.0022, 0.0043, 0.0065) * mix(0.25, 1.0, cloudVisibility);
   vec3 transmitted = mix(scatter, bed * transmission + scatter * (1.0 - transmission), valid);
   vec3 color = mix(transmitted, reflection, fresnel);
 
@@ -134,7 +137,7 @@ void main() {
     smoothstep(0.08, 0.3, footprint));
   float foam = contact * arrival * mix(0.3, 0.9, grain) * 0.65;
   color *= 1.0 - foam;
-  color += waterLighting(normal, view, roughness, foam);
+  color += waterLighting(normal, view, roughness, foam, cloudVisibility);
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -159,6 +162,7 @@ export function createLakeReflector(geometry: PlaneGeometry, mobile: boolean): L
           tDiffuse: { value: null },
           textureMatrix: { value: null },
           uTime: { value: 0 },
+          ...createWindUniforms(),
           uCell: { value: 0.16 },
           uState: { value: null },
           uMask: { value: null },

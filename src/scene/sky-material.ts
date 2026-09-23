@@ -1,4 +1,8 @@
-import { BackSide, ShaderMaterial, Vector3 } from 'three'
+import { BackSide, ShaderMaterial } from 'three'
+
+import { sampleMoonLight } from './moon-light'
+import { CLOUD_SAMPLING_GLSL } from './volumetric-clouds'
+import type { VolumetricClouds } from './volumetric-clouds'
 
 // The landscape is close to the camera; these distant silhouettes give the
 // valley depth without adding another band of visible geometry at the shore.
@@ -6,7 +10,7 @@ const vertexShader = `
 varying vec3 vDirection;
 void main() {
   vDirection = normalize(position);
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * vec4(mat3(viewMatrix) * position, 1.0);
   // The sky is infinitely distant, including in the lake's oblique reflection
   // camera. Clipping this finite sphere against the water plane leaves a black
   // strip where reflected rays meet the lake beyond the sphere's radius.
@@ -16,6 +20,7 @@ void main() {
 
 const fragmentShader = `
 uniform float uTime;
+${CLOUD_SAMPLING_GLSL}
 uniform float uSeed;
 uniform float uMobile;
 uniform vec3 uMoonDirection;
@@ -58,16 +63,15 @@ void main() {
     horizon * (0.58 + 0.27 * horizonNoise + 0.15 * valleyLight)
   );
 
-  // Cloud wisps make the lower sky less uniform without a bright, continuous band.
+  // The visible moon and its halo track the same direction as the scene light.
+  float moonAngle = acos(clamp(dot(direction, uMoonDirection), -1.0, 1.0));
+  float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
+  float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
+  color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 + moonHalo) * uMoonIntensity;
+  // Clouds attenuate both the lunar disc and its halo before distant relief.
+  vec4 cloud = sampleClouds(direction);
+  color = color * cloud.a + cloud.rgb;
   float drift = uTime * 0.011;
-  float cloudBand = exp(-pow((elevation - 0.155) * 12.0, 2.0));
-  float cloudShape = noise(vec2(azimuth * 11.0 + drift + uSeed, elevation * 14.0 + 3.7));
-  float cloudDetail = noise(vec2(
-    azimuth * 28.0 - drift * 0.6 + cloudShape * 0.8,
-    elevation * 35.0 + uSeed
-  ));
-  float cloud = smoothstep(0.34, 0.68, cloudShape * 0.65 + cloudDetail * 0.35);
-  color = mix(color, vec3(0.018, 0.026, 0.034), cloud * cloudBand * 0.13);
 
   // Separate hills overlap at different bearings. Avoid a mirrored valley
   // function, which reads as two diagonal wedges at narrow viewports.
@@ -145,25 +149,26 @@ void main() {
   float mist = lowMist * (0.12 + mistNoise * 0.16 + mistDetail * 0.055 + valleyPool * 0.22);
   color = mix(color, vec3(0.023, 0.033, 0.044), mist);
 
-  // The visible moon and its halo track the same direction as the scene light.
-  float moonAngle = acos(clamp(dot(direction, uMoonDirection), -1.0, 1.0));
-  float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
-  float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
-  color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 + moonHalo) * uMoonIntensity;
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
 `
 
-export function createSkyMaterial(seed: number, mobile = false): ShaderMaterial {
+export function createSkyMaterial(
+  seed: number,
+  mobile: boolean,
+  clouds: VolumetricClouds,
+): ShaderMaterial {
+  const moon = sampleMoonLight(0)
   return new ShaderMaterial({
     vertexShader,
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
-      uMoonDirection: { value: new Vector3(-35, 48, -20).normalize() },
-      uMoonIntensity: { value: 1.5 },
+      ...clouds.uniforms,
+      uMoonDirection: { value: moon.offset.normalize() },
+      uMoonIntensity: { value: moon.intensity },
       uSeed: { value: (seed % 4096) / 379 },
       uMobile: { value: mobile ? 1 : 0 },
     },

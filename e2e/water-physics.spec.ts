@@ -5,6 +5,8 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { build } from 'vite'
 
+test.use({ video: 'on' })
+
 let directory: string
 let harness: string
 
@@ -60,6 +62,13 @@ test('GPU propagation, damping, shore barriers, stability, reset and frame indep
   expect(result.windContact.energy).toBeGreaterThan(0.001)
   expect(result.windContact.peak).toBeLessThan(0.15)
   expect(result.openWind.energy).toBe(0)
+  expect(result.windSampled[0]).toBeCloseTo(result.windSampled[1], 5)
+  expect(result.windSampled[1]).toBeCloseTo(result.windSampled[2], 5)
+  for (const scenario of result.windScenarios) {
+    expect(scenario.energy).toBeGreaterThan(0.001)
+    expect(scenario.peak).toBeLessThan(0.15)
+  }
+  expect(result.windScenarios[1].energy).toBeGreaterThan(result.windScenarios[0].energy)
 })
 
 test('visible water receives gestures, stationary pointers and UI do not; resize and cancellation recover', async ({
@@ -230,7 +239,7 @@ test('reduced motion stays static and unavailable float targets use analytic wat
   await page.mouse.move(300, 550)
   await page.mouse.up()
   await page.waitForTimeout(200)
-  expect(await page.locator('canvas').screenshot()).toEqual(before)
+  expect((await page.locator('canvas').screenshot()).equals(before)).toBe(true)
   const state = await page.evaluate(async () => {
     const url = '/water-harness.js'
     return (await import(url)).diagnostics()
@@ -252,4 +261,146 @@ test('reduced motion stays static and unavailable float targets use analytic wat
     const url = '/water-harness.js'
     ;(await import(url)).stopEngine()
   })
+})
+
+test('shared wind agrees on CPU/GPU; cloud captures are continuous, periodic and volumetric', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000)
+  const errors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  const result = await page.evaluate(async (mobile) => {
+    const url = '/water-harness.js'
+    return (await import(url)).exerciseAtmosphere(mobile)
+  }, testInfo.project.name === 'mobile')
+  await testInfo.attach('atmosphere-measurements', {
+    body: JSON.stringify(result),
+    contentType: 'application/json',
+  })
+  expect(result.maximumError).toBeLessThan(0.0002)
+  expect(result.interpolationError).toBeLessThanOrEqual(1)
+  expect(result.continuityError).toBeLessThanOrEqual(1)
+  expect(result.repeatError).toBe(0)
+  expect(result.motion).toBeGreaterThan(1)
+  expect(result.minTransmission).toBeLessThan(50)
+  expect(result.maxTransmission).toBeGreaterThan(245)
+  expect(result.seamError).toBeLessThanOrEqual(2)
+  expect(errors).toEqual([])
+})
+
+test('controlled wind and lunar attenuation captures, anchored independently of the camera', async ({
+  page,
+}, testInfo) => {
+  test.setTimeout(120_000)
+  const errors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  for (const scenario of ['weak', 'strong', 'reverse']) {
+    // Each experiment owns and releases its renderer and textures.
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(
+      async ({ mobile, scenario: name }) => {
+        const url = '/water-harness.js'
+        ;(await import(url)).startCloudExperiment(mobile, name)
+      },
+      { mobile: testInfo.project.name === 'mobile', scenario },
+    )
+    // eslint-disable-next-line no-await-in-loop
+    const before = await page
+      .locator('canvas')
+      .screenshot({ path: testInfo.outputPath(`${scenario}-0.png`) })
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => {
+      const url = '/water-harness.js'
+      ;(await import(url)).renderCloudExperiment(0, true)
+    })
+    // eslint-disable-next-line no-await-in-loop
+    expect((await page.locator('canvas').screenshot()).equals(before)).toBe(true)
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => {
+      const url = '/water-harness.js'
+      ;(await import(url)).renderCloudExperiment(15)
+    })
+    // eslint-disable-next-line no-await-in-loop
+    const after = await page
+      .locator('canvas')
+      .screenshot({ path: testInfo.outputPath(`${scenario}-15.png`) })
+    expect(after.equals(before)).toBe(false)
+    // Record a continuous segment at real simulation speed after the timed capture.
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => {
+      const url = '/water-harness.js'
+      const module = await import(url)
+      await new Promise<void>((resolve) => {
+        const started = performance.now()
+        const frame = (now: number) => {
+          const elapsed = (now - started) / 1000
+          module.renderCloudExperiment(15 + elapsed)
+          if (elapsed < 4) requestAnimationFrame(frame)
+          else resolve()
+        }
+        requestAnimationFrame(frame)
+      })
+    })
+  }
+  await page.evaluate(async () => {
+    const url = '/water-harness.js'
+    ;(await import(url)).stopCloudExperiment()
+  })
+  expect(errors).toEqual([])
+})
+
+test('cloud shadows follow volume and moon projection while preserving local light', async ({
+  page,
+}, info) => {
+  test.setTimeout(120_000)
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  const result = await page.evaluate(async (mobile) => {
+    const url = '/water-harness.js'
+    return (await import(url)).exerciseCloudShadows(mobile)
+  }, info.project.name === 'mobile')
+  await info.attach('cloud-shadow-measurements', {
+    body: JSON.stringify(result),
+    contentType: 'application/json',
+  })
+  expect(result.referenceError).toBeLessThan(0.045)
+  expect(result.heightError).toBeLessThan(0.002)
+  expect(result.interpolationError).toBeLessThan(0.002)
+  expect(result.repeatError).toBe(0)
+  expect(result.motion).toBeGreaterThan(0.01)
+  expect(result.relativeMotion).toBeGreaterThan(0.01)
+  expect(result.min).toBeLessThan(0.6)
+  expect(result.max).toBeGreaterThan(0.99)
+  expect(result.moonDarkening).toBeGreaterThan(1)
+  expect(result.ambientDarkening).toBeGreaterThan(1)
+  expect(result.localDifference).toBe(0)
+  await page.evaluate(async () => {
+    const url = '/water-harness.js'
+    ;(await import(url)).startEngine(9182, true)
+  })
+  await page.waitForTimeout(100)
+  for (const enabled of [false, true]) {
+    // Same time and camera, varying only cloud shadow strength.
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async (on) => {
+      const url = '/water-harness.js'
+      ;(await import(url)).renderCloudShadowComparison(18, on)
+    }, enabled)
+    // eslint-disable-next-line no-await-in-loop
+    await page.screenshot({
+      path: info.outputPath(enabled ? 'cloud-shadows.png' : 'no-cloud-shadows.png'),
+    })
+  }
+  await page.evaluate(async () => {
+    const url = '/water-harness.js'
+    ;(await import(url)).stopEngine()
+  })
+  expect(errors).toEqual([])
 })

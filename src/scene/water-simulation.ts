@@ -23,6 +23,7 @@ import type { WebGLRenderer } from 'three'
 import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { WIND_FIELD_GLSL } from './water-surface'
+import { WindModel, createWindUniforms, updateWindUniforms } from './wind'
 
 export const WATER_STEP = 1 / 60
 export const WAVE_SPEED = 2.4
@@ -37,6 +38,9 @@ export class WaterClock {
     const steps = Math.min(MAX_WATER_STEPS, Math.floor((this.remainder + 1e-9) / WATER_STEP))
     this.remainder -= steps * WATER_STEP
     return steps
+  }
+  get pendingTime() {
+    return this.remainder
   }
   reset() {
     this.remainder = 0
@@ -109,11 +113,13 @@ export class WaterSimulation {
   private readonly quad: Mesh
   private readonly pending: Vector4[] = []
   private disposed = false
+  private readonly windUniforms = createWindUniforms()
 
   constructor(
     private readonly renderer: WebGLRenderer,
     private readonly bed: LakeBed,
     mobile: boolean,
+    private readonly wind = new WindModel(0),
   ) {
     this.resolution = mobile ? 512 : 1024
     this.mask = new DataTexture(
@@ -138,6 +144,7 @@ export class WaterSimulation {
         uAcceleration: { value: (WAVE_SPEED ** 2 * WATER_STEP) / dx ** 2 },
         uDt: { value: WATER_STEP },
         uTime: { value: 0 },
+        ...this.windUniforms,
         uWindContact: { value: 0 },
       },
       depthTest: false,
@@ -227,7 +234,9 @@ export class WaterSimulation {
       this.pending.length = 0
       this.quad.material = this.material
       for (let i = 0; i < steps; i++) {
-        this.material.uniforms.uTime!.value = (windTime ?? 0) - (steps - i - 1) * WATER_STEP
+        const time = (windTime ?? 0) - this.clock.pendingTime - (steps - i - 1) * WATER_STEP
+        this.material.uniforms.uTime!.value = time
+        updateWindUniforms(this.windUniforms, this.wind.sample(time))
         this.material.uniforms.uWindContact!.value = windTime === undefined ? 0 : 0.8
         this.material.uniforms.uState!.value = this.texture
         const next = 1 - this.current

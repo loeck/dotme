@@ -1,6 +1,7 @@
 import { PlaneGeometry } from 'three'
 
 import { LAKE_BOUNDS } from './lake-bed'
+import type { WindState } from './wind'
 
 // A narrow wind spectrum plus two crossing swells. Incommensurate wavelengths
 // and phases produce evolving packets instead of parallel, repeating stripes.
@@ -21,22 +22,88 @@ export const WIND_WAVES = [
   [0.86, 0.145, 0.00004, 2.6],
 ] as const
 
-export function swellHeight(x: number, z: number, time: number) {
-  return WIND_WAVES.reduce((height, [angle, wavelength, amplitude, phase]) => {
-    const k = (Math.PI * 2) / wavelength
-    const spatial = (x * Math.cos(angle) + z * Math.sin(angle)) * k
-    const omega = Math.sqrt(9.81 * k)
-    const cross =
-      (x * -Math.sin(angle) + z * Math.cos(angle)) * k * 0.18 + omega * time * 0.025 + phase * 1.7
-    const packet = 0.72 + 0.28 * Math.cos(spatial * 0.14 - omega * time * 0.07 + phase * 2.3)
-    return (
-      height +
-      Math.sin(spatial - omega * time + phase + 0.42 * Math.sin(cross * 0.57)) *
-        amplitude *
-        packet *
-        (0.64 + 0.36 * Math.cos(cross))
-    )
-  }, 0)
+// Precompute the same spectrum coefficients for CPU sampling and GLSL generation.
+const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phase]) => {
+  const k = (Math.PI * 2) / wavelength
+  const small = Math.max(0, Math.min(1, (5 - wavelength) / 5))
+  return {
+    wavelength,
+    amplitude,
+    phase,
+    small,
+    kx: Math.cos(angle) * k,
+    kz: Math.sin(angle) * k,
+    omega: Math.sqrt(9.81 * k),
+    sensitivity: 0.22 + small * 0.78,
+  }
+})
+
+/** Same height, spatial gradient and time derivative as the shader, including
+ * the packet envelope and the changing wind amplitude. */
+export function sampleWindField(
+  x: number,
+  z: number,
+  time: number,
+  wind?: WindState,
+  footprint = 0,
+) {
+  const field: [height: number, dx: number, dz: number, velocity: number] = [0, 0, 0, 0]
+  const [rotationX, rotationY] = wind?.rotation ?? [1, 0]
+  const angularVelocity = wind?.rotationVelocity ?? 0
+  const response: WindState['response'] = wind?.response ?? [1, 1, 0, 0]
+  for (const {
+    wavelength,
+    amplitude: baseAmplitude,
+    phase,
+    kx: baseX,
+    kz: baseZ,
+    omega,
+    small,
+    sensitivity,
+  } of WAVE_SPECTRUM) {
+    const kx = baseX * rotationX - baseZ * rotationY
+    const kz = baseZ * rotationX + baseX * rotationY
+    const cx = -kz * 0.18,
+      cz = kx * 0.18
+    const spatial = x * kx + z * kz
+    const cross = x * cx + z * cz + omega * time * 0.025 + phase * 1.7
+    const wavePhase = spatial - omega * time + phase + 0.42 * Math.sin(cross * 0.57)
+    const group = spatial * 0.14 - omega * time * 0.07 + phase * 2.3
+    const alongPacket = 0.72 + 0.28 * Math.cos(group)
+    const crossPacket = 0.64 + 0.36 * Math.cos(cross)
+    const packet = alongPacket * crossPacket
+    const strength = response[0] * (1 - small) + response[1] * small
+    const velocity = response[2] * (1 - small) + response[3] * small
+    const filter = Math.max(0, Math.min(1, (footprint - wavelength * 0.18) / (wavelength * 0.32)))
+    const base = baseAmplitude * (1 - filter * filter * (3 - 2 * filter))
+    const amplitude = base * (1 + sensitivity * (strength - 1))
+    const sine = Math.sin(wavePhase),
+      cosine = Math.cos(wavePhase)
+    field[0] += sine * amplitude * packet
+    const alongGradient =
+      amplitude * (cosine * packet - sine * 0.0392 * Math.sin(group) * crossPacket)
+    const crossGradient =
+      amplitude *
+      (cosine * packet * 0.2394 * Math.cos(cross * 0.57) -
+        sine * 0.36 * Math.sin(cross) * alongPacket)
+    field[1] += kx * alongGradient + cx * crossGradient
+    field[2] += kz * alongGradient + cz * crossGradient
+    const spatialVelocity = angularVelocity * (-x * kz + z * kx)
+    const crossVelocity = angularVelocity * (-x * cz + z * cx) + omega * 0.025
+    const groupVelocity = spatialVelocity * 0.14 - omega * 0.07
+    const phaseVelocity = spatialVelocity - omega + 0.2394 * Math.cos(cross * 0.57) * crossVelocity
+    const packetVelocity =
+      -0.28 * Math.sin(group) * groupVelocity * crossPacket -
+      0.36 * Math.sin(cross) * crossVelocity * alongPacket
+    field[3] +=
+      amplitude * (cosine * phaseVelocity * packet + sine * packetVelocity) +
+      base * sensitivity * velocity * sine * packet
+  }
+  return field
+}
+
+export function swellHeight(x: number, z: number, time: number, wind?: WindState) {
+  return sampleWindField(x, z, time, wind)[0]
 }
 
 const gl = (n: number) => n.toFixed(9)
@@ -44,13 +111,15 @@ const gl = (n: number) => n.toFixed(9)
  * waves are evaluated analytically, independently of the simulation's cell size. */
 export const WIND_FIELD_GLSL = `
 uniform float uTime;
+uniform vec2 uWindRotation;
+uniform float uWindRotationVelocity;
+uniform vec4 uWindResponse;
 vec4 windField(vec2 p, float footprint) {
   vec4 field = vec4(0.0);
-  ${WIND_WAVES.map(([angle, length, amplitude, phase]) => {
-    const k = (Math.PI * 2) / length,
-      omega = Math.sqrt(9.81 * k)
-    return `{
-      vec2 k = vec2(${gl(Math.cos(angle) * k)}, ${gl(Math.sin(angle) * k)});
+  ${WAVE_SPECTRUM.map(
+    ({ wavelength: length, amplitude, phase, kx, kz, omega, small, sensitivity }) => `{
+      vec2 k = vec2(${gl(kx)}, ${gl(kz)});
+      k = vec2(k.x * uWindRotation.x - k.y * uWindRotation.y, k.x * uWindRotation.y + k.y * uWindRotation.x);
       float spatial = dot(p, k);
       vec2 crossK = vec2(-k.y, k.x) * 0.18;
       float crossPhase = dot(p, crossK) + uTime * ${gl(omega * 0.025)} + ${gl(phase * 1.7)};
@@ -62,15 +131,22 @@ vec4 windField(vec2 p, float footprint) {
       float packet = alongPacket * crossPacket;
       vec2 packetGradient = -k * 0.0392 * sin(groupPhase) * crossPacket
         -crossK * 0.36 * sin(crossPhase) * alongPacket;
-      float amplitude = ${gl(amplitude)} * (1.0 - smoothstep(${gl(length * 0.18)}, ${gl(length * 0.5)}, footprint));
+      float baseAmplitude = ${gl(amplitude)} * (1.0 - smoothstep(${gl(length * 0.18)}, ${gl(length * 0.5)}, footprint));
+      float strength = mix(uWindResponse.x, uWindResponse.y, ${gl(small)});
+      float amplitude = baseAmplitude * (1.0 + ${gl(sensitivity)} * (strength - 1.0));
+      float amplitudeVelocity = baseAmplitude * ${gl(sensitivity)} * mix(uWindResponse.z, uWindResponse.w, ${gl(small)});
       field.x += sin(phase) * amplitude * packet;
       field.yz += amplitude * (phaseGradient * cos(phase) * packet + sin(phase) * packetGradient);
-      float phaseVelocity = ${gl(-omega)} + ${gl(omega * 0.025 * 0.2394)} * cos(crossPhase * 0.57);
-      float packetVelocity = ${gl(omega * 0.0196)} * sin(groupPhase) * crossPacket
-        - ${gl(omega * 0.009)} * sin(crossPhase) * alongPacket;
-      field.w += amplitude * (cos(phase) * phaseVelocity * packet + sin(phase) * packetVelocity);
-    }`
-  }).join('\n')}
+      float spatialVelocity = uWindRotationVelocity * dot(p, vec2(-k.y, k.x));
+      float crossVelocity = uWindRotationVelocity * dot(p, vec2(-crossK.y, crossK.x)) + ${gl(omega * 0.025)};
+      float groupVelocity = spatialVelocity * 0.14 - ${gl(omega * 0.07)};
+      float phaseVelocity = spatialVelocity - ${gl(omega)} + 0.2394 * cos(crossPhase * 0.57) * crossVelocity;
+      float packetVelocity = -0.28 * sin(groupPhase) * groupVelocity * crossPacket
+        -0.36 * sin(crossPhase) * crossVelocity * alongPacket;
+      field.w += amplitude * (cos(phase) * phaseVelocity * packet + sin(phase) * packetVelocity)
+        + amplitudeVelocity * sin(phase) * packet;
+    }`,
+  ).join('\n')}
   return field;
 }
 `

@@ -162,3 +162,9 @@ worktree, then merged here. The live lights, shadow maps, spatial material batch
 capture, moon and synchronized lamp energy are retained. The two competing ripple solvers were
 consolidated into `WaterSimulation`; its nine-point propagation and balanced pressure retain the
 useful parts of the other solver while preserving the submerged bed and visible-water picking.
+
+## Shared atmosphere
+
+Cloud advection and the wave spectrum now share a seeded wind model. See
+[Shared wind and volumetric cloud layers](atmosphere.md) for the amplitude response,
+CPU/GPU derivative agreement, capture profiles, approximations and measurements.

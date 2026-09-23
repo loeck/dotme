@@ -39,12 +39,15 @@ import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
+import { sampleMoonLight } from './moon-light'
 import { createSkyMaterial } from './sky-material'
 import { SubmergedScene } from './submerged-scene'
+import { VolumetricClouds } from './volumetric-clouds'
 import type { Voxel, VoxelMaterial } from './voxel-world'
 import { createVoxelWorld } from './voxel-world'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
+import { WindModel, createWindUniforms, updateWindUniforms } from './wind'
 
 export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
@@ -120,7 +123,6 @@ export class VoxelLandscapeEngine {
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicMaterial> | null = null
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
-  private readonly moonDirection = new Vector3()
   private readonly environmentTarget: WebGLCubeRenderTarget
   private readonly environmentCamera: CubeCamera
   private readonly environmentFilter: PMREMGenerator
@@ -137,6 +139,9 @@ export class VoxelLandscapeEngine {
   private pointerBusy = false
   private pendingPointer: { x: number; y: number; time: number } | null = null
   private previousPointer: { x: number; y: number; time: number } | null = null
+  private readonly wind: WindModel
+  private readonly windUniforms = createWindUniforms()
+  private readonly clouds: VolumetricClouds
   private readonly skyMaterial: ShaderMaterial
   private readonly sky: Mesh<SphereGeometry, ShaderMaterial>
   private readonly voxelGroup = new Group()
@@ -203,7 +208,14 @@ export class VoxelLandscapeEngine {
     this.moon.shadow.bias = -0.00015
     this.scene.add(this.moon, this.moon.target)
 
-    this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile)
+    this.wind = new WindModel((options.seed ?? 0) >>> 0)
+    this.clouds = new VolumetricClouds(
+      this.renderer,
+      (options.seed ?? 0) >>> 0,
+      this.mobile,
+      this.wind,
+    )
+    this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile, this.clouds)
     const skyGeometry = new SphereGeometry(260, 32, 16)
     this.sky = new Mesh(skyGeometry, this.skyMaterial)
     this.sky.frustumCulled = false
@@ -213,14 +225,21 @@ export class VoxelLandscapeEngine {
 
     this.scene.add(this.voxelGroup)
     this.buildWorld((options.seed ?? 0) >>> 0)
-    this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile)
+    this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile, this.wind)
     this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
     this.scene.traverse((object) => {
       if ('isLight' in object) object.layers.enable(1)
     })
+    const cloudReceivers = new Set<MeshStandardMaterial>()
+    this.scene.traverse((object) => {
+      if (object instanceof Mesh && object.material instanceof MeshStandardMaterial)
+        cloudReceivers.add(object.material)
+    })
+    for (const material of cloudReceivers) this.clouds.shadows.applyTo(material)
     const waterGeometry = createWaterGeometry(this.mobile)
     this.water = createLakeReflector(waterGeometry, this.mobile)
     const uniforms = this.water.material.uniforms
+    Object.assign(uniforms, this.windUniforms, this.clouds.shadows.uniforms)
     uniforms.uState!.value = this.simulation.texture
     uniforms.uMask!.value = this.simulation.mask
     uniforms.uCell!.value = LAKE_BOUNDS.size / this.simulation.resolution
@@ -445,11 +464,12 @@ export class VoxelLandscapeEngine {
     const ray = this.raycaster.ray
     this.waterPlane.constant = -WATER_LEVEL
     if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
+    const wind = this.wind.sample(this.elapsed)
     for (let i = 0; i < 3; i++) {
       this.waterPlane.constant = -(
         WATER_LEVEL +
         this.pointerHeight +
-        swellHeight(this.waterHit.x, this.waterHit.z, this.elapsed)
+        swellHeight(this.waterHit.x, this.waterHit.z, this.elapsed, wind)
       )
       if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
     }
@@ -638,15 +658,15 @@ export class VoxelLandscapeEngine {
     })
     const uniforms = this.water.material.uniforms
     // Slow moon motion changes the grazing light, shadows and reflected sky together.
-    const orbit = this.elapsed * 0.035
-    this.moon.position.set(-35 + Math.sin(orbit) * 12, 48 + Math.sin(orbit * 0.7) * 4, -48)
-    this.moon.intensity = 1.5 * (0.94 + Math.sin(orbit * 1.3) * 0.06)
-    this.moonDirection.copy(this.moon.position).sub(this.moon.target.position).normalize()
-    this.skyMaterial.uniforms.uMoonDirection!.value.copy(this.moonDirection)
-    this.skyMaterial.uniforms.uMoonIntensity!.value = this.moon.intensity
+    const moon = sampleMoonLight(this.elapsed)
+    this.moon.position.copy(moon.offset).add(this.moon.target.position)
+    this.moon.intensity = moon.intensity
+    this.skyMaterial.uniforms.uMoonDirection!.value.copy(moon.offset).normalize()
+    this.skyMaterial.uniforms.uMoonIntensity!.value = moon.intensity
     uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
-    this.sky.position.copy(this.camera.position)
+    updateWindUniforms(this.windUniforms, this.wind.sample(this.elapsed))
+    this.clouds.update(this.elapsed)
     this.skyMaterial.uniforms.uTime!.value = this.elapsed
     this.water.material.uniforms.uTime!.value = this.elapsed
     const waterPointer = this.water.material.uniforms.uPointer!.value as Vector3
@@ -768,6 +788,7 @@ export class VoxelLandscapeEngine {
       if (object instanceof InstancedMesh) object.dispose()
     }
     this.scene.environment = null
+    this.clouds.dispose()
     this.environmentTarget.dispose()
     this.filteredEnvironment?.dispose()
     this.environmentFilter.dispose()

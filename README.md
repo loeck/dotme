@@ -68,3 +68,6 @@ GPU validation, performance methodology and approximations.
 The project uses TanStack Start with Nitro. Import the repository in Vercel with the repository root
 as the project root; framework detection and SSR functions are configured by `vercel.json` and
 `vite.config.ts`.
+
+See [atmosphere notes](docs/atmosphere.md) for the shared wind, volumetric cloud rendering,
+quality profiles and before/after performance measurements.

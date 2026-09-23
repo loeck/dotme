@@ -1,5 +1,8 @@
+import { CLOUD_SHADOW_GLSL } from './cloud-shadows'
+
 /** Direct water lighting uses Three's live lights and their individual shadow maps. */
 export const WATER_LIGHTING_GLSL = `
+${CLOUD_SHADOW_GLSL}
 // GGX with the dielectric Fresnel reflectance of water (IOR 1.333).
 vec3 waterBRDF(vec3 n, vec3 v, vec3 l, vec3 radiance, float roughness) {
   float nl = max(dot(n, l), 0.0);
@@ -18,7 +21,7 @@ vec3 waterBRDF(vec3 n, vec3 v, vec3 l, vec3 radiance, float roughness) {
   return radiance * nl * distribution * visibility * fresnel;
 }
 
-vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam) {
+vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam, float cloudVisibility) {
   vec3 n = normalize(mat3(viewMatrix) * worldNormal);
   vec3 v = normalize(mat3(viewMatrix) * worldView);
   vec3 viewPosition = (viewMatrix * vec4(vWorldPosition, 1.0)).xyz;
@@ -26,7 +29,7 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
   float filteredRoughness = sqrt(roughness * roughness + min(0.025,
     0.25 * (dot(dFdx(worldNormal), dFdx(worldNormal)) + dot(dFdy(worldNormal), dFdy(worldNormal)))));
   vec3 foamAlbedo = vec3(0.55, 0.60, 0.59) * foam;
-  vec3 result = ambientLightColor * foamAlbedo;
+  vec3 result = ambientLightColor * foamAlbedo * mix(0.35, 1.0, cloudVisibility);
   filteredRoughness = mix(filteredRoughness, 0.4, foam);
   IncidentLight light;
   float visibility;
@@ -60,6 +63,7 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
   #pragma unroll_loop_start
   for (int i = 0; i < NUM_DIR_LIGHTS; i++) {
     getDirectionalLightInfo(directionalLights[i], light);
+    light.color *= cloudVisibility;
     visibility = 1.0;
     #if defined(USE_SHADOWMAP) && UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS
       directionalShadow = directionalLightShadows[i];
