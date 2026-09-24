@@ -36,6 +36,8 @@ function fixture() {
     12,
     false,
     new WindModel(12),
+    undefined,
+    undefined,
     new Uint8Array(32 ** 3 * 2),
   )
   return { clouds, captures }

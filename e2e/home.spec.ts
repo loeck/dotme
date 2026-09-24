@@ -73,7 +73,7 @@ test('cursor lights terrain and water with reduced motion', async ({ page }) => 
   const mobile = page.viewportSize()!.width < 768
   await page.setViewportSize(mobile ? { width: 390, height: 664 } : { width: 1440, height: 900 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?seed=9182')
+  await page.goto('/?seed=9182&time=00:00')
   const canvas = page.locator('canvas[data-water-mode]')
   await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
   const surfaces = mobile
@@ -125,7 +125,7 @@ test('cursor smoke starts after lazy loading and pauses when hidden or motion is
     await new Promise((resolve) => setTimeout(resolve, 350))
     await route.continue()
   })
-  await page.goto('/?seed=9182')
+  await page.goto('/?seed=9182&time=00:00')
   const scene = page.locator('canvas[data-water-mode]')
   await expect(scene.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
   const cursor = page.locator('.scene-cursor')

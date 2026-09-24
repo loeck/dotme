@@ -3,7 +3,7 @@ import type { SVGProps } from 'react'
 type IconProps = SVGProps<SVGSVGElement>
 
 const SOCIAL_LINK_CLASS =
-  'inline-flex min-h-8 items-center gap-2.5 no-underline transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-[#e4e8ed] focus-visible:text-[#e4e8ed] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[#b9dfff] motion-reduce:transition-none'
+  'inline-flex min-h-8 items-center gap-2.5 no-underline transition-colors duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:text-[var(--profile-primary)] focus-visible:text-[var(--profile-primary)] focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[var(--profile-focus)] motion-reduce:transition-none'
 
 function GithubIcon(props: IconProps) {
   return (
@@ -30,23 +30,25 @@ function LinkedinIcon(props: IconProps) {
 export function Profile() {
   return (
     <header
-      className="relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
+      className="profile-panel relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
       aria-labelledby="profile-title"
     >
-      <p className="m-0 text-[0.8rem] tracking-[0.025em] text-[#8a919a]">{'//loeck.me'}</p>
+      <p className="m-0 text-[0.8rem] tracking-[0.025em] text-[var(--profile-muted)]">
+        {'//loeck.me'}
+      </p>
       <div className="h-10" aria-hidden="true" />
       <h1
         id="profile-title"
-        className="mt-0 mb-2 text-[clamp(1.2rem,1.58vw,1.42rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[#e4e8ed]"
+        className="mt-0 mb-2 text-[clamp(1.2rem,1.58vw,1.42rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[var(--profile-primary)]"
       >
         Hi, I’m Loëck.
       </h1>
-      <p className="m-0 text-[0.8rem] leading-5 text-[#8a919a]">
+      <p className="m-0 text-[0.8rem] leading-5 text-[var(--profile-muted)]">
         Building some stuff in Paris, still figuring out the rest.
       </p>
       <div className="h-[3.75rem]" aria-hidden="true" />
       <nav
-        className="flex items-center gap-4 text-[0.76rem] text-[#8a919a] max-sm:gap-2 max-sm:text-[0.7rem]"
+        className="flex items-center gap-4 text-[0.76rem] text-[var(--profile-muted)] max-sm:gap-2 max-sm:text-[0.7rem]"
         aria-label="Social links"
       >
         <a
@@ -55,11 +57,11 @@ export function Profile() {
           target="_blank"
           rel="noreferrer"
         >
-          <GithubIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
+          <GithubIcon className="size-[1.1rem] shrink-0 text-[var(--profile-icon)]" />
           <span>GitHub</span>
           <span className="sr-only">(opens in a new tab)</span>
         </a>
-        <span className="select-none text-[#525a64]" aria-hidden="true">
+        <span className="select-none text-[var(--profile-divider)]" aria-hidden="true">
           |
         </span>
         <a
@@ -68,7 +70,7 @@ export function Profile() {
           target="_blank"
           rel="noreferrer"
         >
-          <LinkedinIcon className="size-[1.1rem] shrink-0 text-[#c5ccd5]" />
+          <LinkedinIcon className="size-[1.1rem] shrink-0 text-[var(--profile-icon)]" />
           <span>LinkedIn</span>
           <span className="sr-only">(opens in a new tab)</span>
         </a>

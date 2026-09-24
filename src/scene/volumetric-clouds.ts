@@ -17,7 +17,9 @@ import type { PerspectiveCamera, WebGLRenderer } from 'three'
 import { CLOUD_DENSITY_GLSL, createCloudBodies } from './cloud-density'
 import { createCloudNoise } from './cloud-noise'
 import { CloudShadows } from './cloud-shadows'
-import { sampleMoonLight } from './moon-light'
+import { sampleLighting } from './lighting'
+import type { LightingState } from './lighting'
+import type { WeatherPreset } from './weather'
 import type { WindModel } from './wind'
 
 export const CLOUD_PROFILES = {
@@ -31,24 +33,16 @@ uniform samplerCube uCloudPrevious;
 uniform samplerCube uCloudNext;
 uniform float uCloudBlend;
 uniform float uCloudResolution;
+uniform float uCloudEnabled;
 vec4 decodeCloud(samplerCube cloudMap, vec3 ray) {
   vec4 value = textureCube(cloudMap, ray);
-  value.rgb *= value.rgb;
+  value.rgb = value.rgb * value.rgb * 16.0;
   return value;
 }
 // Four bilinear lookups reconstruct a cubic B-spline. Work in the selected face's
 // plane but sample directions, allowing taps to cross seamlessly to adjacent faces.
-vec4 smoothCloud(samplerCube cloudMap, vec3 ray) {
-  vec3 a = abs(ray);
-  float major = max(max(a.x, a.y), a.z);
-  vec3 normal, tangent, bitangent;
-  if (a.x >= a.y && a.x >= a.z) {
-    normal = vec3(sign(ray.x), 0.0, 0.0); tangent = vec3(0.0, 1.0, 0.0); bitangent = vec3(0.0, 0.0, 1.0);
-  } else if (a.y >= a.z) {
-    normal = vec3(0.0, sign(ray.y), 0.0); tangent = vec3(1.0, 0.0, 0.0); bitangent = vec3(0.0, 0.0, 1.0);
-  } else {
-    normal = vec3(0.0, 0.0, sign(ray.z)); tangent = vec3(1.0, 0.0, 0.0); bitangent = vec3(0.0, 1.0, 0.0);
-  }
+vec4 smoothCloudFace(samplerCube cloudMap, vec3 ray, vec3 normal, vec3 tangent, vec3 bitangent) {
+  float major = dot(ray, normal);
   vec2 uv = vec2(dot(ray, tangent), dot(ray, bitangent)) / major;
   vec2 texel = (uv * 0.5 + 0.5) * uCloudResolution - 0.5;
   vec2 f = fract(texel), base = floor(texel);
@@ -64,7 +58,24 @@ vec4 smoothCloud(samplerCube cloudMap, vec3 ray) {
     + decodeCloud(cloudMap, normal + tangent * low.x + bitangent * high.y) * g0.x * g1.y
     + decodeCloud(cloudMap, normal + tangent * high.x + bitangent * high.y) * g1.x * g1.y;
 }
+vec4 smoothCloud(samplerCube cloudMap, vec3 ray) {
+  vec3 a = abs(ray);
+  float major = max(max(a.x, a.y), a.z);
+  // Blend face-local reconstruction kernels within two texels of cube seams.
+  // Merely sampling across faces leaves the kernel orientation discontinuous,
+  // which becomes visible when denser clouds increase edge contrast.
+  vec3 weight = smoothstep(vec3(major * (1.0 - 4.0 / uCloudResolution)), vec3(major), a);
+  vec4 result = vec4(0.0);
+  if (weight.x > 0.0) result += weight.x * smoothCloudFace(cloudMap, ray,
+    vec3(sign(ray.x), 0.0, 0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 0.0, 1.0));
+  if (weight.y > 0.0) result += weight.y * smoothCloudFace(cloudMap, ray,
+    vec3(0.0, sign(ray.y), 0.0), vec3(1.0, 0.0, 0.0), vec3(0.0, 0.0, 1.0));
+  if (weight.z > 0.0) result += weight.z * smoothCloudFace(cloudMap, ray,
+    vec3(0.0, 0.0, sign(ray.z)), vec3(1.0, 0.0, 0.0), vec3(0.0, 1.0, 0.0));
+  return result / (weight.x + weight.y + weight.z);
+}
 vec4 sampleClouds(vec3 direction) {
+  if (uCloudEnabled < 0.5) return vec4(0.0, 0.0, 0.0, 1.0);
   return mix(smoothCloud(uCloudPrevious, direction), smoothCloud(uCloudNext, direction), uCloudBlend);
 }
 `
@@ -80,7 +91,8 @@ void main() {
 const fragmentShader = `
 ${CLOUD_DENSITY_GLSL}
 uniform vec3 uMoonDirection;
-uniform float uMoonIntensity;
+uniform vec3 uCloudAmbient;
+uniform vec3 uCloudDirect;
 varying vec3 vDirection;
 
 void main() {
@@ -107,8 +119,8 @@ void main() {
         opticalDepth += density(p + uMoonDirection * (8.0 + float(j) * 22.0), false) * stride;
       }
       float moonLight = exp(-opticalDepth * CLOUD_EXTINCTION);
-      vec3 source = vec3(0.006, 0.009, 0.015)
-        + vec3(0.026, 0.036, 0.050) * moonLight * uMoonIntensity * (0.3 + phase * 0.35);
+      vec3 source = uCloudAmbient
+        + uCloudDirect * moonLight * (0.3 + phase * 0.35);
       float opacity = 1.0 - exp(-d * stepLength * CLOUD_EXTINCTION);
       radiance += transmittance * opacity * source;
       transmittance *= 1.0 - opacity;
@@ -119,7 +131,7 @@ void main() {
   radiance *= horizonFade;
   transmittance = mix(1.0, transmittance, horizonFade);
   // Encode dim radiance for the RGBA8 fallback; decode before linear composition.
-  gl_FragColor = vec4(sqrt(radiance), transmittance);
+  gl_FragColor = vec4(sqrt(max(radiance, vec3(0.0)) / 16.0), transmittance);
 }
 `
 
@@ -133,6 +145,7 @@ export class VolumetricClouds {
     uCloudNext: { value: null as WebGLCubeRenderTarget['texture'] | null },
     uCloudBlend: { value: 0 },
     uCloudResolution: { value: 256 },
+    uCloudEnabled: { value: 1 },
   }
   private readonly targets: WebGLCubeRenderTarget[]
   private readonly noise
@@ -151,8 +164,11 @@ export class VolumetricClouds {
     seed: number,
     mobile: boolean,
     private readonly wind: WindModel,
+    private readonly lighting: (time: number) => LightingState = (time) => sampleLighting(0, time),
+    weather: WeatherPreset = 'partly-cloudy',
     noiseData?: Uint8Array,
   ) {
+    this.uniforms.uCloudEnabled.value = weather === 'clear' ? 0 : 1
     this.profile = mobile ? CLOUD_PROFILES.mobile : CLOUD_PROFILES.desktop
     this.uniforms.uCloudResolution.value = this.profile.resolution
     this.noise = createCloudNoise(seed, 32, noiseData)
@@ -177,12 +193,13 @@ export class VolumetricClouds {
       fragmentShader,
       defines: { CLOUD_STEPS: this.profile.steps },
       uniforms: {
-        ...createCloudBodies(seed),
+        ...createCloudBodies(seed, weather),
         uNoise: { value: this.noise },
         uDisplacement: { value: new Vector2() },
         uTime: { value: 0 },
         uMoonDirection: { value: new Vector3() },
-        uMoonIntensity: { value: 1.5 },
+        uCloudAmbient: { value: sampleLighting(0).cloudAmbient },
+        uCloudDirect: { value: sampleLighting(0).cloudDirect },
       },
       side: BackSide,
       depthTest: false,
@@ -190,6 +207,7 @@ export class VolumetricClouds {
       toneMapped: false,
     })
     this.shadows = new CloudShadows(renderer, this.material.uniforms, this.uniforms.uCloudBlend)
+    this.shadows.uniforms.uCloudShadowStrength.value = weather === 'clear' ? 0 : 1
     const sphere = new Mesh(this.geometry, this.material)
     sphere.frustumCulled = false
     this.scene.add(sphere)
@@ -199,9 +217,10 @@ export class VolumetricClouds {
     const wind = this.wind.sample(time)
     this.material.uniforms.uDisplacement!.value.fromArray(wind.displacement)
     this.material.uniforms.uTime!.value = time
-    const moon = sampleMoonLight(time)
-    this.material.uniforms.uMoonDirection!.value.copy(moon.offset).normalize()
-    this.material.uniforms.uMoonIntensity!.value = moon.intensity
+    const light = this.lighting(time)
+    this.material.uniforms.uMoonDirection!.value.copy(light.direction)
+    this.material.uniforms.uCloudAmbient!.value.copy(light.cloudAmbient)
+    this.material.uniforms.uCloudDirect!.value.copy(light.cloudDirect)
   }
 
   private capture(index: number, time: number) {
@@ -240,6 +259,13 @@ export class VolumetricClouds {
   }
 
   update(time: number) {
+    if (!this.uniforms.uCloudEnabled.value) return
+    const light = this.lighting(time)
+    // Switching the sun/moon projection at the horizon must not pop the sky fill.
+    this.shadows.uniforms.uCloudShadowStrength.value = Math.max(
+      light.sunIntensity / 4.5,
+      light.moonIntensity / 1.4,
+    )
     const tick = Math.floor(time * this.profile.hz)
     if (this.tick !== tick) {
       if (tick === this.tick + 1 && this.tick >= 0) {
@@ -251,6 +277,9 @@ export class VolumetricClouds {
         this.next = this.staging
         this.staging = old
       } else {
+        // Time jumps rebuild a canonical bracket. This also avoids a half-float
+        // rounding difference from sampling the other atlas tile on a repeated time.
+        this.current = 0
         this.capture(this.current, tick / this.profile.hz)
         this.capture(this.next, (tick + 1) / this.profile.hz)
       }

@@ -11,9 +11,10 @@ import {
   Vector2,
   WebGLRenderTarget,
 } from 'three'
-import type { PerspectiveCamera, WebGLRenderer } from 'three'
+import type { DirectionalLight, PerspectiveCamera, WebGLRenderer } from 'three'
 
 import type { RenderDiagnostics } from './render-diagnostics'
+import type { VolumetricLight } from './volumetric-light'
 
 const vertexShader = `
 varying vec2 vUv;
@@ -123,6 +124,8 @@ export class DepthFocus {
     renderer: WebGLRenderer,
     scene: Scene,
     camera: PerspectiveCamera,
+    atmosphere?: VolumetricLight,
+    light?: DirectionalLight,
     diagnostics?: RenderDiagnostics,
   ) {
     this.material.uniforms.uCameraRange!.value.set(camera.near, camera.far)
@@ -131,6 +134,14 @@ export class DepthFocus {
     // Reflector restores this target after its own camera pass.
     if (diagnostics) diagnostics.measure('main', () => renderer.render(scene, camera))
     else renderer.render(scene, camera)
+    this.material.uniforms.tColor!.value =
+      atmosphere && light
+        ? diagnostics
+          ? diagnostics.measure('atmosphere', () =>
+              atmosphere.render(renderer, this.target, camera, light),
+            )
+          : atmosphere.render(renderer, this.target, camera, light)
+        : this.target.texture
     renderer.setRenderTarget(previousTarget)
     if (diagnostics)
       diagnostics.measure('depth-focus', () => renderer.render(this.scene, this.camera))

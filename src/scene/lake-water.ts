@@ -1,4 +1,5 @@
 import {
+  Color,
   DoubleSide,
   Matrix4,
   ShaderMaterial,
@@ -51,6 +52,7 @@ uniform mat4 uBedViewProjection;
 uniform vec2 uBedTexel;
 uniform vec3 uPointer;
 uniform samplerCube uEnvironment;
+uniform vec3 uWaterScatter;
 varying vec3 vWorldPosition;
 varying vec4 vMirrorCoord;
 ${WATER_LIGHTING_GLSL}
@@ -124,7 +126,7 @@ void main() {
   bed += texture2D(uBedColor, clamp(refractUv - bedBlur, 0.0, 1.0)).rgb * 0.3;
   // Cloud cover also shades the moonlit scattering inside the water.
   float cloudVisibility = cloudShadow(vWorldPosition);
-  vec3 scatter = vec3(0.0022, 0.0043, 0.0065) * mix(0.25, 1.0, cloudVisibility);
+  vec3 scatter = uWaterScatter * mix(0.25, 1.0, cloudVisibility);
   vec3 transmitted = mix(scatter, bed * transmission + scatter * (1.0 - transmission), valid);
   vec3 color = mix(transmitted, reflection, fresnel);
 
@@ -179,6 +181,7 @@ export function createLakeReflector(geometry: PlaneGeometry, mobile: boolean): L
           uBedTexel: { value: new Vector2(1, 1) },
           uPointer: { value: new Vector3() },
           ...createCursorGlowUniforms(),
+          uWaterScatter: { value: new Color().setRGB(0.0022, 0.0043, 0.0065) },
           uEnvironment: { value: null },
         },
       ]),
