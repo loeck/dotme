@@ -75,15 +75,17 @@ export class VolumetricLight {
   private readonly hasTerrain = uniform(false)
   private readonly airSize = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
+  private readonly airDivisor: number
   private readonly scatter: FullscreenPass
   private readonly composite: FullscreenPass
   constructor(
     renderer: WebGPURenderer,
-    mobile: boolean,
+    lowPower: boolean,
     clouds: CloudShadowUniforms,
     extinction: number,
-    steps = mobile ? 16 : 32,
+    steps = lowPower ? 16 : 32,
   ) {
+    this.airDivisor = lowPower ? 3 : 2
     this.target.texture.name = 'Atmosphere composite'
     this.airTarget.texture.name = 'Air radiance / transmission'
     const sigma = float(extinction)
@@ -197,7 +199,10 @@ export class VolumetricLight {
   }
   resize(width: number, height: number) {
     this.target.setSize(width, height)
-    this.airTarget.setSize(Math.max(1, Math.ceil(width / 2)), Math.max(1, Math.ceil(height / 2)))
+    this.airTarget.setSize(
+      Math.max(1, Math.ceil(width / this.airDivisor)),
+      Math.max(1, Math.ceil(height / this.airDivisor)),
+    )
     this.airSize.value.set(this.airTarget.width, this.airTarget.height)
   }
   private prepare(input: RenderTarget, camera: PerspectiveCamera, light: DirectionalLight) {

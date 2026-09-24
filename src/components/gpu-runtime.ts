@@ -1,5 +1,7 @@
 import { WebGPURenderer } from 'three/webgpu'
 
+import { isLowPowerDevice, maxPixelRatio } from '../scene/device-profile'
+
 /** Owns the sole renderer; scenes only borrow it. */
 export class GpuRuntime {
   readonly renderer: WebGPURenderer
@@ -76,7 +78,7 @@ export class GpuRuntime {
 
   resize() {
     if (this.disposed) return
-    this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, innerWidth < 768 ? 1.5 : 1.75))
+    this.renderer.setPixelRatio(maxPixelRatio(isLowPowerDevice()))
     this.renderer.setSize(Math.max(1, innerWidth), Math.max(1, innerHeight), false)
   }
 

@@ -55,3 +55,16 @@ Long captures and motion reviews remain outside the default suite. For image par
 compare identical seeds and mocked weather at day/night/rain, fixed viewport and pixel
 ratio. Keep representative captures with the review; do not infer visual equivalence
 from a successful compilation alone.
+
+## Low-power profile
+
+Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
+use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
+foreground cap, pixel ratio capped at 1.25, a 64 px environment probe refreshed at 4 Hz,
+the moon shadow refreshed at 4 Hz and one visible lamp shadow per frame, a third-resolution
+air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
+
+On these devices, leaning the phone left or right (gravity projected onto the screen,
+so an upright phone stays stable) shifts and turns the camera. The turn is limited to
+what the generated terrain still covers at the current aspect ratio. iOS asks for motion
+access on the first tap; touch parallax remains available when it is denied.
