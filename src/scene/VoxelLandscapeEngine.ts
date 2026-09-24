@@ -1267,6 +1267,7 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
+    uniforms.uNight.value = 1 - light.daylight
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
