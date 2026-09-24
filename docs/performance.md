@@ -365,3 +365,40 @@ startup from this repository because of its `devEngines` runtime version require
 Validation: `pnpm check` passes (170 unit tests, typecheck, lint, formatting and
 production build). The complete Playwright suite passes 108 tests with six expected
 skips for opt-in benchmarks and capabilities unavailable in the mobile profile.
+
+## Living landscape: leaves, stars and ambient sound (2026-09-24)
+
+Reference `9ecef4f` is the exact initial working-tree snapshot, rather than the older
+committed scene. Both variants use production harness bundles, seed 9182, clear midnight,
+no rain, desktop Chromium 1280×720 / DPR 1 and mobile WebKit 390×664 / iPhone 13 DPR.
+Images additionally compare seed 42. Captures retain their existing resolution and cadence.
+
+The visual additions were measured twice, in reversed A/B order, for 20 seconds per run
+following five seconds of warm-up. Each isolated addition and the combined scene with
+active audio also received one 12-second A/B pass on both profiles. Raw JSON and images
+are under `artifacts/living-landscape/performance-*`.
+
+| Addition                   | Chromium median before → after | Chromium p95 before → after | WebKit median before → after | WebKit p95 before → after |
+| -------------------------- | ------------------------------ | --------------------------- | ---------------------------- | ------------------------- |
+| Leaves + stars, two passes | 16.7 → 16.7 ms                 | 16.7–16.8 → 16.7 ms         | 17 → 17 ms                   | 32 → 31 ms                |
+| Leaves alone               | 16.7 → 16.7 ms                 | 16.7 → 16.8 ms              | 17 → 17 ms                   | 34 → 33 ms                |
+| Stars alone                | 33.4 → 16.7 ms                 | 66.7 → 16.8 ms              | 17 → 17 ms                   | 32 → 33 ms                |
+| Audio alone                | 16.7 → 16.7 ms                 | 66.7 → 66.7 ms              | 17 → 17 ms                   | 33 → 31 ms                |
+| Leaves + stars + audio     | 16.7 → 16.7 ms                 | 16.8 → 16.8 ms              | 17 → 17 ms                   | 31 → 31 ms                |
+
+The unusually slow Chromium reference during the stars-only pass is an uncontrolled
+machine-load outlier, **not evidence of a speedup**. The audio-only Chromium tail was
+similarly noisy in both variants. No competing automated browser was detected, but that
+check cannot exclude other GPU or system activity. Vsync-capped medians also cannot expose
+small changes in GPU cost. WebKit CPU timings quantize to 1 ms and are unsuitable for a
+percentage comparison at this scale.
+
+The repeated full visual comparison is within the intended <5% median / <10% p95 frame
+interval increases on this host. These are observations, not universal CI limits or a claim
+about physical mobile devices. All effects with audio gave a Chromium CPU median of
+3.0 → 3.2 ms while retaining its 16.7 ms frame median and 16.8 ms p95.
+
+Reproduce an isolated run with `BENCH_LIVING_FEATURE=leaves`, `stars` or `audio`; add
+`BENCH_AUDIO=1` for audio-only or combined runs. These are benchmark environment variables,
+not site URL options. The audio performance harness uses the production mixer, decoded
+local MP3s and a running audio clock.

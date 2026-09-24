@@ -1,6 +1,6 @@
 # Living lake details
 
-Five procedural additions share the engine's simulation clock, wind, seed and
+Six procedural additions share the engine's simulation clock, wind, seed and
 pointer input. They add no assets, dependencies or point lights. Fish use a dedicated
 capture packed above the bed in the existing color/depth target. `SceneDetails` owns their resources; construction, update and
 disposal are handled by `VoxelLandscapeEngine`.
@@ -210,3 +210,11 @@ The separation of surface water, breakup and secondary particles follows the pro
 principles described in [Moana: Performing Water](https://media.disneyanimation.com/uploads/production/publication_asset/163/asset/Moana-_Performing_Water.pdf)
 and [NVIDIA WaveWorks](https://developer.nvidia.com/blog/?p=28941), adapted here to a small
 real-time particle and sheet budget rather than their fluid simulation systems.
+
+## Floating leaves
+
+The detail layer now also owns 12 desktop / 6 mobile surface leaves, with instanced angular
+blades, fixed-step shore avoidance and direct sampling of the shared water field. They
+receive existing lighting and appear in the main and planar reflection views, but not in
+the underwater captures or environment probe. See [living landscape](./living-landscape.md)
+for simulation, input, reduced-motion and validation details.

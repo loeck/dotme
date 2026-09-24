@@ -126,6 +126,28 @@
         </nav>
       </header>
       <button
+        class="scene-sound-trigger"
+        type="button"
+        aria-label="Enable ambient sound"
+        aria-pressed="false"
+        aria-busy="false"
+        hidden
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.5"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          aria-hidden="true"
+        >
+          <path d="M11 4 5 9H2v6h3l6 5Z" />
+          <path data-sound-state d="M16 9l6 6 M22 9l-6 6" />
+        </svg>
+      </button>
+      <span class="sr-only" data-sound-status role="status" aria-live="polite"></span>
+      <button
         class="scene-info-trigger"
         type="button"
         aria-label="About this landscape"
@@ -169,6 +191,51 @@
         <a href="https://www.typescriptlang.org/" target="_blank" rel="noreferrer">TypeScript</a>
         and <a href="https://tailwindcss.com/" target="_blank" rel="noreferrer">Tailwind CSS</a> for
         the site.
+      </p>
+      <h3>Sounds from nature</h3>
+      <p>
+        Optional field recordings from
+        <a
+          href="https://freesound.org/people/salilnair/sounds/524688/"
+          target="_blank"
+          rel="noreferrer"
+          >salilnair</a
+        >
+        (water),
+        <a
+          href="https://freesound.org/people/Nox_Sound/sounds/530908/"
+          target="_blank"
+          rel="noreferrer"
+          >Nox_Sound</a
+        >
+        (wind),
+        <a
+          href="https://freesound.org/people/AlanCat/sounds/383064/"
+          target="_blank"
+          rel="noreferrer"
+          >AlanCat</a
+        >
+        (rain),
+        <a
+          href="https://freesound.org/people/Sclolex/sounds/210540/"
+          target="_blank"
+          rel="noreferrer"
+          >Sclolex</a
+        >
+        (insects), and
+        <a
+          href="https://freesound.org/people/VKProduktion/sounds/231537/"
+          target="_blank"
+          rel="noreferrer"
+          >VKProduktion</a
+        >
+        (birds). Shared on Freesound under
+        <a
+          href="https://creativecommons.org/publicdomain/zero/1.0/"
+          target="_blank"
+          rel="noreferrer"
+          >CC0</a
+        >; excerpts edited and softly mixed for this landscape.
       </p>
       <h3>Weather from the real world</h3>
       <p>

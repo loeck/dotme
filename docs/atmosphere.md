@@ -372,3 +372,10 @@ has no DOM profile, so it also excludes the once-per-second profile meter.
 Earlier measurement windows had markedly different baseline frame intervals;
 these figures describe this machine/session and do not establish sustained
 60 fps or performance on a physical mobile device.
+
+## Stellar sky
+
+Seeded, direction-anchored stars now fade in by solar elevation before cloud and horizon
+composition. Pixel-filtered points have subtle active-time scintillation; a seeded controller
+schedules rare meteors in the current upper frustum. Both use the existing environment
+capture unchanged. See [living landscape](./living-landscape.md) for cadence and validation.

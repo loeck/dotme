@@ -265,3 +265,24 @@ export function pacing() {
     Object.assign(s, saved)
   }
 }
+
+/** Test-only isolation, never a public URL control. */
+export function isolateLiving(feature: string) {
+  const s = engine as unknown as {
+    details?: { leaves?: { mesh: { count: number }; update: (...args: unknown[]) => void } }
+    skyMaterial: { fragmentShader: string; needsUpdate: boolean }
+  }
+  if (feature === 'stars' || feature === 'audio') {
+    if (s.details?.leaves) {
+      s.details.leaves.mesh.count = 0
+      s.details.leaves.update = () => {}
+    }
+  }
+  if (feature === 'leaves' || feature === 'audio') {
+    s.skyMaterial.fragmentShader = s.skyMaterial.fragmentShader.replace(
+      'color += stellarRadiance(direction, moonAngle);',
+      'color += vec3(0.0);',
+    )
+    s.skyMaterial.needsUpdate = true
+  }
+}

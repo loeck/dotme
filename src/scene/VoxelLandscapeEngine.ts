@@ -36,6 +36,7 @@ import {
 } from 'three'
 import type { WebGLRenderTarget } from 'three'
 
+import type { AmbientEnvironment } from '../audio/environment'
 import { sceneParams } from '../scene-params'
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
@@ -57,6 +58,7 @@ import type { DetailEnvironment } from './scene-details'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { SolarClock, parseInitialTime } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
+import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
@@ -76,6 +78,7 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
   onContextFailure: () => void
   onFirstFrame: () => void
+  onEnvironment?: (state: AmbientEnvironment) => void
   reducedMotion?: boolean
   seed?: number
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
@@ -189,6 +192,9 @@ export class VoxelLandscapeEngine {
   private readonly windUniforms = createWindUniforms()
   private readonly clouds: VolumetricClouds
   private readonly rain: RainEffect
+  private readonly shootingStars: ShootingStars
+  private starTime = 0
+  private ambientStateAt = -Infinity
   private readonly skyMaterial: ShaderMaterial
   private readonly sky: Mesh<SphereGeometry, ShaderMaterial>
   private readonly voxelGroup = new Group()
@@ -326,6 +332,7 @@ export class VoxelLandscapeEngine {
       this.clouds.shadows.uniforms,
       WEATHER[this.weather].extinction,
     )
+    this.shootingStars = new ShootingStars((options.seed ?? 0) >>> 0)
     this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile, this.clouds)
     const skyGeometry = new SphereGeometry(260, 32, 16)
     this.sky = new Mesh(skyGeometry, this.skyMaterial)
@@ -736,7 +743,17 @@ export class VoxelLandscapeEngine {
               bounds.left + (projected.x + 1) * bounds.width * 0.5,
               bounds.top + (1 - projected.y) * bounds.height * 0.5,
             )
-            if (contact) this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
+            if (contact) {
+              this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
+              const fraction = 0.5 / samples
+              this.details?.leaves.drift.push(
+                contact.x - (point.x - start.x) * fraction,
+                contact.z - (point.z - start.z) * fraction,
+                contact.x + (point.x - start.x) * fraction,
+                contact.z + (point.z - start.z) * fraction,
+                Math.abs(velocity) * 3,
+              )
+            }
           }
         }
       }
@@ -905,6 +922,7 @@ export class VoxelLandscapeEngine {
       return
 
     this.water.visible = false
+    if (this.details) this.details.leaves.mesh.visible = false
     const environmentIntensity = this.scene.environmentIntensity
     this.scene.environmentIntensity = 0
     // Direct solar energy already comes from the directional light. Excluding the
@@ -915,6 +933,7 @@ export class VoxelLandscapeEngine {
       this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
     } finally {
       this.water.visible = true
+      if (this.details) this.details.leaves.mesh.visible = true
       this.scene.environmentIntensity = environmentIntensity
       this.skyMaterial.uniforms.uShowSun!.value = this.showSun ? 1 : 0
       this.skyMaterial.uniforms.uShowMoon!.value = 1
@@ -941,7 +960,8 @@ export class VoxelLandscapeEngine {
     this.frame = 0
     if (!this.options.reducedMotion) this.requestFrame()
     this.diagnostics?.begin(now)
-    const rainDelta = clamp((now - this.lastFrameAt) / 1000, 0, 0.1)
+    const activeDelta = Math.max(0, (now - this.lastFrameAt) / 1000)
+    const rainDelta = Math.min(activeDelta, 0.1)
     const dt = Math.min(rainDelta, 0.05)
     this.lastFrameAt = now
     if (!this.options.reducedMotion) this.elapsed += dt
@@ -989,11 +1009,32 @@ export class VoxelLandscapeEngine {
     fog.color.copy(light.haze)
     fog.density = Math.sqrt(WEATHER[this.weather].extinction / 100)
     updateSkyLighting(this.skyMaterial, light, this.showSun)
+    if (!this.options.reducedMotion) this.starTime += activeDelta
+    this.shootingStars.advance(
+      activeDelta,
+      light.sunDirection.y,
+      this.weather === 'overcast',
+      !!this.options.reducedMotion,
+      this.camera,
+    )
+    this.skyMaterial.uniforms.uStarTime!.value = this.starTime
+    this.skyMaterial.uniforms.uMeteorAge!.value = this.shootingStars.age
+    this.skyMaterial.uniforms.uMeteorStart!.value.copy(this.shootingStars.start)
+    this.skyMaterial.uniforms.uMeteorEnd!.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter!.value.copy(light.waterScatter)
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
     const wind = this.wind.sample(this.elapsed)
+    if (now - this.ambientStateAt >= 250) {
+      this.ambientStateAt = now
+      this.options.onEnvironment?.({
+        solarHour: this.solarClock.seconds(atmosphereTime) / 3600,
+        daylight: light.daylight,
+        windSpeed: wind.speed,
+        rainIntensity: this.rain.simulation.state.intensity,
+      })
+    }
     updateWindUniforms(this.windUniforms, wind)
     const optics = sampleWaterOptics(this.rain.simulation.state.intensity, wind.speed)
     uniforms.uWaterClarity!.value = optics.clarity

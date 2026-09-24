@@ -203,3 +203,7 @@ References: [Garg and Nayar, Photorealistic Rendering of Rain Streaks](https://c
 [Experimental Study of Drop Impact on Deep-Water Surface in the Presence of Wind](https://journals.ametsoc.org/view/journals/phoc/48/2/jpo-d-17-0172.1.xml),
 [Olano and Baker, LEAN Mapping](https://userpages.cs.umbc.edu/olano/papers/lean/),
 and [Three.js instanced buffer geometry](https://threejs.org/docs/pages/InstancedBufferGeometry.html).
+
+The lake also has drifting leaves, a seeded night sky and optional natural ambient sound.
+Sound starts off on every visit and is enabled with the speaker button. Implementation,
+CC0 recording credits and verification notes are in [living landscape](docs/living-landscape.md).

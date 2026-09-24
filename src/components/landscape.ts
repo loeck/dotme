@@ -1,3 +1,4 @@
+import type { AmbientEnvironment } from '../audio/environment'
 import { sceneParams } from '../scene-params'
 import type { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
 import { preloadSceneWeather } from '../weather/scene'
@@ -13,7 +14,11 @@ function randomSeed(): number {
 const seeds = new WeakMap<HTMLDivElement, number>()
 const weatherSnapshots = new WeakMap<HTMLDivElement, SceneWeather>()
 
-export function initLandscape(host: HTMLDivElement, onSettled: () => void = () => {}): () => void {
+export function initLandscape(
+  host: HTMLDivElement,
+  onSettled: () => void = () => {},
+  sound?: { setEnvironment: (state: AmbientEnvironment) => void; fail: () => void },
+): () => void {
   const lifetime = new AbortController()
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
   const params = sceneParams(window.location.search)
@@ -58,7 +63,9 @@ export function initLandscape(host: HTMLDivElement, onSettled: () => void = () =
           const instance = await Engine.create(
             {
               container: host,
+              onEnvironment: sound?.setEnvironment,
               onContextFailure: () => {
+                sound?.fail()
                 stop()
                 onSettled()
               },
@@ -84,6 +91,7 @@ export function initLandscape(host: HTMLDivElement, onSettled: () => void = () =
           resizeObserver.observe(host)
         } catch {
           if (!controller.signal.aborted) {
+            sound?.fail()
             stop()
             onSettled()
           }
@@ -97,6 +105,7 @@ export function initLandscape(host: HTMLDivElement, onSettled: () => void = () =
       // Keep the static background if the engine module cannot be loaded.
       if (!lifetime.signal.aborted) {
         lifetime.abort()
+        sound?.fail()
         onSettled()
       }
     }

@@ -1,3 +1,4 @@
+import { initAmbientSound } from './components/ambient-sound'
 import { initLandscape } from './components/landscape'
 import { initSceneCursor } from './components/scene-cursor'
 import { initSceneInfo } from './components/scene-info'
@@ -12,12 +13,14 @@ function start() {
   const url = cleanSceneUrl(new URL(window.location.href))
   if (url.href !== window.location.href) history.replaceState(history.state, '', url)
   const loader = initSceneLoader()
-  const stopLandscape = landscape ? initLandscape(landscape, loader.reveal) : undefined
+  const sound = initAmbientSound()
+  const stopLandscape = landscape ? initLandscape(landscape, loader.reveal, sound) : undefined
   if (!landscape) loader.reveal()
   const cursor = document.querySelector<HTMLDivElement>('.scene-cursor')
   const stopCursor = cursor ? initSceneCursor(cursor) : undefined
   const stopInfo = initSceneInfo()
   cleanup = () => {
+    sound.dispose()
     stopInfo?.()
     stopCursor?.()
     stopLandscape?.()

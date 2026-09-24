@@ -57,7 +57,8 @@ html[data-scene-loading] #landscape {
   line-height: 1.6;
 }
 
-.scene-info-trigger {
+.scene-info-trigger,
+.scene-sound-trigger {
   position: absolute;
   z-index: 10;
   bottom: max(0.5rem, env(safe-area-inset-bottom));
@@ -75,13 +76,16 @@ html[data-scene-loading] #landscape {
 }
 
 .scene-info-trigger:hover,
-.scene-info-trigger:focus-visible {
+.scene-info-trigger:focus-visible,
+.scene-sound-trigger:focus-visible {
   opacity: 1;
 }
-.scene-info-trigger:active {
+.scene-info-trigger:active,
+.scene-sound-trigger:active {
   transform: scale(0.95);
 }
-.scene-info-trigger:focus-visible {
+.scene-info-trigger:focus-visible,
+.scene-sound-trigger:focus-visible {
   outline: 1px solid currentColor;
   outline-offset: -6px;
   border-radius: 50%;
@@ -171,7 +175,8 @@ html[data-scene-loading] #landscape {
   .scene-info-dialog[open] {
     animation: none;
   }
-  .scene-info-trigger {
+  .scene-info-trigger,
+  .scene-sound-trigger {
     transition: none;
   }
 }
@@ -283,7 +288,8 @@ html[data-scene-loading] #landscape {
 
 /* Accessible DOM fallback when the GPU mask is unavailable. */
 .profile-panel,
-.scene-info-trigger {
+.scene-info-trigger,
+.scene-sound-trigger {
   --profile-primary: #e4e8ed;
   --profile-muted: #cbd1d7;
   --profile-icon: #d5dce3;
@@ -291,7 +297,8 @@ html[data-scene-loading] #landscape {
   --profile-focus: #b9dfff;
 }
 main[data-scene-tone='light'] .profile-panel,
-main[data-scene-tone='light'] .scene-info-trigger {
+main[data-scene-tone='light'] .scene-info-trigger,
+main[data-scene-tone='light'] .scene-sound-trigger {
   --profile-primary: #17232d;
   --profile-muted: #2e3d49;
   --profile-icon: #263641;
@@ -302,9 +309,25 @@ main[data-scene-tone='light'] .scene-info-trigger {
    pixel from the scenery beneath it. DOM hit targets, selection and focus remain. */
 main[data-ui-mask='gpu'] .profile-panel,
 main[data-ui-mask='gpu'] .profile-panel *,
-main[data-ui-mask='gpu'] .scene-info-trigger {
+main[data-ui-mask='gpu'] .scene-info-trigger,
+main[data-ui-mask='gpu'] .scene-sound-trigger {
   color: transparent !important;
 }
-main[data-ui-mask='gpu'] .scene-info-trigger:focus-visible {
+main[data-ui-mask='gpu'] .scene-info-trigger:focus-visible,
+main[data-ui-mask='gpu'] .scene-sound-trigger:focus-visible {
   outline-color: var(--profile-focus);
+}
+
+.scene-sound-trigger {
+  right: max(3.5rem, calc(env(safe-area-inset-right) + 2.75rem));
+}
+.scene-sound-trigger[data-loading='true']::after {
+  content: '';
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  bottom: 5px;
+  left: 21px;
 }

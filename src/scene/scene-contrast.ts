@@ -105,7 +105,7 @@ export class SceneContrast {
     if (host) {
       const profile = host.querySelector('.profile-panel')
       if (profile) this.observer.observe(profile)
-      for (const event of ['pointerover', 'pointerout', 'focusin', 'focusout'])
+      for (const event of ['pointerover', 'pointerout', 'focusin', 'focusout', 'scene-icon-change'])
         host.addEventListener(event, invalidate, { signal })
     }
     this.dialogObserver = new MutationObserver(() => this.redraw())
@@ -208,8 +208,18 @@ export class SceneContrast {
         ctx.fillRect(rect.left - bounds.left, rect.bottom - bounds.top - 2, rect.width, 1)
       }
     }
-    const icon = this.host.querySelector<SVGSVGElement>('.scene-info-trigger svg')
-    if (icon) this.drawSvg(ctx, icon, bounds)
+    for (const icon of this.host.querySelectorAll<SVGSVGElement>(
+      '.scene-info-trigger svg, .scene-sound-trigger svg',
+    ))
+      this.drawSvg(ctx, icon, bounds)
+    const sound = this.host.querySelector<HTMLElement>(".scene-sound-trigger[data-loading='true']")
+    if (sound) {
+      const rect = sound.getBoundingClientRect()
+      ctx.beginPath()
+      ctx.arc(rect.left - bounds.left + 22, rect.bottom - bounds.top - 6, 1.5, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.fill()
+    }
     this.texture.needsUpdate = true
     this.dirty = false
     return true

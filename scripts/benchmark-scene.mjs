@@ -46,6 +46,8 @@ async function waitForQuiet() {
 
 // Production bundles, sequential A/B runs. No application source is modified.
 const reference = process.argv[2] ?? 'HEAD'
+const livingFeature = process.env.BENCH_LIVING_FEATURE ?? 'all'
+const ambientAudio = process.env.BENCH_AUDIO === '1'
 const output = resolve(process.env.BENCH_OUTPUT ?? 'artifacts/performance')
 const repetitions = Number(process.env.BENCH_REPEATS ?? 3)
 const seconds = Number(process.env.BENCH_SECONDS ?? 30)
@@ -61,6 +63,8 @@ const temporary = await mkdtemp(join(tmpdir(), 'dotme-performance-'))
 let browser
 let server
 const report = {
+  livingFeature,
+  ambientAudio,
   reference: bedExperiment ? 'working-tree-full-bed' : reference,
   seconds,
   repetitions,
@@ -92,8 +96,26 @@ try {
       },
     })
   }
+  if (ambientAudio)
+    await build({
+      configFile: false,
+      logLevel: 'error',
+      build: {
+        outDir: join(temporary, 'audio-bundle'),
+        lib: {
+          entry: resolve('e2e/audio-performance-harness.ts'),
+          formats: ['es'],
+          fileName: () => 'harness.js',
+        },
+      },
+    })
   server = createServer(async (request, response) => {
     const path = new URL(request.url, 'http://localhost').pathname
+    if (ambientAudio && /^\/audio\/(water|wind|rain|insects|birds)\.mp3$/.test(path)) {
+      response.setHeader('Content-Type', 'audio/mpeg')
+      response.end(await readFile(join(workspace, 'public', path)))
+      return
+    }
     if (path === '/') {
       response.setHeader('Content-Type', 'text/html')
       response.end(
@@ -101,7 +123,7 @@ try {
       )
       return
     }
-    const match = path.match(/^\/(baseline|optimized)\/(harness\.js|assets\/[\w.-]+)$/)
+    const match = path.match(/^\/(baseline|optimized|audio)\/(harness\.js|assets\/[\w.-]+)$/)
     if (!match) {
       response.writeHead(404)
       response.end()
@@ -204,13 +226,21 @@ try {
           await waitForQuiet()
           const page = await context.newPage()
           await page.goto(`${url}/?${query}`)
+          if (ambientAudio) await page.mouse.click(5, 5)
           await page.evaluate(
-            async ({ v, diagnostics }) => {
+            async ({ v, diagnostics, feature, audio }) => {
               const module = await import(`/${v}/harness.js`)
               module.start(9182, diagnostics, v === 'baseline')
+              if (v === 'optimized') module.isolateLiving?.(feature)
+              if (v === 'optimized' && audio) await (await import('/audio/harness.js')).start()
               module.animate()
             },
-            { v: variant, diagnostics: diagnosticRuns },
+            {
+              v: variant,
+              diagnostics: diagnosticRuns,
+              feature: livingFeature,
+              audio: ambientAudio,
+            },
           )
           const competing = new Set(competingBrowsers() ?? [])
           const monitor = setInterval(() => {

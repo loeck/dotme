@@ -73,3 +73,18 @@ simulated responses for conditions, unknown codes, mixed precipitation, invalid 
 HTTP/network/JSON errors, timeout during fetch/body reads, and cancellation. Browser tests
 also check that the page makes no Open-Meteo request. Development URLs were checked separately:
 `/` returns 200 and unknown nested paths return the custom page with 404.
+
+## Living landscape additions (2026-09-24)
+
+Compared with `9ecef4f`, a snapshot of the user's working tree before leaves/stars/audio:
+
+| Scope            |   Before raw / gzip |    After raw / gzip |
+| ---------------- | ------------------: | ------------------: |
+| Initial JS       |    15,351 / 6,262 B |    17,377 / 6,971 B |
+| Total JS         | 891,856 / 246,828 B | 906,461 / 252,192 B |
+| Lazy audio mixer |                   — |     3,512 / 1,429 B |
+
+Initial gzip grows by 709 B. Five local MP3s total 864,585 B and are fetched only after
+activation. They are excluded from the JavaScript totals. There is no new dependency.
+The renderer remains the existing large deferred chunk (Vite's 500 kB advisory still applies).
+Raw reports: `artifacts/living-landscape/bundle-before.json` and `bundle-after.json`.

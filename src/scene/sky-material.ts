@@ -1,10 +1,11 @@
-import { BackSide, ShaderMaterial } from 'three'
+import { BackSide, ShaderMaterial, Vector3 } from 'three'
 
 import { DAYLIGHT_SKY_GLSL } from './daylight-sky'
 import { DISTANT_HORIZON_GLSL } from './distant-horizon'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { sampleMoonLight } from './moon-light'
+import { STAR_RADIANCE_GLSL } from './stars'
 import { CLOUD_SAMPLING_GLSL } from './volumetric-clouds'
 import type { VolumetricClouds } from './volumetric-clouds'
 
@@ -35,6 +36,7 @@ uniform float uShowMoon;
 varying vec3 vDirection;
 
 ${DISTANT_HORIZON_GLSL}
+${STAR_RADIANCE_GLSL}
 void main() {
   vec3 direction = normalize(vDirection);
   float azimuth = atan(direction.x, -direction.z);
@@ -58,6 +60,7 @@ void main() {
   float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
   float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
   color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 * uShowMoon + moonHalo) * uMoonIntensity;
+  color += stellarRadiance(direction, moonAngle);
   // Clouds attenuate both the lunar disc and its halo before distant relief.
   vec4 cloud = sampleClouds(direction);
   color = color * cloud.a + cloud.rgb;
@@ -115,6 +118,10 @@ export function createSkyMaterial(
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
+      uStarTime: { value: 0 },
+      uMeteorAge: { value: 2 },
+      uMeteorStart: { value: new Vector3() },
+      uMeteorEnd: { value: new Vector3() },
       uReflectionCapture: { value: 0 },
       uSunDirection: { value: sampleLighting(0).sunDirection },
       uSunColor: { value: sampleLighting(0).sunColor },

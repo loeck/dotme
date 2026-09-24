@@ -317,3 +317,107 @@ export function landingFrame(age = 0.22) {
   splashes.impacts.update(100 + age)
   engine!.resize()
 }
+
+/** Inspect the production passes and shared water uniforms without public controls. */
+export async function livingProbe() {
+  const state = engine as unknown as {
+    camera: PerspectiveCamera
+    water: import('../src/scene/lake-water').LakeReflector
+    details: import('../src/scene/scene-details').SceneDetails
+    renderer: WebGLRenderer
+    skyMaterial: ShaderMaterial
+    environmentAt: number
+    options: { reducedMotion: boolean }
+    cancelFrame(): void
+    render(now: number): void
+  }
+  state.cancelFrame()
+  state.options.reducedMotion = true
+  const leaf = state.details.leaves.mesh
+  const passes: string[] = []
+  const mirror = state.water.getReflectionCamera(state.camera)
+  leaf.onBeforeRender = (_renderer, _scene, camera) => {
+    passes.push(camera === state.camera ? 'main' : camera === mirror ? 'reflection' : 'unexpected')
+  }
+  state.environmentAt = -Infinity
+  state.render(performance.now())
+  const gl = state.renderer.getContext(),
+    width = gl.drawingBufferWidth,
+    height = gl.drawingBufferHeight
+  const read = () => {
+    const data = new Uint8Array(width * height * 4)
+    gl.readPixels(0, 0, width, height, gl.RGBA, gl.UNSIGNED_BYTE, data)
+    return data
+  }
+  const withStars = read()
+  const original = state.skyMaterial.fragmentShader
+  state.skyMaterial.fragmentShader = original.replace(
+    'color += stellarRadiance(direction, moonAngle);',
+    'color += vec3(0.0);',
+  )
+  state.skyMaterial.needsUpdate = true
+  state.render(performance.now())
+  const withoutStars = read()
+  let skyDifference = 0,
+    lowDifference = 0
+  for (let y = 0; y < height; y++)
+    for (let x = 0; x < width; x++) {
+      const i = (y * width + x) * 4
+      const difference =
+        Math.abs(withStars[i]! - withoutStars[i]!) +
+        Math.abs(withStars[i + 1]! - withoutStars[i + 1]!) +
+        Math.abs(withStars[i + 2]! - withoutStars[i + 2]!)
+      if (y > height * 0.55) skyDifference += difference
+      else if (y > height * 0.4 && y < height * 0.46) lowDifference += difference
+    }
+  state.skyMaterial.fragmentShader = original
+  state.skyMaterial.needsUpdate = true
+  state.render(performance.now())
+  return { count: leaf.count, passes, skyDifference, lowDifference }
+}
+
+export function leafContacts() {
+  const state = engine as unknown as {
+    camera: PerspectiveCamera
+    details: import('../src/scene/scene-details').SceneDetails
+    water: import('../src/scene/lake-water').LakeReflector
+  }
+  const leaves = state.details.leaves
+  const uniforms = (leaves as unknown as { uniforms: Record<string, { value: unknown }> }).uniforms
+  return {
+    sharedTexture: uniforms.uState === state.water.material.uniforms.uState,
+    contacts: leaves.drift.leaves.map((leaf) => {
+      const p = new Vector3(leaf.x, 0, leaf.z).project(state.camera)
+      return {
+        x: ((p.x + 1) * innerWidth) / 2,
+        y: ((1 - p.y) * innerHeight) / 2,
+        worldX: leaf.x,
+        worldZ: leaf.z,
+      }
+    }),
+  }
+}
+
+export function meteorProbe() {
+  const state = engine as unknown as {
+    camera: PerspectiveCamera
+    shootingStars: import('../src/scene/stars').ShootingStars
+    skyMaterial: ShaderMaterial
+    options: { reducedMotion: boolean }
+    lastFrameAt: number
+    cancelFrame(): void
+    render(now: number): void
+  }
+  state.cancelFrame()
+  state.shootingStars.remaining = 0
+  state.shootingStars.advance(0, -0.5, false, false, state.camera)
+  state.shootingStars.age = 0.4
+  state.options.reducedMotion = false
+  state.lastFrameAt = performance.now()
+  state.render(state.lastFrameAt)
+  state.cancelFrame()
+  return {
+    age: state.skyMaterial.uniforms.uMeteorAge!.value,
+    attempts: state.shootingStars.attempts,
+  }
+}

@@ -1,0 +1,57 @@
+[
+  {
+    "layer": "water",
+    "author": "salilnair",
+    "source": "https://freesound.org/people/salilnair/sounds/524688/",
+    "preview": "https://cdn.freesound.org/previews/524/524688_11540971-hq.mp3",
+    "license": "CC0-1.0",
+    "verified": "2026-09-24",
+    "excerptStart": 5,
+    "duration": 19,
+    "sha256": "ae768190f9472d4c20f579f947a27ed679393bb8927f60d40f977407e31f91ba"
+  },
+  {
+    "layer": "wind",
+    "author": "Nox_Sound",
+    "source": "https://freesound.org/people/Nox_Sound/sounds/530908/",
+    "preview": "https://cdn.freesound.org/previews/530/530908_9250976-hq.mp3",
+    "license": "CC0-1.0",
+    "verified": "2026-09-24",
+    "excerptStart": 7,
+    "duration": 23,
+    "sha256": "70dd7706c833dd585eacdba3dab8827361fad3d0cb1de35530b659fd8a6e5032"
+  },
+  {
+    "layer": "rain",
+    "author": "AlanCat",
+    "source": "https://freesound.org/people/AlanCat/sounds/383064/",
+    "preview": "https://cdn.freesound.org/previews/383/383064_5486695-hq.mp3",
+    "license": "CC0-1.0",
+    "verified": "2026-09-24",
+    "excerptStart": 20,
+    "duration": 21,
+    "sha256": "fb814cdb9fe54b140ae276cd29c89c2b61ea31725cc946c81ed35dd40ed8e398"
+  },
+  {
+    "layer": "insects",
+    "author": "Sclolex",
+    "source": "https://freesound.org/people/Sclolex/sounds/210540/",
+    "preview": "https://cdn.freesound.org/previews/210/210540_985466-hq.mp3",
+    "license": "CC0-1.0",
+    "verified": "2026-09-24",
+    "excerptStart": 8,
+    "duration": 17,
+    "sha256": "5a9b1160fbaef37f520898f89eb10ae19f5bc29c478a0cac9bba0111b619f908"
+  },
+  {
+    "layer": "birds",
+    "author": "VKProduktion",
+    "source": "https://freesound.org/people/VKProduktion/sounds/231537/",
+    "preview": "https://cdn.freesound.org/previews/231/231537_4034520-hq.mp3",
+    "license": "CC0-1.0",
+    "verified": "2026-09-24",
+    "excerptStart": 4,
+    "duration": 6,
+    "sha256": "0bdc787ce089bef66c7ff1ce09aa09a022e6a6f727a4f3adc987c644673a7b69"
+  }
+]
