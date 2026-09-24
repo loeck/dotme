@@ -16,7 +16,11 @@ export class GpuRuntime {
   readonly canvas: HTMLCanvasElement
   private readonly device: GPUDevice | undefined
 
-  private constructor(canvas: HTMLCanvasElement, device: GPUDevice | undefined) {
+  private constructor(
+    canvas: HTMLCanvasElement,
+    device: GPUDevice | undefined,
+    context: WebGL2RenderingContext | undefined,
+  ) {
     this.device = device
     this.canvas = canvas
     this.backend = device ? 'webgpu' : 'webgl'
@@ -24,7 +28,7 @@ export class GpuRuntime {
       canvas,
       antialias: false,
       alpha: false,
-      ...(device ? { device } : { forceWebGL: true }),
+      ...(device ? { device } : { forceWebGL: true, context }),
     })
     const lost = () => {
       if (!this.disposed) this.onFailure?.()
@@ -41,8 +45,12 @@ export class GpuRuntime {
   static async create(canvas: HTMLCanvasElement, signal: AbortSignal) {
     signal.throwIfAborted()
     const device = await requestDevice(signal)
-    if (!device) await restoreWebGLContext(canvas, signal)
-    const runtime = new GpuRuntime(canvas, device)
+    let context: WebGL2RenderingContext | undefined
+    if (!device) {
+      await restoreWebGLContext(canvas, signal)
+      context = acquireWebGLContext(canvas)
+    }
+    const runtime = new GpuRuntime(canvas, device, context)
     const abort = () => {
       void runtime.dispose()
     }
@@ -109,6 +117,13 @@ async function requestDevice(signal: AbortSignal) {
     signal.throwIfAborted()
   }
   return device
+}
+
+/** Three's WebGL backend dereferences a null context instead of reporting it. */
+function acquireWebGLContext(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('webgl2', { antialias: false })
+  if (!context) throw new Error('WebGL 2 unavailable')
+  return context
 }
 
 const webglContexts = new WeakMap<HTMLCanvasElement, WEBGL_lose_context>()

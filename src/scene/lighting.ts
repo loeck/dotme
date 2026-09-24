@@ -69,8 +69,8 @@ export function sampleLighting(
       .setRGB(0.007, 0.014, 0.023)
       .lerp(new Color().setRGB(0.32, 0.43, 0.55), daylight),
     waterScatter: new Color()
-      .setRGB(0.0018, 0.0055, 0.007)
-      .lerp(new Color().setRGB(0.012, 0.12, 0.135), daylight),
+      .setRGB(0.0006, 0.0028, 0.0085)
+      .lerp(new Color().setRGB(0.018, 0.2, 0.23), daylight),
     cloudAmbient: new Color()
       .setRGB(0.006, 0.009, 0.015)
       .lerp(new Color().setRGB(0.1, 0.14, 0.2), daylight)
