@@ -250,7 +250,6 @@ export class VoxelLandscapeEngine {
       const initialLight = sampleLighting(engine.solarClock.initialSeconds, 0, engine.weather)
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
-      for (const lamp of engine.lampLights) lamp.light.visible = initialLight.localLightStrength > 0
       await engine.clouds.compileAsync()
       await preparationFrame(signal)
       await engine.compileRain()
@@ -1109,7 +1108,7 @@ export class VoxelLandscapeEngine {
       // The material used by the public shadow node is shared with the actual shadow pass.
       for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
         const map = light.shadow.map
-        if (!light.visible || !map) continue
+        if (!map) continue
         if (light instanceof PointLight) {
           // Point lights have no target; their shadow node orients each cube face.
           const camera = light.shadow.camera
@@ -1357,7 +1356,7 @@ export class VoxelLandscapeEngine {
       this.reducedMotion,
     )
     for (const [index, lamp] of this.lampLights.entries()) {
-      lamp.cube.visible = lamp.glow.visible = lamp.light.visible = this.nightLightFade > 0
+      lamp.cube.visible = lamp.glow.visible = this.nightLightFade > 0
       const source = lamp.source
       const motion = Math.sin(this.elapsed * source.speed + source.phase)
       // Long, independent quiet intervals separate soft changes tied to the bobbing.
@@ -1422,7 +1421,8 @@ export class VoxelLandscapeEngine {
       this.rain.renderSlopes(this.renderer, this.camera, this.elapsed),
     )
     this.moon.shadow.needsUpdate = true
-    for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
+    if (this.nightLightFade > 0)
+      for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
     this.updateEnvironment(now, atmosphereTime)
     this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene, this.camera))
     this.depthFocus.render(
