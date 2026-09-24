@@ -3,6 +3,10 @@
 The production renderer remains WebGL. Effects, DPR caps, shadow lights and map sizes,
 water/bed resolutions, the 60 Hz physical clock and `?seed=` are preserved.
 
+After integration of `feat/sun-light`, `feat/rain` and `feat/bundle-size`, the scene also
+includes the solar cycle and rain, and starts from the static TypeScript lifecycle.
+The measurements below predate these integrations and do not measure the combined scene.
+
 ## Implementation
 
 - Terrain uses static indexed meshes per material and original 12-unit spatial batch.
@@ -15,7 +19,8 @@ water/bed resolutions, the 60 Hz physical clock and `?seed=` are preserved.
   the back-face depth of internal faces affects lamp visibility. Removing them caused a
   small but visible light leak in deterministic comparisons. The group is exposed only
   during shadow rendering; color, environment and reflection passes use the culled meshes.
-- The same BVH finds the nearest front-facing cube for cursor illumination. Move events
+- The same BVH finds the nearest front-facing cube for cursor illumination and resolves
+  rain segments, including starts inside solids and exclusion of submerged obstacles. Move events
   only update the latest pending sample; pointer-down remains immediate. The canvas bounds
   are shared within a frame, and height readback remains asynchronous.
 - `VoxelLandscapeEngine.create(options, signal)` prepares terrain, bathymetry, mesh buffers,
@@ -39,7 +44,7 @@ Removing hidden faces trades instance-buffer reuse for fewer submitted triangles
 seeds 0, 12 and 9182, the new terrain retains about 61.5% of desktop faces and 56–57% of mobile
 faces in color passes. Shadow topology is unchanged; smaller shadow batches
 allow point-light cameras to reject more off-screen cubes. Static mesh storage is larger than the original instance buffers. The third cloud
-capture adds about 3 MiB desktop / 0.75 MiB mobile, plus 0.25 MiB for the shadow tile.
+capture adds about 3 MiB desktop / 0.75 MiB mobile, plus 0.5625 MiB for the 384² shadow tile introduced by solar lighting.
 
 ## Diagnostics and reproducible comparison
 
@@ -50,7 +55,7 @@ milliseconds when the extension is available. Resource counts describe live GPU 
 not exact driver memory usage or JavaScript allocation tracing.
 
 GPU queries are asynchronous and split at nested pass boundaries so they never overlap.
-Shadow, environment, PMREM, cloud, simulation, lake-bed, reflection, main and depth-focus
+Shadow, environment, PMREM, cloud, simulation, lake-bed, reflection, main, atmosphere, rain overlay and depth-focus
 costs are exclusive. A disjoint event, unavailable extension or query-budget overflow makes
 the affected GPU result null. CPU timing is not GPU time. Enabling diagnostics adds overhead;
 the timing benchmark disables it and records pass diagnostics separately for captures.
@@ -68,7 +73,7 @@ The benchmark builds production bundles of the reference and working-tree engine
 changing either tree. It alternates A/B order, uses five seconds of warm-up and thirty seconds
 of measurement, and runs three repetitions for Chromium desktop and the WebKit iPhone profile.
 Captures use deterministic time 18 and seeds 0, 12, 9182. JSON samples, reports and PNGs are
-written to `artifacts/performance/`. The scene is isolated from React for timing; application
+written to `artifacts/performance/`. The scene is isolated from the page interface for timing; application
 startup and Worker integration are covered by the browser suite.
 
 Optional environment variables: `BENCH_PROFILES=desktop,mobile`, `BENCH_REPEATS=3`,

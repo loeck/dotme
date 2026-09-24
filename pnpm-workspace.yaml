@@ -40,8 +40,5 @@ minimumReleaseAgeExclude:
   - '@oxlint/binding-win32-arm64-msvc@1.85.0'
   - '@oxlint/binding-win32-ia32-msvc@1.85.0'
   - '@oxlint/binding-win32-x64-msvc@1.85.0'
-  - '@tanstack/react-start-rsc@0.1.56'
-  - '@tanstack/react-start@1.168.57'
-  - '@tanstack/start-plugin-core@1.171.47'
   - oxfmt@0.70.0
   - oxlint@1.85.0

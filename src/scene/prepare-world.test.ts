@@ -36,7 +36,7 @@ describe('world preparation lifetime', () => {
     await expect(ready).resolves.toEqual({ seed: 0 })
     expect(worker.terminated).toBe(true)
     const failed = prepareWorldAsync(0, true, controller.signal)
-    FakeWorker.latest.dispatchEvent(new ErrorEvent('error', { message: 'worker failed' }))
+    FakeWorker.latest.dispatchEvent(Object.assign(new Event('error'), { message: 'worker failed' }))
     await expect(failed).rejects.toThrow('worker failed')
     expect(FakeWorker.latest.terminated).toBe(true)
   })

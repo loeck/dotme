@@ -1,17 +1,6 @@
 {
   "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
-  "plugins": [
-    "eslint",
-    "oxc",
-    "import",
-    "typescript",
-    "unicorn",
-    "react",
-    "jsx-a11y",
-    "promise",
-    "node",
-    "vitest"
-  ],
+  "plugins": ["eslint", "oxc", "import", "typescript", "unicorn", "promise", "node", "vitest"],
   "categories": {
     "correctness": "error",
     "suspicious": "warn",
@@ -23,21 +12,21 @@
     "node": true
   },
   "rules": {
-    "react/react-in-jsx-scope": "off",
-    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "eqeqeq": [
+      "error",
+      "always",
+      {
+        "null": "ignore"
+      }
+    ],
     "no-shadow": "error",
     "import/consistent-type-specifier-style": ["error", "prefer-top-level"],
     "import/no-unassigned-import": [
       "warn",
-      { "allow": ["**/*.css", "@testing-library/jest-dom/vitest"] }
+      {
+        "allow": ["**/*.css"]
+      }
     ]
   },
-  "ignorePatterns": [
-    "dist",
-    "node_modules",
-    ".output",
-    ".tanstack",
-    ".vercel",
-    "src/routeTree.gen.ts"
-  ]
+  "ignorePatterns": ["dist", "node_modules", ".vercel", ".cache"]
 }

@@ -280,6 +280,8 @@ export class VolumetricClouds {
         // Time jumps rebuild a canonical bracket. This also avoids a half-float
         // rounding difference from sampling the other atlas tile on a repeated time.
         this.current = 0
+        this.next = 1
+        this.staging = 2
         this.capture(this.current, tick / this.profile.hz)
         this.capture(this.next, (tick + 1) / this.profile.hz)
       }

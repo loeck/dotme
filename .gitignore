@@ -4,10 +4,10 @@ node_modules
 .env.*
 !.env.example
 .vercel
-.output
 dist
 coverage
 playwright-report
 test-results
 .tanstack
 artifacts
+.output

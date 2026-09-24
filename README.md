@@ -1,7 +1,8 @@
 # loeck.me
 
-Personal site built with TanStack Start, React and Three.js. The profile is server-rendered; the
-procedural voxel lake loads in the browser after hydration. Each visit gets a fresh landscape seed.
+Static personal site built with Vite, HTML, TypeScript, Tailwind and Three.js. The profile, social
+icons and SEO metadata are in the HTML and work without JavaScript. The procedural voxel lake
+loads through a dynamic import. Each visit gets a fresh landscape seed.
 Add `?seed=42` to the URL to reproduce one composition.
 
 ## Requirements
@@ -78,9 +79,14 @@ for Worker preparation, pass diagnostics, the reproducible A/B benchmark and the
 
 ## Vercel
 
-The project uses TanStack Start with Nitro. Import the repository in Vercel with the repository root
-as the project root; framework detection and SSR functions are configured by `vercel.json` and
-`vite.config.ts`.
+Import the repository in Vercel with the repository root as the project root. `vercel.json` selects
+Vite and publishes the static `dist` directory. No server functions or SPA rewrites are needed.
+Vercel serves `404.html` for unknown paths; development and preview use the same page with HTTP 404.
+Other static hosts should also be configured to serve that page with a 404 status.
+
+See [bundle measurements](docs/bundle-size.md) for the initial and total JavaScript comparison, and
+[Paris weather access](docs/paris-weather.md) for the optional, on-demand Open-Meteo module. Weather
+is not called or displayed by the site.
 
 See [atmosphere notes](docs/atmosphere.md) for the shared wind, volumetric cloud rendering,
 quality profiles and before/after performance measurements.

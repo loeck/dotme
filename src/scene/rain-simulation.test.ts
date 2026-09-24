@@ -9,6 +9,7 @@ import {
   RainSimulation,
   WATER_Y,
 } from './rain-simulation'
+import { createVoxelIndex } from './voxel-spatial'
 
 const empty = () => new RainCollider([])
 const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
@@ -175,5 +176,25 @@ describe('rain timing, wind and budgets', () => {
     expect(available.alive).toBe(true)
     expect(available.y).toBeGreaterThan(21)
     expect(simulation.drops.every((drop) => drop.alive)).toBe(true)
+  })
+})
+
+describe('rain collisions against the transferred terrain index', () => {
+  it('matches voxel buckets for inside starts, misses, submerged solids and oblique segments', () => {
+    const voxels = [
+      { x: 0, y: 2, z: 0, size: 0.125, color: 0 },
+      { x: 0, y: 1, z: 0, size: 0.5, color: 0 },
+      { x: 0, y: -3, z: 0, size: 0.5, color: 0 },
+    ]
+    const reference = new RainCollider(voxels)
+    const indexed = new RainCollider(createVoxelIndex(voxels))
+    for (let i = 0; i < 300; i++) {
+      const a = { x: Math.sin(i) * 0.3, y: i % 3 === 0 ? 1 : 3, z: Math.cos(i) * 0.2 }
+      const b = { x: Math.cos(i) * 0.5, y: -4, z: Math.sin(i) * 0.5 }
+      expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
+    }
+    expect(indexed.trace({ x: 0, y: -2, z: 0 }, { x: 0, y: -4, z: 0 })).toBe(Infinity)
+    expect(indexed.trace({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 0 })).toBe(0)
+    expect(indexed.trace({ x: 5, y: 3, z: 0 }, { x: 5, y: -4, z: 0 })).toBe(Infinity)
   })
 })
