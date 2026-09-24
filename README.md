@@ -74,7 +74,7 @@ components form curved, localized packets; their analytic gradients preserve fin
 mobile resolution. A volume-balanced pressure profile is sampled along pointer strokes, with
 bounded input strength. A nine-point stencil propagates and combines waves; the terrain mask
 reflects them at banks and an absorbing border prevents waves returning from the outer domain.
-In low light, hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
+At night, hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
 the general camera parallax. See the rendering notes below for physical parameters and limitations.
 
 The solver is a damped linear surface-wave approximation with constant propagation speed. It does
@@ -94,9 +94,9 @@ smaller shadow maps and reflection targets; every rendered frame still refreshes
 reflections. Reduced motion freezes the simulation while allowing refreshes on resize or visibility changes.
 A 6-pixel outlined point follows the pointer immediately. Only its shape stretches slightly
 with speed and settles within 245 ms; reduced motion disables deformation. Links and buttons enlarge the same point. An inline SVG supplies the matching cursor before
-JavaScript starts, with no separate image request. In low light, a short-range cool diffuse
-light follows the targeted terrain or water. It fades with ambient brightness and pointer
-activity; reduced motion keeps its intensity immediate.
+JavaScript starts, with no separate image request. At night, a short-range cool diffuse
+light follows the targeted terrain or water. It fades with solar elevation and pointer
+activity; daylight and twilight disable it regardless of weather. Reduced motion keeps its intensity immediate.
 
 ## Verification
 

@@ -637,15 +637,23 @@ export class VoxelLandscapeEngine {
     light.shadow.normalBias = 0.035
   }
 
-  private hitWater(clientX: number, clientY: number, throughOverlay = false): Vector3 | null {
+  private projectPointer(clientX: number, clientY: number): boolean {
     const canvas = this.renderer.domElement
-    if (!throughOverlay && document.elementFromPoint(clientX, clientY) !== canvas) return null
+    if (document.elementFromPoint(clientX, clientY) !== canvas) return false
     const bounds = this.pointerBounds ?? canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
-    if (Math.abs(x) > 1 || Math.abs(y) > 1) return null
+    if (Math.abs(x) > 1 || Math.abs(y) > 1) return false
     this.rayNdc.set(x, y)
     this.raycaster.setFromCamera(this.rayNdc, this.camera)
+    return true
+  }
+
+  private hitWater(clientX: number, clientY: number): Vector3 | null {
+    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay() : null
+  }
+
+  private waterPointOnRay(): Vector3 | null {
     const ray = this.raycaster.ray
     this.waterPlane.constant = -WATER_LEVEL
     if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
@@ -672,17 +680,14 @@ export class VoxelLandscapeEngine {
     return this.waterHit.clone()
   }
 
-  private updatePointerLight(waterPoint: Vector3 | null, darkness: number, dt: number) {
+  private updatePointerLight(
+    pointerOnScene: boolean,
+    waterPoint: Vector3 | null,
+    nightStrength: number,
+    dt: number,
+  ) {
     let contact = null
-    if (
-      darkness > 0 &&
-      this.pointerActive &&
-      this.pointerType === 'mouse' &&
-      this.focused &&
-      document.elementFromPoint(this.pointerClient.x, this.pointerClient.y) ===
-        this.renderer.domElement
-    ) {
-      // hitWater has already projected this frame's pointer, even over a dry bank.
+    if (nightStrength > 0 && pointerOnScene && this.pointerType === 'mouse' && this.focused) {
       const ray = this.raycaster.ray
       const solid = firstVoxelHit(this.voxelIndex, ray.origin.toArray(), ray.direction.toArray())
       if (solid && (!waterPoint || solid.distance < ray.origin.distanceTo(waterPoint)))
@@ -692,7 +697,7 @@ export class VoxelLandscapeEngine {
     this.pointerLight.update(
       contact,
       this.raycaster.ray.direction,
-      darkness * this.intro,
+      nightStrength * this.intro,
       dt,
       !!this.options.reducedMotion,
     )
@@ -743,9 +748,7 @@ export class VoxelLandscapeEngine {
               bounds.left + (projected.x + 1) * bounds.width * 0.5,
               bounds.top + (1 - projected.y) * bounds.height * 0.5,
             )
-            if (contact) {
-              this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
-            }
+            if (contact) this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
           }
         }
       }
@@ -979,13 +982,13 @@ export class VoxelLandscapeEngine {
     this.pointerBounds = this.pointerActive
       ? this.renderer.domElement.getBoundingClientRect()
       : null
-    const waterPoint = this.pointerActive
-      ? this.hitWater(this.pointerClient.x, this.pointerClient.y)
-      : null
+    const pointerOnScene =
+      this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
+    const waterPoint = pointerOnScene ? this.waterPointOnRay() : null
     if (waterPoint)
-      this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.localLightStrength)
+      this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
-    this.updatePointerLight(waterPoint, light.localLightStrength, dt)
+    this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
@@ -1064,7 +1067,7 @@ export class VoxelLandscapeEngine {
       fireflyPointer,
       light.moonIntensity,
       this.intro,
-      light.localLightStrength,
+      light.pointerLightStrength,
     )
     this.pointerBounds = null
     this.measure('clouds', () => this.clouds.update(atmosphereTime))
@@ -1078,7 +1081,7 @@ export class VoxelLandscapeEngine {
     waterPointer.z +=
       (this.waterPointerTarget.z - waterPointer.z) *
       (this.options.reducedMotion ? 1 : 1 - Math.exp(-dt * 8))
-    if (light.localLightStrength === 0) waterPointer.z = 0
+    if (light.pointerLightStrength === 0) waterPointer.z = 0
     this.nightLightFade = fadeNightLight(
       this.nightLightFade,
       light.localLightStrength,

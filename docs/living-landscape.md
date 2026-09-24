@@ -148,3 +148,9 @@ suites pass all 24 desktop/mobile browser tests. The audio suites pass 19 tests,
 Chromium-only autoplay-policy test skipped on WebKit; they include the delayed suspension
 failure regression. The latest bundle report is recorded below in the linked
 [bundle notes](./bundle-size.md); earlier leaf screenshots and timings are historical.
+
+Integration with the target branch's `c417714` retains its updated night-only cursor
+lighting and shared pointer projection. The merged tree passes `pnpm check` (204 unit
+tests) and 60 targeted Chromium/WebKit browser tests; four desktop-only mouse/autoplay
+checks are skipped on WebKit. The target's changes were reconciled against the shared
+workspace snapshot before integration, preserving both branches' behavior.

@@ -284,11 +284,14 @@ opacity, halo and emitted energy follow the motion. Fireflies approach and
 disperse along individual curved, elevated routes spanning 7–12 units in several
 directions. Their glow fades at the distant end, rather than extinguishing at the
 colony position. Reduced motion keeps settled positions and samples lighting directly.
-The lamps' emitted energy and visible geometry are zero in bright light. The outlined point stays visible. In low light, its surface contact receives a cool diffuse
+The lamps' emitted energy and visible geometry are zero in bright light. The outlined point stays visible. At night, its surface contact receives a cool diffuse
 field with a 4.5-unit radius. A shared world-space shader illuminates material albedo and a
 broad water sheen; surface normals retain the relief and wave detail. Solid picking uses the
 terrain BVH and the nearest visible water contact. Sky, controls and inactive pointers fade
-the field out; daylight also fades it out through ambient luminance. There is no added shadow
+the field out. Cursor illumination rises only after the daylight transition ends (solar
+height from -0.12 to -0.24), reversing at dawn; daylight and twilight force it to zero
+regardless of cloud cover, including any remaining temporal fade. The optical lake-bed
+reveal and cursor-driven caustics use that same night strength. There is no added shadow
 map or point-source specular highlight. Water
 gestures remain active. Text and icons keep their accessible DOM hit targets, but
 their visible glyph coverage is rasterized to one texture on layout/font changes.

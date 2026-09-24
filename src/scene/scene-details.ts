@@ -87,14 +87,15 @@ export class SceneDetails {
     scenePointer: FireflyPointer | null,
     moonIntensity: number,
     intro: number,
-    localLightStrength = 1,
+    pointerLightStrength = 1,
   ) {
     const { daylight, rainIntensity } = this.environment
     this.caustics.update(
       time,
       wind,
       (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
-      localLightStrength > 0 ? waterPointer : null,
+      waterPointer,
+      pointerLightStrength,
     )
     this.fish.update(time, dt, waterPointer, scenePointer)
     this.splashes.update(time, wind, this.reducedMotion, intro)

@@ -102,3 +102,6 @@ After removing floating leaves and reviewing audio lifecycle/scheduling, initial
 is 17,626 B raw / 7,040 B gzip; total emitted JavaScript is 902,455 B raw / 250,598 B gzip.
 The audio assets are unchanged by that cleanup. Earlier leaf-related sizes above are
 historical measurements, not the current shipped scene.
+
+After integrating the target branch's cursor refinements: initial JavaScript is
+17,626 B raw / 7,042 B gzip; total emitted JavaScript is 902,202 B raw / 250,629 B gzip.

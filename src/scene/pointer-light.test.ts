@@ -6,7 +6,7 @@ import { PointerLight } from './pointer-light'
 const direction = new Vector3(0, -0.2, -1).normalize()
 const contact = new Vector3(2, 0, -5)
 
-it('fades with darkness and loses illumination when no surface is targeted', () => {
+it('fades with night strength and loses illumination when no surface is targeted', () => {
   const light = new PointerLight()
   const strength = () => light.uniforms.uPointerLightStrength.value
   light.update(contact, direction, 0, 1 / 60)
@@ -41,4 +41,11 @@ it('uses elapsed time rather than frame count to fade', () => {
     return light.uniforms.uPointerLightStrength.value
   })
   for (const strength of strengths) expect(strength).toBeCloseTo(strengths[0]!, 8)
+})
+
+it('clears lingering illumination as soon as night ends, even on an accelerated clock', () => {
+  const light = new PointerLight()
+  light.update(contact, direction, 1, 0, true)
+  light.update(contact, direction, 0, 1 / 60)
+  expect(light.uniforms.uPointerLightStrength.value).toBe(0)
 })

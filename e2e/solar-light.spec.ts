@@ -295,7 +295,35 @@ test('distant hills block sunrise and moonrise illumination without extinguishin
   for (const sample of samples) expect(sample.cloud).toBe(1)
 })
 
-test('a soft pointer light reveals both stone and water at night, then clears over the sky', async ({
+for (const time of ['05:45', '18:15']) {
+  test(`cursor light stays off during overcast twilight at ${time}`, async ({ page }, info) => {
+    test.skip(info.project.name !== 'chromium', 'The light follows a mouse pointer')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await mockSceneWeather(page, 'overcast')
+    await page.goto(`/?seed=42&startTime=${time}`)
+    const canvas = page.locator('canvas[data-water-mode]')
+    await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
+    await page.addStyleTag({ content: '.scene-cursor { visibility: hidden !important; }' })
+    const captureAt = async (x: number, y: number) => {
+      await page.mouse.move(x, y)
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      )
+      return canvas.screenshot()
+    }
+    const sky = await captureAt(950, 180)
+    const stone = await captureAt(200, 840)
+    expect(stone.equals(sky)).toBe(true)
+    const water = await captureAt(900, 760)
+    expect(water.equals(sky)).toBe(true)
+  })
+}
+
+test('a soft pointer light reveals stone and water at night, then clears over sky and controls', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'chromium', 'The light follows a mouse pointer')
@@ -359,6 +387,16 @@ test('a soft pointer light reveals both stone and water at night, then clears ov
   }
   /* eslint-enable no-await-in-loop */
   await page.mouse.move(950, 180)
+  await settle()
+  expect((await canvas.screenshot()).equals(unlit)).toBe(true)
+  // A transparent control covers a previously lit bank: it must block picking.
+  await page.evaluate(() => {
+    const control = document.createElement('button')
+    control.style.cssText =
+      'position:fixed;left:160px;top:580px;width:40px;height:40px;opacity:0;z-index:9999'
+    document.body.append(control)
+  })
+  await page.mouse.move(180, 600)
   await settle()
   expect((await canvas.screenshot()).equals(unlit)).toBe(true)
   expect(errors).toEqual([])

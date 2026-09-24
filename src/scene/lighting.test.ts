@@ -98,6 +98,23 @@ describe('solar lighting and light-space projection', () => {
       ),
     ).toBeLessThan(0.0001)
   })
+  it('reserves cursor light for night, independently of weather, with a gradual night transition', () => {
+    for (const weather of Object.keys(WEATHER) as Array<keyof typeof WEATHER>) {
+      const daytime = Array.from({ length: 288 }, (_, i) =>
+        sampleLighting(i * 300, 0, weather),
+      ).filter((light) => light.daylight > 0)
+      expect(new Set(daytime.map((light) => light.pointerLightStrength))).toEqual(new Set([0]))
+      expect(sampleLighting(0, 0, weather).pointerLightStrength).toBe(1)
+      const dusk = [18.5, 18.6, 18.75, 19, 19.25].map(
+        (hour) => sampleLighting(hour * 3600, 0, weather).pointerLightStrength,
+      )
+      expect(dusk[0]).toBe(0)
+      expect(dusk.at(-1)).toBe(1)
+      expect(dusk.filter((value) => value > 0 && value < 1).length).toBeGreaterThanOrEqual(2)
+      expect(dusk).toEqual(dusk.toSorted((a, b) => a - b))
+      expect(sampleLighting(5.25 * 3600, 0, weather).pointerLightStrength).toBeCloseTo(dusk[2]!)
+    }
+  })
   it('projects every point along a light ray to the same UV, including the horizon', () => {
     for (const direction of [
       new Vector3(1, 0, 0),

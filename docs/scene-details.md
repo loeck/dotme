@@ -1,6 +1,6 @@
 # Living lake details
 
-Six procedural additions share the engine's simulation clock, wind, seed and
+Five procedural additions share the engine's simulation clock, wind, seed and
 pointer input. They add no assets, dependencies or point lights. Fish use a dedicated
 capture packed above the bed in the existing color/depth target. `SceneDetails` owns their resources; construction, update and
 disposal are handled by `VoxelLandscapeEngine`.
@@ -103,8 +103,8 @@ Inputs without an explicit override follow the live rain and solar state.
 `SceneDetails` reuses the shared wind and is created before the global cloud
 material traversal. Its material hooks are attached after that traversal, and its
 state updates before environment/reflection/submerged captures. Cloud material
-hooks apply to the submerged bed. Cursor-driven caustic illumination is limited
-to dark scenes; fish keep their independent pointer response.
+hooks apply to the submerged bed. Cursor-driven caustics and the optical reveal share
+the cursor light's solar night strength and clear at dawn; fish keep their independent pointer response.
 The details import neither React nor the weather API, so the static-site
 migration does not require replacing these modules.
 

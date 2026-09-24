@@ -89,6 +89,10 @@ describe('lake caustics material extension', () => {
     expect(caustics.uniforms.uCausticPointer.value.z).toBeGreaterThan(0)
     caustics.update(10.05, wind.sample(10.05), 0)
     expect(caustics.uniforms.uCausticStrength.value).toBe(0)
+    // Sunrise ends the cursor's contribution without disabling solar caustics.
+    caustics.update(10.1, wind.sample(10.1), 1, { x: 2, z: 3 }, 0)
+    expect(caustics.uniforms.uCausticPointer.value.z).toBe(0)
+    expect(caustics.uniforms.uCausticStrength.value).toBe(0.85)
     const still = new LakeCaustics(true)
     still.update(0, wind.sample(0), 0.5)
     still.update(100, wind.sample(100), 1, { x: 2, z: 3 })

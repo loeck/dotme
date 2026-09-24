@@ -49,8 +49,11 @@ export function sampleLighting(
   const ambientLuminance = ambient.r * 0.2126 + ambient.g * 0.7152 + ambient.b * 0.0722
   // Use the shared ambient illumination, including weather, rather than fixed hours.
   const localLightStrength = 1 - smooth(0.04, 0.24, ambientLuminance)
+  // Cursor illumination starts only after the sky's daylight transition ends.
+  const pointerLightStrength = 1 - smooth(-0.24, -0.12, sunDirection.y)
   return {
     localLightStrength,
+    pointerLightStrength,
     ambientLuminance,
     sunDirection,
     moonDirection,

@@ -31,7 +31,7 @@ export class PointerLight {
   update(
     contact: Vector3 | null,
     rayDirection: Vector3,
-    darkness: number,
+    nightStrength: number,
     dt: number,
     frozen = false,
   ) {
@@ -41,9 +41,11 @@ export class PointerLight {
       this.uniforms.uPointerLightSource.value.copy(contact).addScaledVector(rayDirection, -1.8)
       this.uniforms.uPointerLightSource.value.y += 0.6
     }
-    const target = contact ? Math.max(0, Math.min(1, darkness)) : 0
+    const target = contact ? Math.max(0, Math.min(1, nightStrength)) : 0
     const strength = this.uniforms.uPointerLightStrength
-    strength.value += (target - strength.value) * (frozen ? 1 : 1 - Math.exp(-Math.max(0, dt) * 7))
+    strength.value +=
+      (target - strength.value) *
+      (frozen || nightStrength <= 0 ? 1 : 1 - Math.exp(-Math.max(0, dt) * 7))
     if (Math.abs(strength.value - target) < 0.0001) strength.value = target
   }
 
@@ -54,28 +56,17 @@ export class PointerLight {
     material.onBeforeCompile = (shader, renderer) => {
       previousCompile.call(material, shader, renderer)
       Object.assign(shader.uniforms, this.uniforms)
-      shader.vertexShader = `varying vec3 vPointerLightWorld;\n${shader.vertexShader}`.replace(
-        '#include <project_vertex>',
-        `#include <project_vertex>
-        vec4 pointerWorld = vec4(transformed, 1.0);
-        #ifdef USE_BATCHING
-          pointerWorld = batchingMatrix * pointerWorld;
-        #endif
-        #ifdef USE_INSTANCING
-          pointerWorld = instanceMatrix * pointerWorld;
-        #endif
-        vPointerLightWorld = (modelMatrix * pointerWorld).xyz;`,
-      )
-      shader.fragmentShader =
-        `varying vec3 vPointerLightWorld;\n${POINTER_LIGHT_GLSL}\n${shader.fragmentShader}`.replace(
-          '#include <lights_fragment_end>',
-          `// Foreground stone has deliberately dark baked albedo; give the diffuse
+      shader.fragmentShader = `${POINTER_LIGHT_GLSL}\n${shader.fragmentShader}`.replace(
+        '#include <lights_fragment_end>',
+        `// Reuse Three's view-space position, including in reflection captures.
+        vec3 pointerWorld = cameraPosition - vViewPosition * mat3(viewMatrix);
+        // Foreground stone has deliberately dark baked albedo; give the diffuse
         // field enough irradiance to reveal it without adding an emissive overlay.
-        irradiance += 4.0 * pointerLightAt(vPointerLightWorld, inverseTransformDirection(normal, viewMatrix));
+        irradiance += 4.0 * pointerLightAt(pointerWorld, inverseTransformDirection(normal, viewMatrix));
         #include <lights_fragment_end>`,
-        )
+      )
     }
-    material.customProgramCacheKey = () => `${cacheKey}:pointer-light-v1`
+    material.customProgramCacheKey = () => `${cacheKey}:pointer-light-v2`
     material.needsUpdate = true
   }
 }
