@@ -5,6 +5,13 @@ const state = () =>
   engine as unknown as {
     renderer: import('three').WebGLRenderer
     frame: number
+    frameTimer?: number
+    environmentAt: number
+    focused: boolean
+    nextFrameAt: number
+    onAnimationFrame(now: number): void
+    cancelFrame?(): void
+    requestFrame?(): void
     elapsed: number
     lastFrameAt: number
     introStartedAt: number | null
@@ -38,8 +45,7 @@ export function start(seed = 9182, diagnostics = false, instrumentReferenceRain 
       throw new Error('Context lost')
     },
   })
-  cancelAnimationFrame(state().frame)
-  state().frame = 0
+  pause()
   // Older reference engines lack the dedicated rain scopes; add equivalent instrumentation.
   const s = state()
   if (instrumentReferenceRain && s.diagnostics && s.rain) {
@@ -50,10 +56,11 @@ export function start(seed = 9182, diagnostics = false, instrumentReferenceRain 
   }
 }
 
-export function capture(time = 18) {
+export function capture(time = 18, refreshEnvironment = true) {
   const s = state(),
     renderer = s.renderer
-  cancelAnimationFrame(s.frame)
+  pause()
+  s.focused = true
   s.options.reducedMotion = false
   s.elapsed = time
   if (s.solarClock) s.solarClock.elapsed = () => time
@@ -67,8 +74,9 @@ export function capture(time = 18) {
   for (let i = 0; i < 3; i++) {
     const now = performance.now()
     s.lastFrameAt = now
+    s.environmentAt = refreshEnvironment ? -Infinity : now
     s.render(now)
-    cancelAnimationFrame(s.frame)
+    pause()
   }
   const gl = renderer.getContext(),
     width = gl.drawingBufferWidth,
@@ -87,6 +95,7 @@ export function capture(time = 18) {
 export function animate() {
   const s = state(),
     renderer = s.renderer
+  s.focused = true
   s.options.reducedMotion = false
   renderer.info.autoReset = false
   let last = performance.now()
@@ -189,4 +198,68 @@ export function rainCpu(steps = 600) {
   let hash = 2166136261
   for (const byte of new Uint8Array(values.buffer)) hash = Math.imul(hash ^ byte, 16777619) >>> 0
   return { cpuMs, steps, hash, alive: rain.drops.filter((d) => d.alive).length }
+}
+
+/** Stop both a scheduled display frame and the inactive-window wake-up. */
+export function pause() {
+  const s = state()
+  if (s.cancelFrame) s.cancelFrame()
+  else {
+    cancelAnimationFrame(s.frame)
+    s.frame = 0
+  }
+}
+
+export function activity() {
+  const s = state()
+  return { frame: s.frame, timer: s.frameTimer ?? 0, elapsed: s.elapsed, focused: s.focused }
+}
+
+export function invalidate() {
+  engine!.setRainState({ intensity: 0.55, wind: { x: 2, z: 0.5 } })
+  engine!.setDetailEnvironment({ daylight: 0.5 })
+  engine!.resize()
+}
+
+export function setReducedMotion(enabled: boolean) {
+  pause()
+  state().options.reducedMotion = enabled
+  invalidate()
+}
+
+/** Feed display timestamps without GPU work, including high-refresh monitors. */
+export function pacing() {
+  pause()
+  const s = state()
+  const saved = {
+    render: s.render,
+    requestFrame: s.requestFrame,
+    nextFrameAt: s.nextFrameAt,
+    focused: s.focused,
+  }
+  try {
+    s.requestFrame = () => {}
+    const rates = [60, 90, 120, 144].flatMap((refreshRate) =>
+      [true, false].map((focused) => {
+        let renders = 0
+        s.focused = focused
+        s.nextFrameAt = 0
+        s.render = () => {
+          renders++
+        }
+        for (let tick = 0; tick < refreshRate * 10; tick++)
+          s.onAnimationFrame(1000 + (tick * 1000) / refreshRate)
+        return { refreshRate, focused, fps: renders / 10 }
+      }),
+    )
+    s.focused = false
+    s.nextFrameAt = 0
+    const delayed: number[] = []
+    s.render = (now) => delayed.push(now)
+    // A late wake-up must not be followed by a short catch-up interval.
+    for (const now of [1000, 1110, 1167, 1194, 1220, 1278]) s.onAnimationFrame(now)
+    return { rates, delayed }
+  } finally {
+    Object.assign(s, saved)
+  }
 }

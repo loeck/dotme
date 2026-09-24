@@ -206,6 +206,10 @@ html[data-scene-loading] #landscape {
 .scene-loader__fallback i:nth-child(5) {
   animation-delay: -280ms;
 }
+.scene-loader[data-paused='true'] .scene-loader__fallback i {
+  animation-play-state: paused;
+}
+
 .scene-loader[data-rendered='true'] .scene-loader__fallback {
   display: none;
 }

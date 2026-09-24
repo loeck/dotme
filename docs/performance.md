@@ -277,3 +277,83 @@ context loss, disposal and preventing overlapping meter queries.
 Validation of this fix: `pnpm check` passes (129 unit tests and production build).
 The targeted home, solar-light, lifecycle and backdrop Playwright suites report
 57 passed and one expected skip for mobile mouse smoke.
+
+## Focus-aware rendering and environment reuse
+
+The scene now targets 60 FPS while focused and 12 FPS while visible without focus.
+A hidden page schedules neither animation frames nor render timers. Inactive windows
+sleep with a timeout before requesting the next display frame; they do not poll at the
+monitor's refresh rate. The foreground deadline carries its remainder across display ticks
+so 90/120/144 Hz displays still target 60 FPS. Inactive frames start a fresh interval
+after each draw, avoiding catch-up bursts when a timer fires late. Focus and visibility
+transitions cancel both pending callbacks, clear pointer interaction, and reset simulation timing before
+resuming. The solar clock keeps wall time; the existing bounded water/rain timesteps
+prevent a backlog of physical updates after suspension. Reduced motion remains on-demand.
+Weather, detail and resize invalidations cannot restart rendering while hidden.
+
+After the introduction, the environment cubemap and its PMREM filter update at most
+15 times per second when focused, or 3 times per second without focus. The previous
+complete capture is reused between updates. The intro, reduced-motion renders, focus
+resumption and solar-clock discontinuities refresh it immediately. This intentionally
+reduces the temporal resolution of indirect lighting; it does not lower texture sizes,
+geometry detail, shadow quality or the cadence of planar water reflections. Shadow
+rendering explicitly uses terrain layer 0 even when the layer-1 lake-bed camera triggers
+it first on a frame without an environment capture. A fixed-scene image comparison
+covers that path. Daytime motes with zero opacity no longer upload matrices or draw,
+and an inactive pointer no longer causes a canvas bounds read on every frame.
+
+The loader's Worker, fallback renderer and CSS fallback animation stop animating when
+focus is lost. Their existing visibility and reduced-motion handling is retained.
+The browser tests cover both loader implementations, pacing at four display frequencies,
+visible/inactive/hidden transitions, invalidation while hidden, reduced-motion rendering,
+resumption and disposal on Chromium and WebKit.
+
+Research used for this change:
+
+- [MDN Page Visibility API](https://developer.mozilla.org/en-US/docs/Web/API/Page_Visibility_API):
+  window blur does not imply that the page is hidden; handle both signals explicitly.
+- [MDN WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices):
+  reduce unnecessary submissions and avoid blocking GPU operations. The existing asynchronous
+  luminance query and readback paths are retained.
+- [Three.js CubeCamera](https://threejs.org/docs/pages/CubeCamera.html) and
+  [PMREMGenerator](https://threejs.org/docs/pages/PMREMGenerator.html): environment capture
+  and roughness filtering are distinct rendering work, so cache both together.
+
+Further candidates to measure: adaptive render-buffer resolution on sustained slow frames,
+independent update cadences for slow shadow lights, and a complete WebGPU renderer comparison.
+Those trade image quality or require wider changes, and are not enabled by this patch.
+
+Comparison against `35f5600`, seed 9182, midnight/heavy rain/partly cloudy: three
+alternating repetitions per browser, five-second warm-up and fifteen-second samples,
+with diagnostics disabled. No concurrent automated browsers were detected.
+
+| Metric                | Chromium desktop, before → after | WebKit mobile profile, before → after |
+| --------------------- | -------------------------------- | ------------------------------------- |
+| Median CPU submission | 4.2 → 3.6–3.7 ms                 | 2 → 2 ms                              |
+| Frame interval p95    | 16.8–33.3 → 16.7–16.8 ms         | 18 → 18 ms                            |
+| Mean draw calls/frame | 1,465 → 1,253                    | 903 → 769                             |
+| Mean triangles/frame  | 4.60 M → 4.12 M                  | 1.97 M → 1.75 M                       |
+
+The deterministic time-18 captures were pixel-identical on both backends. These
+captures explicitly refresh the probe, so they verify the spatial rendering changes;
+they do not claim temporal equivalence for cached lighting during animation. Browser
+tests separately compare a refreshed versus reused probe at a fixed scene time and
+check that terrain shadows remain populated on every frame. The mobile profile runs
+on the Mac GPU, not a physical phone, and WebKit CPU timing is quantized to milliseconds.
+The means include the full cost of probe-refresh frames: about 14–15% fewer draw calls.
+Raw samples and captures are in `artifacts/focus-perf/`.
+
+```sh
+BENCH_REPEATS=3 BENCH_SECONDS=15 BENCH_SEEDS=9182 BENCH_OUTPUT=artifacts/focus-perf pnpm benchmark:scene 35f5600
+```
+
+Chrome DevTools MCP 1.10.1 also profiled the complete local page at 1200 × 2029,
+without CPU/network throttling: LCP 1,354 ms, CLS 0, nine successful network requests.
+Render-blocking resources had zero estimated LCP/FCP savings. This is a local startup
+observation, not a before/after comparison or a field measurement. The MCP was already
+registered in Codex; setting its working directory to the user home fixes npm rejecting
+startup from this repository because of its `devEngines` runtime version requirement.
+
+Validation: `pnpm check` passes (170 unit tests, typecheck, lint, formatting and
+production build). The complete Playwright suite passes 108 tests with six expected
+skips for opt-in benchmarks and capabilities unavailable in the mobile profile.

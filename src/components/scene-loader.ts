@@ -24,7 +24,7 @@ export function initSceneLoader(loop = false) {
   canvas.width = Math.round(144 * Math.min(devicePixelRatio || 1, 1.5))
   canvas.height = Math.round(80 * Math.min(devicePixelRatio || 1, 1.5))
 
-  const animated = () => !document.hidden && !reducedMotion.matches
+  const animated = () => !document.hidden && document.hasFocus() && !reducedMotion.matches
   const post = (message: LoaderMessage, transfer: Transferable[] = []) => {
     // A dedicated Worker has no target origin.
     // eslint-disable-next-line unicorn/require-post-message-target-origin
@@ -38,12 +38,14 @@ export function initSceneLoader(loop = false) {
     frame = requestAnimationFrame(tick)
   }
   const updateMotion = () => {
+    const animate = animated()
     cancelAnimationFrame(frame)
-    post({ type: 'motion', animate: animated() })
+    overlay.dataset.paused = String(!animate)
+    post({ type: 'motion', animate })
     if (!renderer) return
     animationStartedAt = performance.now()
-    renderer.render(animated() ? 0 : VOXEL_LOADER_REST_TIME)
-    if (animated()) frame = requestAnimationFrame(tick)
+    renderer.render(animate ? 0 : VOXEL_LOADER_REST_TIME)
+    if (animate) frame = requestAnimationFrame(tick)
   }
   const fallback = () => {
     clearTimeout(workerTimer)
@@ -94,6 +96,9 @@ export function initSceneLoader(loop = false) {
   }
   reducedMotion.addEventListener('change', updateMotion, { signal: lifetime.signal })
   document.addEventListener('visibilitychange', updateMotion, { signal: lifetime.signal })
+  window.addEventListener('blur', updateMotion, { signal: lifetime.signal })
+  window.addEventListener('focus', updateMotion, { signal: lifetime.signal })
+  overlay.dataset.paused = String(!animated())
 
   const stopRendering = () => {
     lifetime.abort()
@@ -118,6 +123,7 @@ export function initSceneLoader(loop = false) {
     // Restore an untransferred canvas for bfcache and hot reload.
     if (canvas) canvas.replaceWith(canvas.cloneNode())
     delete overlay.dataset.rendered
+    delete overlay.dataset.paused
   }
   const reveal = () => {
     if (finished || loop) return

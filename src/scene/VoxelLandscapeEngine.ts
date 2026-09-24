@@ -191,6 +191,11 @@ export class VoxelLandscapeEngine {
   private readonly voxelGroup = new Group()
   private readonly shadowGroup = new Group()
   private frame = 0
+  private frameTimer = 0
+  private nextFrameAt = 0
+  private focused = document.hasFocus()
+  private environmentAt = -Infinity
+  private environmentTime = -Infinity
   private lastFrameAt = 0
   private elapsed = 0
   private intro = 0
@@ -240,9 +245,14 @@ export class VoxelLandscapeEngine {
       // Back-face shadow depth includes internal cube faces. Keep their exact
       // geometry in this pass; exposing only the outer shell changes lamp shadows.
       this.shadowGroup.visible = true
+      // When the probe is reused, the layer-1 bed camera triggers shadows first.
+      // Shadows must still include the layer-0 terrain, just like a probe capture.
+      const cameraLayers = args[2].layers.mask
+      args[2].layers.set(0)
       try {
         return this.measure('shadows', () => renderShadows(...args))
       } finally {
+        args[2].layers.mask = cameraLayers
         this.shadowGroup.visible = false
       }
     }
@@ -398,11 +408,12 @@ export class VoxelLandscapeEngine {
     window.addEventListener('pointercancel', this.onPointerUp)
     this.renderer.domElement.addEventListener('pointerleave', this.onPointerLeave)
     this.renderer.domElement.addEventListener('lostpointercapture', this.onLostCapture)
-    window.addEventListener('blur', this.onPointerLeave)
-    document.addEventListener('visibilitychange', this.onVisibilityChange)
+    window.addEventListener('blur', this.onActivityChange)
+    window.addEventListener('focus', this.onActivityChange)
+    document.addEventListener('visibilitychange', this.onActivityChange)
     this.renderer.domElement.addEventListener('webglcontextlost', this.onContextLost)
     this.lastFrameAt = performance.now()
-    this.frame = requestAnimationFrame(this.render)
+    this.requestFrame()
   }
 
   private measure<T>(name: string, action: () => T): T {
@@ -555,8 +566,7 @@ export class VoxelLandscapeEngine {
         this.detailEnvironment = { ...this.detailEnvironment, [key]: value }
     }
     this.details?.setEnvironment(environment)
-    if (this.options.reducedMotion && this.frame === 0)
-      this.frame = requestAnimationFrame(this.render)
+    if (this.options.reducedMotion) this.requestFrame()
   }
 
   private buildShadowCasters(batches: Float32Array[]) {
@@ -712,7 +722,7 @@ export class VoxelLandscapeEngine {
     this.pointerActive = true
     this.pointerClient.set(event.clientX, event.clientY)
     if (this.options.reducedMotion) {
-      if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+      this.requestFrame()
       return
     }
     const point = this.hitWater(event.clientX, event.clientY)
@@ -730,6 +740,7 @@ export class VoxelLandscapeEngine {
   }
 
   private onPointerMove = (event: PointerEvent) => {
+    if (!this.focused || document.hidden) return
     if (!event.isPrimary || (this.dragging && event.pointerId !== this.dragPointerId)) return
     this.pointerType = event.pointerType
     this.pointerActive = event.pointerType !== 'touch' || event.buttons !== 0
@@ -740,7 +751,7 @@ export class VoxelLandscapeEngine {
     if (this.pointerClient.x === event.clientX && this.pointerClient.y === event.clientY) return
     this.pointerClient.set(event.clientX, event.clientY)
     if (this.options.reducedMotion) {
-      if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+      this.requestFrame()
       return
     }
     if (!this.pointerActive) {
@@ -783,28 +794,64 @@ export class VoxelLandscapeEngine {
     this.pendingPointer = null
     this.pointerRevision += 1
     this.waterPointerTarget.z = 0
-    if (this.options.reducedMotion && !this.disposed && this.frame === 0)
-      this.frame = requestAnimationFrame(this.render)
+    if (this.options.reducedMotion) this.requestFrame()
     if (pointerId >= 0 && this.renderer.domElement.hasPointerCapture(pointerId))
       this.renderer.domElement.releasePointerCapture(pointerId)
   }
 
-  private onVisibilityChange = () => {
-    this.onPointerLeave()
-    if (document.hidden) {
-      cancelAnimationFrame(this.frame)
-      this.frame = 0
+  /** Background frames sleep between draws instead of waking on every display refresh. */
+  private requestFrame() {
+    if (this.disposed || document.hidden || this.frame !== 0 || this.frameTimer !== 0) return
+    if (this.focused || this.options.reducedMotion) {
+      this.frame = requestAnimationFrame(this.onAnimationFrame)
+    } else {
+      const delay = Math.max(0, this.nextFrameAt - performance.now())
+      this.frameTimer = window.setTimeout(() => {
+        this.frameTimer = 0
+        if (!this.disposed && !document.hidden)
+          this.frame = requestAnimationFrame(this.onAnimationFrame)
+      }, delay)
+    }
+  }
+
+  private cancelFrame() {
+    cancelAnimationFrame(this.frame)
+    clearTimeout(this.frameTimer)
+    this.frame = 0
+    this.frameTimer = 0
+  }
+
+  private onAnimationFrame = (now: number) => {
+    this.frame = 0
+    if (this.disposed || document.hidden) return
+    // Leave a little room for rAF timestamp jitter at the display's nominal frequency.
+    const interval = 1000 / (this.focused ? 60 : 12)
+    if (!this.options.reducedMotion && now < this.nextFrameAt - 0.5) {
+      this.requestFrame()
       return
     }
+    // Carry display jitter only in the foreground; idle frames never catch up after a delay.
+    this.nextFrameAt = this.focused ? this.nextFrameAt + interval : now + interval
+    if (this.nextFrameAt <= now) this.nextFrameAt = now + interval
+    this.render(now)
+  }
+
+  private onActivityChange = () => {
+    this.focused = document.hasFocus()
+    this.onPointerLeave()
+    this.cancelFrame()
     this.lastFrameAt = performance.now()
-    if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+    this.nextFrameAt = this.focused ? 0 : this.lastFrameAt + 1000 / 12
+    this.environmentAt = -Infinity
+    // requestFrame also handles hidden pages and the final unlit reduced-motion frame.
+    this.requestFrame()
   }
 
   /** Temporary URL parameters only initialize this state; weather may replace it later. */
   setRainState(state: RainState) {
     if (this.disposed) return
     this.rain.setRainState(state)
-    if (!document.hidden && this.frame === 0) this.frame = requestAnimationFrame(this.render)
+    this.requestFrame()
   }
 
   private onContextLost = (event: Event) => {
@@ -813,12 +860,53 @@ export class VoxelLandscapeEngine {
     this.dispose()
   }
 
+  private updateEnvironment(now: number, atmosphereTime: number) {
+    // Reuse broad indirect lighting; planar water reflections stay per-frame.
+    // Intro, still renders and clock discontinuities always refresh the probe.
+    const interval = 1000 / (this.focused ? 15 : 3)
+    if (
+      now - this.environmentAt < interval &&
+      atmosphereTime >= this.environmentTime &&
+      atmosphereTime - this.environmentTime <= 1 &&
+      this.intro === 1 &&
+      !this.options.reducedMotion
+    )
+      return
+
+    this.water.visible = false
+    const environmentIntensity = this.scene.environmentIntensity
+    this.scene.environmentIntensity = 0
+    // Direct solar energy already comes from the directional light. Excluding the
+    // disc from the lighting probe also makes sun=hidden a purely visual switch.
+    this.skyMaterial.uniforms.uShowSun!.value = 0
+    try {
+      this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
+    } finally {
+      this.water.visible = true
+      this.scene.environmentIntensity = environmentIntensity
+      this.skyMaterial.uniforms.uShowSun!.value = this.showSun ? 1 : 0
+    }
+    // Filter explicitly before the main render. Lazy filtering inside a
+    // material upload would nest renderer calls and disturb texture bindings.
+    if (this.simulation.available) {
+      this.filteredEnvironment = this.measure('pmrem', () =>
+        this.environmentFilter.fromCubemap(
+          this.environmentTarget.texture,
+          this.filteredEnvironment,
+        ),
+      )
+      this.scene.environment = this.filteredEnvironment.texture
+    }
+    this.water.material.uniforms.uEnvironment!.value =
+      this.filteredEnvironment?.texture ?? this.environmentTarget.texture
+    this.environmentAt = now
+    this.environmentTime = atmosphereTime
+  }
+
   private render = (now: number) => {
-    if (this.disposed) return
+    if (this.disposed || document.hidden) return
     this.frame = 0
-    if (document.hidden) return
-    if (this.options.reducedMotion) this.frame = 0
-    else this.frame = requestAnimationFrame(this.render)
+    if (!this.options.reducedMotion) this.requestFrame()
     this.diagnostics?.begin(now)
     const rainDelta = clamp((now - this.lastFrameAt) / 1000, 0, 0.1)
     const dt = Math.min(rainDelta, 0.05)
@@ -845,7 +933,9 @@ export class VoxelLandscapeEngine {
     this.camera.position.z = 16
     this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
-    this.pointerBounds = this.renderer.domElement.getBoundingClientRect()
+    this.pointerBounds = this.pointerActive
+      ? this.renderer.domElement.getBoundingClientRect()
+      : null
     const waterPoint = this.pointerActive
       ? this.hitWater(this.pointerClient.x, this.pointerClient.y)
       : null
@@ -963,9 +1053,10 @@ export class VoxelLandscapeEngine {
       lamp.cube.material.color.copy(lamp.color).multiplyScalar(energy)
     }
     if (this.moteMesh) {
+      this.moteMesh.visible = light.localLightStrength > 0
       this.moteMesh.material.opacity =
         smooth(0.25, 0.9, this.intro) * 0.2 * light.localLightStrength
-      if (!this.options.reducedMotion) {
+      if (this.moteMesh.visible && !this.options.reducedMotion) {
         for (const [index, mote] of this.motes.entries()) {
           this.moteTransform.position.set(
             mote.x + Math.sin(this.elapsed * mote.speed * 0.71 + mote.phase) * 0.11,
@@ -994,34 +1085,7 @@ export class VoxelLandscapeEngine {
       this.rain.renderSlopes(this.renderer, this.camera, this.elapsed),
     )
     this.renderer.shadowMap.needsUpdate = true
-    // Capture current lighting in all six directions every frame. Water has its
-    // own planar reflection and is excluded to avoid recursive mirror captures.
-    this.water.visible = false
-    const environmentIntensity = this.scene.environmentIntensity
-    this.scene.environmentIntensity = 0
-    // Direct solar energy already comes from the directional light. Excluding the
-    // disc from the lighting probe also makes sun=hidden a purely visual switch.
-    this.skyMaterial.uniforms.uShowSun!.value = 0
-    try {
-      this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
-    } finally {
-      this.water.visible = true
-      this.scene.environmentIntensity = environmentIntensity
-      this.skyMaterial.uniforms.uShowSun!.value = this.showSun ? 1 : 0
-    }
-    // Filter explicitly before the main render. Lazy filtering inside a
-    // material upload would nest renderer calls and disturb texture bindings.
-    if (this.simulation.available) {
-      this.filteredEnvironment = this.measure('pmrem', () =>
-        this.environmentFilter.fromCubemap(
-          this.environmentTarget.texture,
-          this.filteredEnvironment,
-        ),
-      )
-      this.scene.environment = this.filteredEnvironment.texture
-    }
-    this.water.material.uniforms.uEnvironment!.value =
-      this.filteredEnvironment?.texture ?? this.environmentTarget.texture
+    this.updateEnvironment(now, atmosphereTime)
     this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene))
     this.depthFocus.render(
       this.renderer,
@@ -1114,14 +1178,13 @@ export class VoxelLandscapeEngine {
         Math.max(256, Math.round(this.drawingBufferSize.x * reflectionScale)),
         Math.max(256, Math.round(this.drawingBufferSize.y * reflectionScale)),
       )
-    if (this.options.reducedMotion && this.rendered && this.frame === 0)
-      this.frame = requestAnimationFrame(this.render)
+    if (this.options.reducedMotion && this.rendered) this.requestFrame()
   }
 
   dispose() {
     if (this.disposed) return
     this.disposed = true
-    cancelAnimationFrame(this.frame)
+    this.cancelFrame()
     this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDown)
     this.renderer.domElement.removeEventListener('webglcontextlost', this.onContextLost)
     window.removeEventListener('pointermove', this.onPointerMove)
@@ -1129,8 +1192,9 @@ export class VoxelLandscapeEngine {
     window.removeEventListener('pointercancel', this.onPointerUp)
     this.renderer.domElement.removeEventListener('pointerleave', this.onPointerLeave)
     this.renderer.domElement.removeEventListener('lostpointercapture', this.onLostCapture)
-    window.removeEventListener('blur', this.onPointerLeave)
-    document.removeEventListener('visibilitychange', this.onVisibilityChange)
+    window.removeEventListener('blur', this.onActivityChange)
+    window.removeEventListener('focus', this.onActivityChange)
+    document.removeEventListener('visibilitychange', this.onActivityChange)
     for (const object of this.objects) {
       object.removeFromParent()
       if (object instanceof InstancedMesh) object.dispose()

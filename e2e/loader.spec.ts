@@ -96,3 +96,35 @@ test('the loader falls back when offscreen canvas is unavailable', async ({ page
   await expect(page.locator('.scene-loader')).toBeHidden()
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
 })
+
+for (const fallback of [false, true]) {
+  test(`the ${fallback ? 'main-thread' : 'worker'} loader pauses without focus`, async ({
+    page,
+  }) => {
+    if (fallback)
+      await page.addInitScript(() => {
+        Object.defineProperty(HTMLCanvasElement.prototype, 'transferControlToOffscreen', {
+          value: undefined,
+        })
+      })
+    await page.goto('/?loader=loop')
+    const loader = page.locator('.scene-loader')
+    await expect(loader).toHaveAttribute('data-rendered', 'true')
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => false })
+      window.dispatchEvent(new Event('blur'))
+    })
+    await expect(loader).toHaveAttribute('data-paused', 'true')
+    await page.waitForTimeout(100)
+    const still = await loader.screenshot()
+    await page.waitForTimeout(200)
+    expect((await loader.screenshot()).equals(still)).toBe(true)
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'hasFocus', { configurable: true, value: () => true })
+      window.dispatchEvent(new Event('focus'))
+    })
+    await expect(loader).toHaveAttribute('data-paused', 'false')
+    await page.waitForTimeout(200)
+    expect((await loader.screenshot()).equals(still)).toBe(false)
+  })
+}
