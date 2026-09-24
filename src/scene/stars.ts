@@ -3,8 +3,16 @@ import type { PerspectiveCamera } from 'three'
 
 import { leafRandom } from './leaf-drift'
 
+// Match the end of the shared daylight fade; no stars during twilight.
+const NIGHT_START = 0.12
+const NIGHT_FADE = 0.16
+const FAINT_DELAY = 0.06
+
 export function starVisibility(sunHeight: number, brightness = 1) {
-  const t = Math.max(0, Math.min(1, (-sunHeight - 0.015 - (1 - brightness) * 0.09) / 0.13))
+  const t = Math.max(
+    0,
+    Math.min(1, (-sunHeight - NIGHT_START - (1 - brightness) * FAINT_DELAY) / NIGHT_FADE),
+  )
   return t * t * (3 - 2 * t)
 }
 
@@ -69,13 +77,13 @@ vec3 starHash(vec2 p) {
   return fract((q.xxy + q.yzz) * q.zyx);
 }
 vec3 stellarRadiance(vec3 direction, float moonAngle) {
-  if (uSunDirection.y >= -0.015) return vec3(0.0);
+  if (uSunDirection.y >= -${NIGHT_START}) return vec3(0.0);
   vec2 sky = vec2(atan(direction.x, -direction.z) * 31.8309886, asin(direction.y) * 63.6619772);
   vec2 cell = floor(sky);
   vec3 random = starHash(cell);
   vec2 offset = fract(sky) - (0.15 + random.xy * 0.7);
   float brightness = pow(random.z, 7.0);
-  float visibility = smoothstep(0.0, 0.13, -uSunDirection.y - 0.015 - (1.0 - brightness) * 0.09);
+  float visibility = smoothstep(0.0, ${NIGHT_FADE}, -uSunDirection.y - ${NIGHT_START} - (1.0 - brightness) * ${FAINT_DELAY});
   float radius = mix(0.010, 0.032, brightness);
   float variance = radius * radius;
   float pixelVariance = dot(fwidth(sky), fwidth(sky)) / 12.0;
@@ -96,7 +104,8 @@ vec3 stellarRadiance(vec3 direction, float moonAngle) {
     float width = max(length(fwidth(direction)) * 0.55, 0.00035);
     float line = exp(-distance * distance / (width * width)) * (0.00035 / width);
     float life = smoothstep(0.0, 0.08, uMeteorAge) * (1.0 - smoothstep(0.65, 1.15, uMeteorAge));
-    radiance += vec3(0.68, 0.8, 1.0) * line * along * life * 0.7 * horizonFade;
+    radiance += vec3(0.68, 0.8, 1.0) * line * along * life * 0.7 * horizonFade
+      * smoothstep(0.0, ${NIGHT_FADE}, -uSunDirection.y - ${NIGHT_START});
   }
   return radiance;
 }

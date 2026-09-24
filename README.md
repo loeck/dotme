@@ -204,6 +204,7 @@ References: [Garg and Nayar, Photorealistic Rendering of Rain Streaks](https://c
 [Olano and Baker, LEAN Mapping](https://userpages.cs.umbc.edu/olano/papers/lean/),
 and [Three.js instanced buffer geometry](https://threejs.org/docs/pages/InstancedBufferGeometry.html).
 
-The lake also has drifting leaves, a seeded night sky and optional natural ambient sound.
-Sound starts off on every visit and is enabled with the speaker button. Implementation,
+The lake also has drifting leaves, a seeded night sky and natural ambient sound (autoplay when the browser allows it,
+otherwise enabled by the speaker button).
+Implementation,
 CC0 recording credits and verification notes are in [living landscape](docs/living-landscape.md).

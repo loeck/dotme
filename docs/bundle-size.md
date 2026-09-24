@@ -88,3 +88,12 @@ Initial gzip grows by 709 B. Five local MP3s total 864,585 B and are fetched onl
 activation. They are excluded from the JavaScript totals. There is no new dependency.
 The renderer remains the existing large deferred chunk (Vite's 500 kB advisory still applies).
 Raw reports: `artifacts/living-landscape/bundle-before.json` and `bundle-after.json`.
+
+### Review refinements
+
+After the more detailed leaves, stricter stellar masking and revised audio behavior:
+initial JavaScript is 17,562 B raw / 7,031 B gzip; total emitted JavaScript is
+911,056 B raw / 253,896 B gzip. The lazy mixer is 3,898 B raw / 1,600 B gzip.
+The longer water recording brings the five local MP3s to 1,274,625 B, still below
+2 MB. Autoplay now attempts to start by default; MP3 requests only begin after the
+browser allows the audio context to run. Refused autoplay stays off until activation.

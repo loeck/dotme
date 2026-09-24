@@ -352,7 +352,7 @@ export async function livingProbe() {
   const withStars = read()
   const original = state.skyMaterial.fragmentShader
   state.skyMaterial.fragmentShader = original.replace(
-    'color += stellarRadiance(direction, moonAngle);',
+    'color += stellarRadiance(direction, moonAngle) * stellarWindow;',
     'color += vec3(0.0);',
   )
   state.skyMaterial.needsUpdate = true
@@ -420,4 +420,26 @@ export function meteorProbe() {
     age: state.skyMaterial.uniforms.uMeteorAge!.value,
     attempts: state.shootingStars.attempts,
   }
+}
+
+/** Close inspection of the actual material and its water contact, not a separate demo. */
+export function leafCloseup() {
+  const state = engine as unknown as {
+    camera: PerspectiveCamera
+    details: import('../src/scene/scene-details').SceneDetails
+    options: { reducedMotion: boolean }
+    cancelFrame(): void
+    render(now: number): void
+  }
+  state.cancelFrame()
+  state.options.reducedMotion = true
+  const leaf = state.details.leaves.drift.leaves[1]!
+  const update = state.camera.updateMatrixWorld.bind(state.camera)
+  state.camera.updateMatrixWorld = (force) => {
+    state.camera.position.set(leaf.x + 0.4, 1.1, leaf.z + 1.1)
+    state.camera.lookAt(leaf.x, 0, leaf.z)
+    update(force)
+  }
+  state.render(performance.now())
+  state.camera.updateMatrixWorld = update
 }

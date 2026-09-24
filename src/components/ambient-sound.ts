@@ -1,7 +1,7 @@
 import type { AmbientMixer } from '../audio/ambient-mixer'
 import type { AmbientEnvironment } from '../audio/environment'
 
-export function initAmbientSound() {
+export function initAmbientSound(autoplay = true) {
   const button = document.querySelector<HTMLButtonElement>('.scene-sound-trigger')
   const status = document.querySelector<HTMLElement>('[data-sound-status]')
   const lifetime = new AbortController()
@@ -45,48 +45,63 @@ export function initAmbientSound() {
   }
   const failure = () => disable('Ambient sound is unavailable. Please try again.')
 
+  const enable = (automatic = false) => {
+    if (failed || lifetime.signal.aborted || (automatic && document.hidden)) return
+    enabled = true
+    const version = ++generation
+    clearTimeout(suspension)
+    display(true)
+    try {
+      // Explicit activation always creates/resumes synchronously in the gesture.
+      // Autoplay uses the same path but never waits indefinitely on browser policy.
+      if (!context || context.state === 'closed') context = new AudioContext({ sampleRate: 32000 })
+      const audioContext = context
+      const resumed = audioContext.resume()
+      const ready = automatic
+        ? Promise.race([resumed, new Promise<void>((resolve) => setTimeout(resolve, 300))])
+        : resumed
+      void ready
+        .then(async () => {
+          if (!enabled || version !== generation) return
+          if (audioContext.state !== 'running') {
+            disable()
+            return
+          }
+          // No mixer or MP3 download until the browser has actually allowed playback.
+          const module = await import('../audio/ambient-mixer')
+          if (!enabled || version !== generation) return
+          const instance = new module.AmbientMixer(audioContext)
+          mixer = instance
+          instance.setEnvironment(environment)
+          await instance.load()
+          if (!enabled || version !== generation) return
+          if (document.hidden) {
+            instance.pause()
+            await audioContext.suspend()
+          } else {
+            if (audioContext.state !== 'running') throw new Error('Audio suspended')
+            instance.resume()
+          }
+          display()
+          return undefined
+        })
+        .catch(() => {
+          if (version === generation) {
+            if (automatic && !mixer) disable()
+            else failure()
+          }
+        })
+    } catch {
+      if (automatic) disable()
+      else failure()
+    }
+  }
+
   button?.addEventListener(
     'click',
     () => {
-      if (enabled) {
-        disable()
-        return
-      }
-      if (failed) return
-      enabled = true
-      const version = ++generation
-      clearTimeout(suspension)
-      display(true)
-      try {
-        // The context and resume call must happen in the original user gesture.
-        if (!context || context.state === 'closed')
-          context = new AudioContext({ sampleRate: 32000 })
-        const audioContext = context
-        const resumed = audioContext.resume()
-        void Promise.all([resumed, import('../audio/ambient-mixer')])
-          .then(async ([, module]) => {
-            if (!enabled || version !== generation) return
-            const instance = new module.AmbientMixer(audioContext)
-            mixer = instance
-            instance.setEnvironment(environment)
-            await instance.load()
-            if (!enabled || version !== generation) return
-            if (document.hidden) {
-              instance.pause()
-              await audioContext.suspend()
-            } else {
-              if (audioContext.state !== 'running') throw new Error('Audio suspended')
-              instance.resume()
-            }
-            display()
-            return undefined
-          })
-          .catch(() => {
-            if (version === generation) failure()
-          })
-      } catch {
-        failure()
-      }
+      if (enabled) disable()
+      else enable()
     },
     { signal: lifetime.signal },
   )
@@ -123,6 +138,7 @@ export function initAmbientSound() {
   )
   if (button) button.hidden = false
   display()
+  if (autoplay) enable(true)
   return {
     setEnvironment(state: AmbientEnvironment) {
       environment = state

@@ -60,9 +60,12 @@ void main() {
   float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
   float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
   color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 * uShowMoon + moonHalo) * uMoonIntensity;
-  color += stellarRadiance(direction, moonAngle);
-  // Clouds attenuate both the lunar disc and its halo before distant relief.
   vec4 cloud = sampleClouds(direction);
+  // Tiny distant light sources disappear behind even moderately opaque cloud.
+  // Keep the open gaps bright without changing the cloud or lunar illumination.
+  float stellarWindow = smoothstep(0.65, 0.98, cloud.a);
+  color += stellarRadiance(direction, moonAngle) * stellarWindow;
+  // Clouds attenuate the moon and stellar light before distant relief.
   color = color * cloud.a + cloud.rgb;
   float drift = uTime * 0.011;
 

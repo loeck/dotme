@@ -213,7 +213,7 @@ real-time particle and sheet budget rather than their fluid simulation systems.
 
 ## Floating leaves
 
-The detail layer now also owns 12 desktop / 6 mobile surface leaves, with instanced angular
+The detail layer now also owns 12 desktop / 6 mobile surface leaves, with instanced curved, veined
 blades, fixed-step shore avoidance and direct sampling of the shared water field. They
 receive existing lighting and appear in the main and planar reflection views, but not in
 the underwater captures or environment probe. See [living landscape](./living-landscape.md)

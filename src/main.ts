@@ -7,13 +7,13 @@ import { cleanSceneUrl } from './scene-params'
 
 let cleanup: (() => void) | undefined
 
-function start() {
+function start(autoplay = true) {
   if (cleanup) return
   const landscape = document.querySelector<HTMLDivElement>('#landscape')
   const url = cleanSceneUrl(new URL(window.location.href))
   if (url.href !== window.location.href) history.replaceState(history.state, '', url)
   const loader = initSceneLoader()
-  const sound = initAmbientSound()
+  const sound = initAmbientSound(autoplay)
   const stopLandscape = landscape ? initLandscape(landscape, loader.reveal, sound) : undefined
   if (!landscape) loader.reveal()
   const cursor = document.querySelector<HTMLDivElement>('.scene-cursor')
@@ -34,7 +34,7 @@ function stop() {
 }
 
 function restore(event: PageTransitionEvent) {
-  if (event.persisted) start()
+  if (event.persisted) start(false)
 }
 
 start()

@@ -1013,7 +1013,7 @@ export class VoxelLandscapeEngine {
     this.shootingStars.advance(
       activeDelta,
       light.sunDirection.y,
-      this.weather === 'overcast',
+      this.weather === 'cloudy' || this.weather === 'overcast',
       !!this.options.reducedMotion,
       this.camera,
     )

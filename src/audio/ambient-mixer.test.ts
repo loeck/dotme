@@ -29,7 +29,9 @@ class Source extends Node {
   buffer: AudioBuffer | null = null
   at = -1
   end = -1
-  start(at: number) {
+  offset = 0
+  start(at: number, offset = 0) {
+    this.offset = offset
     this.at = at
   }
   stop(at: number) {
@@ -40,6 +42,7 @@ class Source extends Node {
 function fixture() {
   const voices: Source[] = [],
     gains: Node[] = []
+  let decoded = 0
   const context = {
     currentTime: 0,
     state: 'running',
@@ -54,7 +57,10 @@ function fixture() {
       voices.push(source)
       return source
     },
-    decodeAudioData: async () => ({ duration: 19, length: 19 * 32000, numberOfChannels: 1 }),
+    decodeAudioData: async () => {
+      const duration = decoded++ === 0 ? 60 : 19
+      return { duration, length: duration * 32000, numberOfChannels: 1 }
+    },
   }
   vi.stubGlobal(
     'fetch',
@@ -79,7 +85,11 @@ it('schedules three minutes with overlap, bounded envelopes, spaced birds and no
   }
   expect(voices.length).toBeGreaterThan(40)
   const water = voices.filter((v) => v.buffer === voices[0]!.buffer)
-  for (let i = 1; i < water.length; i++) expect(water[i]!.at).toBeCloseTo(water[i - 1]!.end - 1.5)
+  for (let i = 1; i < water.length; i++) expect(water[i]!.at).toBeCloseTo(water[i - 1]!.end - 4)
+  for (let i = 1; i < water.length; i++) {
+    expect(Math.abs(water[i]!.offset - water[i - 1]!.offset)).toBeGreaterThanOrEqual(8)
+    expect(water[i]!.offset + water[i]!.end - water[i]!.at).toBeLessThanOrEqual(60.001)
+  }
   for (const gain of gains.slice(6))
     for (const event of gain.gain.events) expect(event[0]).toBeGreaterThanOrEqual(0)
   const count = voices.length

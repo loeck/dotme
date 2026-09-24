@@ -2,22 +2,50 @@ import { expect, test } from '@playwright/test'
 
 import { mockSceneWeather } from './weather-fixture'
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async ({ page }, info) => {
   await mockSceneWeather(page, 'clear')
-  await page.addInitScript(() => {
+  await page.addInitScript((pendingAutoplay) => {
     const Original = window.AudioContext
     const contexts: AudioContext[] = []
     Object.assign(window, { testAudioContexts: contexts })
     window.AudioContext = class extends Original {
+      // Model a browser refusing autoplay, while allowing real user gestures.
+      resume() {
+        if (!navigator.userActivation.isActive && !navigator.userActivation.hasBeenActive)
+          return pendingAutoplay
+            ? new Promise<void>(() => {})
+            : Promise.reject(new DOMException('Autoplay blocked', 'NotAllowedError'))
+        return super.resume()
+      }
+      get state() {
+        if (pendingAutoplay && !navigator.userActivation.hasBeenActive) return 'suspended' as const
+        return super.state
+      }
       constructor(options?: AudioContextOptions) {
         super(options)
         contexts.push(this)
       }
     }
-  })
+  }, info.title.includes('pending autoplay'))
 })
 
-test('loads nothing until a keyboard gesture, decodes all MP3s, toggles and reloads silently', async ({
+test('pending autoplay returns to off without downloading or starting later', async ({ page }) => {
+  const requests: string[] = []
+  page.on('request', (r) => {
+    if (r.url().endsWith('.mp3')) requests.push(r.url())
+  })
+  await page.goto('/?seed=42')
+  const button = page.locator('.scene-sound-trigger')
+  await expect(button).toHaveAttribute('aria-busy', 'false')
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect(requests).toHaveLength(0)
+  await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await expect(button).toHaveAttribute('aria-busy', 'false')
+  expect(requests).toHaveLength(5)
+})
+
+test('blocked autoplay loads nothing; a keyboard gesture decodes all MP3s and toggles playback', async ({
   page,
 }) => {
   const requests: string[] = []

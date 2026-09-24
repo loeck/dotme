@@ -25,6 +25,7 @@ test.afterAll(async () => {
 for (const [time, weather] of [
   ['12:00', 'clear'],
   ['18:25', 'clear'],
+  ['05:35', 'clear'],
   ['00:00', 'clear'],
   ['00:00', 'overcast'],
   ['12:00', 'cloudy'],
@@ -57,7 +58,9 @@ for (const [time, weather] of [
     expect(result.passes).toContain('main')
     expect(result.passes).toContain('reflection')
     expect(result.passes).not.toContain('unexpected')
-    if (time === '12:00') expect(result.skyDifference).toBe(0)
+    if (time === '12:00' || time === '18:25' || time === '05:35')
+      expect(result.skyDifference).toBe(0)
+    if (weather === 'overcast') expect(result.skyDifference).toBeLessThan(50)
     if (time === '00:00' && weather === 'clear') expect(result.skyDifference).toBeGreaterThan(500)
     await page.screenshot({ path: info.outputPath(`${time.replace(':', '')}-${weather}.png`) })
     await info.attach('capture-metrics.json', {
@@ -71,6 +74,11 @@ for (const [time, weather] of [
       expect(meteor.age).toBeCloseTo(0.4)
       expect(meteor.attempts).toBe(1)
       await page.screenshot({ path: info.outputPath('meteor.png') })
+    }
+
+    if (time === '12:00' && weather === 'clear') {
+      await page.evaluate(async () => (await import('/living-harness.js')).leafCloseup())
+      await page.screenshot({ path: info.outputPath('leaf-closeup.png') })
     }
 
     await page.evaluate(async () => {

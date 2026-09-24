@@ -1,5 +1,6 @@
 import { ambientMix } from './environment'
 import type { AmbientEnvironment } from './environment'
+import { waterPhrase } from './water-phrases'
 
 export const AUDIO_LAYERS = ['water', 'wind', 'rain', 'insects', 'birds'] as const
 type Layer = (typeof AUDIO_LAYERS)[number]
@@ -18,6 +19,7 @@ export class AmbientMixer {
   private started = false
   private ready = false
   private nextBird = 0
+  private waterOffset = -Infinity
   private decodedBytes = 0
   private environment: AmbientEnvironment = {
     solarHour: 0,
@@ -71,7 +73,7 @@ export class AmbientMixer {
     }
   }
 
-  private voice(layer: Layer, at: number, duration: number) {
+  private voice(layer: Layer, at: number, duration: number, offset = 0, crossfade = CROSSFADE) {
     const buffer = this.buffers.get(layer)
     if (!buffer || this.disposed) return
     const source = this.context.createBufferSource(),
@@ -79,7 +81,7 @@ export class AmbientMixer {
     source.buffer = buffer
     source.connect(envelope)
     envelope.connect(this.gains.get(layer)!)
-    const fade = Math.min(CROSSFADE, duration / 3)
+    const fade = Math.min(crossfade, duration / 3)
     envelope.gain.setValueAtTime(0, at)
     envelope.gain.linearRampToValueAtTime(1, at + fade)
     envelope.gain.setValueAtTime(1, at + duration - fade)
@@ -94,7 +96,7 @@ export class AmbientMixer {
       },
       { once: true },
     )
-    source.start(at)
+    source.start(at, offset)
     source.stop(at + duration)
   }
 
@@ -106,8 +108,15 @@ export class AmbientMixer {
       const next = this.next.get(layer) ?? now
       if (next > now + 0.75) continue
       const at = Math.max(now, next)
-      this.voice(layer, at, buffer.duration)
-      this.next.set(layer, at + buffer.duration - CROSSFADE)
+      if (layer === 'water') {
+        const phrase = waterPhrase(buffer.duration, this.waterOffset)
+        this.waterOffset = phrase.offset
+        this.voice(layer, at, phrase.duration, phrase.offset, phrase.fade)
+        this.next.set(layer, at + phrase.duration - phrase.fade)
+      } else {
+        this.voice(layer, at, buffer.duration)
+        this.next.set(layer, at + buffer.duration - CROSSFADE)
+      }
     }
     if (now >= this.nextBird) {
       this.nextBird = now + 20 + Math.random() * 40

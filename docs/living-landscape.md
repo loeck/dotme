@@ -7,7 +7,14 @@ these additions. No public URL options, runtime service or package dependency we
 ## Floating leaves
 
 `SceneDetails` owns `LakeLeaves`: one instanced mesh and one shared standard material,
-with 12 desktop / 6 mobile blades, three proportions and olive/ochre/brown instance colors.
+with 12 desktop / 6 mobile blades, three silhouettes and olive/ochre/brown instance colors.
+Blades now use a curved, serrated 32×8 grid, a raised midrib, a narrow petiole and
+per-instance curl/lobing. Pixel-filtered procedural veins, mottling, dry edges and
+vein relief break up the albedo, normals and wet roughness without texture downloads.
+The shared water field still displaces every vertex. At the grazing scene angle,
+subpixel veins intentionally filter away. Material design references:
+[NVIDIA foliage shading](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)
+and [Three.js standard material](https://threejs.org/docs/pages/MeshStandardMaterial.html).
 The seed determines placement, scale, heading and circulation phase. Candidates are in
 the camera's near lake and tested against terrain occlusion and the signed shore field.
 `LeafDrift` is independent of rendering. It integrates at 60 Hz, recovering at most four
@@ -32,14 +39,16 @@ underwater layers 1 and 3. No new capture or water-fragment sampler is used.
 
 The sky shader hashes cells in fixed spherical directions. Points have seeded jitter,
 a strongly skewed brightness distribution, warm/cool variation and pixel-filtered energy.
-Visibility depends on solar elevation, so cloudy daylight cannot reveal stars. Bright stars
-arrive first, with a reversed transition at dawn. Horizon and lunar-halo attenuation keep
+Visibility starts only after the shared daylight fade reaches zero (sun height below
+−0.12). Bright stars then arrive first, with a reversed transition before dawn.
+An extra transmission window suppresses stellar light where cloud transmission is
+under 0.65 and restores it smoothly through clear gaps above 0.98. Horizon and lunar-halo attenuation keep
 silhouettes legible. The contribution is composed before clouds and distant ridges.
 The existing environment capture carries filtered stellar light into the lake.
 
 `ShootingStars` counts active night seconds independently of `timeScale`. Seeded intervals
-are 90–180 seconds; one short upper-frustum trajectory can be active at a time. Very
-covered skies suppress events without queuing missed attempts. Age and scintillation use
+are 90–180 seconds; one short upper-frustum trajectory can be active at a time. Cloudy and
+overcast skies suppress events without queuing missed attempts. Age and scintillation use
 active wall time; visibility changes reset the engine's frame timestamp. Reduced motion
 freezes scintillation and disables meteors. Environment resolution/cadence are unchanged.
 
@@ -53,7 +62,7 @@ information dialog.
 
 | Layer   | Author and source                                                                                      | Excerpt     | Duration |
 | ------- | ------------------------------------------------------------------------------------------------------ | ----------- | -------: |
-| Water   | [salilnair, Water-lap-against-rocks-lake](https://freesound.org/people/salilnair/sounds/524688/)       | 00:05–00:24 |     19 s |
+| Water   | [TRP, Gentle lapping lake water waves](https://freesound.org/people/TRP/sounds/573163/)                | 00:05–01:05 |     60 s |
 | Wind    | [Nox_Sound, Ambiance_Wind_Forest_Trees_Loop_01](https://freesound.org/people/Nox_Sound/sounds/530908/) | 00:07–00:30 |     23 s |
 | Rain    | [AlanCat, ForestRainShower1a](https://freesound.org/people/AlanCat/sounds/383064/)                     | 00:20–00:41 |     21 s |
 | Insects | [Sclolex, crickets](https://freesound.org/people/Sclolex/sounds/210540/)                               | 00:08–00:25 |     17 s |
@@ -61,17 +70,25 @@ information dialog.
 
 Processing with FFmpeg: mono, 32 kHz, high-pass 100 Hz, low-pass 11 kHz,
 `loudnorm=I=-27:TP=-9:LRA=7`, MP3 `libmp3lame` at 80 kbit/s. The mixer schedules
-1.5-second linear overlap envelopes on the audio clock, including decoded MP3 padding.
+1.5-second linear overlap envelopes on the audio clock for the secondary loops.
+Water plays random 24–36 second passages of the 60-second recording with four-second
+crossfades and separated start offsets, preserving its natural pitch. Water gain is
+0.14–0.175 in dry weather, ducked by up to 45% in rain; maximum rain gain is 0.42.
+The water therefore leaves room for the other layers instead of dominating rain.
 Bird excerpts are spaced by 20–60 active audio seconds. There is no music, thunder,
 interface sound or meteor sound.
 
-Audio payload: **864,585 bytes**, below 2 MB. Nominal decoded buffers total **10.5 MiB**
+Audio payload: **1,274,625 bytes**, below 2 MB. Nominal decoded buffers total **15.5 MiB**
 at the requested 32 kHz; browser tests also decode at 48 kHz and check the 24 MiB ceiling.
 A runtime guard enforces that ceiling. Clips remain local; no audio request occurs until
-activation. The mixer is a separate lazy chunk, independent of Three.js.
+the context is running and playback is enabled. The mixer is a separate lazy chunk, independent of Three.js.
 
-The gesture component creates/resumes one context synchronously in the click handler,
-then imports and loads the mixer. Base water failure turns the command off with an
+A fresh page attempts playback by default, as requested in the follow-up. If browser
+autoplay policy refuses or leaves the context suspended after 300 ms, the button returns
+to off without fetching MP3s or automatically retrying later. Explicit activation creates/
+resumes the same context synchronously in the click handler, then loads the mixer.
+[Browser autoplay rules](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay)
+remain authoritative; sound cannot be guaranteed before a user gesture. Base water failure turns the command off with an
 accessible retry message; secondary failures retain available layers. Network loads have
 a 15-second timeout. Cancellation invalidates pending work and aborts fetches; late decoding
 cannot start playback. The scene emits solar hour, daylight, wind speed and effective rain
@@ -111,3 +128,35 @@ unchanged. A SHA-256 comparison against the initial 146-file snapshot detected c
 changes in the original `src/scene/VoxelLandscapeEngine.ts`, `src/scene/pointer-light.ts`
 and `e2e/solar-light.spec.ts`; this task did not write those original files or attempt to
 restore them. The branch intentionally retains the initial snapshot as its comparison base.
+
+## Follow-up refinements, 2026-09-24
+
+User review requested full-night stellar gating, stronger cloud masking, more natural
+leaves, less repetitive water, a quieter water bed relative to rain, and autoplay where
+permitted. These supersede the initial opt-in-only audio policy and short water loop.
+
+Validation: `pnpm check` passes (205 unit tests). The targeted living-landscape,
+ambient-sound, ambient-autoplay and audio-audit suites pass 31 browser tests across
+Chromium and mobile WebKit; one WebKit test is skipped because its explicit allowed-
+autoplay policy uses a Chromium launch flag. Both engines cover denied and indefinitely
+pending autoplay, gesture retry, cancellation, background lifecycle, all MP3s and the
+48 kHz decoded-memory ceiling. The actual three-minute production mix passes the peak,
+sample-step and continuous-energy checks. Human listening is still needed to judge the
+new recording and balance subjectively; numerical checks do not replace that review.
+
+The scene harness captures the new leaves both at normal scale and close up, using the
+production material and water field. Day, dusk (18:25), dawn (05:35), clear night and
+opaque night are checked on both engines. Stars contribute zero pixels during daytime,
+dusk and dawn; the overcast upper-sky difference is below 50 summed byte levels.
+
+A short scene-only before/after comparison against `753f090`, with seed 42, clear noon,
+one six-second measured window per variant and no competing automated browser, reports:
+
+| Profile                 | Before median / p95 | After median / p95 |
+| ----------------------- | ------------------- | ------------------ |
+| Chromium desktop        | 16.7 / 16.7 ms      | 16.7 / 16.8 ms     |
+| WebKit mobile emulation | 17 / 18 ms          | 17 / 18 ms         |
+
+These are frame scheduling measurements on the development Mac, not a physical-phone
+or sustained-load guarantee. Raw runs are in
+`artifacts/living-landscape/refinements-performance/report.json`.
