@@ -86,7 +86,16 @@ describe('lake atmosphere', () => {
     expect(flies.mesh.visible).toBe(false)
     flies.update(5 + 1 / 60, wind, { nightFactor: 0.5 })
     expect(flies.mesh.visible).toBe(true)
-    expect(flies.mesh.material.uniforms.uIntensity!.value).toBe(0.5)
+    const first = flies.mesh.material.uniforms.uIntensity!.value
+    expect(first).toBeGreaterThan(0)
+    expect(first).toBeLessThan(0.02)
+    for (let frame = 2; frame <= 300; frame++)
+      flies.update(5 + frame / 60, wind, { nightFactor: 0.5 })
+    expect(flies.mesh.material.uniforms.uIntensity!.value).toBeGreaterThan(0.99)
+    flies.update(10 + 1 / 60, wind, { nightFactor: 0 })
+    expect(flies.mesh.material.uniforms.uIntensity!.value).toBeGreaterThan(0.45)
+    flies.update(11, wind, { nightFactor: 0, reducedMotion: true })
+    expect(flies.mesh.visible).toBe(false)
     for (const effect of [flies, repeated, mobile]) effect.dispose()
   })
 
@@ -131,6 +140,41 @@ describe('lake atmosphere', () => {
         expect(sample.distanceTo(responses[0]![i]!)).toBeLessThan(0.004),
       )
     }
+  })
+
+  it('flies away in several directions at dawn and returns continuously at dusk', () => {
+    const flies = new LakeFireflies(new Scene(), lakeBed(), 91, false)
+    const baseline = new LakeFireflies(new Scene(), lakeBed(), 91, false)
+    const wind = new WindModel(91)
+    flies.update(0, wind.sample(0))
+    baseline.update(0, wind.sample(0))
+    let previous = firstFly(flies)
+    let maximumStep = 0
+    let escapeDirections: number[] = []
+    let escapeHeight = 0
+    for (let frame = 1; frame <= 240; frame++) {
+      const time = frame / 60
+      flies.update(time, wind.sample(time), { nightFactor: frame <= 120 ? 0 : 1 })
+      baseline.update(time, wind.sample(time))
+      maximumStep = Math.max(maximumStep, firstFly(flies).distanceTo(previous))
+      previous = firstFly(flies)
+      if (frame === 120) {
+        const escaping = flies.mesh.geometry.getAttribute('aCenter')
+        const settled = baseline.mesh.geometry.getAttribute('aCenter')
+        escapeDirections = Array.from(
+          { length: escaping.count },
+          (_, index) => escaping.getX(index) - settled.getX(index),
+        )
+        escapeHeight = escaping.getY(0) - settled.getY(0)
+      }
+    }
+    expect(Math.min(...escapeDirections)).toBeLessThan(-3)
+    expect(Math.max(...escapeDirections)).toBeGreaterThan(3)
+    expect(escapeHeight).toBeGreaterThan(2)
+    expect(maximumStep).toBeLessThan(0.5)
+    expect(firstFly(flies).distanceTo(firstFly(baseline))).toBeLessThan(1)
+    flies.dispose()
+    baseline.dispose()
   })
 
   it('uses a CSS-pixel hover radius at any scene depth without a terrain hit', () => {

@@ -6,7 +6,12 @@ export type RainState = Readonly<{ intensity: number; wind: Readonly<{ x: number
 export const DEFAULT_RAIN: RainState = { intensity: 0.55, wind: { x: 2, z: 0.5 } }
 export const RAIN_STEP = 1 / 120
 export const WATER_Y = -0.035
-export const IMPACT_LIFETIME = 1.6
+export const IMPACT_LIFETIME = 1.1
+// Conservative bounds for the lake's small wind-driven displacement. Avoid
+// evaluating its spectrum while drops are still metres above the surface.
+const WATER_MIN_Y = -0.5
+const WATER_MAX_Y = 0.5
+export type RainSurfaceSampler = (x: number, z: number, time: number) => number
 const bounded = (n: number, fallback: number, min: number, max: number) =>
   Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback
 
@@ -20,23 +25,6 @@ export function normalizeRainState(state: RainState): RainState {
   }
 }
 
-/** Temporary bootstrap controls; weather can replace this state at any time. */
-export function queryRainState(search: string): RainState {
-  const params = new URLSearchParams(search)
-  const number = (key: string, fallback: number) => {
-    const value = params.get(key)?.trim()
-    return value ? Number(value) : fallback
-  }
-  const presets: Record<string, number> = { off: 0, light: 0.25, moderate: 0.55, heavy: 1 }
-  const preset = params.get('rain') ?? ''
-  return normalizeRainState({
-    intensity: Object.hasOwn(presets, preset)
-      ? presets[preset]!
-      : number('rain', DEFAULT_RAIN.intensity),
-    wind: { x: number('windX', DEFAULT_RAIN.wind.x), z: number('windZ', DEFAULT_RAIN.wind.z) },
-  })
-}
-
 type Point = { x: number; y: number; z: number }
 export type RainDrop = Point & {
   vx: number
@@ -48,6 +36,7 @@ export type RainDrop = Point & {
 }
 export type RainImpact = Point & {
   vx: number
+  vy: number
   vz: number
   size: number
   seed: number
@@ -84,7 +73,7 @@ export class RainCollider {
   private readonly index?: VoxelIndex
   private readonly origin = [0, 0, 0]
   private readonly direction = [0, 0, 0]
-  private readonly aboveWater = (id: number) => this.index!.boxes[id * 6 + 4]! >= WATER_Y
+  private readonly aboveWater = (id: number) => this.index!.boxes[id * 6 + 4]! >= WATER_MIN_Y
 
   constructor(voxels: readonly Voxel[] | VoxelIndex) {
     if ('boxes' in voxels) {
@@ -93,7 +82,7 @@ export class RainCollider {
     }
     for (const voxel of voxels) {
       const half = voxel.size / 2
-      if (voxel.y + half < WATER_Y) continue
+      if (voxel.y + half < WATER_MIN_Y) continue
       for (let x = cell(voxel.x - half); x <= cell(voxel.x + half); x++) {
         for (let y = cell(voxel.y - half); y <= cell(voxel.y + half); y++) {
           for (let z = cell(voxel.z - half); z <= cell(voxel.z + half); z++) {
@@ -160,6 +149,7 @@ export class RainSimulation {
   private cursor = 0
   private impactCursor = 0
   private randomState: number
+  private waterSurface?: RainSurfaceSampler
   private readonly previous: Point = { x: 0, y: 0, z: 0 }
   readonly rate: number
 
@@ -186,6 +176,7 @@ export class RainSimulation {
       y: WATER_Y,
       z: 0,
       vx: 0,
+      vy: 0,
       vz: 0,
       size: 0,
       seed: 0,
@@ -201,6 +192,53 @@ export class RainSimulation {
       this.emission = 0
       this.remainder = 0
     }
+  }
+
+  /** The callback returns world-space height at simulation time, in seconds. */
+  setWaterSurface(sampler?: RainSurfaceSampler) {
+    this.waterSurface = sampler
+  }
+
+  /** Accepted frame time, including the fraction awaiting the next fixed step. */
+  get elapsedTime() {
+    return this.time + this.remainder
+  }
+
+  private waterHeight(x: number, z: number, time: number) {
+    return this.waterSurface?.(x, z, time) ?? WATER_Y
+  }
+
+  private waterHit(a: Point, b: Point) {
+    if (Math.min(a.y, b.y) > WATER_MAX_Y) return Infinity
+    if (!this.waterSurface) {
+      if (a.y <= WATER_Y) return 0
+      return b.y <= WATER_Y ? (WATER_Y - a.y) / (b.y - a.y) : Infinity
+    }
+    const endGap = b.y - this.waterHeight(b.x, b.z, this.time)
+    if (endGap > 0) return Infinity
+    const startTime = this.time - RAIN_STEP
+    let lowGap = a.y - this.waterHeight(a.x, a.z, startTime)
+    if (lowGap <= 0) return 0
+    let highGap = endGap
+    let low = 0
+    let high = 1
+    for (let i = 0; i < 6; i++) {
+      const fraction = (low + high) * 0.5
+      const x = a.x + (b.x - a.x) * fraction
+      const z = a.z + (b.z - a.z) * fraction
+      const y = a.y + (b.y - a.y) * fraction
+      const gap = y - this.waterHeight(x, z, startTime + RAIN_STEP * fraction)
+      if (gap > 0) {
+        low = fraction
+        lowGap = gap
+      } else {
+        high = fraction
+        highGap = gap
+      }
+    }
+    // Interpolate the final narrow bracket to retain sub-millimetre contact
+    // timing without more expensive spectrum samples.
+    return low + ((high - low) * lowGap) / (lowGap - highGap)
   }
 
   private random() {
@@ -240,7 +278,9 @@ export class RainSimulation {
       drop.x += drop.vx * age
       drop.y += drop.vy * age
       drop.z += drop.vz * age
-      drop.alive = this.collider.trace(this.previous, drop) === Infinity
+      drop.alive =
+        this.collider.trace(this.previous, drop) === Infinity &&
+        (drop.y > WATER_MAX_Y || drop.y > this.waterHeight(drop.x, drop.z, this.time))
     }
     this.cursor = count % this.drops.length
   }
@@ -284,21 +324,25 @@ export class RainSimulation {
       drop.y += drop.vy * RAIN_STEP
       drop.z += drop.vz * RAIN_STEP
       const solid = this.collider.trace(this.previous, drop)
-      const water = drop.y <= WATER_Y ? (WATER_Y - y) / (drop.y - y) : Infinity
+      const water = this.waterHit(this.previous, drop)
       if (solid <= 1 && solid <= water) drop.alive = false
       else if (water <= 1) {
         drop.alive = false
         const impact = this.impacts[this.impactCursor]!
+        const hitX = x + (drop.x - x) * water
+        const hitZ = z + (drop.z - z) * water
+        const born = this.time - RAIN_STEP * (1 - water)
         // Every tracked water collision creates exactly one event shared by waves and splash.
         Object.assign(impact, {
-          x: x + (drop.x - x) * water,
-          y: WATER_Y,
-          z: z + (drop.z - z) * water,
+          x: hitX,
+          y: this.waterHeight(hitX, hitZ, born),
+          z: hitZ,
           vx: drop.vx,
+          vy: drop.vy,
           vz: drop.vz,
           size: drop.size,
           seed: drop.seed,
-          born: this.time - RAIN_STEP * (1 - water),
+          born,
         })
         this.impactCursor = (this.impactCursor + 1) % this.impacts.length
       }

@@ -13,6 +13,22 @@
     <meta name="theme-color" content="#080a0d" />
     <link rel="canonical" href="https://loeck.me/" />
     <link rel="icon" href="/favicon.ico" />
+    <style>
+      /* Inline so the custom point is available before JS or an image request. */
+      @media (hover: hover) and (pointer: fine) {
+        html {
+          --scene-native-cursor:
+            url('data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%228%22%20height%3D%228%22%20viewBox%3D%220%200%208%208%22%3E%0A%20%20%3Ccircle%20cx%3D%224%22%20cy%3D%224%22%20r%3D%222.5%22%20fill%3D%22%23edf2f5%22%20stroke%3D%22%23253038%22%20stroke-width%3D%221%22%2F%3E%0A%3C%2Fsvg%3E')
+              4 4,
+            none;
+        }
+        html,
+        html *,
+        dialog::backdrop {
+          cursor: var(--scene-native-cursor) !important;
+        }
+      }
+    </style>
     <link rel="stylesheet" href="/src/styles.css" />
     <script>
       document.documentElement.dataset.sceneLoading = 'loading'
@@ -30,7 +46,7 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body
-    class="m-0 min-h-full min-w-[280px] overflow-x-hidden bg-[#080a0d] font-mono text-sm font-normal leading-6 text-[#e4e8ed] antialiased"
+    class="m-0 min-h-full min-w-[280px] select-none overflow-x-hidden bg-[#080a0d] font-mono text-sm font-normal leading-6 text-[#e4e8ed] antialiased"
   >
     <div class="scene-loader" role="status" aria-live="polite" aria-label="Loading the scenery">
       <div class="scene-loader__content">
@@ -38,7 +54,7 @@
           <canvas width="144" height="80"></canvas>
           <div class="scene-loader__fallback"><i></i><i></i><i></i><i></i><i></i></div>
         </div>
-        <p class="scene-loader__title">Building a quiet little world.</p>
+        <p class="scene-loader__title">Building a little world…</p>
       </div>
     </div>
     <main class="relative isolate min-h-svh overflow-hidden bg-[#080a0d]">
@@ -154,10 +170,10 @@
         and <a href="https://tailwindcss.com/" target="_blank" rel="noreferrer">Tailwind CSS</a> for
         the site.
       </p>
-      <h3>A little of Paris</h3>
+      <h3>Weather from the real world</h3>
       <p>
-        When available, Paris weather shapes the clouds, rain and wind. Otherwise, the landscape
-        picks a random mood.
+        Weather from the selected location, Paris by default, shapes the clouds, rain and wind. When
+        unavailable, the landscape picks a random mood.
       </p>
       <p data-weather-credit hidden>
         Weather adapted from
@@ -168,13 +184,6 @@
         >. Conditions are interpreted for this miniature world.
       </p>
     </dialog>
-    <div class="scene-cursor" popover="manual" aria-hidden="true">
-      <div class="scene-cursor__halo"></div>
-      <canvas class="scene-cursor__smoke"></canvas>
-      <div class="scene-cursor__ring">
-        <div class="scene-cursor__glint"></div>
-      </div>
-      <div class="scene-cursor__core"></div>
-    </div>
+    <div class="scene-cursor" popover="manual" aria-hidden="true"><span></span></div>
   </body>
 </html>

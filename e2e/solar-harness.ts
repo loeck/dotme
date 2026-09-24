@@ -192,17 +192,23 @@ export async function exerciseSceneLighting() {
     moon: DirectionalLight
     lampLights: Array<{
       light: { intensity: number; visible: boolean }
-      cube: { visible: boolean }
+      cube: { visible: boolean; material: MeshBasicMaterial; position: { y: number } }
+      source: { groundY: number }
       glow: { visible: boolean }
       glowStrength: { value: number }
     }>
-    cursorGlow: { uniforms: { uCursorGlowStrength: { value: number } } }
     depthFocus: { target: WebGLRenderTarget }
     showSun: boolean
     render: (time: number) => void
     solarClock: { initialSeconds: number }
     clouds: { tick: number }
     water: { material: { uniforms: Record<string, { value: unknown }> } }
+    options: { reducedMotion: boolean }
+    requestFrame(): void
+    nightLightFade: number
+    lastFrameAt: number
+    elapsed: number
+    introStartedAt: number
   }
   const read = async (target: WebGLRenderTarget) => {
     const data = new Uint16Array(target.width * target.height * 4)
@@ -226,7 +232,6 @@ export async function exerciseSceneLighting() {
     ),
   })
   const daytimeLamps = lamps()
-  const daytimeCursor = state.cursorGlow.uniforms.uCursorGlowStrength.value
   const visibleAir = await read(state.atmosphere.airTarget)
   const visibleIntensity = state.moon.intensity
   state.showSun = false
@@ -260,18 +265,43 @@ export async function exerciseSceneLighting() {
   state.clouds.tick = -1
   state.render(performance.now())
   const nighttimeLamps = lamps()
+  const twilightOpacity = [17.5, 18, 18.25, 18.5, 18.75].map((hour) => {
+    state.solarClock.initialSeconds = hour * 3600
+    state.clouds.tick = -1
+    state.render(performance.now())
+    return state.lampLights[0]!.cube.material.opacity
+  })
+  const transparentLamps = state.lampLights.every(
+    ({ cube }) => cube.material.transparent && !cube.material.depthWrite,
+  )
   state.solarClock.initialSeconds = 12 * 3600
   state.clouds.tick = -1
   state.render(performance.now())
   const returnedDaytimeLamps = lamps()
+  // Inspect the actual moving cubes in both directions at identical simulated
+  // instants, independently of bobbing and the browser's frame cadence.
+  state.options.reducedMotion = false
+  state.requestFrame = () => {}
+  state.solarClock.initialSeconds = 0
+  const now = performance.now()
+  state.introStartedAt = now - 3000
+  const lampTravel = [0, 0.5, 1, 0.5, 0].map((presence) => {
+    state.lastFrameAt = now
+    state.elapsed = 0
+    state.nightLightFade = presence
+    state.render(now)
+    return state.lampLights.map(({ cube, source }) => cube.position.y - source.groundY)
+  })
   const result = {
     hiddenError,
     visibleIntensity,
     finite,
     boundaryChanges,
     daytimeLamps,
-    daytimeCursor,
     nighttimeLamps,
+    twilightOpacity,
+    transparentLamps,
+    lampTravel,
     returnedDaytimeLamps,
   }
   engine.dispose()
@@ -354,4 +384,89 @@ export async function captureCloudShafts() {
   engine.dispose()
   container.remove()
   return result
+}
+
+export async function exerciseTimeScale() {
+  const container = document.createElement('div')
+  container.style.cssText = 'width:320px;height:180px'
+  document.body.append(container)
+  let ready!: () => void
+  const firstFrame = new Promise<void>((resolve) => {
+    ready = resolve
+  })
+  const engine = new VoxelLandscapeEngine({
+    container,
+    seed: 42,
+    reducedMotion: true,
+    onFirstFrame: ready,
+    onContextFailure() {},
+  })
+  await firstFrame
+  const state = engine as unknown as {
+    solarClock: import('../src/scene/solar-clock').SolarClock
+    moon: DirectionalLight
+    render(now: number): void
+  }
+  try {
+    const elapsed = 30
+    state.solarClock.elapsed = () => elapsed
+    state.render(performance.now())
+    const seconds = state.solarClock.seconds(elapsed)
+    const expected = sampleLighting(seconds)
+    return {
+      seconds,
+      scale: state.solarClock.timeScale,
+      directionError: state.moon.position
+        .clone()
+        .sub(state.moon.target.position)
+        .normalize()
+        .distanceTo(expected.direction),
+    }
+  } finally {
+    engine.dispose()
+    container.remove()
+  }
+}
+
+/** The same distant ridge must block direct light even with a perfectly clear sky. */
+export async function exerciseCelestialHorizon() {
+  const renderer = new WebGLRenderer()
+  const scene = new Scene()
+  const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  let state = sampleLighting(0)
+  const clouds = new VolumetricClouds(renderer, 42, false, new WindModel(42), () => state, 'clear')
+  const geometry = new PlaneGeometry(2, 2)
+  const material = new ShaderMaterial({
+    uniforms: clouds.shadows.uniforms,
+    vertexShader: 'void main() { gl_Position = vec4(position.xy, 0.0, 1.0); }',
+    fragmentShader: `${CLOUD_SHADOW_GLSL}
+      void main() {
+        gl_FragColor = vec4(celestialVisibility(), cloudShadow(vec3(0.0)), 0.0, 1.0);
+      }`,
+    depthTest: false,
+    depthWrite: false,
+  })
+  scene.add(new Mesh(geometry, material))
+  const target = new WebGLRenderTarget(1, 1)
+  const results = []
+  try {
+    for (const hour of [6.05, 6.3, 6.7, 12, 18.05, 18.3, 18.7, 0]) {
+      state = sampleLighting(hour * 3600)
+      clouds.update(0)
+      renderer.setRenderTarget(target)
+      renderer.render(scene, camera)
+      const pixel = new Uint8Array(4)
+      // Each read must follow the associated light direction.
+      // eslint-disable-next-line no-await-in-loop
+      await renderer.readRenderTargetPixelsAsync(target, 0, 0, 1, 1, pixel)
+      results.push({ hour, direct: pixel[0]! / 255, cloud: pixel[1]! / 255 })
+    }
+    return results
+  } finally {
+    geometry.dispose()
+    material.dispose()
+    target.dispose()
+    clouds.dispose()
+    renderer.dispose()
+  }
 }

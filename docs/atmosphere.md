@@ -121,9 +121,8 @@ the decorative distant hills painted inside the sky shader do not cast shadows.
 
 Water uses the capped simulation clock; atmospheric wind and captures use wall time.
 Hidden tabs skip rendering and resume at current atmospheric time. Reduced motion captures time zero once
-and leaves both clouds and water frozen, including after resize. Pointer lighting
-can still update without advancing the simulation. Its material hook chains after
-cloud attenuation, so cloud shadows do not dim the local cursor light. Float-target
+and leaves both clouds and water frozen, including after resize. The cursor shape stays
+independent of scene rendering. Its local diffuse illumination can update on pointer input. Float-target
 fallback retains volumetric clouds and analytic water. Cloud targets, noise,
 geometry and material are disposed with the engine.
 
@@ -207,17 +206,30 @@ DPR emulation; physical iPhone performance has not been measured.
 - [GPU Gems 2, chapter 20](https://developer.nvidia.com/gpugems/gpugems2/part-iii-high-quality-rendering/chapter-20-fast-third-order-texture-filtering):
   cubic B-spline reconstruction using four bilinear texture samples.
 
+Overcast uses an advected, uneven stratus base instead of a uniform density slab.
+Density above each cloud sample attenuates ambient sky light, preserving visible relief.
+Cloud advection retains the weather wind direction with a 2.2 m/s minimum artistic drift;
+calm weather therefore still moves visibly. Water and rain retain their own weather speeds.
+
 ## Solar cycle and atmospheric shafts
 
-The scene now starts at the visitor's local time and advances at real speed.
-`?time=08:30` sets the initial time (strict 24-hour `HH:MM`); invalid values use
+The scene starts at the visitor's local time. `timeScale` multiplies solar-clock
+progress by 1–100 (default 1), while atmospheric advection and the physical simulations
+retain real-time speed. Cloud illumination and terrain lighting use the same scaled clock.
+`?startTime=08:30` sets the initial time (strict 24-hour `HH:MM`); invalid values use
 local time. The artistic sun rises at 06:00, culminates at 12:00 and sets at
-18:00. `weather=clear|partly-cloudy|cloudy|overcast` selects a fixed weather
-preset, defaulting to `partly-cloudy`. `sun=hidden` hides the solar disc and its
-visible reflection; direct light, cloud illumination, shadows and air scattering
-are independent of this flag. The solar disc is always excluded from the lighting
-probe because direct sunlight is already evaluated by the directional light.
+18:00. Current weather at `coordinates=latitude,longitude` selects the cloud and rain state;
+Paris is the default. The solar and lunar discs are excluded from the lighting
+probe because their direct energy is already evaluated by the directional light.
 `seed` still determines the terrain and cloud composition.
+
+The sky and direct lighting share `distant-horizon.ts`: the same seeded crests
+block sunlight and moonlight on water, terrain and atmospheric shafts, with a soft
+transition for the finite angular disc. Diffuse sky fill remains independent. This
+is an infinitely distant relief approximation; nearby structures retain their
+individual shadow maps. An offscreen celestial body can still illuminate the water.
+The transport approach follows [PBRT transmittance](https://pbr-book.org/4ed/Volume_Scattering/Transmittance)
+and the separation of direct/sky reflection in [Bruneton et al., 2010](https://morpho.inrialpes.fr/Publications/2010/BNH10/article.pdf).
 
 `SolarClock`, `sampleLighting` and `WEATHER` separate time, lighting and weather.
 Atmospheric time uses monotonic wall time, independently of the capped water
@@ -263,18 +275,38 @@ against the sky. Neither the solar disc nor a screen-space radial blur generates
 these rays. Coverage still determines their contrast: a clear sky has no cloud
 shafts and an opaque overcast layer blocks the direct source.
 
-Local lamps, halos, motes and cursor illumination fade with ambient luminance
-between 0.04 and 0.16 in linear space, including the weather's diffuse factor.
-The lamps' emitted energy and visible geometry are zero in bright light. The custom
-mouse cursor stays visible; only its illumination of the scenery fades. Water
-gestures remain active. The profile measures 32 points in the rendered backdrop
-behind its bounds once per second, with an asynchronous occlusion query for the
-light/dark classification and no pixel readback.
-The measurement follows the final Reinhard tone mapping and uses linear luminance;
-hysteresis at 0.16/0.20 prevents palette flicker. Initial scene reveal waits for
-the first measurement, with ambient light as a fallback. Dark text covers bright
-scenes, while light text covers night and dense overcast scenes. There is no text
-outline, doubled text or dark profile veil. Cubemap reconstruction blends the
+Local lamps, halos and motes fade with ambient luminance
+between 0.04 and 0.24 in linear space, including the weather's diffuse factor.
+Lamps and fireflies additionally adapt with a 0.9-second real-time fade, even under
+an accelerated solar clock. Each lamp rises from 0.25 units below its actual terrain height to its hovering
+position, then descends along that path at dawn. Seeded delays stagger emergence;
+opacity, halo and emitted energy follow the motion. Fireflies approach and
+disperse along individual curved, elevated routes spanning 7–12 units in several
+directions. Their glow fades at the distant end, rather than extinguishing at the
+colony position. Reduced motion keeps settled positions and samples lighting directly.
+The lamps' emitted energy and visible geometry are zero in bright light. The outlined point stays visible. In low light, its surface contact receives a cool diffuse
+field with a 4.5-unit radius. A shared world-space shader illuminates material albedo and a
+broad water sheen; surface normals retain the relief and wave detail. Solid picking uses the
+terrain BVH and the nearest visible water contact. Sky, controls and inactive pointers fade
+the field out; daylight also fades it out through ambient luminance. There is no added shadow
+map or point-source specular highlight. Water
+gestures remain active. Text and icons keep their accessible DOM hit targets, but
+their visible glyph coverage is rasterized to one texture on layout/font changes.
+The last GPU overlay shades each covered pixel black or white against the
+atmospheric scene texture, after matching Reinhard tone mapping. The linear-light
+crossover is 0.179, with a smooth transition of ±0.025.
+A nine-tap neighborhood filter spans 1.5 CSS pixels; a single letter can contain both colors as clouds move.
+The glyph itself remains sharp, with a 0.325 CSS-pixel dark keyline supporting
+light and intermediate ink. The keyline fades out on dark ink to preserve normal
+font weight. The cursor is a separate 6-pixel DOM point: its position follows input immediately, while its
+shape stretches by at most 180% along movement and compresses across it. A short CSS transition
+restores its round shape; reduced motion disables strain. There is no idle animation or WebGL
+cursor pass. Links enlarge the point by 65%. A matching inline SVG supplies it from the first paint.
+No luminance query or GPU-to-CPU readback is needed. The backdrop is sampled before
+the final small lens blur and transient rain streaks, so drops do not flash the ink.
+The point uses a non-interactive popover above dialogs and during loading. Focus, links and the information dialog retain native HTML behavior; the body
+disables text selection through Tailwind’s `select-none`. There is no
+doubled text or dark profile veil. Cubemap reconstruction blends the
 adjacent face kernels at edges to avoid seams in the denser clouds.
 
 The air target has half the drawing-buffer resolution on each axis, with 32

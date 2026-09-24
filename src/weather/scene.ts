@@ -1,7 +1,8 @@
+import type { GpsPosition } from '../scene-params'
 import type { RainState } from '../scene/rain-simulation'
 import type { WeatherPreset } from '../scene/weather'
 import type { WindOptions } from '../scene/wind'
-import type { ParisWeather } from './paris'
+import type { WeatherSnapshot } from './current'
 
 export const WEATHER_PRELOAD_TIMEOUT_MS = 3000
 
@@ -13,7 +14,7 @@ export type SceneWeather = Readonly<{
 }>
 
 /** Artistic presets, not a physical precipitation or cloud simulation. */
-export function weatherForScene(snapshot: ParisWeather): SceneWeather {
+export function weatherForScene(snapshot: WeatherSnapshot): SceneWeather {
   const { kind } = snapshot.condition
   const cover = snapshot.cloudCoverPercent
   let weather: WeatherPreset =
@@ -87,10 +88,12 @@ export function randomSceneWeather(seed: number): SceneWeather {
 
 export async function preloadSceneWeather({
   seed,
+  position,
   signal,
   timeoutMs = WEATHER_PRELOAD_TIMEOUT_MS,
 }: {
   seed: number
+  position?: GpsPosition
   signal: AbortSignal
   timeoutMs?: number
 }): Promise<SceneWeather> {
@@ -109,9 +112,9 @@ export async function preloadSceneWeather({
   })
   try {
     // The deadline covers the module download, fetch, body read and parsing.
-    const request = import('./paris').then(async ({ fetchParisWeather }) => {
+    const request = import('./current').then(async ({ fetchWeather }) => {
       controller.signal.throwIfAborted()
-      return weatherForScene(await fetchParisWeather({ signal: controller.signal }))
+      return weatherForScene(await fetchWeather({ position, signal: controller.signal }))
     })
     return await Promise.race([request, cancelled])
   } catch {

@@ -28,8 +28,10 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
   // Unresolved normal variance broadens highlights instead of flickering.
   float filteredRoughness = sqrt(roughness * roughness + min(0.025,
     0.25 * (dot(dFdx(worldNormal), dFdx(worldNormal)) + dot(dFdy(worldNormal), dFdy(worldNormal)))));
-  vec3 foamAlbedo = vec3(0.55, 0.60, 0.59) * foam;
-  vec3 result = ambientLightColor * foamAlbedo * mix(0.35, 1.0, cloudVisibility);
+  vec3 foamAlbedo = vec3(0.84, 0.89, 0.87) * foam;
+  // Ambient illumination already includes the weather's diffuse attenuation.
+  // A direct cloud shadow must not extinguish the sky-lit bubbles a second time.
+  vec3 result = ambientLightColor * foamAlbedo;
   filteredRoughness = mix(filteredRoughness, 0.4, foam);
   IncidentLight light;
   float visibility;
@@ -52,7 +54,7 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
         pointShadow.shadowIntensity, pointShadow.shadowBias, pointShadow.shadowRadius,
         vPointShadowCoord[i], pointShadow.shadowCameraNear, pointShadow.shadowCameraFar);
     #endif
-    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility;
+    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility * (1.0 - foam);
     result += foamAlbedo * light.color * max(dot(n, light.direction), 0.0) * visibility / PI;
     }
   }
@@ -63,7 +65,7 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
   #pragma unroll_loop_start
   for (int i = 0; i < NUM_DIR_LIGHTS; i++) {
     getDirectionalLightInfo(directionalLights[i], light);
-    light.color *= cloudVisibility;
+    light.color *= cloudVisibility * celestialVisibility();
     visibility = 1.0;
     #if defined(USE_SHADOWMAP) && UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS
       directionalShadow = directionalLightShadows[i];
@@ -71,7 +73,7 @@ vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam
         directionalShadow.shadowIntensity, directionalShadow.shadowBias, directionalShadow.shadowRadius,
         vDirectionalShadowCoord[i]);
     #endif
-    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility;
+    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility * (1.0 - foam);
     result += foamAlbedo * light.color * max(dot(n, light.direction), 0.0) * visibility / PI;
   }
   #pragma unroll_loop_end

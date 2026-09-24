@@ -10,11 +10,13 @@ import {
   Mesh,
   MeshStandardMaterial,
   OrthographicCamera,
+  PerspectiveCamera,
   Matrix4,
   PlaneGeometry,
   UnsignedIntType,
   WebGLRenderTarget,
   Vector4,
+  Vector2,
   Float32BufferAttribute,
 } from 'three'
 import type { Scene, WebGLRenderer } from 'three'
@@ -37,13 +39,20 @@ export class SubmergedScene {
   readonly fieldLayout: Vector4
   readonly viewProjection = new Matrix4()
   readonly inverseViewProjection = new Matrix4()
+  readonly atlasLayout = new Vector4()
+  readonly fishInverseViewProjection = new Matrix4()
+  readonly bedTexel = new Vector2()
+  private readonly fishCamera = new PerspectiveCamera()
+  private bedSize = 1
+  private fishWidth = 1
+  private fishHeight = 1
   // Spend the existing capture pixels on the visible near lake. The full 160m
   // simulation domain made fish narrower than two texels even on desktop.
   private readonly camera = new OrthographicCamera(-28, 28, 28, -28, 0.1, 80)
   private readonly group = new Group()
   private readonly geometry: PlaneGeometry
   private readonly material = new MeshStandardMaterial({
-    color: 0x718080,
+    color: 0xb4b59e,
     roughness: 0.96,
     vertexColors: true,
   })
@@ -115,24 +124,63 @@ export class SubmergedScene {
     scene.add(this.group)
   }
 
-  resize(mobile: boolean) {
-    const size = mobile ? 512 : 1024
-    this.target.setSize(size, size)
+  resize(mobile: boolean, width = 1280, height = 720) {
+    this.bedSize = mobile ? 512 : 1024
+    const scale = Math.min(1, (mobile ? 960 : 1600) / width)
+    this.fishWidth = Math.max(1, Math.round(width * scale))
+    this.fishHeight = Math.max(1, Math.round(height * scale))
+    const atlasWidth = Math.max(this.bedSize, this.fishWidth)
+    const atlasHeight = this.bedSize + this.fishHeight
+    this.target.setSize(atlasWidth, atlasHeight)
+    this.target.scissorTest = true
+    this.atlasLayout.set(
+      this.bedSize / atlasWidth,
+      this.bedSize / atlasHeight,
+      this.fishWidth / atlasWidth,
+      this.fishHeight / atlasHeight,
+    )
+    this.bedTexel.set(1 / this.bedSize, 1 / this.bedSize)
   }
 
-  render(renderer: WebGLRenderer, scene: Scene) {
+  render(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera) {
     const previous = renderer.getRenderTarget()
     const background = scene.background,
       fog = scene.fog
+    const clearColor = renderer.getClearColor(new Color())
+    const clearAlpha = renderer.getClearAlpha()
+    const viewport = renderer.getViewport(new Vector4())
+    const scissor = renderer.getScissor(new Vector4())
+    const scissorTest = renderer.getScissorTest()
     try {
       scene.background = new Color(0x080c11)
       scene.fog = null
+      // Render-target regions use device pixels. Renderer.setViewport would
+      // multiply by DPR again and move the fish region off-atlas on mobile.
+      this.target.viewport.set(0, 0, this.bedSize, this.bedSize)
+      this.target.scissor.copy(this.target.viewport)
       renderer.setRenderTarget(this.target)
       renderer.render(scene, this.camera)
+      this.fishCamera.copy(camera)
+      this.fishCamera.layers.set(3)
+      this.fishCamera.updateMatrixWorld()
+      this.fishInverseViewProjection.multiplyMatrices(
+        this.fishCamera.matrixWorld,
+        this.fishCamera.projectionMatrixInverse,
+      )
+      scene.background = null
+      renderer.setClearColor(0, 0)
+      this.target.viewport.set(0, this.bedSize, this.fishWidth, this.fishHeight)
+      this.target.scissor.copy(this.target.viewport)
+      renderer.setRenderTarget(this.target)
+      renderer.render(scene, this.fishCamera)
     } finally {
       scene.background = background
       scene.fog = fog
+      renderer.setClearColor(clearColor, clearAlpha)
       renderer.setRenderTarget(previous)
+      renderer.setViewport(viewport)
+      renderer.setScissor(scissor)
+      renderer.setScissorTest(scissorTest)
     }
   }
 

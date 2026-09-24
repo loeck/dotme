@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchParisWeather } from './paris'
+import { fetchWeather } from './current'
 import { parisWeatherFixture } from './paris.fixture'
 import { preloadSceneWeather, randomSceneWeather, weatherForScene } from './scene'
 
@@ -32,7 +32,7 @@ describe('scene weather mapping', () => {
       wind_direction_10m: 90,
     })
     respond(data)
-    const mapped = weatherForScene(await fetchParisWeather())
+    const mapped = weatherForScene(await fetchWeather())
     expect(mapped.weather).toBe('cloudy')
     expect(mapped.rain.intensity).toBeCloseTo(0.55)
     expect(mapped.rain.wind.x).toBeCloseTo(-5)
@@ -47,7 +47,7 @@ describe('scene weather mapping', () => {
       respond(data)
       // Consume each fixture before replacing the response.
       // eslint-disable-next-line no-await-in-loop
-      const mapped = weatherForScene(await fetchParisWeather())
+      const mapped = weatherForScene(await fetchWeather())
       expect(mapped.weather).toBe('overcast')
       expect(mapped.rain.intensity).toBe(0)
     }

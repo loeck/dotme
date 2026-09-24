@@ -40,7 +40,7 @@ export function createLakeBed(
   for (const [voxelIndex, voxel] of voxels.entries()) {
     if (voxelIndex < terrainCount && voxel.y + voxel.size / 2 >= WATER_LEVEL) {
       // Exact rectangle distances keep the contact attached to voxel faces;
-      // the coarser conservative simulation mask would leave a visible gap.
+      // the coarser conservative picking raster would leave a visible gap.
       const half = voxel.size / 2
       const reach = half + 1.2
       const sx0 = Math.max(0, Math.floor((voxel.x - reach - LAKE_BOUNDS.minX) / shoreCell))

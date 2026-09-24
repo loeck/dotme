@@ -34,7 +34,7 @@ test('alternating before/after solar rendering frame timings', async ({ page }, 
     await page.route('**/after.js', (route) =>
       route.fulfill({ contentType: 'text/javascript', body: after }),
     )
-    await page.goto('/solar-benchmark?time=12:00&weather=partly-cloudy')
+    await page.goto('/solar-benchmark?startTime=12:00&weather=partly-cloudy')
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     const result = await page.evaluate(async () => {

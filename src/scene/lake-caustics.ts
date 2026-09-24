@@ -129,12 +129,6 @@ export class LakeCaustics {
         // Caustics concentrate that light; darkness remains dark.
         reflectedLight.directDiffuse *= 1.0 + causticFocus;`,
         )
-      // CursorGlow enters via diffuse irradiance rather than a Three light.
-      // Concentrate only that existing local contribution, leaving ambient fill alone.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'irradiance += cursorGlowAt(',
-        'irradiance += (1.0 + causticFocus) * cursorGlowAt(',
-      )
     }
     material.onBeforeCompile = compile
     material.customProgramCacheKey = () => `${cacheKey}:lake-caustics-v2`

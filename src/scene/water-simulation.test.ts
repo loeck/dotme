@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
 import { LAKE_BOUNDS, createLakeBed, lakeIndex } from './lake-bed'
-import { WaterClock, WATER_STEP, WAVE_SPEED, MAX_WATER_STEPS } from './water-simulation'
+import {
+  WaterClock,
+  WATER_STEP,
+  WAVE_SPEED,
+  MAX_WATER_STEPS,
+  createWaterMask,
+} from './water-simulation'
 
 describe('lake field', () => {
   it('uses stable fixed steps at 30, 60 and 144 Hz, and caps catch-up', () => {
@@ -61,5 +67,16 @@ describe('lake field', () => {
     expect(sample(0, 0).distance).toBeLessThan(0)
     expect(sample(8, 0).distance).toBe(2)
     expect(sample(16, 0).distance).toBe(2)
+    const mask = createWaterMask(bed)
+    expect(mask.resolution).toBe(n)
+    let mismatches = 0
+    for (let z = 0; z < n; z++)
+      for (let x = 0; x < n; x++) {
+        const wx = LAKE_BOUNDS.minX + ((x + 0.5) * LAKE_BOUNDS.size) / n
+        const wz = LAKE_BOUNDS.minZ + ((z + 0.5) * LAKE_BOUNDS.size) / n
+        const solid = Math.abs(wx) <= 1 && Math.abs(wz) <= 1
+        if (mask.water[z * n + x] !== (solid ? 0 : 255)) mismatches++
+      }
+    expect(mismatches).toBe(0)
   })
 })

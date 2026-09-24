@@ -63,7 +63,19 @@ float density(vec3 world, bool detail) {
   if (world.y <= CLOUD_BASE || world.y >= CLOUD_TOP) return 0.0;
   float envelope = smoothstep(CLOUD_BASE, CLOUD_BASE + 4.0, world.y)
     * (1.0 - smoothstep(CLOUD_TOP - 4.0, CLOUD_TOP, world.y));
-  float total = uCloudCoverage * envelope;
+  // A covered sky is an uneven stratus layer, not a constant opaque slab.
+  // Keep the low-frequency thickness periodic and advected with the wind.
+  float total = 0.0;
+  if (uCloudCoverage > 0.0) {
+    vec2 sheetXZ = (world.xz - uDisplacement * 0.7) / ${CLOUD_PERIOD.toFixed(1)};
+    vec2 sheet = texture(uNoise, vec3(sheetXZ.x, 0.37, sheetXZ.y)).rg;
+    float base = CLOUD_BASE + 3.0 + sheet.r * 22.0;
+    float sheetEnvelope = smoothstep(base, base + 12.0, world.y)
+      * (1.0 - smoothstep(CLOUD_TOP - 12.0, CLOUD_TOP, world.y));
+    total = uCloudCoverage * sheetEnvelope
+      * mix(0.22, 1.15, smoothstep(0.2, 0.8, sheet.r))
+      * mix(0.8, 1.1, sheet.g);
+  }
   for (int i = 0; i < ${CLOUD_COUNT}; i++) {
     vec4 origin = uCloudOrigins[i];
     vec4 radii = uCloudRadii[i];

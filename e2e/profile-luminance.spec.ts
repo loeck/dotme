@@ -5,7 +5,30 @@ import { join } from 'node:path'
 import { expect, test } from '@playwright/test'
 import { build } from 'vite'
 
-test('backdrop query preserves contrast without copying GPU pixels', async ({ page }) => {
+import { mockSceneWeather } from './weather-fixture'
+
+test('GPU text and information button retain DOM keyboard interaction', async ({ page }, info) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await mockSceneWeather(page, 'clear')
+  await page.goto('/?seed=42&startTime=12:00')
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
+  await expect(page.locator('main')).toHaveAttribute('data-ui-mask', 'gpu')
+  await expect(page.locator('#profile-title')).toHaveCSS('color', 'rgba(0, 0, 0, 0)')
+  const trigger = page.getByRole('button', { name: 'About this landscape' })
+  await trigger.focus()
+  await page.keyboard.press('Enter')
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(trigger).toBeFocused()
+  await info.attach('per-pixel-contrast', {
+    body: await page.screenshot(),
+    contentType: 'image/png',
+  })
+})
+
+test('one letter simultaneously contains black and white ink, following moving light', async ({
+  page,
+}) => {
   test.setTimeout(60_000)
   const directory = await mkdtemp(join(tmpdir(), 'dotme-backdrop-'))
   try {
@@ -37,17 +60,19 @@ test('backdrop query preserves contrast without copying GPU pixels', async ({ pa
     })
     expect(errors).toEqual([])
     expect(result.error).toBe(0)
-    expect(result.copies).toBe(0)
-    expect(result.cases).toHaveLength(80)
-    for (const sample of result.cases)
-      expect(sample.actual, JSON.stringify(sample)).toBe(sample.expected)
+    expect(result.rendererState).toBe(true)
+    expect(result.cleaned).toBe(true)
+    expect(result.initial.glyphTop.black).toBeGreaterThan(40)
+    expect(result.initial.glyphBottom.white).toBeGreaterThan(40)
+    expect(result.changed.glyphTop.white).toBeGreaterThan(40)
+    expect(result.changed.glyphBottom.black).toBeGreaterThan(40)
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
 })
 
 for (const time of ['08:30', '00:00']) {
-  test(`the complete page meters ${time} lighting without periodic buffer copies`, async ({
+  test(`the complete page shades ${time} UI without periodic buffer copies or luminance queries`, async ({
     page,
   }) => {
     await page.addInitScript(() => {
@@ -65,7 +90,8 @@ for (const time of ['08:30', '00:00']) {
         return begin.call(this, target, query)
       }
     })
-    await page.goto(`/?seed=9182&time=${time}&rain=heavy&weather=partly-cloudy`)
+    await mockSceneWeather(page, 'partly-cloudy', 1)
+    await page.goto(`/?seed=9182&startTime=${time}`)
     await expect(page.locator('#landscape')).toHaveClass(/opacity-100/)
     const read = () =>
       page.evaluate(
@@ -77,9 +103,9 @@ for (const time of ['08:30', '00:00']) {
           ).backdropCounters,
       )
     const initial = await read()
-    await expect
-      .poll(async () => (await read()).queries, { timeout: 10_000 })
-      .toBeGreaterThanOrEqual(initial.queries + 3)
-    expect((await read()).copies).toBe(initial.copies)
+    await page.waitForTimeout(350)
+    const after = await read()
+    expect(after.queries).toBe(0)
+    expect(after.copies).toBe(initial.copies)
   })
 }

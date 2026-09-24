@@ -85,6 +85,7 @@ void main() {
   vec2 previousStep = (uCloudShadowPreviousMatrix * step).xy;
   vec2 nextStart = (uCloudShadowNextMatrix * start).xy;
   vec2 nextStep = (uCloudShadowNextMatrix * step).xy;
+  float horizonVisibility = celestialVisibility();
   bool directLight = uSunDirection.y > 0.0 && dot(uSunRadiance, vec3(1.0)) > 0.0;
   float transmission = exp(-uExtinction * stepLength);
   float integral = segmentIntegral(uExtinction, stepLength);
@@ -96,7 +97,7 @@ void main() {
     float midpoint = float(i) + 0.5;
     float visibility = 0.0;
     if (directLight) {
-      visibility = terrainVisibility(terrainStart + terrainStep * midpoint);
+      visibility = terrainVisibility(terrainStart + terrainStep * midpoint) * horizonVisibility;
       // Fully blocked terrain contributes no sunlight, regardless of cloud cover.
       if (visibility > 0.0)
         visibility *= cloudShadowProjected(previousStart + previousStep * midpoint,

@@ -18,8 +18,10 @@ executes at most four steps per call and drops excess wall time. Background-tab 
 resets the frame timestamp, preventing a backlog. Velocity damping is exp(-0.65 dt).
 An 8.8-metre perimeter sponge additionally damps both height and velocity.
 
-A conservative 512²/256² shore raster comes from generated terrain voxel footprints,
-including foreground stones and isolated rocks. Solid neighbors substitute the center height
+The 1024²/512² collision mask comes from signed distances to the actual terrain faces,
+including foreground stones and isolated rocks. The separate conservative picking raster
+does not push reflections away from the visible shore. Fully submerged stones remain wet.
+Solid neighbors substitute the center height
 (no-flux reflecting boundary). Compact pressure splats add local velocity without reading the target being written.
 For q=(radius/brushRadius)², their profile is (1-q)²(1-4q) within q<1 and zero outside.
 Its continuous area integral is zero: displaced water feeds a surrounding shoulder, avoiding a
@@ -28,7 +30,7 @@ and emergency height/velocity limits (±0.22 m, ±1.5 m/s) prevent pathological 
 exploding the field. Ordinary motion stays well below those limits.
 
 When `windTime` is supplied, solid neighbors also contribute the missing incident-wind
-slope to the boundary stencil (coupling 0.8). This approximates a no-flux boundary on the
+slope to the boundary stencil (coupling 1.0). This approximates a no-flux boundary on the
 combined wind and simulated surface: ambient waves now generate reflected disturbances
 around rocks, even without pointer input. Open water receives no additional forcing.
 The scattered field keeps the solver's 2.4 m/s propagation speed, so this is an approximate
@@ -60,20 +62,21 @@ Pass order is simulation → light/shadow update → environment capture/filter 
 before-render callback) → main color/depth → depth of field. The bed camera inverse reconstructs
 bottom positions. Snell refraction uses n=1.333; four fixed-point iterations against the
 bathymetry estimate the bed intersection. Small fish use a separate analytic Snell
-projection with depth-tested alpha composition, avoiding depth-atlas reconstruction
-artifacts. They do not appear in the bed, environment or reflection captures.
+projection into a dedicated perspective region of the submerged color/depth atlas.
+The water composites their transmitted light before reflection, highlights and foam;
+they are excluded from the main, environment and reflection cameras.
 Projection into the oblique submerged pass supplies
 color and resolved depth, without the disocclusion bands of a grazing camera capture. Schlick Fresnel uses F0=0.02037. Beer–Lambert RGB absorption coefficients are
-(0.72, 0.36, 0.22) m⁻¹ in deep/turbid water, blending toward (0.14, 0.065, 0.045)
-in clear shallows. Rain controls clarity; shared wind and rain control surface roughness.
+(0.48, 0.22, 0.14) m⁻¹ in turbid water, blending toward (0.18, 0.035, 0.016)
+in clear water. Rain controls clarity; shared wind and rain control surface roughness.
 Reflection, transmission, scattering and lamp specular terms compose
 in linear space before the final display conversion. Lamps use the simulated normal and
 existing world-space light positions/intensities. There is no cursor light or emissive crest.
 
 Hover gently reduces weather-driven optical roughness (0.035–0.085) to 0.025 and reduces transmission blur
 inside a Gaussian footprint. This is a deliberate interaction concession, not a physical
-change to water depth. Absorption and grazing-angle Fresnel remain in force, so the deep
-lake cannot become transparent. Refraction uses a height-field intersection and a projected bed capture; it is single-interface
+change to water depth. Depth-dependent absorption and the distant grazing reflection remain in force, so the
+lake retains a depth-dependent turquoise tint. Refraction uses a height-field intersection and a projected bed capture; it is single-interface
 and approximate:
 there is no ray-traced self-occlusion, multiple scattering or caustic pass. Invalid bottom
 samples use the deep-water scattering color. Reflections are planar and distorted by the
@@ -85,8 +88,13 @@ excluded because volume scattering already supplies the water body color. Reinha
 is applied once in the final lens pass. Voxel colors contain albedo without baked lamp light.
 
 A separate signed shore-distance texture (1024² desktop / 512² mobile) follows actual
-terrain footprints instead of the conservative collision raster. A broken contact foam band
-extends roughly 0.38 m into water, gated by the current surface height and upward velocity.
+terrain footprints, shared by the collision mask. Surface normals use reflecting samples at
+solid faces instead of falling toward a zero-height solid texel. In the last two simulation
+cells, the shore normal removes the unresolved slope into the wall. A broken contact foam
+band expands from 0.32 to 1.15 m with crest height and impact velocity, with a
+pixel-sized minimum for distant banks. An outward-moving, broken front sheds small flecks;
+a sheared residual film remains visible between crests. This is procedural persistence,
+not a stored foam simulation.
 Wind velocity uses the analytic time derivative of the same wave packets; simulated velocity
 contributes to the impact. Foam has diffuse albedo and increased roughness, lit and shadowed
 by the scene lights, with no emission. Its fine pattern is filtered at a distance. This is
@@ -97,8 +105,12 @@ about 2 MB on desktop / 0.5 MB on mobile and is disposed with the submerged pass
 ## Input and lifecycle
 
 Only actual client-coordinate motion generates a wake. Both ends of a stroke are reprojected
-with the same camera; interpolated screen samples check visibility along the stroke. Velocity
-and travelled distance set the splat energy. Holding still stops injection; pointerdown adds
+with the same camera. Samples are spaced evenly in world space and reprojected to check
+visibility along the stroke. CSS-pixel speed and distance set a shared impulse budget,
+so perspective cannot amplify vertical gestures or bunch samples at their near end.
+Hover uses a gentle 0.55 m brush; dragging uses 0.7 m and four times the motion budget.
+Each event is capped at 80 pixels of energy and 48 samples.
+Holding still stops injection; pointerdown adds
 one impulse and dragging increases strength. Dragging has no separate camera control.
 
 Picking iterates the analytic surface height and asynchronously reads GPU height on pointer
@@ -173,3 +185,10 @@ useful parts of the other solver while preserving the submerged bed and visible-
 Cloud advection and the wave spectrum now share a seeded wind model. See
 [Shared wind and volumetric cloud layers](atmosphere.md) for the amplitude response,
 CPU/GPU derivative agreement, capture profiles, approximations and measurements.
+
+Calm water now transmits through the full water column, with a lighter mineral bed
+and RGB absorption `(0.18, 0.035, 0.016)` at maximum clarity. Red attenuates faster
+than green/blue, creating a depth-dependent turquoise gradient. The nearby artistic
+reflection cap is 0.24 and fades back to natural grazing Fresnel between 30 and 85
+world units. Fish pass through this same water composition, so reflections and
+highlights cover their silhouettes, including in clear water.

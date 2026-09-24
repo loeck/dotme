@@ -16,7 +16,7 @@ These numbers can differ slightly from Vite's own compressed-size reporter.
 “Initial” means module scripts and modulepreload links in the document, including their static
 imports. It excludes dynamically imported chunks. The landscape import still starts automatically
 when the entry runs: this is **not** a claim that the entire initial visit transfers only 6.0 kB.
-“Total” counts every emitted client JavaScript chunk once, including the mouse-only cursor smoke.
+“Total” counts every emitted client JavaScript chunk once, including all lazy-loaded modules. The historical cursor smoke chunk below has since been removed.
 There is no weather chunk or weather call: that module is not imported by the application.
 
 | Chunk            | Before, raw / gzip bytes | After, raw / gzip bytes |

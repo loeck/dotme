@@ -15,13 +15,9 @@ describe('lake caustics material extension', () => {
         '#include <lights_fragment_begin>',
         ShaderChunk.lights_fragment_begin,
       )
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <lights_fragment_end>',
-        'irradiance += cursorGlowAt(position, normal);\n#include <lights_fragment_end>',
-      )
     })
     material.onBeforeCompile = previous
-    material.customProgramCacheKey = () => 'cloud-and-cursor'
+    material.customProgramCacheKey = () => 'cloud-shadow'
     const caustics = new LakeCaustics()
     caustics.applyTo(material)
     caustics.applyTo(material)
@@ -32,18 +28,17 @@ describe('lake caustics material extension', () => {
     } as Parameters<MeshStandardMaterial['onBeforeCompile']>[0]
     material.onBeforeCompile(shader, {} as WebGLRenderer)
     expect(previous).toHaveBeenCalledOnce()
-    expect(material.customProgramCacheKey()).toBe('cloud-and-cursor:lake-caustics-v2')
+    expect(material.customProgramCacheKey()).toBe('cloud-shadow:lake-caustics-v2')
     expect(shader.fragmentShader).toContain('reflectedLight.directDiffuse *=')
     expect(shader.fragmentShader.indexOf('float causticFocus =')).toBeGreaterThan(0)
     expect(shader.fragmentShader.indexOf('float causticFocus =')).toBeLessThan(
-      shader.fragmentShader.indexOf('irradiance += (1.0 + causticFocus)'),
+      shader.fragmentShader.indexOf('reflectedLight.directDiffuse *='),
     )
     expect(shader.fragmentShader).not.toContain('totalEmissiveRadiance +=')
-    expect(shader.fragmentShader).toContain('irradiance += (1.0 + causticFocus) * cursorGlowAt(')
     expect(shader.vertexShader).toContain('instanceMatrix * causticWorld')
     caustics.dispose()
     expect(material.onBeforeCompile).toBe(previous)
-    expect(material.customProgramCacheKey()).toBe('cloud-and-cursor')
+    expect(material.customProgramCacheKey()).toBe('cloud-shadow')
     material.dispose()
   })
 
