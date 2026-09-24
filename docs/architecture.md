@@ -12,9 +12,10 @@ belongs to the page lifecycle: initialization is cancelled after 20 seconds, and
 independent HTML deadline releases the profile even when the primary module fails.
 
 The scene separates CPU world generation, GPU resources, simulation and composition.
-Node materials and TSL passes render through WebGPU. Without a working WebGPU adapter,
-the page releases its static profile. Device loss ends the graphics session and releases
-the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
+Node materials and TSL passes render through WebGPU. Without a working WebGPU adapter or
+device, the same renderer is created with its WebGL 2 backend, and the same TSL graph is
+compiled to GLSL; the page releases its static profile only when WebGL 2 is unavailable too.
+Device or context loss ends the graphics session and releases the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
 state. The world worker prepares terrain, shadow bounds, lake-bed geometry and normals,
 water geometry, the half-float depth/shore atlas and the simulation mask. It transfers
 typed buffers; the render thread wraps those buffers in GPU resources without repeating
@@ -23,6 +24,14 @@ array generation or bounds scans. Audio has its own asynchronous resource lifeti
 Shadow batches carry their transforms as instanced vertex attributes, sharing shader
 programs across batch sizes. Environment materials are compiled once with all meshes
 included; the six cubemap views reuse those programs with normal culling restored.
+
+Both backends must produce the same image. Three normalizes texture and screen
+coordinates, but three conventions remain the scene’s responsibility:
+`src/scene/backend-nodes.ts` converts sampled depth to clip-space Z before unprojection
+(`clipDepth`) and clip-space Z to a written fragment depth (`fragmentDepth`), and
+provides screen-linear varyings because GLSL ES 3.00 has no `noperspective`. CPU
+readbacks of render targets arrive bottom-up on WebGL. `pnpm e2e:gpu` compares both
+backends pixel by pixel on fixed scenes.
 
 Diagnostics consume public renderer counters through a minimal interface. CPU submission
 costs are distinct from GPU execution time. Unavailable GPU timings remain null. Snapshot

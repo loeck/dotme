@@ -108,9 +108,6 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   wind?: WindOptions
 }>
 
-const LEAN_SHIFT = 4.5
-const LOOK_DISTANCE = 41
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const smooth = (a: number, b: number, value: number) => {
   const t = clamp((value - a) / (b - a), 0, 1)
@@ -171,9 +168,6 @@ export class VoxelLandscapeEngine {
   private readonly detailPointerNdc = new Vector2()
   private readonly target = new Vector2(0, 0)
   private readonly tilt = new DeviceTilt()
-  private tiltView = 0
-  private leanLook = 0
-  private readonly worldBounds: PreparedWorld['world']['bounds']
   private lampShadowCursor = 0
   private moonShadowAt = -Infinity
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
@@ -264,7 +258,6 @@ export class VoxelLandscapeEngine {
       const initialLight = sampleLighting(engine.solarClock.initialSeconds, 0, engine.weather)
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
-      for (const lamp of engine.lampLights) lamp.light.visible = initialLight.localLightStrength > 0
       await engine.clouds.compileAsync()
       await engine.skyAtmosphere.compileAsync()
       engine.skyAtmosphere.update(initialLight.sunDirection, initialLight.skyExposure)
@@ -330,7 +323,6 @@ export class VoxelLandscapeEngine {
     this.waterfall =
       options.sceneDetails === false ? undefined : (options.prepared.world.waterfall ?? undefined)
     this.voxelIndex = options.prepared.terrain.index
-    this.worldBounds = options.prepared.world.bounds
     this.detailEnvironment = { ...options.detailEnvironment }
     this.container = options.container
     this.sceneContrast = this.resources.own(
@@ -627,6 +619,8 @@ export class VoxelLandscapeEngine {
         blending: AdditiveBlending,
         depthWrite: false,
         side: DoubleSide,
+        // Fog would mix the opaque additive quad toward the fog colour and light up its square.
+        fog: false,
       })
       const p = uv().sub(0.5).mul(2)
       const r = p.dot(p)
@@ -1132,7 +1126,7 @@ export class VoxelLandscapeEngine {
       // The material used by the public shadow node is shared with the actual shadow pass.
       for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
         const map = light.shadow.map
-        if (!light.visible || !map) continue
+        if (!map) continue
         if (light instanceof PointLight) {
           // Point lights have no target; their shadow node orients each cube face.
           const camera = light.shadow.camera
@@ -1224,6 +1218,7 @@ export class VoxelLandscapeEngine {
       this.moon.shadow.needsUpdate = true
       this.moonShadowAt = now
     }
+    if (this.nightLightFade === 0) return
     if (!throttle) {
       for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
       return
@@ -1231,7 +1226,7 @@ export class VoxelLandscapeEngine {
     if (!this.lampLights.length) return
     this.lampShadowCursor = (this.lampShadowCursor + 1) % this.lampLights.length
     const lamp = this.lampLights[this.lampShadowCursor]
-    if (lamp?.light.visible) lamp.light.shadow.needsUpdate = true
+    if (lamp) lamp.light.shadow.needsUpdate = true
   }
 
   private applyLighting(light: LightingState) {
@@ -1272,20 +1267,14 @@ export class VoxelLandscapeEngine {
     }
 
     const parallax = this.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
+    if (this.tilt.active) this.target.x = this.tilt.value
     this.pointer.lerp(this.target, parallax)
     const idleDrift =
       this.reducedMotion || this.tilt.active ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
-    this.tiltView += ((this.reducedMotion ? 0 : this.tilt.value) - this.tiltView) * parallax
-    this.camera.position.x +=
-      (this.pointer.x * 1.9 + this.tiltView * LEAN_SHIFT + idleDrift - this.camera.position.x) *
-      parallax
+    this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
     this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
-    this.camera.lookAt(
-      this.camera.position.x * 0.22 + this.tiltView * this.leanLook,
-      this.mobile ? 2.3 : 7.3,
-      -25,
-    )
+    this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
     this.pointerBounds = this.pointerActive
       ? this.renderer.domElement.getBoundingClientRect()
@@ -1316,6 +1305,7 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
+    uniforms.uNight.value = 1 - light.daylight
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
@@ -1406,7 +1396,7 @@ export class VoxelLandscapeEngine {
       this.reducedMotion,
     )
     for (const [index, lamp] of this.lampLights.entries()) {
-      lamp.cube.visible = lamp.glow.visible = lamp.light.visible = this.nightLightFade > 0
+      lamp.cube.visible = lamp.glow.visible = this.nightLightFade > 0
       const source = lamp.source
       const motion = Math.sin(this.elapsed * source.speed + source.phase)
       // Long, independent quiet intervals separate soft changes tied to the bobbing.
@@ -1503,7 +1493,6 @@ export class VoxelLandscapeEngine {
     this.height = Math.max(1, bounds.height)
     this.camera.aspect = this.width / this.height
     this.camera.updateProjectionMatrix()
-    this.leanLook = this.leanLookRange()
     this.renderer.setPixelRatio(maxPixelRatio(this.lowPower))
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
@@ -1521,16 +1510,6 @@ export class VoxelLandscapeEngine {
     this.water.material.uniforms.uBedTexel.value.copy(this.submerged.bedTexel)
     this.resizeReflection()
     if (this.reducedMotion && this.rendered) this.requestFrame()
-  }
-
-  /** Turn toward the side only as far as the generated terrain still fills the frame. */
-  private leanLookRange() {
-    const { minX, maxX, minZ } = this.worldBounds
-    const depth = this.camera.position.z - minZ
-    const reach = (Math.min(maxX, -minX) * 0.9 - LEAN_SHIFT - 1.9) / depth
-    const view = Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect
-    const yaw = Math.max(0, Math.atan(reach) - Math.atan(view))
-    return LOOK_DISTANCE * Math.tan(yaw)
   }
 
   private resizeReflection() {

@@ -1,9 +1,10 @@
 import { AmbientMixer } from '../src/audio/ambient-mixer'
+import type { AudioFormat } from '../src/audio/ambient-mixer'
 import { required } from '../src/invariant'
 import { deferred } from './deferred'
 
 /** Render three minutes with the actual decoded clips, mixer and scheduling code. */
-export async function auditAudio() {
+export async function auditAudio(format: AudioFormat) {
   const offline = new OfflineAudioContext(2, 180 * 32000, 32000)
   let time = 0
   const { promise: waterfallReady, resolve: waterfallConnected } = deferred()
@@ -22,7 +23,7 @@ export async function auditAudio() {
     createBufferSource: () => offline.createBufferSource(),
     decodeAudioData: (data: ArrayBuffer) => offline.decodeAudioData(data),
   }
-  const mixer = new AmbientMixer(clock)
+  const mixer = new AmbientMixer(clock, format)
   const daylight = { solarHour: 12, daylight: 1, rainIntensity: 0, windSpeed: 2 }
   mixer.setEnvironment({ ...daylight, waterfall: { intensity: 1, pan: -0.7 } })
   let deadline: ReturnType<typeof setTimeout> | undefined

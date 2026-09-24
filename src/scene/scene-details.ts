@@ -127,7 +127,7 @@ export class SceneDetails {
     this.caustics.update(
       time,
       wind,
-      (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
+      (0.65 * moonIntensity * (1 - daylight) + daylight) * intro,
       waterPointer,
       pointerLightStrength,
     )

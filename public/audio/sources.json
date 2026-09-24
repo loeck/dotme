@@ -8,7 +8,12 @@
     "verified": "2026-09-24",
     "excerptStart": 5,
     "duration": 60,
-    "sha256": "e2e0489dc8eb48d3f10d7685ffca0cafe48f7cf13ffcee1d30992c12fc055f8f"
+    "sha256": "e2e0489dc8eb48d3f10d7685ffca0cafe48f7cf13ffcee1d30992c12fc055f8f",
+    "opus": {
+      "bitrate": 56,
+      "gainDb": -0.36,
+      "sha256": "621153d0864d2d1ba19dd02241603b7d53d36a3c6dc9602c98f8495df0f6a568"
+    }
   },
   {
     "layer": "wind",
@@ -19,7 +24,12 @@
     "verified": "2026-09-24",
     "excerptStart": 7,
     "duration": 23,
-    "sha256": "70dd7706c833dd585eacdba3dab8827361fad3d0cb1de35530b659fd8a6e5032"
+    "sha256": "70dd7706c833dd585eacdba3dab8827361fad3d0cb1de35530b659fd8a6e5032",
+    "opus": {
+      "bitrate": 64,
+      "gainDb": -0.44,
+      "sha256": "d8a7a73fbec72015eb0f38bba26aeeef39e264ec9588fde7b2472d2522f8f265"
+    }
   },
   {
     "layer": "rain",
@@ -30,7 +40,12 @@
     "verified": "2026-09-24",
     "excerptStart": 20,
     "duration": 21,
-    "sha256": "fb814cdb9fe54b140ae276cd29c89c2b61ea31725cc946c81ed35dd40ed8e398"
+    "sha256": "fb814cdb9fe54b140ae276cd29c89c2b61ea31725cc946c81ed35dd40ed8e398",
+    "opus": {
+      "bitrate": 64,
+      "gainDb": -0.42,
+      "sha256": "85abbcff28acd2d7bf3ff1db99012d978175e3f1eea5095cb61e9cd695063e7a"
+    }
   },
   {
     "layer": "insects",
@@ -41,7 +56,12 @@
     "verified": "2026-09-24",
     "excerptStart": 8,
     "duration": 17,
-    "sha256": "5a9b1160fbaef37f520898f89eb10ae19f5bc29c478a0cac9bba0111b619f908"
+    "sha256": "5a9b1160fbaef37f520898f89eb10ae19f5bc29c478a0cac9bba0111b619f908",
+    "opus": {
+      "bitrate": 56,
+      "gainDb": -0.46,
+      "sha256": "cee58b8ec82ccd408035e4216ff930ffe92c7d48e57d5ba4d6fac66e1891dacd"
+    }
   },
   {
     "layer": "birds",
@@ -52,7 +72,12 @@
     "verified": "2026-09-24",
     "excerptStart": 4,
     "duration": 6,
-    "sha256": "0bdc787ce089bef66c7ff1ce09aa09a022e6a6f727a4f3adc987c644673a7b69"
+    "sha256": "0bdc787ce089bef66c7ff1ce09aa09a022e6a6f727a4f3adc987c644673a7b69",
+    "opus": {
+      "bitrate": 56,
+      "gainDb": -0.27,
+      "sha256": "bd694c3322e90461fbd7b423f2897c52782d4ae0539f5a40e3eccf288e4842e8"
+    }
   },
   {
     "layer": "waterfall",
@@ -71,6 +96,11 @@
       "Gain reduced by 5.7 dB; final mean -30.0 dBFS and peak -8.2 dBFS measured after MP3 decoding.",
       "Mono, 32000 Hz, MP3 80 kbit/s; source metadata removed."
     ],
-    "sha256": "1e80a62db667cefa87b8ef34c61faada066a6726d289b0a27d2480e7469885c6"
+    "sha256": "1e80a62db667cefa87b8ef34c61faada066a6726d289b0a27d2480e7469885c6",
+    "opus": {
+      "bitrate": 64,
+      "gainDb": -0.4,
+      "sha256": "51245e61de7f044d237db83d12c9493608aa6f10f705fb6527b552c74e651357"
+    }
   }
 ]

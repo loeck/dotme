@@ -76,10 +76,11 @@ export function initAmbientSound(autoplay = true) {
         disable()
         return
       }
-      // No mixer or MP3 download until the browser has actually allowed playback.
+      // No mixer or audio download until the browser has actually allowed playback.
       const { AmbientMixer } = await import('../audio/ambient-mixer')
       if (!isCurrent()) return
-      const instance = new AmbientMixer(audioContext)
+      const format = new Audio().canPlayType('audio/ogg; codecs="opus"') ? 'ogg' : 'mp3'
+      const instance = new AmbientMixer(audioContext, format)
       mixer = instance
       instance.setEnvironment(environment)
       await instance.load()

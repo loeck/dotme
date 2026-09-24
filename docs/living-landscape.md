@@ -22,7 +22,12 @@ information dialog.
 | Waterfall | [Joseph SARDIN, Mini waterfall](https://bigsoundbank.com/mini-waterfall-s0996.html)                    | 00:01–00:25, circular crossfade |     23 s |
 
 Base clips are processed with FFmpeg: mono, 32 kHz, high-pass 100 Hz, low-pass 11 kHz,
-`loudnorm=I=-27:TP=-9:LRA=7`, MP3 `libmp3lame` at 80 kbit/s. The mixer schedules
+`loudnorm=I=-27:TP=-9:LRA=7`, MP3 `libmp3lame` at 80 kbit/s. Browsers that report Ogg Opus
+support load `.ogg` copies instead, encoded from the same unencoded chain with `libopus` VBR at the
+lowest rate whose third-octave spectral distance to that chain matches the MP3: 56 kbit/s for water,
+insects and birds, 64 kbit/s for the others. Below 56 kbit/s, libopus limits mono to an 8 kHz band.
+Each copy is encoded with a per-layer gain, recorded in the manifest, that matches its MP3 loudness.
+If an Ogg clip fails to load or decode, the mixer switches to the MP3 clips. The mixer schedules
 1.5-second linear overlap envelopes on the audio clock for the secondary loops.
 Water plays random 24–36 second passages of the 60-second recording with four-second
 crossfades and separated start offsets, preserving its natural pitch. Water gain is
@@ -46,7 +51,7 @@ the context is running and playback is enabled. The mixer is a separate lazy chu
 A fresh page attempts playback after its first complete scene frame. The sound and
 information controls appear with that frame. The sound button remains off while playback
 is pending and switches on only when the mixer is running. If browser autoplay policy
-refuses or leaves the context suspended after 300 ms, it stays off without fetching MP3s
+refuses or leaves the context suspended after 300 ms, it stays off without fetching audio
 or automatically retrying later. Explicit activation creates/
 resumes the same context synchronously in the click handler, then loads the mixer.
 [Browser autoplay rules](https://developer.mozilla.org/en-US/docs/Web/Media/Guides/Autoplay)

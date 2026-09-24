@@ -77,7 +77,7 @@ test.beforeEach(async ({ page }, info) => {
 test('pending autoplay returns to off without downloading or starting later', async ({ page }) => {
   const requests: string[] = []
   page.on('request', (r) => {
-    if (r.url().endsWith('.mp3')) requests.push(r.url())
+    if (r.url().endsWith('.ogg')) requests.push(r.url())
   })
   await page.goto('/?seed=42')
   await waitForScene(page)
@@ -101,7 +101,7 @@ for (const { seed, waterfall } of [
   }) => {
     const requests: string[] = []
     page.on('request', (request) => {
-      if (request.url().endsWith('.mp3')) requests.push(request.url())
+      if (request.url().endsWith('.ogg')) requests.push(request.url())
     })
     await page.goto(`/?seed=${seed}&startTime=12:00`)
     await waitForScene(page)
@@ -112,7 +112,7 @@ for (const { seed, waterfall } of [
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(button).toHaveAttribute('aria-busy', 'false')
     await expect.poll(() => requests.length).toBe(waterfall ? 6 : 5)
-    expect(requests.some((url) => url.endsWith('/audio/waterfall.mp3'))).toBe(waterfall)
+    expect(requests.some((url) => url.endsWith('/audio/waterfall.ogg'))).toBe(waterfall)
     const snapshot = await page.evaluate(() => {
       const c = window.testAudioContexts ?? []
       const context = c[0]
@@ -134,9 +134,9 @@ test('cancels a pending load without delayed playback and allows retry', async (
   const pendingRoutes: Route[] = []
   const failedRequests: string[] = []
   page.on('requestfailed', (request) => {
-    if (request.url().endsWith('.mp3')) failedRequests.push(request.url())
+    if (request.url().endsWith('.ogg')) failedRequests.push(request.url())
   })
-  await page.route('**/audio/*.mp3', (route) => {
+  await page.route('**/audio/*.ogg', (route) => {
     pendingRoutes.push(route)
   })
   await page.goto('/?seed=42')
@@ -152,7 +152,7 @@ test('cancels a pending load without delayed playback and allows retry', async (
   await Promise.all(pendingRoutes.map((route) => route.continue().catch(() => {})))
   await expect.poll(() => failedRequests.length).toBe(5)
   await expect.poll(() => page.evaluate(audioState)).toBe('suspended')
-  await page.unroute('**/audio/*.mp3')
+  await page.unroute('**/audio/*.ogg')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'true')
@@ -164,15 +164,15 @@ test('cancels a pending load without delayed playback and allows retry', async (
 test('keeps available layers on secondary errors, but base-water failures are accessible and retryable', async ({
   page,
 }) => {
-  await page.route('**/audio/wind.mp3', (route) => route.abort())
-  await page.route('**/audio/water.mp3', (route) => route.abort())
+  await page.route('**/audio/wind.*', (route) => route.abort())
+  await page.route('**/audio/water.*', (route) => route.abort())
   await page.goto('/?seed=42')
   await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
   await expect(page.locator('[data-sound-status]')).toContainText('Ambient sound is unavailable')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
-  await page.unroute('**/audio/water.mp3')
+  await page.unroute('**/audio/water.*')
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
@@ -237,7 +237,7 @@ test('decodes within the total buffer budget and draws both icons with GPU contr
     const context = new OfflineAudioContext(1, 1, 32000)
     const buffers = await Promise.all(
       ['water', 'wind', 'rain', 'insects', 'birds', 'waterfall'].map(async (name) => {
-        const response = await fetch(`/audio/${name}.mp3`)
+        const response = await fetch(`/audio/${name}.ogg`)
         return context.decodeAudioData(await response.arrayBuffer())
       }),
     )

@@ -3,8 +3,9 @@
 Unit tests cover deterministic physics, wave stability, weather validation, audio
 scheduling, worker cancellation and resource lifecycle. The default browser suite uses
 observable loading states and public DOM behavior. It covers essential journeys on
-Chromium and mobile WebKit. Chromium exercises WebGPU rendering; mobile WebKit checks
-the static profile when a WebGPU adapter is unavailable.
+Chromium and mobile WebKit. Chromium exercises WebGPU rendering; mobile WebKit renders
+through WebGL 2 when a WebGPU adapter is unavailable, and checks the static profile when
+neither backend exists.
 
 The default suite targets at most 60 seconds locally and 90 seconds in CI; those global
 limits are configured in Playwright. Record the actual duration from each validation run. Reuse the existing production
@@ -65,6 +66,6 @@ the moon shadow refreshed at 4 Hz and one visible lamp shadow per frame, a third
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
 
 On these devices, leaning the phone left or right (gravity projected onto the screen,
-so an upright phone stays stable) shifts and turns the camera. The turn is limited to
-what the generated terrain still covers at the current aspect ratio. iOS asks for motion
+so an upright phone stays stable) drives the same camera parallax as the desktop mouse.
+iOS asks for motion
 access on the first tap; touch parallax remains available when it is denied.

@@ -90,25 +90,37 @@ test('unavailable graphics leave keyboard profile access and do not request the 
   expect(errors).toEqual([])
 })
 
-test('page lifecycle restores one scene on the same canvas and seed', async ({ page }) => {
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?seed=42&startTime=00:00')
-  const canvas = page.locator('#scene-canvas')
-  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  await canvas.evaluate((element) => element.setAttribute('data-original-canvas', 'true'))
-  await page.evaluate(() =>
-    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
-  )
-  await expect(canvas).toHaveCount(1)
-  await page.evaluate(() => {
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+for (const backend of ['webgpu', 'webgl'] as const)
+  test(`page lifecycle restores one ${backend} scene on the same canvas and seed`, async ({
+    page,
+  }) => {
+    if (backend === 'webgl')
+      await page.addInitScript(() => {
+        Object.defineProperty(Navigator.prototype, 'gpu', {
+          configurable: true,
+          get: () => undefined,
+        })
+      })
+    await page.emulateMedia({ reducedMotion: 'reduce' })
+    await page.goto('/?seed=42&startTime=00:00')
+    const canvas = page.locator('#scene-canvas')
+    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+    await canvas.evaluate((element) => element.setAttribute('data-original-canvas', 'true'))
+    await page.evaluate(() =>
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
+    )
+    await expect(canvas).toHaveCount(1)
+    await page.evaluate(() => {
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+    })
+    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+    await expect(canvas).toHaveCount(1)
+    await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
+    await expect(canvas).toHaveAttribute('data-seed', '42')
+    await expect(canvas).toHaveAttribute('data-backend', backend)
+    await expect(canvas).toHaveAttribute('data-scene-rendered', 'true')
   })
-  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  await expect(canvas).toHaveCount(1)
-  await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
-  await expect(canvas).toHaveAttribute('data-seed', '42')
-})
 
 test('cancels a pending landscape import and can restore after it resolves', async ({ page }) => {
   const barrier = deferred()

@@ -10,9 +10,13 @@ const mixer = vi.hoisted(() => ({
   pause: vi.fn<() => void>(),
   dispose: vi.fn<() => void>(),
   setEnvironment: vi.fn<() => void>(),
+  create: vi.fn<(context: unknown, format: string) => void>(),
 }))
 vi.mock('../audio/ambient-mixer', () => ({
   AmbientMixer: class {
+    constructor(context: unknown, format: string) {
+      mixer.create(context, format)
+    }
     load = mixer.load
     resume = mixer.resume
     pause = mixer.pause
@@ -91,6 +95,20 @@ it('keeps the icon off while loading and enables it only after playback starts',
   expect(mixer.resume).toHaveBeenCalledOnce()
   expect(button().getAttribute('aria-busy')).toBe('false')
 })
+
+for (const [support, format] of [
+  ['probably', 'ogg'],
+  ['', 'mp3'],
+] as const)
+  it(`loads ${format} audio when Opus support is "${support}"`, async () => {
+    const canPlayType = vi.spyOn(HTMLMediaElement.prototype, 'canPlayType').mockReturnValue(support)
+    const sound = initAmbientSound(false)
+    dispose = () => sound.dispose()
+    button().click()
+    await vi.waitFor(() => expect(mixer.create).toHaveBeenCalledOnce())
+    expect(canPlayType).toHaveBeenCalledWith('audio/ogg; codecs="opus"')
+    expect(mixer.create).toHaveBeenCalledWith(expect.anything(), format)
+  })
 
 it('cancels pending activation on a second click without a late enabled state', async () => {
   const pending = pendingLoad()

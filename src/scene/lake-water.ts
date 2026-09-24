@@ -41,13 +41,14 @@ import {
 } from 'three/webgpu'
 import type { BufferGeometry, Camera, Node } from 'three/webgpu'
 
+import { clipDepth } from './backend-nodes'
 import { cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
 import { pointerLightAt } from './pointer-light'
 import type { PointerLightUniforms } from './pointer-light'
 import { WATER_IOR, WaterLightingModel } from './water-lighting'
 import { contactNoise } from './water-noise'
-import { createWindNodes, fieldUvNode, windFieldNode } from './water-surface'
+import { createWindNodes, fieldUvNode, rippleSlopeNode, windFieldNode } from './water-surface'
 
 type LakeInputs = {
   wind: Omit<ReturnType<typeof createWindNodes>, 'uTime'>
@@ -81,6 +82,7 @@ export class LakeWaterMaterial extends NodeMaterial {
     uWaterScatter: uniform(new Color().setRGB(0.0022, 0.0043, 0.0065)),
     uWaterClarity: uniform(1),
     uWaterAgitation: uniform(0.2),
+    uNight: uniform(0),
     uEnvironment: pmremTexture(this.empty),
     uPointerLightPosition: uniform(new Vector3()),
     uPointerLightSource: uniform(new Vector3()),
@@ -175,7 +177,13 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       wetHeight(p.add(vec2(0, stepSize))).sub(wetHeight(p.sub(vec2(0, stepSize)))),
     ).div(stepSize.mul(2))
     const rain = u.uRainSlopeMap.sample(screenUV).mul(u.uRainSlopesEnabled)
-    const incidentSlope = field.yz.add(rippleSlope).add(rain.xy)
+    const capillary = rippleSlopeNode(
+      p,
+      footprint,
+      clamp(u.uWindResponse.y, 0.4, 1.6).mul(u.uWaterAgitation.mul(0.6).add(0.8)),
+      u,
+    )
+    const incidentSlope = field.yz.add(rippleSlope).add(rain.xy).add(capillary)
     const slope = incidentSlope.sub(
       shoreNormal
         .mul(incidentSlope.dot(shoreNormal))
@@ -190,7 +198,11 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(0.97963)
       .add(0.02037)
     const reveal = exp(p.sub(u.uPointer.xy).dot(p.sub(u.uPointer.xy)).div(-2.8)).mul(u.uPointer.z)
-    const roughness = mix(mix(0.035, 0.085, u.uWaterAgitation), 0.025, reveal)
+    const roughness = mix(
+      mix(0.035, 0.085, u.uWaterAgitation).mul(mix(1, 0.7, u.uNight)),
+      0.025,
+      reveal,
+    )
       .pow(2)
       .add(min(0.04, rain.z))
       .sqrt()
@@ -265,7 +277,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const bedUv = clamp(projectedUv, u.uBedTexel, vec2(1).sub(u.uBedTexel))
     const bottomDepth = u.uBedDepth.sample(bedUv.mul(u.uBedAtlas.xy)).r
     const bottomPoint = u.uBedInverseViewProjection.mul(
-      vec4(bedUv.flipY().mul(2).sub(1), bottomDepth, 1),
+      vec4(bedUv.flipY().mul(2).sub(1), clipDepth(bottomDepth), 1),
     )
     const actualBottom = bottomPoint.xyz.div(bottomPoint.w)
     const valid = float(1)
@@ -278,7 +290,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(2.8, 6, depth))
       .mul(float(1).sub(smoothstep(24, 48, cameraPosition.xz.sub(p).length())))
     const clarity = max(u.uWaterClarity.mul(nearShallow.mul(0.1).add(0.9)), reveal)
-    const absorption = mix(vec3(0.48, 0.22, 0.14), vec3(0.18, 0.035, 0.016), clarity)
+    const absorption = mix(vec3(0.48, 0.22, 0.14), vec3(0.3, 0.05, 0.028), clarity)
     const transmission = exp(absorption.mul(path).negate())
     const bedBlur = u.uBedTexel.mul(mix(1.1, 0.18, clarity))
     const bed = u.uBedColor
@@ -299,11 +311,19 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
           .rgb.mul(0.3),
       )
     const scatter = u.uWaterScatter.rgb
-      .mul(inputs ? mix(0.25, 1, cloudShadow(positionWorld, inputs.cloud)) : float(1))
+      .mul(
+        inputs
+          ? mix(mix(0.25, 0.8, u.uNight), 1, cloudShadow(positionWorld, inputs.cloud))
+          : float(1),
+      )
       .mul(mix(vec3(1.18, 1.12, 0.92), vec3(0.8, 1.08, 1.12), u.uWaterClarity))
+    const shallow = float(1).sub(smoothstep(0.3, 3.2, depth))
+    const litBed = bed
+      .mul(exp(absorption.mul(depth).negate()))
+      .mul(mix(vec3(1), vec3(0.34, 0.58, 0.8).mul(shallow.mul(0.9).add(0.1)), u.uNight))
     const transmitted = mix(
       scatter,
-      bed.mul(transmission).add(scatter.mul(vec3(1).sub(transmission))),
+      litBed.mul(transmission).add(scatter.mul(vec3(1).sub(transmission))),
       valid,
     )
     const fishUv = clamp(screenUV.add(normal.xz.mul(0.0025)), 0.001, 0.999)
@@ -311,7 +331,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const fish = u.uBedColor.sample(fishAtlasUv)
     const fishDepth = u.uBedDepth.sample(fishAtlasUv).r
     const fishPoint = u.uFishInverseViewProjection.mul(
-      vec4(fishUv.flipY().mul(2).sub(1), fishDepth, 1),
+      vec4(fishUv.flipY().mul(2).sub(1), clipDepth(fishDepth), 1),
     )
     const fishPath = max(0, float(-0.035).sub(fishPoint.y.div(fishPoint.w)))
       .mul(WATER_IOR)
@@ -324,7 +344,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const window = float(1)
       .sub(smoothstep(30, 85, cameraPosition.xz.sub(p).length()))
       .mul(u.uWaterClarity)
-    const reflectance = mix(fresnel, min(fresnel, 0.24), window)
+    const reflectance = mix(fresnel, min(fresnel, mix(0.14, 0.1, u.uNight)), window)
     const shorePixel = min(1, fwidth(shore)),
       distance = max(0, shore)
     const crest = smoothstep(-0.018, 0.04, field.x.add(state.x))

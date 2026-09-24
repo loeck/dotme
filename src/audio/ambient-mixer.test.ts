@@ -1,8 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
 
 import { required } from '../invariant'
-import { AmbientMixer } from './ambient-mixer'
-import type { AudioSample } from './ambient-mixer'
+import { AUDIO_LAYERS, AmbientMixer } from './ambient-mixer'
+import type { AudioFormat, AudioSample } from './ambient-mixer'
 
 class Param {
   value = 0
@@ -47,7 +47,7 @@ class Source extends Node {
   }
   addEventListener() {}
 }
-function fixture() {
+function fixture(format?: AudioFormat) {
   const voices: Source[] = [],
     gains: Node[] = [],
     panners: Panner[] = [],
@@ -87,7 +87,15 @@ function fixture() {
       return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }
     }),
   )
-  return { context, voices, gains, panners, samples, requests, mixer: new AmbientMixer(context) }
+  return {
+    context,
+    voices,
+    gains,
+    panners,
+    samples,
+    requests,
+    mixer: new AmbientMixer(context, format),
+  }
 }
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -173,6 +181,35 @@ it('accepts missing secondary layers and rejects missing base water', async () =
   )
   await expect(failed.load()).rejects.toThrow('Water audio unavailable')
   failed.dispose()
+})
+
+it('requests every layer in the selected format', async () => {
+  const { mixer, requests } = fixture('ogg')
+  await mixer.load()
+  expect(requests.map((request) => request.url)).toEqual(
+    AUDIO_LAYERS.map((layer) => `/audio/${layer}.ogg`),
+  )
+  mixer.dispose()
+})
+
+it('falls back to MP3 after an Ogg clip fails', async () => {
+  const { mixer } = fixture('ogg')
+  const urls: string[] = []
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (url: string) => {
+      urls.push(url)
+      return {
+        ok: url !== '/audio/water.ogg',
+        status: 404,
+        arrayBuffer: async () => new ArrayBuffer(0),
+      }
+    }),
+  )
+  await mixer.load()
+  expect(urls).toContain('/audio/water.mp3')
+  expect(urls.filter((url) => url.endsWith('.ogg'))).toHaveLength(AUDIO_LAYERS.length)
+  mixer.dispose()
 })
 
 const quietEnvironment = { solarHour: 0, daylight: 0, windSpeed: 0, rainIntensity: 0 }
@@ -280,9 +317,7 @@ it('does not start a newly decoded waterfall while playback is paused', async ()
   await vi.waitFor(() => expect(decode).toHaveBeenCalledTimes(1))
   mixer.pause()
   required(finish)()
-  await pending
-  await Promise.resolve()
-  await Promise.resolve()
+  await vi.advanceTimersByTimeAsync(0)
   expect(voices).toHaveLength(4)
   mixer.resume()
   expect(voices).toHaveLength(5)

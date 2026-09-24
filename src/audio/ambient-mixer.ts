@@ -5,6 +5,7 @@ import { waterPhrase } from './water-phrases'
 
 export const AUDIO_LAYERS = ['water', 'wind', 'rain', 'insects', 'birds'] as const
 type Layer = (typeof AUDIO_LAYERS)[number] | 'waterfall'
+export type AudioFormat = 'ogg' | 'mp3'
 const CROSSFADE = 1.5
 
 export interface AudioSample {
@@ -72,9 +73,11 @@ export class AmbientMixer {
   }
 
   private readonly context: AmbientAudioContext
+  private format: AudioFormat
 
-  constructor(context: AmbientAudioContext) {
+  constructor(context: AmbientAudioContext, format: AudioFormat = 'mp3') {
     this.context = context
+    this.format = format
     this.master = context.createGain()
     this.master.gain.value = 0
     this.master.connect(context.destination)
@@ -99,15 +102,27 @@ export class AmbientMixer {
     this.loadWaterfall()
   }
 
-  private async loadLayer(layer: Layer) {
-    const response = await fetch(`/audio/${layer}.mp3`, {
+  private async decode(layer: Layer, format: AudioFormat) {
+    const response = await fetch(`/audio/${layer}.${format}`, {
       signal: AbortSignal.any([this.loading.signal, AbortSignal.timeout(15000)]),
     })
     if (!response.ok) throw new Error(`Audio ${layer}: ${response.status}`)
     const data = await response.arrayBuffer()
     if (this.disposed) return undefined
-    const buffer = await this.context.decodeAudioData(data)
-    if (this.disposed) return undefined
+    return this.context.decodeAudioData(data)
+  }
+
+  private async loadLayer(layer: Layer) {
+    const format = this.format
+    let buffer: AudioSample | undefined
+    try {
+      buffer = await this.decode(layer, format)
+    } catch (error) {
+      if (format === 'mp3' || this.loading.signal.aborted) throw error
+      this.format = 'mp3'
+      buffer = await this.decode(layer, 'mp3')
+    }
+    if (!buffer || this.disposed) return undefined
     const bytes = buffer.length * buffer.numberOfChannels * 4
     if (this.decodedBytes + bytes > 24 * 1024 * 1024)
       throw new Error('Audio memory budget exceeded')

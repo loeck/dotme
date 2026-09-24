@@ -124,6 +124,12 @@ export function createWindNodes() {
   }
 }
 
+export const windRotate = (u: ReturnType<typeof createWindNodes>, x: number, z: number) =>
+  vec2(
+    u.uWindRotation.x.mul(x).sub(u.uWindRotation.y.mul(z)),
+    u.uWindRotation.y.mul(x).add(u.uWindRotation.x.mul(z)),
+  )
+
 export function windFieldNode(
   p: Node<'vec2'>,
   footprint: Node<'float'>,
@@ -136,10 +142,7 @@ export function windFieldNode(
     const gradient = vec2(0).toVar()
     const velocity = float(0).toVar()
     for (const w of WAVE_SPECTRUM) {
-      const k = vec2(
-        u.uWindRotation.x.mul(w.kx).sub(u.uWindRotation.y.mul(w.kz)),
-        u.uWindRotation.y.mul(w.kx).add(u.uWindRotation.x.mul(w.kz)),
-      )
+      const k = windRotate(u, w.kx, w.kz)
       const spatial = p.dot(k)
       const crossK = vec2(k.y.negate(), k.x).mul(w.crossScale)
       const crossPhase = p
@@ -201,6 +204,54 @@ export function windFieldNode(
       )
     }
     return vec4(height, gradient, velocity)
+  })()
+}
+
+const RIPPLES = (
+  [
+    [0.35, 0.93, 0.034, 0.7],
+    [-0.9, 0.61, 0.028, 2.9],
+    [1.6, 0.43, 0.024, 4.4],
+    [-0.2, 0.29, 0.018, 1.2],
+    [2.4, 0.19, 0.013, 5.6],
+  ] as const
+).map(([angle, wavelength, slope, phase]) => {
+  const k = (Math.PI * 2) / wavelength
+  return {
+    wavelength,
+    slope,
+    phase,
+    k,
+    dx: Math.cos(angle),
+    dz: Math.sin(angle),
+    omega: Math.sqrt(9.81 * k),
+  }
+})
+
+/** Shading-only capillary slopes; heights stay with the shared spectrum. */
+export function rippleSlopeNode(
+  p: Node<'vec2'>,
+  footprint: Node<'float'>,
+  strength: Node<'float'>,
+  u: ReturnType<typeof createWindNodes>,
+) {
+  return Fn(() => {
+    const slope = vec2(0).toVar()
+    for (const w of RIPPLES) {
+      const direction = windRotate(u, w.dx, w.dz)
+      const crest = sin(
+        p
+          .dot(vec2(direction.y.negate(), direction.x))
+          .mul(3.1 / w.wavelength)
+          .add(w.phase * 3),
+      )
+        .mul(0.5)
+        .add(0.5)
+      const fade = float(1).sub(smoothstep(w.wavelength * 0.12, w.wavelength * 0.45, footprint))
+      const phase = p.dot(direction).mul(w.k).sub(u.uTime.mul(w.omega)).add(w.phase)
+      slope.addAssign(direction.mul(cos(phase).mul(w.slope).mul(fade).mul(crest.mul(0.7).add(0.3))))
+    }
+    return slope.mul(strength)
   })()
 }
 
