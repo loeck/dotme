@@ -76,47 +76,41 @@ export class ProfileLuminance {
       (panel.right - canvas.left) / canvas.width,
       1 - (panel.top - canvas.top) / canvas.height,
     )
-    const previous = renderer.getRenderTarget()
+    let timer: ReturnType<typeof setTimeout> | undefined
     try {
-      renderer.setRenderTarget(this.target)
-      gl.beginQuery(gl.ANY_SAMPLES_PASSED, query)
+      const previous = renderer.getRenderTarget()
       try {
-        renderer.render(this.scene, this.camera)
+        renderer.setRenderTarget(this.target)
+        gl.beginQuery(gl.ANY_SAMPLES_PASSED, query)
+        try {
+          renderer.render(this.scene, this.camera)
+        } finally {
+          gl.endQuery(gl.ANY_SAMPLES_PASSED)
+        }
       } finally {
-        gl.endQuery(gl.ANY_SAMPLES_PASSED)
+        renderer.setRenderTarget(previous)
       }
-    } catch (error) {
-      gl.deleteQuery(query)
-      throw error
+      // Even fenced getBufferSubData can stall Chrome behind later queued frames.
+      // Poll the classification on later tasks, including in reduced motion.
+      return await new Promise<boolean>((resolve, reject) => {
+        this.cancelRead = () => reject(new Error('Backdrop meter disposed'))
+        const poll = () => {
+          try {
+            if (gl.isContextLost()) throw new Error('Backdrop meter context lost')
+            if (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE))
+              resolve(!!gl.getQueryParameter(query, gl.QUERY_RESULT))
+            else timer = setTimeout(poll, 16)
+          } catch (error) {
+            reject(error)
+          }
+        }
+        timer = setTimeout(poll, 16)
+      })
     } finally {
-      renderer.setRenderTarget(previous)
+      clearTimeout(timer)
+      gl.deleteQuery(query)
+      this.cancelRead = undefined
     }
-    // Even fenced getBufferSubData can stall Chrome behind later queued frames.
-    // An occlusion query answers the only question the palette needs, without
-    // copying a pixel to the CPU. Poll on later tasks, including in reduced motion.
-    return new Promise<boolean>((resolve, reject) => {
-      let timer: ReturnType<typeof setTimeout>
-      const release = () => {
-        clearTimeout(timer)
-        gl.deleteQuery(query)
-        this.cancelRead = undefined
-      }
-      this.cancelRead = () => {
-        release()
-        reject(new Error('Backdrop meter disposed'))
-      }
-      const poll = () => {
-        if (gl.isContextLost()) {
-          release()
-          reject(new Error('Backdrop meter context lost'))
-        } else if (gl.getQueryParameter(query, gl.QUERY_RESULT_AVAILABLE)) {
-          const light = !!gl.getQueryParameter(query, gl.QUERY_RESULT)
-          release()
-          resolve(light)
-        } else timer = setTimeout(poll, 16)
-      }
-      timer = setTimeout(poll, 16)
-    })
   }
 
   dispose() {

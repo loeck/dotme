@@ -109,4 +109,24 @@ describe('nonblocking backdrop contrast', () => {
     expect(f.gl.createQuery).toHaveBeenCalledTimes(1)
     f.meter.dispose()
   })
+
+  it('releases a failed poll and allows the next measurement', async () => {
+    const f = fixture()
+    f.gl.getQueryParameter.mockImplementationOnce(() => {
+      throw new Error('query failed')
+    })
+    const result = f.read().catch((error: Error) => error)
+    await vi.advanceTimersByTimeAsync(16)
+    await expect(result).resolves.toMatchObject({ message: 'query failed' })
+    expect(f.gl.deleteQuery).toHaveBeenCalledTimes(1)
+    expect(vi.getTimerCount()).toBe(0)
+
+    f.available()
+    const next = f.read()
+    await vi.advanceTimersByTimeAsync(16)
+    await expect(next).resolves.toBe(true)
+    expect(f.gl.deleteQuery).toHaveBeenCalledTimes(2)
+    expect(vi.getTimerCount()).toBe(0)
+    f.meter.dispose()
+  })
 })
