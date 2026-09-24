@@ -41,6 +41,7 @@ import {
 } from 'three/webgpu'
 import type { BufferGeometry, Camera, Node } from 'three/webgpu'
 
+import { clipDepth } from './backend-nodes'
 import { cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
 import { pointerLightAt } from './pointer-light'
@@ -276,7 +277,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const bedUv = clamp(projectedUv, u.uBedTexel, vec2(1).sub(u.uBedTexel))
     const bottomDepth = u.uBedDepth.sample(bedUv.mul(u.uBedAtlas.xy)).r
     const bottomPoint = u.uBedInverseViewProjection.mul(
-      vec4(bedUv.flipY().mul(2).sub(1), bottomDepth, 1),
+      vec4(bedUv.flipY().mul(2).sub(1), clipDepth(bottomDepth), 1),
     )
     const actualBottom = bottomPoint.xyz.div(bottomPoint.w)
     const valid = float(1)
@@ -330,7 +331,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const fish = u.uBedColor.sample(fishAtlasUv)
     const fishDepth = u.uBedDepth.sample(fishAtlasUv).r
     const fishPoint = u.uFishInverseViewProjection.mul(
-      vec4(fishUv.flipY().mul(2).sub(1), fishDepth, 1),
+      vec4(fishUv.flipY().mul(2).sub(1), clipDepth(fishDepth), 1),
     )
     const fishPath = max(0, float(-0.035).sub(fishPoint.y.div(fishPoint.w)))
       .mul(WATER_IOR)

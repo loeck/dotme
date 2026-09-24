@@ -35,9 +35,9 @@ export class DepthFocus {
   private readonly depth = texture(this.depthTexture)
   private readonly cssPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
-  constructor(renderer: WebGPURenderer, mobile: boolean) {
+  constructor(renderer: WebGPURenderer, lowPower: boolean) {
     this.target.texture.name = 'Landscape lens color'
-    const samples = mobile ? 12 : 20
+    const samples = lowPower ? 12 : 20
     const distance = (coord: Node<'vec2'>) => {
       const d = this.depth.sample(coord).r
       return this.cameraRange.x

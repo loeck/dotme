@@ -38,6 +38,7 @@ import {
 } from 'three/webgpu'
 import type { WebGPURenderer } from 'three/webgpu'
 
+import { rendersWithWebGL } from './backend-nodes'
 import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { prepareWaterMask } from './lake-geometry-data'
@@ -299,6 +300,11 @@ export class WaterSimulation {
     }
   }
 
+  /** WebGPU reads rows in the field's world-z order; WebGL reads them bottom-up. */
+  private readbackRow(row: number, bottomUp = rendersWithWebGL(this.renderer)) {
+    return bottomUp ? this.resolution - 1 - row : row
+  }
+
   async heightAt(x: number, z: number) {
     if (this.disposed) return 0
     const px = Math.floor(((x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * this.resolution)
@@ -307,7 +313,7 @@ export class WaterSimulation {
     const data = await this.renderer.readRenderTargetPixelsAsync(
       this.targets[this.current],
       px,
-      pz,
+      this.readbackRow(pz),
       1,
       1,
     )
@@ -325,10 +331,11 @@ export class WaterSimulation {
       this.resolution,
       this.resolution,
     )
-    const state = new Float32Array(this.resolution * this.resolution * 2)
-    for (let i = 0; i < this.resolution * this.resolution; i++) {
-      // WebGPU readback preserves the field's top-to-bottom world-z ordering.
-      const pixel = i * 4
+    const n = this.resolution
+    const state = new Float32Array(n * n * 2)
+    const bottomUp = rendersWithWebGL(this.renderer)
+    for (let i = 0; i < n * n; i++) {
+      const pixel = (this.readbackRow(Math.floor(i / n), bottomUp) * n + (i % n)) * 4
       const height = pixels[pixel] ?? 0,
         velocity = pixels[pixel + 1] ?? 0
       state[i * 2] = pixels instanceof Uint16Array ? DataUtils.fromHalfFloat(height) : height

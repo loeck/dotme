@@ -7,6 +7,7 @@ import { chromium, webkit, devices } from '@playwright/test'
 import { preview } from 'vite'
 
 import { chromiumLaunchOptions } from '../e2e/browser-options.ts'
+import { availableBackend } from '../e2e/graphics-support.ts'
 import { parisWeatherFixture } from '../src/weather/paris.fixture.ts'
 
 type LoadingMetrics = {
@@ -144,19 +145,15 @@ try {
           const loadingRun = { profile, scenario, repeat, ...loading }
           loadingRuns.push(loadingRun)
           if ((await page.locator('html').getAttribute('data-scene-loading')) === 'failed') {
-            const supported = await page.evaluate(async () =>
-              navigator.gpu
-                ? Boolean(await navigator.gpu.requestAdapter().catch(() => null))
-                : false,
-            )
+            const supported = Boolean(await page.evaluate(availableBackend))
             if (profile !== 'mobile' || supported)
-              throw new Error(`${profile}: WebGPU scene failed to initialize`)
+              throw new Error(`${profile}: scene failed to initialize`)
             unsupportedProfiles.add(profile)
             console.log(
               JSON.stringify({
                 profile,
                 status: 'static-profile',
-                reason: 'WebGPU adapter unavailable',
+                reason: 'WebGPU and WebGL 2 unavailable',
               }),
             )
             await page.close()
