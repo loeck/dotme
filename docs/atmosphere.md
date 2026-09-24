@@ -1,8 +1,8 @@
 # Shared wind and volumetric cloud layers
 
 The scene uses one seeded `WindModel` for cloud advection, analytic water, CPU
-pointer picking and wave scattering at rocks. React props and URL parameters are
-unchanged. Internal `WindOptions` support weak, strong and reversed-wind experiments;
+pointer picking and wave scattering at rocks. The TypeScript lifecycle preserves the engine's
+options and URL parameters. Internal `WindOptions` support weak, strong and reversed-wind experiments;
 there is no weather UI.
 
 ## Wind and water

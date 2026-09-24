@@ -26,7 +26,5 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
-        env:
-          NITRO_PRESET: vercel
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm e2e

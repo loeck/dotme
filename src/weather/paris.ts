@@ -1,0 +1,209 @@
+export type WeatherKind =
+  | 'clear'
+  | 'mainly-clear'
+  | 'partly-cloudy'
+  | 'overcast'
+  | 'fog'
+  | 'drizzle'
+  | 'rain'
+  | 'snow'
+  | 'thunderstorm'
+  | 'unknown'
+
+export interface WmoCondition {
+  kind: WeatherKind
+  freezing: boolean
+  hail: boolean
+  showers: boolean
+  rimeFog: boolean
+  snowGrains: boolean
+}
+
+/** Interpret Open-Meteo's WMO codes; unrecognized codes never imply clear weather. */
+export function interpretWmoCode(code: number): WmoCondition {
+  let kind: WeatherKind = 'unknown'
+  if (code === 0) kind = 'clear'
+  else if (code === 1) kind = 'mainly-clear'
+  else if (code === 2) kind = 'partly-cloudy'
+  else if (code === 3) kind = 'overcast'
+  else if ([45, 48].includes(code)) kind = 'fog'
+  else if ([51, 53, 55, 56, 57].includes(code)) kind = 'drizzle'
+  else if ([61, 63, 65, 66, 67, 80, 81, 82].includes(code)) kind = 'rain'
+  else if ([71, 73, 75, 77, 85, 86].includes(code)) kind = 'snow'
+  else if ([95, 96, 99].includes(code)) kind = 'thunderstorm'
+  return {
+    kind,
+    freezing: [56, 57, 66, 67].includes(code),
+    hail: code === 96 || code === 99,
+    showers: [80, 81, 82, 85, 86].includes(code),
+    rimeFog: code === 48,
+    snowGrains: code === 77,
+  }
+}
+
+export interface ParisWeather {
+  timezone: 'Europe/Paris'
+  /** Original API time, explicitly requested as UTC Unix seconds (no local-date parsing). */
+  timestampUnixSeconds: number
+  utcOffsetSeconds: number
+  /** Duration of backward-looking sums/averages, in seconds. Usually 900. */
+  intervalSeconds: number
+  weatherCode: number
+  isDay: boolean
+  temperatureC: number
+  apparentTemperatureC: number
+  relativeHumidityPercent: number
+  visibilityM: number
+  windSpeedMs: number
+  windGustsMs: number
+  windDirectionDegrees: number
+  cloudCoverPercent: number
+  /** Accumulations over intervalSeconds, NOT instantaneous rates. */
+  rainMm: number
+  showersMm: number
+  snowfallCm: number
+  condition: WmoCondition
+  indicators: {
+    /** Approximation: daylight and WMO 0 or 1; not measured sunshine. */
+    sunny: boolean
+    clouds: boolean
+    rain: boolean
+    snow: boolean
+    fog: boolean
+    thunderstorm: boolean
+    hail: boolean
+  }
+}
+
+const UNITS = {
+  temperature_2m: '°C',
+  apparent_temperature: '°C',
+  relative_humidity_2m: '%',
+  visibility: 'm',
+  wind_speed_10m: 'm/s',
+  wind_gusts_10m: 'm/s',
+  wind_direction_10m: '°',
+  cloud_cover: '%',
+  rain: 'mm',
+  showers: 'mm',
+  snowfall: 'cm',
+  weather_code: 'wmo code',
+  is_day: '',
+} as const
+
+function object(value: unknown, field: string): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new TypeError(`Invalid weather data: ${field}`)
+  }
+  return value as Record<string, unknown>
+}
+
+function number(
+  data: Record<string, unknown>,
+  key: string,
+  minimum = -Infinity,
+  maximum = Infinity,
+  integer = false,
+): number {
+  const value = data[key]
+  if (
+    typeof value !== 'number' ||
+    !Number.isFinite(value) ||
+    value < minimum ||
+    value > maximum ||
+    (integer && !Number.isSafeInteger(value))
+  ) {
+    throw new TypeError(`Invalid weather data: ${key}`)
+  }
+  return value
+}
+
+function parseParisWeather(value: unknown): ParisWeather {
+  const data = object(value, 'response')
+  const current = object(data.current, 'current')
+  const units = object(data.current_units, 'current_units')
+  for (const [key, unit] of Object.entries({ ...UNITS, time: 'unixtime', interval: 'seconds' })) {
+    if (units[key] !== unit) throw new TypeError(`Invalid weather unit: ${key}`)
+  }
+  if (data.timezone !== 'Europe/Paris') throw new TypeError('Invalid weather timezone')
+  const weatherCode = number(current, 'weather_code', 0, Infinity, true)
+  const isDay = number(current, 'is_day', 0, 1, true) === 1
+  const cloudCoverPercent = number(current, 'cloud_cover', 0, 100)
+  const rainMm = number(current, 'rain', 0)
+  const showersMm = number(current, 'showers', 0)
+  const snowfallCm = number(current, 'snowfall', 0)
+  const condition = interpretWmoCode(weatherCode)
+  return {
+    timezone: 'Europe/Paris',
+    timestampUnixSeconds: number(current, 'time', 0, 8_640_000_000_000, true),
+    utcOffsetSeconds: number(data, 'utc_offset_seconds', -86_400, 86_400, true),
+    intervalSeconds: number(current, 'interval', 1, Infinity, true),
+    weatherCode,
+    isDay,
+    temperatureC: number(current, 'temperature_2m', -273.15),
+    apparentTemperatureC: number(current, 'apparent_temperature', -273.15),
+    relativeHumidityPercent: number(current, 'relative_humidity_2m', 0, 100),
+    visibilityM: number(current, 'visibility', 0),
+    windSpeedMs: number(current, 'wind_speed_10m', 0),
+    windGustsMs: number(current, 'wind_gusts_10m', 0),
+    windDirectionDegrees: number(current, 'wind_direction_10m', 0, 360),
+    cloudCoverPercent,
+    rainMm,
+    showersMm,
+    snowfallCm,
+    condition,
+    indicators: {
+      sunny: isDay && (weatherCode === 0 || weatherCode === 1),
+      clouds: cloudCoverPercent > 0,
+      rain:
+        rainMm > 0 || showersMm > 0 || condition.kind === 'rain' || condition.kind === 'drizzle',
+      snow: snowfallCm > 0 || condition.kind === 'snow',
+      fog: condition.kind === 'fog',
+      thunderstorm: condition.kind === 'thunderstorm',
+      hail: condition.hail,
+    },
+  }
+}
+
+export class WeatherHttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Open-Meteo request failed (HTTP ${status})`)
+    this.name = 'WeatherHttpError'
+  }
+}
+
+/** On-demand only. Free API: non-commercial use; attribute Open-Meteo when integrating data. */
+export async function fetchParisWeather({
+  signal,
+}: { signal?: AbortSignal } = {}): Promise<ParisWeather> {
+  signal?.throwIfAborted()
+  const controller = new AbortController()
+  const abort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', abort, { once: true })
+  const timeout = setTimeout(() => {
+    controller.abort(
+      new DOMException('Open-Meteo request timed out after 10 seconds', 'TimeoutError'),
+    )
+  }, 10_000)
+  try {
+    const url = new URL('https://api.open-meteo.com/v1/forecast')
+    url.search = new URLSearchParams({
+      latitude: '48.8566',
+      longitude: '2.3522',
+      timezone: 'Europe/Paris',
+      current: Object.keys(UNITS).join(','),
+      wind_speed_unit: 'ms',
+      temperature_unit: 'celsius',
+      precipitation_unit: 'mm',
+      timeformat: 'unixtime',
+    }).toString()
+    const response = await fetch(url, { signal: controller.signal })
+    if (!response.ok) throw new WeatherHttpError(response.status)
+    const data: unknown = await response.json()
+    controller.signal.throwIfAborted()
+    return parseParisWeather(data)
+  } finally {
+    clearTimeout(timeout)
+    signal?.removeEventListener('abort', abort)
+  }
+}

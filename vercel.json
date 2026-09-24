@@ -1,4 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "framework": "tanstack-start"
+  "framework": "vite",
+  "buildCommand": "pnpm build",
+  "outputDirectory": "dist"
 }

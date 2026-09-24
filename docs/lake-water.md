@@ -1,6 +1,6 @@
 # Calm lake rendering
 
-The React component's public interface is unchanged. `?seed=9182` reproduces the bank,
+The TypeScript landscape initializer loads the engine on demand. `?seed=9182` reproduces the bank,
 submerged relief and stones. World units are treated as metres for the optical and wave
 parameters; the landscape remains a stylized, nocturnal voxel scene.
 
