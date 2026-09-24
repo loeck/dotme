@@ -102,7 +102,11 @@ export class SubmergedScene {
       stones.setMatrixAt(i, transform.matrix)
     })
     this.group.add(floor, stones)
-    this.group.traverse((object) => object.layers.set(1))
+    this.group.traverse((object) => {
+      object.layers.set(1)
+      object.updateMatrixWorld(true)
+      object.matrixAutoUpdate = object.matrixWorldAutoUpdate = false
+    })
     scene.add(this.group)
   }
 

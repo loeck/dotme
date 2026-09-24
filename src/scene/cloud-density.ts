@@ -56,12 +56,16 @@ float density(vec3 world, bool detail) {
     vec4 origin = uCloudOrigins[i];
     vec4 radii = uCloudRadii[i];
     vec3 p = world - origin.xyz;
+    // Reject vertically before the periodic projection; avoid all noise work
+    // when even its maximum possible contribution cannot produce density.
+    float vertical = p.y / radii.y;
+    if (vertical * vertical >= 2.65) continue;
     // Each cloud keeps its own speed factor, applied to the wind's exact integral.
     p.xz -= uDisplacement * origin.w;
     p.xz = mod(p.xz + ${CLOUD_PERIOD / 2}.0, ${CLOUD_PERIOD}.0) - ${CLOUD_PERIOD / 2}.0;
     vec3 q = p / radii.xyz;
     float boundary = dot(q, q);
-    if (boundary >= 2.7) continue;
+    if (boundary >= 2.65) continue;
     // Local noise travels with this body, so overtaking clouds retain their shape.
     vec3 noisePoint = p * vec3(0.008, 0.016, 0.008) + radii.w;
     noisePoint += 0.025 * sin(p.zxy * 0.015 + uTime * 0.035 + radii.w);

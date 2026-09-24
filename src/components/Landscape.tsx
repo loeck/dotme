@@ -45,11 +45,14 @@ export function Landscape() {
     let disposed = false
     let resizeObserver: ResizeObserver | undefined
     let startVersion = 0
+    let preparation: AbortController | undefined
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
     if (seed.current === undefined) seed.current = querySeed(window.location.search) ?? randomSeed()
 
     const stop = () => {
       startVersion += 1
+      preparation?.abort()
+      preparation = undefined
       resizeObserver?.disconnect()
       resizeObserver = undefined
       engine.current?.dispose()
@@ -60,25 +63,34 @@ export function Landscape() {
     const start = async () => {
       if (disposed || engine.current) return
       const version = ++startVersion
+      const controller = new AbortController()
+      preparation = controller
       try {
         const Engine = await loadEngine()
         if (disposed || engine.current || version !== startVersion) return
-        const instance = new Engine({
-          container: host,
-          onContextFailure: () => {
-            setWebglReady(false)
+        const instance = await Engine.create(
+          {
+            container: host,
+            onContextFailure: () => {
+              setWebglReady(false)
+            },
+            onFirstFrame: () => {
+              setWebglReady(true)
+            },
+            reducedMotion: reducedMotion.matches,
+            seed: seed.current,
           },
-          onFirstFrame: () => {
-            setWebglReady(true)
-          },
-          reducedMotion: reducedMotion.matches,
-          seed: seed.current,
-        })
+          controller.signal,
+        )
+        if (disposed || version !== startVersion) {
+          instance.dispose()
+          return
+        }
         engine.current = instance
         resizeObserver = new ResizeObserver(instance.resize)
         resizeObserver.observe(host)
       } catch {
-        setWebglReady(false)
+        if (!disposed && version === startVersion) setWebglReady(false)
       }
     }
 

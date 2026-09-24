@@ -2,6 +2,8 @@ import {
   AdditiveBlending,
   AmbientLight,
   BoxGeometry,
+  BufferAttribute,
+  BufferGeometry,
   Color,
   CubeCamera,
   DirectionalLight,
@@ -41,11 +43,15 @@ import type { LakeBed } from './lake-bed'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { sampleMoonLight } from './moon-light'
+import { prepareWorld, prepareWorldAsync } from './prepare-world'
+import type { PreparedWorld } from './prepare-world'
+import { RenderDiagnostics } from './render-diagnostics'
 import { createSkyMaterial } from './sky-material'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
-import type { Voxel, VoxelLamp, VoxelMaterial } from './voxel-world'
-import { createVoxelWorld } from './voxel-world'
+import { firstVoxelHit } from './voxel-spatial'
+import type { VoxelIndex } from './voxel-spatial'
+import type { VoxelLamp, VoxelMaterial } from './voxel-world'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
 import { WindModel, createWindUniforms, updateWindUniforms } from './wind'
@@ -56,6 +62,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onFirstFrame: () => void
   reducedMotion?: boolean
   seed?: number
+  diagnostics?: boolean
+  prepared?: PreparedWorld
 }>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
@@ -98,6 +106,7 @@ export class VoxelLandscapeEngine {
   private readonly options: VoxelLandscapeEngineOptions
   private readonly container: HTMLDivElement
   private readonly renderer: WebGLRenderer
+  private readonly diagnostics?: RenderDiagnostics
   private readonly depthFocus: DepthFocus
   private readonly scene = new Scene()
   private readonly camera = new PerspectiveCamera(54, 1, 0.05, 500)
@@ -134,6 +143,8 @@ export class VoxelLandscapeEngine {
   private readonly simulation: WaterSimulation
   private readonly submerged: SubmergedScene
   private bed!: LakeBed
+  private voxelIndex!: VoxelIndex
+  private pointerBounds: DOMRect | null = null
   private pointerActive = false
   private pointerType = 'mouse'
   private pointerHeight = 0
@@ -147,6 +158,7 @@ export class VoxelLandscapeEngine {
   private readonly skyMaterial: ShaderMaterial
   private readonly sky: Mesh<SphereGeometry, ShaderMaterial>
   private readonly voxelGroup = new Group()
+  private readonly shadowGroup = new Group()
   private frame = 0
   private lastFrameAt = 0
   private elapsed = 0
@@ -160,15 +172,44 @@ export class VoxelLandscapeEngine {
   private height = 1
   private mobile = false
 
+  static async create(options: VoxelLandscapeEngineOptions, signal: AbortSignal) {
+    const prepared = await prepareWorldAsync(
+      (options.seed ?? 0) >>> 0,
+      window.innerWidth < 768,
+      signal,
+    )
+    if (signal.aborted) throw new DOMException('World preparation cancelled', 'AbortError')
+    return new VoxelLandscapeEngine({ ...options, prepared })
+  }
+
   constructor(options: VoxelLandscapeEngineOptions) {
-    this.options = options
+    this.options = { ...options, prepared: undefined }
     this.container = options.container
-    this.mobile = window.innerWidth < 768
+    this.mobile = options.prepared
+      ? options.prepared.world.variant === 'mobile'
+      : window.innerWidth < 768
     this.renderer = new WebGLRenderer({
       antialias: false,
       alpha: false,
       powerPreference: 'high-performance',
     })
+    if (options.diagnostics) this.diagnostics = new RenderDiagnostics(this.renderer)
+    const renderShadows = this.renderer.shadowMap.render.bind(this.renderer.shadowMap)
+    this.renderer.shadowMap.render = (...args) => {
+      if (
+        (!this.renderer.shadowMap.autoUpdate && !this.renderer.shadowMap.needsUpdate) ||
+        args[0].length === 0
+      )
+        return renderShadows(...args)
+      // Back-face shadow depth includes internal cube faces. Keep their exact
+      // geometry in this pass; exposing only the outer shell changes lamp shadows.
+      this.shadowGroup.visible = true
+      try {
+        return this.measure('shadows', () => renderShadows(...args))
+      } finally {
+        this.shadowGroup.visible = false
+      }
+    }
     this.renderer.setClearColor(0x080c11)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = PCFShadowMap
@@ -210,12 +251,14 @@ export class VoxelLandscapeEngine {
     this.moon.shadow.bias = -0.00015
     this.scene.add(this.moon, this.moon.target)
 
+    const prepared = options.prepared ?? prepareWorld((options.seed ?? 0) >>> 0, this.mobile)
     this.wind = new WindModel((options.seed ?? 0) >>> 0)
     this.clouds = new VolumetricClouds(
       this.renderer,
       (options.seed ?? 0) >>> 0,
       this.mobile,
       this.wind,
+      prepared.noise,
     )
     this.skyMaterial = createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile, this.clouds)
     const skyGeometry = new SphereGeometry(260, 32, 16)
@@ -225,8 +268,9 @@ export class VoxelLandscapeEngine {
     this.materials.push(this.skyMaterial)
     this.geometries.push(skyGeometry)
 
-    this.scene.add(this.voxelGroup)
-    this.buildWorld((options.seed ?? 0) >>> 0)
+    this.shadowGroup.visible = false
+    this.scene.add(this.voxelGroup, this.shadowGroup)
+    this.buildWorld(prepared)
     this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile, this.wind)
     this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
     this.scene.traverse((object) => {
@@ -242,6 +286,10 @@ export class VoxelLandscapeEngine {
     this.cursorGlow.attachSurfaces(this.scene)
     const waterGeometry = createWaterGeometry(this.mobile)
     this.water = createLakeReflector(waterGeometry, this.mobile)
+    if (this.diagnostics) {
+      const reflection = this.water.onBeforeRender.bind(this.water)
+      this.water.onBeforeRender = (...args) => this.measure('reflection', () => reflection(...args))
+    }
     const uniforms = this.water.material.uniforms
     Object.assign(
       uniforms,
@@ -260,6 +308,8 @@ export class VoxelLandscapeEngine {
     if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
     this.water.position.y = WATER_LEVEL
+    this.water.updateMatrixWorld(true)
+    this.water.matrixAutoUpdate = this.water.matrixWorldAutoUpdate = false
     this.water.receiveShadow = true
     this.scene.add(this.water)
     this.objects.push(this.water)
@@ -282,61 +332,52 @@ export class VoxelLandscapeEngine {
     this.frame = requestAnimationFrame(this.render)
   }
 
-  private buildWorld(seed: number) {
-    const world = createVoxelWorld(seed, this.mobile)
+  private measure<T>(name: string, action: () => T): T {
+    return this.diagnostics ? this.diagnostics.measure(name, action) : action()
+  }
+
+  getDiagnostics() {
+    return this.diagnostics?.snapshot() ?? null
+  }
+
+  private buildWorld(prepared: PreparedWorld) {
+    const { world, terrain } = prepared
+    const seed = world.seed
     this.bed = world.lakeBed
-    const box = new BoxGeometry(1, 1, 1)
-    this.geometries.push(box)
-    const dummy = new Object3D()
-    const color = new Color()
+    this.voxelIndex = terrain.index
     const surfaces: Record<VoxelMaterial, { roughness: number; metalness: number }> = {
       ground: { roughness: 0.88, metalness: 0 },
       shore: { roughness: 0.24, metalness: 0.04 },
       rock: { roughness: 0.42, metalness: 0.02 },
     }
-    let offset = 0
     for (const kind of Object.keys(world.groups) as VoxelMaterial[]) {
-      const count = world.groups[kind].count
-      if (count === 0) continue
-      // Instance colors contain only albedo. Illumination is evaluated by the GPU.
       const material = new MeshStandardMaterial({
         ...surfaces[kind],
         envMapIntensity: 0.8,
         flatShading: true,
+        vertexColors: true,
       })
       this.materials.push(material)
-      // Spatial batches let each point-light face discard distant voxels.
-      // One world-sized batch would submit all 50k cubes to every shadow camera.
-      const chunks = new Map<string, Voxel[]>()
-      for (let i = 0; i < count; i += 1) {
-        const voxel = world.voxels[offset + i]!
-        const key = `${Math.floor(voxel.x / 12)}:${Math.floor(voxel.z / 12)}`
-        let chunk = chunks.get(key)
-        if (!chunk) {
-          chunk = []
-          chunks.set(key, chunk)
-        }
-        chunk.push(voxel)
-      }
-      offset += count
-      for (const voxels of chunks.values()) {
-        const mesh = new InstancedMesh(box, material, voxels.length)
-        mesh.castShadow = true
+      for (const batch of terrain.batches) {
+        if (batch.material !== kind) continue
+        const geometry = new BufferGeometry()
+        geometry.setAttribute('position', new BufferAttribute(batch.positions, 3))
+        geometry.setAttribute('normal', new BufferAttribute(batch.normals, 3, true))
+        geometry.setAttribute('color', new BufferAttribute(batch.colors, 3))
+        geometry.setIndex(new BufferAttribute(batch.indices, 1))
+        geometry.computeBoundingBox()
+        geometry.computeBoundingSphere()
+        const mesh = new Mesh(geometry, material)
         mesh.receiveShadow = true
-        for (const [index, voxel] of voxels.entries()) {
-          dummy.position.set(voxel.x, voxel.y, voxel.z)
-          dummy.scale.setScalar(voxel.size)
-          dummy.updateMatrix()
-          mesh.setMatrixAt(index, dummy.matrix)
-          mesh.setColorAt(index, color.setHex(voxel.color))
-        }
-        mesh.instanceMatrix.needsUpdate = true
-        mesh.computeBoundingSphere()
-        mesh.computeBoundingBox()
+        mesh.updateMatrixWorld(true)
+        mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
         this.voxelGroup.add(mesh)
         this.objects.push(mesh)
+        this.geometries.push(geometry)
       }
     }
+
+    this.buildShadowCasters(terrain.shadowMatrices)
 
     const capGeometry = new BoxGeometry(0.17, 0.17, 0.17)
     const glowGeometry = new PlaneGeometry(1.3, 1.3)
@@ -424,6 +465,25 @@ export class VoxelLandscapeEngine {
     this.materials.push(moteMaterial)
   }
 
+  private buildShadowCasters(batches: Float32Array[]) {
+    const box = new BoxGeometry(1, 1, 1)
+    const material = new MeshBasicMaterial()
+    this.geometries.push(box)
+    this.materials.push(material)
+    for (const matrices of batches) {
+      const mesh = new InstancedMesh(box, material, matrices.length / 16)
+      mesh.castShadow = true
+      mesh.instanceMatrix.array = matrices
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.computeBoundingBox()
+      mesh.computeBoundingSphere()
+      mesh.updateMatrixWorld(true)
+      mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
+      this.shadowGroup.add(mesh)
+      this.objects.push(mesh)
+    }
+  }
+
   private configurePointShadow(light: PointLight) {
     light.castShadow = true
     light.shadow.mapSize.setScalar(this.mobile ? 256 : 512)
@@ -436,7 +496,7 @@ export class VoxelLandscapeEngine {
   private hitWater(clientX: number, clientY: number, throughOverlay = false): Vector3 | null {
     const canvas = this.renderer.domElement
     if (!throughOverlay && document.elementFromPoint(clientX, clientY) !== canvas) return null
-    const bounds = canvas.getBoundingClientRect()
+    const bounds = this.pointerBounds ?? canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
     if (Math.abs(x) > 1 || Math.abs(y) > 1) return null
@@ -523,7 +583,7 @@ export class VoxelLandscapeEngine {
 
   private updateCursorGlow(waterPoint: Vector3 | null): boolean {
     if (!this.pointerActive) return false
-    const bounds = this.renderer.domElement.getBoundingClientRect()
+    const bounds = this.pointerBounds ?? this.renderer.domElement.getBoundingClientRect()
     if (
       this.pointerClient.x < bounds.left ||
       this.pointerClient.x > bounds.right ||
@@ -536,15 +596,11 @@ export class VoxelLandscapeEngine {
     waterPoint ??= this.hitWater(this.pointerClient.x, this.pointerClient.y, true)
     // hitWater has projected the cursor with this frame's camera.
     // Test actual solid faces as well as water, including cliff faces and isolated rocks.
-    this.raycaster.far = 130
-    const candidates = this.voxelGroup.children.filter((child) => {
-      const mesh = child as InstancedMesh
-      return mesh.boundingBox && this.raycaster.ray.intersectsBox(mesh.boundingBox)
-    })
-    const solid = this.raycaster.intersectObjects(candidates, false)[0]
+    const ray = this.raycaster.ray
+    const solid = firstVoxelHit(this.voxelIndex, ray.origin.toArray(), ray.direction.toArray())
     const position = this.cursorGlow.uniforms.uCursorGlowPosition.value
     if (solid && (!waterPoint || solid.distance < this.camera.position.distanceTo(waterPoint))) {
-      position.copy(solid.point)
+      ray.at(solid.distance, position)
     } else if (waterPoint) {
       position.copy(waterPoint)
     } else return false
@@ -593,7 +649,7 @@ export class VoxelLandscapeEngine {
       if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
       return
     }
-    if (!this.pointerActive || !this.hitWater(event.clientX, event.clientY)) {
+    if (!this.pointerActive) {
       this.previousPointer = null
       this.pendingPointer = null
       this.pointerRevision += 1
@@ -658,6 +714,7 @@ export class VoxelLandscapeEngine {
     if (this.options.reducedMotion) this.frame = 0
     else this.frame = requestAnimationFrame(this.render)
     if (document.hidden) return
+    this.diagnostics?.begin(now)
     const dt = clamp((now - this.lastFrameAt) / 1000, 0, 0.05)
     this.lastFrameAt = now
     if (!this.options.reducedMotion) this.elapsed += dt
@@ -672,6 +729,7 @@ export class VoxelLandscapeEngine {
     this.camera.position.z = 16
     this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
+    this.pointerBounds = this.renderer.domElement.getBoundingClientRect()
     const waterPoint = this.pointerActive
       ? this.hitWater(this.pointerClient.x, this.pointerClient.y)
       : null
@@ -686,6 +744,7 @@ export class VoxelLandscapeEngine {
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
+    this.pointerBounds = null
     const uniforms = this.water.material.uniforms
     // Slow moon motion changes the grazing light, shadows and reflected sky together.
     const moon = sampleMoonLight(this.elapsed)
@@ -696,7 +755,7 @@ export class VoxelLandscapeEngine {
     uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
     updateWindUniforms(this.windUniforms, this.wind.sample(this.elapsed))
-    this.clouds.update(this.elapsed)
+    this.measure('clouds', () => this.clouds.update(this.elapsed))
     this.skyMaterial.uniforms.uTime!.value = this.elapsed
     this.water.material.uniforms.uTime!.value = this.elapsed
     const waterPointer = this.water.material.uniforms.uPointer!.value as Vector3
@@ -748,7 +807,8 @@ export class VoxelLandscapeEngine {
         this.moteMesh.instanceMatrix.needsUpdate = true
       }
     }
-    if (!this.options.reducedMotion) this.simulation.step(dt, this.elapsed)
+    if (!this.options.reducedMotion)
+      this.measure('simulation', () => this.simulation.step(dt, this.elapsed))
     uniforms.uState!.value = this.simulation.texture
     this.renderer.shadowMap.needsUpdate = true
     // Capture current lighting in all six directions every frame. Water has its
@@ -757,7 +817,7 @@ export class VoxelLandscapeEngine {
     const environmentIntensity = this.scene.environmentIntensity
     this.scene.environmentIntensity = 0
     try {
-      this.environmentCamera.update(this.renderer, this.scene)
+      this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
     } finally {
       this.water.visible = true
       this.scene.environmentIntensity = environmentIntensity
@@ -765,15 +825,18 @@ export class VoxelLandscapeEngine {
     // Filter explicitly before the main render. Lazy filtering inside a
     // material upload would nest renderer calls and disturb texture bindings.
     if (this.simulation.available) {
-      this.filteredEnvironment = this.environmentFilter.fromCubemap(
-        this.environmentTarget.texture,
-        this.filteredEnvironment,
+      this.filteredEnvironment = this.measure('pmrem', () =>
+        this.environmentFilter.fromCubemap(
+          this.environmentTarget.texture,
+          this.filteredEnvironment,
+        ),
       )
       this.scene.environment = this.filteredEnvironment.texture
     }
     this.water.material.uniforms.uEnvironment!.value = this.environmentTarget.texture
-    this.submerged.render(this.renderer, this.scene)
-    this.depthFocus.render(this.renderer, this.scene, this.camera)
+    this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene))
+    this.depthFocus.render(this.renderer, this.scene, this.camera, this.diagnostics)
+    this.diagnostics?.end()
     if (!this.rendered) {
       this.rendered = true
       this.options.onFirstFrame()
@@ -836,6 +899,7 @@ export class VoxelLandscapeEngine {
       if (object instanceof InstancedMesh) object.dispose()
     }
     this.scene.environment = null
+    this.diagnostics?.dispose()
     this.clouds.dispose()
     this.environmentTarget.dispose()
     this.filteredEnvironment?.dispose()

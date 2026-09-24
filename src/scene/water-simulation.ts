@@ -4,6 +4,9 @@ import {
   DataTexture,
   DataUtils,
   HalfFloatType,
+  DynamicDrawUsage,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
   LinearFilter,
   Mesh,
   NearestFilter,
@@ -11,6 +14,7 @@ import {
   PlaneGeometry,
   RedFormat,
   RGBAFormat,
+  RGFormat,
   Scene,
   ShaderMaterial,
   UnsignedByteType,
@@ -100,6 +104,7 @@ void main() {
 export class WaterSimulation {
   readonly resolution: number
   readonly available: boolean
+  readonly channels: 2 | 4
   readonly mask: DataTexture
   private readonly zero = new DataTexture(new Uint8Array(4), 1, 1, RGBAFormat)
   private readonly targets: WebGLRenderTarget[] = []
@@ -112,6 +117,11 @@ export class WaterSimulation {
   private readonly splat: ShaderMaterial
   private readonly quad: Mesh
   private readonly pending: Vector4[] = []
+  private readonly splatGeometry = new InstancedBufferGeometry()
+  private readonly impulses = new InstancedBufferAttribute(new Float32Array(128 * 4), 4).setUsage(
+    DynamicDrawUsage,
+  )
+  private readonly splatMesh: Mesh
   private disposed = false
   private readonly windUniforms = createWindUniforms()
 
@@ -151,17 +161,17 @@ export class WaterSimulation {
       depthWrite: false,
     })
     this.splat = new ShaderMaterial({
-      vertexShader: `uniform vec4 uImpulse; varying vec2 vUv;
-        void main() { vUv = uv; gl_Position = vec4(uImpulse.xy * 2.0 - 1.0 + position.xy * uImpulse.z * 2.0, 0.0, 1.0); }`,
-      fragmentShader: `uniform vec4 uImpulse; uniform sampler2D uMask; varying vec2 vUv;
+      vertexShader: `attribute vec4 aImpulse; varying vec4 vImpulse; varying vec2 vUv;
+        void main() { vUv = uv; vImpulse = aImpulse; gl_Position = vec4(aImpulse.xy * 2.0 - 1.0 + position.xy * aImpulse.z * 2.0, 0.0, 1.0); }`,
+      fragmentShader: `varying vec4 vImpulse; uniform sampler2D uMask; varying vec2 vUv;
         void main() { vec2 p = (vUv - 0.5) * 2.0;
           float q = dot(p, p);
           // Compact, smooth, zero-integral pressure: the displaced center feeds
           // a surrounding shoulder instead of excavating a persistent trench.
           float profile = q < 1.0 ? (1.0-q) * (1.0-q) * (1.0-4.0*q) : 0.0;
-          float wet = step(0.5, texture2D(uMask, uImpulse.xy + p * uImpulse.z).r);
-          gl_FragColor = vec4(0.0, uImpulse.w * profile * wet, 0.0, 1.0); }`,
-      uniforms: { uImpulse: { value: new Vector4() }, uMask: { value: this.mask } },
+          float wet = step(0.5, texture2D(uMask, vImpulse.xy + p * vImpulse.z).r);
+          gl_FragColor = vec4(0.0, vImpulse.w * profile * wet, 0.0, 1.0); }`,
+      uniforms: { uMask: { value: this.mask } },
       depthTest: false,
       depthWrite: false,
       transparent: true,
@@ -170,13 +180,23 @@ export class WaterSimulation {
     this.quad = new Mesh(this.geometry, this.material)
     this.quad.frustumCulled = false
     this.scene.add(this.quad)
+    this.splatGeometry.index = this.geometry.index
+    this.splatGeometry.setAttribute('position', this.geometry.getAttribute('position'))
+    this.splatGeometry.setAttribute('uv', this.geometry.getAttribute('uv'))
+    this.splatGeometry.setAttribute('aImpulse', this.impulses)
+    this.splatMesh = new Mesh(this.splatGeometry, this.splat)
+    this.splatMesh.frustumCulled = false
+    this.splatMesh.visible = false
+    this.scene.add(this.splatMesh)
     let supported = renderer.extensions.has('EXT_color_buffer_float')
+    this.channels = supported && this.supportsRG() ? 2 : 4
     if (supported) {
       const previous = renderer.getRenderTarget()
       try {
         for (let i = 0; i < 2; i++) {
           const target = new WebGLRenderTarget(this.resolution, this.resolution, {
             type: HalfFloatType,
+            format: this.channels === 2 ? RGFormat : RGBAFormat,
             minFilter: LinearFilter,
             magFilter: LinearFilter,
             depthBuffer: false,
@@ -197,6 +217,59 @@ export class WaterSimulation {
       this.targets.length = 0
     }
     this.reset()
+  }
+
+  /** Require rendering, additive blending AND native half-float readback.
+   * Some drivers render RG16F but only expose RGBA reads: keep RGBA16F there. */
+  private supportsRG() {
+    const renderer = this.renderer,
+      gl = renderer.getContext() as WebGL2RenderingContext
+    const target = new WebGLRenderTarget(1, 1, {
+      type: HalfFloatType,
+      format: RGFormat,
+      depthBuffer: false,
+    })
+    const previous = renderer.getRenderTarget(),
+      face = renderer.getActiveCubeFace(),
+      mip = renderer.getActiveMipmapLevel()
+    const clear = renderer.getClearColor(new Color()),
+      alpha = renderer.getClearAlpha(),
+      autoClear = renderer.autoClear
+    const probe = new ShaderMaterial({
+      vertexShader,
+      fragmentShader: 'void main() { gl_FragColor = vec4(0.125, 0.25, 0.0, 1.0); }',
+      transparent: true,
+      blending: AdditiveBlending,
+      depthTest: false,
+      depthWrite: false,
+    })
+    try {
+      renderer.setRenderTarget(target)
+      if (
+        gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE ||
+        gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_FORMAT) !== gl.RG ||
+        gl.getParameter(gl.IMPLEMENTATION_COLOR_READ_TYPE) !== gl.HALF_FLOAT
+      )
+        return false
+      renderer.autoClear = false
+      renderer.setClearColor(0, 0)
+      renderer.clear()
+      this.quad.material = probe
+      renderer.render(this.scene, this.camera)
+      renderer.render(this.scene, this.camera)
+      const result = new Uint16Array(2)
+      renderer.readRenderTargetPixels(target, 0, 0, 1, 1, result)
+      return (
+        DataUtils.fromHalfFloat(result[0]!) === 0.25 && DataUtils.fromHalfFloat(result[1]!) === 0.5
+      )
+    } finally {
+      this.quad.material = this.material
+      renderer.autoClear = autoClear
+      renderer.setClearColor(clear, alpha)
+      renderer.setRenderTarget(previous, face, mip)
+      probe.dispose()
+      target.dispose()
+    }
   }
 
   get texture() {
@@ -226,13 +299,18 @@ export class WaterSimulation {
     try {
       this.renderer.autoClear = false
       this.renderer.setRenderTarget(this.targets[this.current]!)
-      this.quad.material = this.splat
-      for (const impulse of this.pending) {
-        this.splat.uniforms.uImpulse!.value.copy(impulse)
+      if (this.pending.length) {
+        for (let i = 0; i < this.pending.length; i++)
+          this.pending[i]!.toArray(this.impulses.array, i * 4)
+        this.impulses.needsUpdate = true
+        this.splatGeometry.instanceCount = this.pending.length
+        this.quad.visible = false
+        this.splatMesh.visible = true
         this.renderer.render(this.scene, this.camera)
       }
       this.pending.length = 0
-      this.quad.material = this.material
+      this.splatMesh.visible = false
+      this.quad.visible = true
       for (let i = 0; i < steps; i++) {
         const time = (windTime ?? 0) - this.clock.pendingTime - (steps - i - 1) * WATER_STEP
         this.material.uniforms.uTime!.value = time
@@ -245,6 +323,8 @@ export class WaterSimulation {
         this.current = next
       }
     } finally {
+      this.splatMesh.visible = false
+      this.quad.visible = true
       this.renderer.autoClear = autoClear
       this.renderer.setRenderTarget(previous)
     }
@@ -257,7 +337,7 @@ export class WaterSimulation {
     const px = Math.floor(((x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * this.resolution)
     const pz = Math.floor(((z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size) * this.resolution)
     if (px < 0 || pz < 0 || px >= this.resolution || pz >= this.resolution) return 0
-    const data = new Uint16Array(4)
+    const data = new Uint16Array(this.channels)
     await this.renderer.readRenderTargetPixelsAsync(target, px, pz, 1, 1, data)
     return DataUtils.fromHalfFloat(data[0]!)
   }
@@ -283,6 +363,7 @@ export class WaterSimulation {
     this.mask.dispose()
     this.zero.dispose()
     this.geometry.dispose()
+    this.splatGeometry.dispose()
     this.material.dispose()
     this.splat.dispose()
     this.pending.length = 0

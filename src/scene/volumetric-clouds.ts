@@ -12,7 +12,7 @@ import {
   Vector3,
   WebGLCubeRenderTarget,
 } from 'three'
-import type { WebGLRenderer } from 'three'
+import type { PerspectiveCamera, WebGLRenderer } from 'three'
 
 import { CLOUD_DENSITY_GLSL, createCloudBodies } from './cloud-density'
 import { createCloudNoise } from './cloud-noise'
@@ -142,17 +142,21 @@ export class VolumetricClouds {
   private readonly camera: CubeCamera
   private tick = -1
   private current = 0
+  private next = 1
+  private staging = 2
+  private preparedParts = 0
 
   constructor(
     private readonly renderer: WebGLRenderer,
     seed: number,
     mobile: boolean,
     private readonly wind: WindModel,
+    noiseData?: Uint8Array,
   ) {
     this.profile = mobile ? CLOUD_PROFILES.mobile : CLOUD_PROFILES.desktop
     this.uniforms.uCloudResolution.value = this.profile.resolution
-    this.noise = createCloudNoise(seed)
-    this.targets = [0, 1].map(
+    this.noise = createCloudNoise(seed, 32, noiseData)
+    this.targets = [0, 1, 2].map(
       () =>
         new WebGLCubeRenderTarget(this.profile.resolution, {
           type: renderer.extensions.has('EXT_color_buffer_float')
@@ -191,33 +195,79 @@ export class VolumetricClouds {
     this.scene.add(sphere)
   }
 
-  private capture(index: number, time: number) {
+  private setCaptureTime(time: number) {
     const wind = this.wind.sample(time)
     this.material.uniforms.uDisplacement!.value.fromArray(wind.displacement)
     this.material.uniforms.uTime!.value = time
     const moon = sampleMoonLight(time)
     this.material.uniforms.uMoonDirection!.value.copy(moon.offset).normalize()
     this.material.uniforms.uMoonIntensity!.value = moon.intensity
+  }
+
+  private capture(index: number, time: number) {
+    this.setCaptureTime(time)
     this.camera.renderTarget = this.targets[index]!
     this.camera.update(this.renderer, this.scene)
     this.shadows.capture(index)
+  }
+
+  /** Render one face (or the shadow tile) without exposing a partial capture. */
+  private prepareParts(time: number, count: number) {
+    this.setCaptureTime(time)
+    if (this.camera.coordinateSystem !== this.renderer.coordinateSystem) {
+      this.camera.coordinateSystem = this.renderer.coordinateSystem
+      this.camera.updateCoordinateSystem()
+    }
+    this.camera.updateMatrixWorld()
+    const target = this.renderer.getRenderTarget(),
+      face = this.renderer.getActiveCubeFace(),
+      mip = this.renderer.getActiveMipmapLevel()
+    const xr = this.renderer.xr.enabled
+    try {
+      this.renderer.xr.enabled = false
+      while (this.preparedParts < count) {
+        const part = this.preparedParts
+        if (part < 6) {
+          this.renderer.setRenderTarget(this.targets[this.staging]!, part)
+          this.renderer.render(this.scene, this.camera.children[part] as PerspectiveCamera)
+        } else this.shadows.capture(this.staging)
+        this.preparedParts++
+      }
+    } finally {
+      this.renderer.xr.enabled = xr
+      this.renderer.setRenderTarget(target, face, mip)
+    }
   }
 
   update(time: number) {
     const tick = Math.floor(time * this.profile.hz)
     if (this.tick !== tick) {
       if (tick === this.tick + 1 && this.tick >= 0) {
-        this.current = 1 - this.current
+        // A slow frame may cross the deadline. Complete the exact timestamp,
+        // never publish half a cubemap or delay the interpolation clock.
+        this.prepareParts((tick + 1) / this.profile.hz, 7)
+        const old = this.current
+        this.current = this.next
+        this.next = this.staging
+        this.staging = old
       } else {
         this.capture(this.current, tick / this.profile.hz)
+        this.capture(this.next, (tick + 1) / this.profile.hz)
       }
-      this.capture(1 - this.current, (tick + 1) / this.profile.hz)
-      this.shadows.select(this.current)
+      this.preparedParts = 0
+      this.shadows.select(this.current, this.next)
       this.tick = tick
       this.uniforms.uCloudPrevious.value = this.targets[this.current]!.texture
-      this.uniforms.uCloudNext.value = this.targets[1 - this.current]!.texture
+      this.uniforms.uCloudNext.value = this.targets[this.next]!.texture
     }
-    this.uniforms.uCloudBlend.value = Math.max(0, Math.min(1, time * this.profile.hz - tick))
+    const fraction = Math.max(0, Math.min(1, time * this.profile.hz - tick))
+    this.uniforms.uCloudBlend.value = fraction
+    // Seven equal scheduling units, spread across the capture interval. Keep a
+    // frame of headroom at 60 Hz; below that, the deadline path completes work.
+    this.prepareParts(
+      (tick + 2) / this.profile.hz,
+      Math.min(7, Math.ceil((fraction + this.profile.hz / 60) * 7)),
+    )
   }
 
   dispose() {

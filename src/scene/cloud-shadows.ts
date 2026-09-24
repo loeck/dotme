@@ -20,6 +20,7 @@ export const CLOUD_SHADOW_BOUNDS = { minX: -256, minZ: -376, size: 512 } as cons
 export const CLOUD_SHADOW_GLSL = `
 uniform sampler2D uCloudShadowAtlas;
 uniform float uCloudShadowPreviousOffset;
+uniform float uCloudShadowNextOffset;
 uniform vec3 uCloudShadowPreviousDirection;
 uniform vec3 uCloudShadowNextDirection;
 uniform float uCloudShadowBlend;
@@ -30,28 +31,28 @@ float cloudTransmission(float offset, vec3 direction, vec3 world) {
   float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
   // Clamp within each 256-pixel tile so linear filtering never crosses timestamps.
   uv = clamp(uv, vec2(0.5 / 256.0), vec2(1.0 - 0.5 / 256.0));
-  uv.x = uv.x * 0.5 + offset;
+  uv.x = uv.x / 3.0 + offset;
   return mix(1.0, texture2D(uCloudShadowAtlas, uv).r, smoothstep(0.0, 0.06, edge));
 }
 float cloudShadow(vec3 world) {
   float transmission = mix(
     cloudTransmission(uCloudShadowPreviousOffset, uCloudShadowPreviousDirection, world),
-    cloudTransmission(0.5 - uCloudShadowPreviousOffset, uCloudShadowNextDirection, world), uCloudShadowBlend);
+    cloudTransmission(uCloudShadowNextOffset, uCloudShadowNextDirection, world), uCloudShadowBlend);
   return mix(1.0, transmission, uCloudShadowStrength);
 }
 `
 
 /** Beer–Lambert shadow maps, captured on the exact same clock as the visible sky. */
 export class CloudShadows {
-  // Both capture times share one sampler, leaving room for seven lamp shadow maps
+  // All three capture times share one sampler, leaving room for seven lamp shadow maps
   // in the water shader on devices with the WebGL2 minimum of 16 fragment samplers.
-  private readonly atlas = new WebGLRenderTarget(512, 256, {
+  private readonly atlas = new WebGLRenderTarget(768, 256, {
     minFilter: LinearFilter,
     magFilter: LinearFilter,
     depthBuffer: false,
     stencilBuffer: false,
   })
-  private readonly directions = [new Vector3(), new Vector3()]
+  private readonly directions = [new Vector3(), new Vector3(), new Vector3()]
   private readonly geometry = new PlaneGeometry(2, 2)
   private readonly scene = new Scene()
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
@@ -59,6 +60,7 @@ export class CloudShadows {
   readonly uniforms = {
     uCloudShadowAtlas: { value: this.atlas.texture },
     uCloudShadowPreviousOffset: { value: 0 },
+    uCloudShadowNextOffset: { value: 1 / 3 },
     uCloudShadowPreviousDirection: { value: this.directions[0]! },
     uCloudShadowNextDirection: { value: this.directions[1]! },
     uCloudShadowBlend: { value: 0 },
@@ -117,10 +119,11 @@ export class CloudShadows {
     }
   }
 
-  select(previous: number) {
-    this.uniforms.uCloudShadowPreviousOffset.value = previous * 0.5
+  select(previous: number, next: number) {
+    this.uniforms.uCloudShadowPreviousOffset.value = previous / 3
+    this.uniforms.uCloudShadowNextOffset.value = next / 3
     this.uniforms.uCloudShadowPreviousDirection.value = this.directions[previous]!
-    this.uniforms.uCloudShadowNextDirection.value = this.directions[1 - previous]!
+    this.uniforms.uCloudShadowNextDirection.value = this.directions[next]!
   }
 
   /** Shade moonlight and approximate local sky visibility; preserve lamps and emission. */
@@ -167,7 +170,7 @@ export class CloudShadows {
           #include <lights_fragment_end>`,
           )
     }
-    material.customProgramCacheKey = () => 'moon-cloud-shadow-v1'
+    material.customProgramCacheKey = () => 'moon-cloud-shadow-v2'
     material.needsUpdate = true
   }
 

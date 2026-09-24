@@ -48,7 +48,8 @@ Solid surfaces use one shared, filtered environment probe, so their reflections 
 parallax. The probe excludes the lake to avoid recursive reflections; the lake uses its own reflected
 camera. This is a rasterized rendering pipeline with approximate indirect illumination.
 
-Voxels are instanced in spatial batches so shadow cameras can cull distant terrain. Mobile uses
+Visible terrain uses spatial batches of static meshes with covered faces removed. Shadow cameras
+use smaller batches of the original cubes to preserve back-face shadow depth. Mobile uses
 smaller shadow maps and reflection targets; every rendered frame still refreshes lighting and
 reflections. Reduced motion freezes the simulation while allowing pointer lighting and refreshes
 on resize or visibility changes. A luminous cursor softly lights the terrain and water; its smoke
@@ -63,7 +64,8 @@ pnpm e2e
 ```
 
 See [lake rendering notes](docs/lake-water.md) for physical parameters, input behavior,
-GPU validation, performance methodology and approximations.
+GPU validation, performance methodology and approximations. See [scene performance](docs/performance.md)
+for Worker preparation, pass diagnostics, the reproducible A/B benchmark and the isolated WebGPU compute prototype.
 
 ## Vercel
 
