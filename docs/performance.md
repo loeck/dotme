@@ -66,6 +66,6 @@ the moon shadow refreshed at 4 Hz and one visible lamp shadow per frame, a third
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
 
 On these devices, leaning the phone left or right (gravity projected onto the screen,
-so an upright phone stays stable) shifts and turns the camera. The turn is limited to
-what the generated terrain still covers at the current aspect ratio. iOS asks for motion
+so an upright phone stays stable) drives the same camera parallax as the desktop mouse.
+iOS asks for motion
 access on the first tap; touch parallax remains available when it is denied.

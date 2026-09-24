@@ -107,9 +107,6 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   wind?: WindOptions
 }>
 
-const LEAN_SHIFT = 4.5
-const LOOK_DISTANCE = 41
-
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 const smooth = (a: number, b: number, value: number) => {
   const t = clamp((value - a) / (b - a), 0, 1)
@@ -169,9 +166,6 @@ export class VoxelLandscapeEngine {
   private readonly detailPointerNdc = new Vector2()
   private readonly target = new Vector2(0, 0)
   private readonly tilt = new DeviceTilt()
-  private tiltView = 0
-  private leanLook = 0
-  private readonly worldBounds: PreparedWorld['world']['bounds']
   private lampShadowCursor = 0
   private moonShadowAt = -Infinity
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
@@ -326,7 +320,6 @@ export class VoxelLandscapeEngine {
     this.waterfall =
       options.sceneDetails === false ? undefined : (options.prepared.world.waterfall ?? undefined)
     this.voxelIndex = options.prepared.terrain.index
-    this.worldBounds = options.prepared.world.bounds
     this.detailEnvironment = { ...options.detailEnvironment }
     this.container = options.container
     this.sceneContrast = this.resources.own(
@@ -1266,20 +1259,14 @@ export class VoxelLandscapeEngine {
     }
 
     const parallax = this.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
+    if (this.tilt.active) this.target.x = this.tilt.value
     this.pointer.lerp(this.target, parallax)
     const idleDrift =
       this.reducedMotion || this.tilt.active ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
-    this.tiltView += ((this.reducedMotion ? 0 : this.tilt.value) - this.tiltView) * parallax
-    this.camera.position.x +=
-      (this.pointer.x * 1.9 + this.tiltView * LEAN_SHIFT + idleDrift - this.camera.position.x) *
-      parallax
+    this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
     this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
-    this.camera.lookAt(
-      this.camera.position.x * 0.22 + this.tiltView * this.leanLook,
-      this.mobile ? 2.3 : 7.3,
-      -25,
-    )
+    this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
     this.pointerBounds = this.pointerActive
       ? this.renderer.domElement.getBoundingClientRect()
@@ -1496,7 +1483,6 @@ export class VoxelLandscapeEngine {
     this.height = Math.max(1, bounds.height)
     this.camera.aspect = this.width / this.height
     this.camera.updateProjectionMatrix()
-    this.leanLook = this.leanLookRange()
     this.renderer.setPixelRatio(maxPixelRatio(this.lowPower))
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
@@ -1514,16 +1500,6 @@ export class VoxelLandscapeEngine {
     this.water.material.uniforms.uBedTexel.value.copy(this.submerged.bedTexel)
     this.resizeReflection()
     if (this.reducedMotion && this.rendered) this.requestFrame()
-  }
-
-  /** Turn toward the side only as far as the generated terrain still fills the frame. */
-  private leanLookRange() {
-    const { minX, maxX, minZ } = this.worldBounds
-    const depth = this.camera.position.z - minZ
-    const reach = (Math.min(maxX, -minX) * 0.9 - LEAN_SHIFT - 1.9) / depth
-    const view = Math.tan((this.camera.fov * Math.PI) / 360) * this.camera.aspect
-    const yaw = Math.max(0, Math.atan(reach) - Math.atan(view))
-    return LOOK_DISTANCE * Math.tan(yaw)
   }
 
   private resizeReflection() {
