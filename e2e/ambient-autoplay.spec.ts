@@ -29,7 +29,7 @@ test('starts by default when browser autoplay is allowed, with a working stop bu
     })
     const requests: string[] = []
     page.on('request', (r) => {
-      if (r.url().endsWith('.mp3')) requests.push(r.url())
+      if (r.url().endsWith('.ogg')) requests.push(r.url())
     })
     await page.goto(`${info.project.use.baseURL}/?seed=42&startTime=12:00`)
     const button = page.locator('.scene-sound-trigger')
