@@ -234,3 +234,46 @@ tests and production build); Playwright reports 74 passed and four expected skip
 Coverage includes the new column rejection against exact voxel intersections, rain
 and wind changes, solar scattering and shadows, reduced motion, RGBA8/analytic
 fallbacks, resize, page restoration, Worker cancellation and repeated disposal.
+
+## Periodic stalls in the complete page
+
+The isolated scene harness above has no `.profile-panel`, so it does not run the
+backdrop contrast meter. A subsequent trace of the **complete page** reproduced
+periodic stalls in Chromium with heavy rain, both day and night. The rain made the
+pauses particularly visible, but the blocking operation was the meter's GPU readback.
+Even after Three.js's asynchronous fence had signaled, `getBufferSubData` blocked
+Chrome's main thread for up to 213 ms behind later queued rendering commands.
+
+The meter now keeps the same 32 backdrop samples, exposure, Reinhard mapping,
+RGBA8 quantization, one-second cadence and contrast hysteresis. Its shader discards
+the pixel when the backdrop is dark, and an `ANY_SAMPLES_PASSED` query returns the
+classification. Query availability is polled on later tasks; the result is read only
+when ready. No pixel buffer is copied to the CPU. Comparing integer byte values
+avoids a GLSL division-rounding error exactly at the 0.2 threshold. Pending queries
+and timers are released on disposal and context loss, including reduced-motion pages.
+See the [WebGL 2 query specification](https://registry.khronos.org/webgl/specs/2.0/#3.7.12).
+
+A local full-page Chromium/Metal trace used seed 9182, heavy rain, partly cloudy sky,
+1440 × 900 CSS pixels and device scale 2 (the existing desktop DPR cap remains 1.75).
+After five seconds of warm-up, about 35 seconds were observed per scenario:
+
+| Full page        | Frame p95 | Frame p99 | Maximum interval | Intervals above 100 ms |
+| ---------------- | --------- | --------- | ---------------- | ---------------------- |
+| 08:30 before     | 83.3 ms   | 150 ms    | 166.7 ms         | 35                     |
+| 08:30 with query | 33.3 ms   | 33.4 ms   | 33.5 ms          | 0                      |
+| 00:00 with query | 50 ms     | 66.7 ms   | 66.7 ms          | 0                      |
+
+The corrected day and night traces made zero `getBufferSubData` calls. These are
+local diagnostic runs, not three alternating production benchmarks or a guarantee
+of 60 fps; the remaining frame cost, especially at night, is still measurable.
+Raw traces and frame samples are in the ignored `artifacts/stutter/` directory.
+
+Regression coverage includes full production pages at both times across Chromium
+and WebKit, requiring several meter updates without GPU buffer copies. Eighty
+GPU classification cases per browser cover both hysteresis thresholds, HDR values,
+exposure and panel cropping; unit tests cover deferred availability, render failure,
+context loss, disposal and preventing overlapping meter queries.
+
+Validation of this fix: `pnpm check` passes (129 unit tests and production build).
+The targeted home, solar-light, lifecycle and backdrop Playwright suites report
+57 passed and one expected skip for mobile mouse smoke.

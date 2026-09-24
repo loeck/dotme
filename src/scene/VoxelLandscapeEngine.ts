@@ -956,18 +956,18 @@ export class VoxelLandscapeEngine {
           this.atmosphere.target.texture,
           profile.getBoundingClientRect(),
           this.renderer.domElement.getBoundingClientRect(),
+          lightingHost!.dataset.sceneTone === 'light' ? 0.16 : 0.2,
         )
-        .then((luminance) => {
+        .then((lightBackdrop) => {
           if (!this.disposed) {
             // Hysteresis prevents passing clouds from flickering the text palette.
-            const threshold = lightingHost!.dataset.sceneTone === 'light' ? 0.16 : 0.2
-            const tone = luminance > threshold ? 'light' : 'dark'
+            const tone = lightBackdrop ? 'light' : 'dark'
             if (lightingHost!.dataset.sceneTone !== tone) lightingHost!.dataset.sceneTone = tone
           }
-          return luminance
+          return lightBackdrop
         })
         .catch(() => {
-          /* Keep the ambient-light fallback if readback is unavailable. */
+          /* Keep the ambient-light fallback if the query is unavailable. */
         })
         .finally(() => {
           this.profileMeterBusy = false
