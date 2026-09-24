@@ -73,27 +73,26 @@ Fireflies do not add point lights.
 
 ## Rain and daylight integration
 
-This branch still contains the original nocturnal scene. The parallel rain,
-solar, performance and static-site worktrees are not merged by this change.
-The weather input is explicit, framework-independent and does not fetch data:
+The engine supplies the current rain intensity and solar daylight weight each frame.
+Explicit overrides remain available for controlled comparisons and do not fetch data:
 
 ```ts
 engine.setDetailEnvironment({ rainIntensity: 0.65 })
 engine.setDetailEnvironment({ daylight: 0.8 })
 ```
 
-Both values are normalized to 0–1, default to 0, and can be supplied initially
+Both overrides are normalized to 0–1 and can be supplied initially
 through `detailEnvironment` in the engine options. Partial updates preserve
 the other value, non-finite values are ignored and finite values are clamped.
 `daylight` changes the details' response; it does not replace the solar lighting
 system or change the sky itself.
 
-When combining the parallel branches, call `setDetailEnvironment` with the rain
-effect's active intensity and the solar system's daylight weight. Reuse the
-existing shared wind state. Keep `SceneDetails` creation before the global
-cloud/cursor material traversal, its material attachment after that traversal,
-and its update before environment/reflection/submerged captures. The cloud
-material hook composes with previous hooks.
+Inputs without an explicit override follow the live rain and solar state.
+`SceneDetails` reuses the shared wind and is created before the global cloud/cursor
+material traversal. Its material hooks are attached after that traversal, and its
+state updates before environment/reflection/submerged captures. Cloud material
+hooks compose with fish deformation. Cursor-driven caustic illumination is limited
+to dark scenes; fish keep their independent pointer response.
 The details import neither React nor the weather API, so the static-site
 migration does not require replacing these modules.
 

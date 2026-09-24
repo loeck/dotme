@@ -27,7 +27,7 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/water-test', (route) =>
+  await page.route('**/water-test?time=00:00', (route) =>
     route.fulfill({
       contentType: 'text/html',
       body: '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0"><div id="scene" style="width:100vw;height:100vh"></div></body></html>',
@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/water-harness.js', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: harness }),
   )
-  await page.goto('/water-test')
+  await page.goto('/water-test?time=00:00')
 })
 
 test('GPU propagation, damping, shore barriers, stability, reset and frame independence', async ({

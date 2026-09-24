@@ -1,8 +1,8 @@
 # Shared wind and volumetric cloud layers
 
 The scene uses one seeded `WindModel` for cloud advection, analytic water, CPU
-pointer picking and wave scattering at rocks. React props and URL parameters are
-unchanged. Internal `WindOptions` support weak, strong and reversed-wind experiments;
+pointer picking and wave scattering at rocks. The solar and weather URL parameters
+are described in the solar section below. Internal `WindOptions` support weak, strong and reversed-wind experiments;
 there is no weather UI.
 
 ## Wind and water
@@ -50,7 +50,7 @@ The volume occupies world heights 80–140, from a fixed sky origin at (0, 0, 0)
 The layer bounds and extinction coefficient are shared by the density, sky and
 shadow shaders. Rays intersect the layer and march front to back, accumulating Beer–Lambert
 transmission and premultiplied in-scattered radiance. A Henyey–Greenstein phase
-function (g=0.5) emphasizes moonward scattering. Three moonward density samples
+function (g=0.5) emphasizes lightward scattering. Three lightward density samples
 approximate internal shadows; an ambient term approximates unresolved multiple
 scattering. Marching stops below 1.5% transmission. The horizon fades smoothly
 at the finite 2200-unit tracing limit.
@@ -60,14 +60,13 @@ at the finite 2200-unit tracing limit.
 | Desktop | 256²      | 15 Hz        | 48                       |
 | Mobile  | 128²      | 10 Hz        | 24                       |
 
-The scene light, sky disc and cloud captures evaluate the same `sampleMoonLight`
+The scene light, sky discs and cloud captures evaluate the same `sampleLighting`
 function, including captures evaluated ahead of the visual clock.
 
 Both profiles trace a genuine 3D volume. Two cubemaps bracket the current time;
-the next capture is evaluated ahead because wind and lunar motion are deterministic.
+the next capture is evaluated ahead because wind and celestial motion are deterministic.
 Only one capture is replaced per tick in normal playback. A time jump rebuilds
-the bracket directly, without processing missed captures. RGB stores square-root
-radiance to retain dim gradients in the RGBA8 fallback; the sky decodes both samples
+the bracket directly, without processing missed captures. RGB stores `sqrt(radiance / 16)` to retain dim gradients in the RGBA8 fallback; the sky decodes both samples
 before interpolating in linear space. A four-tap cubic B-spline reconstruction
 smooths magnified cubemap texels, including diagonal outlines during wind turns;
 sampling directions lets the filter cross face boundaries. It adds no per-frame
@@ -76,14 +75,14 @@ randomness and retains the original capture resolutions. The sky and GPU tests u
 are used when supported. The noise texture is 64 KiB; both half-float
 cubemaps together use about 6 MiB desktop / 1.5 MiB mobile, without depth or mipmaps.
 
-The sky composes the moon and halo, then clouds, then distant relief. Actual terrain
+The sky composes the atmosphere and celestial discs, then clouds, then distant relief. Actual terrain
 occludes the infinite sky through the depth buffer. The sky vertex shader uses
 camera rotation only, including in environment and planar reflection cameras.
 All existing passes sample the same two captures and interpolation factor; none
 reruns the volume marcher. The environment includes the current cloud composition
 and remains synchronized with planar water reflection.
 
-This is a stylized, calm nocturnal layer inspired by Nubis, not a reproduction of
+This is a stylized cloud layer inspired by Nubis, not a reproduction of
 its full weather authoring or scattering system. The finite layer, sparse shadow
 march and small noise volume favor soft cloud sheets over towering cumulus. The repeated tile can become recognizable over long distances. This is an advected
 procedural cloud population, not a fluid simulation of cloud formation. Interpolating captures can slightly soften
@@ -91,22 +90,22 @@ fine moving edges; no random per-frame jitter is used, avoiding temporal sparkle
 
 ## Shadows on the scene
 
-Two Beer–Lambert transmission maps, packed into one 512×256 atlas, integrate the
+Two Beer–Lambert transmission maps, packed into one 768×384 atlas, integrate the
 same cloud bodies and noise
-along the moon direction through the full layer. Each map shares its timestamp,
-wind displacement and lunar direction with a cubemap capture; interpolation uses
-the same blend. Both profiles use 256² maps with 32 integration steps in RGBA8,
-adding 512 KiB for the pair. A single sampler keeps water within the 16-texture
+along the active light direction through the full layer. Each map shares its timestamp,
+wind displacement and light direction with a cubemap capture; interpolation uses
+the same blend. Both profiles use 384² maps with 32 integration steps in RGBA8,
+adding 1.125 MiB for the pair. A single sampler keeps water within the 16-texture
 limit even with seven floating lights; tile borders are clamped independently.
 The shared resolution preserves narrow shadow edges
 on mobile; only the capture rate follows its lower-frequency sky profile.
 
-Receivers are projected along the corresponding moon direction onto a fixed
-512-unit ground domain. This accounts for terrain elevation and instanced voxels.
+Receivers are projected orthographically into the corresponding light frame over
+a fixed 768-unit domain. This accounts for terrain elevation and instanced voxels.
 A soft boundary returns to unshadowed lighting outside the map. Each surface
 samples this transmission once per fragment and reuses it for its lighting terms.
 Cloud transmission
-attenuates the moon's direct diffuse/specular light (95% maximum strength).
+attenuates the active light's direct diffuse/specular contribution (full strength away from the horizon).
 A local sky-visibility approximation also reduces ambient/diffuse environment fill
 by up to 65%, environment specular by up to 35%, and in-water scattering by up to
 75%, weighted by that same transmission. This makes passing shadows legible in
@@ -115,13 +114,13 @@ hemispherical sky-occlusion integral. Direct lamp lighting and emission remain
 unchanged. Terrain, submerged objects and the water's analytic moon highlight
 share it, including reflection captures.
 The existing reflected sky already contains cloud occlusion. This approximation
-assumes receivers below the cloud base and does not add volumetric light shafts
-or shadows to the decorative distant hills painted inside the sky shader.
+assumes receivers below the cloud base. The air pass reuses this same transmission;
+the decorative distant hills painted inside the sky shader do not cast shadows.
 
 ## Lifecycle and verification
 
-Wind and captures use the existing simulation clock. Hidden tabs do not advance
-it; resuming resets the frame timestamp. Reduced motion captures time zero once
+Water uses the capped simulation clock; atmospheric wind and captures use wall time.
+Hidden tabs skip rendering and resume at current atmospheric time. Reduced motion captures time zero once
 and leaves both clouds and water frozen, including after resize. Pointer lighting
 can still update without advancing the simulation. Its material hook chains after
 cloud attenuation, so cloud shadows do not dim the local cursor light. Float-target
@@ -207,3 +206,137 @@ DPR emulation; physical iPhone performance has not been measured.
   Beer shadow maps for directional cloud shadows on the scene.
 - [GPU Gems 2, chapter 20](https://developer.nvidia.com/gpugems/gpugems2/part-iii-high-quality-rendering/chapter-20-fast-third-order-texture-filtering):
   cubic B-spline reconstruction using four bilinear texture samples.
+
+## Solar cycle and atmospheric shafts
+
+The scene now starts at the visitor's local time and advances at real speed.
+`?time=08:30` sets the initial time (strict 24-hour `HH:MM`); invalid values use
+local time. The artistic sun rises at 06:00, culminates at 12:00 and sets at
+18:00. `weather=clear|partly-cloudy|cloudy|overcast` selects a fixed weather
+preset, defaulting to `partly-cloudy`. `sun=hidden` hides the solar disc and its
+visible reflection; direct light, cloud illumination, shadows and air scattering
+are independent of this flag. The solar disc is always excluded from the lighting
+probe because direct sunlight is already evaluated by the directional light.
+`seed` still determines the terrain and cloud composition.
+
+`SolarClock`, `sampleLighting` and `WEATHER` separate time, lighting and weather.
+Atmospheric time uses monotonic wall time, independently of the capped water
+simulation timestep. Hidden tabs stop rendering; the next frame jumps to the
+current atmospheric time and rebuilds both cloud capture timestamps directly.
+Reduced motion freezes the initial atmosphere even after resize or visibility
+changes. Future captures evaluate the lighting at their own timestamps. The
+sun/moon relay fades smoothly near the horizon, and cloud shadow strength fades
+with it so switching projection directions cannot flash the ambient fill.
+
+The sky adapts the Rayleigh/Mie coefficients, phase functions and optical air
+mass of [Three.js r186 Sky](https://github.com/mrdoob/three.js/blob/r186/examples/jsm/objects/Sky.js);
+the existing volumetric clouds and painted ridges remain. The adapted sky functions
+retain the [Three.js MIT notice](licenses/three-sky.txt). Shared linear colors drive cloud ambient/direct illumination, water
+scattering, sky fill and decorative ridge mist. Weather changes cloud-body radii,
+coverage and density independently of the air. Overcast has a continuous dense
+volume with diffuse illumination. Clear bypasses cloud capture and sampling;
+its cloud radiance is zero and transmission exactly one. Cloud RGB is encoded as
+`sqrt(radiance / 16)` in both float and RGBA8 captures and decoded before filtering,
+preserving daylight radiance above one as well as dim night gradients.
+
+The previous ground-projected cloud shadow atlas is replaced by two 384²
+orthographic light-space maps spanning 768 world units, centered on the terrain
+and air volume. Each timestamp keeps its own world-to-light matrix. All points
+on a light ray share UV coordinates, without dividing receiver height by the
+solar elevation. Cloud integration is bounded to 2400 units, including near the
+horizon; the direct solar term fades from zero to full intensity between 0° and
+2°. The finite tracing distance is an approximation at grazing elevations.
+
+After the main linear color/depth render, `VolumetricLight` reconstructs world
+positions and integrates air to the nearest surface, at most 240 units and only
+inside the height slab -20..80. It reads the directional light's PCF depth
+comparison texture with `sampler2DShadow` and multiplies terrain visibility by
+the same cloud transmission used on surfaces. The sunward view phase is
+Henyey–Greenstein with g=0.6 (`dot(camera-to-scene ray, scene-to-sun direction)`).
+Each segment uses the analytic exponential integral, including its zero-extinction
+limit. Composition is `scene * transmission + scatteredRadiance`.
+
+Solar scattering uses an artistic exposure of 6 with the normalized HG phase;
+daytime diffuse air fill is 30% of the haze color. Denser cloud cores and subdued
+cloud ambient lighting make the illuminated openings and their shafts readable
+against the sky. Neither the solar disc nor a screen-space radial blur generates
+these rays. Coverage still determines their contrast: a clear sky has no cloud
+shafts and an opaque overcast layer blocks the direct source.
+
+Local lamps, halos, motes and cursor illumination fade with ambient luminance
+between 0.04 and 0.16 in linear space, including the weather's diffuse factor.
+The lamps' emitted energy and visible geometry are zero in bright light. The custom
+mouse cursor stays visible; only its illumination of the scenery fades. Water
+gestures remain active. The profile measures 32 points in the rendered backdrop
+behind its bounds once per second, with an asynchronous occlusion query for the
+light/dark classification and no pixel readback.
+The measurement follows the final Reinhard tone mapping and uses linear luminance;
+hysteresis at 0.16/0.20 prevents palette flicker. Initial scene reveal waits for
+the first measurement, with ambient light as a fallback. Dark text covers bright
+scenes, while light text covers night and dense overcast scenes. There is no text
+outline, doubled text or dark profile veil. Cubemap reconstruction blends the
+adjacent face kernels at edges to avoid seams in the denser clouds.
+
+The air target has half the drawing-buffer resolution on each axis, with 32
+samples desktop and 16 mobile. A four-tap depth-guided reconstruction rejects
+samples across surface discontinuities, then the existing lens pass and final
+tone mapping run. No temporal history is used. Main-view material fog is disabled
+per camera to avoid double attenuation; environment and planar captures keep a
+matching-distance exponential fog approximation. Air RGB uses the same 0..16
+encoding as clouds for the RGBA8 fallback. The final RGBA8 scene/composite still
+has less highlight headroom than the half-float path.
+
+Full volumetric reflections in water remain out of scope. Distant clouds keep
+the fixed-origin cubemap approximation. Shadow maps and volume quadrature have
+finite resolution; these settings are starting quality profiles, not a guaranteed
+frame rate. No rain, snow or separate weather fog effect is implemented.
+
+### Solar verification
+
+`lighting.test.ts` checks parsing, midnight wrapping, real-time resume, reduced
+motion, the artistic orbit, transition continuity, seeded weather and light-ray
+projection invariance at the horizon and zenith. `solar-light.spec.ts` captures
+morning/noon/evening/night for all four presets in Chromium and mobile WebKit.
+It also reads back the real GPU air targets with and without terrain occlusion,
+compares 16/32 samples to 128, checks finite water/horizon radiance, unchanged
+scattering when hiding the disc, and exercises RGBA8 rendering and resize.
+
+On the controlled occluder scene, mean relative radiance errors are 2.43% (16
+samples) and 0.83% (32 samples) versus 128. The homogeneous-medium maximum
+relative difference is 0.188%, dominated by half-float storage. Its absolute
+difference is 0.01035 at the increased HDR solar exposure. The center-ray
+radiance falls from 2.998 to 1.152 with the occluder; moving the surface nearer
+leaves 0.3696 scattering in front of it, with no integration behind it. These
+numbers agree in Chromium and WebKit on the development Mac.
+
+The optional `solar-performance.spec.ts` alternates independently bundled
+before/after/after/before engines with seed 9182, the same browser/viewport/DPR,
+three seconds warmup and 180 frame intervals per trial. Set
+`SOLAR_BASELINE_BUNDLE` to the absolute path of the baseline `water-harness.ts`
+ES module bundle. `PLAYWRIGHT_PORT` selects an isolated preview port when other
+worktrees are being tested. Frame intervals measure scheduling, not isolated GPU
+execution time; mobile WebKit uses emulation on the Mac, not a physical iPhone.
+
+Verification on 2026-09-24: `pnpm check` passed (24 unit tests). All 51 browser
+checks passed across the full suite and a targeted rerun of the two cloudy-scene
+captures after removing their obsolete assumption that every daytime backdrop
+needs dark text. The three normal skips are the mouse-only mobile cursor test
+and two opt-in performance trials; both performance trials subsequently passed.
+The cloud-edge probe now measures zero byte difference on Chromium and WebKit.
+
+The final alternating scene-only benchmark, with stronger shafts and the
+low-light lamp gating, measured:
+
+| Browser / viewport              | Before 1 median / p95 | After 1 median / p95 | After 2 median / p95 | Before 2 median / p95 |
+| ------------------------------- | --------------------- | -------------------- | -------------------- | --------------------- |
+| Chromium, ANGLE Metal, 1280×720 | 33.4 / 66.6 ms        | 16.7 / 33.4 ms       | 16.7 / 33.4 ms       | 33.4 / 50.1 ms        |
+| WebKit, iPhone 13, 390×664      | 18 / 31 ms            | 16 / 28 ms           | 17 / 25 ms           | 19 / 29 ms            |
+
+The baseline is commit `aa86158`. Both trials receive the same seed, viewport
+and noon URL, but the baseline only supported its original night lighting.
+In particular the new daytime scene disables local lamps and their point-light
+shadow work. These totals do not isolate the cost of the air pass. The benchmark
+has no DOM profile, so it also excludes the once-per-second profile meter.
+Earlier measurement windows had markedly different baseline frame intervals;
+these figures describe this machine/session and do not establish sustained
+60 fps or performance on a physical mobile device.

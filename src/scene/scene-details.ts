@@ -43,7 +43,7 @@ export class SceneDetails {
 
   constructor(
     scene: Scene,
-    world: VoxelWorld,
+    world: Pick<VoxelWorld, 'seed' | 'lakeBed'>,
     mobile: boolean,
     private readonly reducedMotion: boolean,
     environment: Partial<DetailEnvironment> = {},
@@ -81,6 +81,7 @@ export class SceneDetails {
     scenePointer: FireflyPointer | null,
     moonIntensity: number,
     intro: number,
+    cursorLightStrength = 1,
   ) {
     const { daylight, rainIntensity } = this.environment
     this.lightColor.copy(this.nightColor).lerp(this.dayColor, daylight)
@@ -88,7 +89,7 @@ export class SceneDetails {
       time,
       wind,
       (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
-      waterPointer,
+      cursorLightStrength > 0 ? waterPointer : null,
     )
     this.fish.update(time, dt, waterPointer, scenePointer)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)

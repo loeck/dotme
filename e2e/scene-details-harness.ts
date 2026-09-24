@@ -7,7 +7,7 @@ import { VoxelLandscapeEngine } from '../src/scene/VoxelLandscapeEngine'
 
 let engine: VoxelLandscapeEngine | undefined
 
-export async function start(seed = 42, details = true, reducedMotion = false) {
+export async function start(seed = 42, details = true, reducedMotion = false, rainIntensity = 0) {
   stop()
   await new Promise<void>((resolve, reject) => {
     engine = new VoxelLandscapeEngine({
@@ -15,6 +15,7 @@ export async function start(seed = 42, details = true, reducedMotion = false) {
       seed,
       sceneDetails: details,
       reducedMotion,
+      rain: { intensity: rainIntensity, wind: { x: 2, z: 0.5 } },
       onFirstFrame: resolve,
       onContextFailure: () => reject(new Error('Scene context failed')),
     })
@@ -23,6 +24,10 @@ export async function start(seed = 42, details = true, reducedMotion = false) {
 
 export function environment(state: Partial<DetailEnvironment>) {
   engine!.setDetailEnvironment(state)
+}
+
+export function rain(intensity: number) {
+  engine!.setRainState({ intensity, wind: { x: 2, z: 0.5 } })
 }
 
 export function resize() {
@@ -54,6 +59,7 @@ export function status() {
       fireflies: { mesh: { geometry: { instanceCount: number } } }
       mist: { mesh: { geometry: { instanceCount: number } } }
       wetness: { wetness: number }
+      environment: DetailEnvironment
     }
     renderer: { info: { memory: { geometries: number; textures: number } } }
   }
@@ -63,6 +69,7 @@ export function status() {
     fireflies: state.details?.fireflies.mesh.geometry.instanceCount ?? 0,
     mist: state.details?.mist.mesh.geometry.instanceCount ?? 0,
     wetness: state.details?.wetness.wetness ?? 0,
+    environment: state.details?.environment,
     memory: { ...state.renderer.info.memory },
   }
 }

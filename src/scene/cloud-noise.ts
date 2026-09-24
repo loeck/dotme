@@ -53,7 +53,7 @@ function worley(x: number, y: number, z: number, seed: number, period: number) {
   return 1 - distance
 }
 
-export function createCloudNoise(seed: number, size = 32) {
+export function createCloudNoiseData(seed: number, size = 32) {
   // Only shape and erosion are sampled; no unused coverage or alpha channels.
   const data = new Uint8Array(size ** 3 * 2)
   for (let z = 0; z < size; z++)
@@ -69,7 +69,11 @@ export function createCloudNoise(seed: number, size = 32) {
         data[i] = Math.round(255 * (value(4, 0) * 0.65 + value(8, 17) * 0.25 + value(16, 39) * 0.1))
         data[i + 1] = Math.round(255 * worley(px * 8, py * 8, pz * 8, seed ^ 991, 8))
       }
-  const texture = new Data3DTexture(data, size, size, size)
+  return data
+}
+
+export function createCloudNoise(seed: number, size = 32, prepared?: Uint8Array) {
+  const texture = new Data3DTexture(prepared ?? createCloudNoiseData(seed, size), size, size, size)
   texture.format = RGFormat
   texture.minFilter = texture.magFilter = LinearFilter
   texture.wrapS = texture.wrapT = texture.wrapR = RepeatWrapping

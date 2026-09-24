@@ -4,5 +4,5 @@
   "singleQuote": true,
   "semi": false,
   "sortImports": true,
-  "ignorePatterns": ["src/routeTree.gen.ts", ".output", ".vercel", "dist"]
+  "ignorePatterns": [".vercel", "dist", ".cache"]
 }

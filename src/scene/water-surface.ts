@@ -23,7 +23,7 @@ export const WIND_WAVES = [
 ] as const
 
 // Precompute the same spectrum coefficients for CPU sampling and GLSL generation.
-const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phase]) => {
+export const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phase]) => {
   const k = (Math.PI * 2) / wavelength
   const small = Math.max(0, Math.min(1, (5 - wavelength) / 5))
   return {
@@ -61,6 +61,7 @@ export function sampleWindField(
     small,
     sensitivity,
   } of WAVE_SPECTRUM) {
+    if (footprint >= wavelength * 0.5) continue
     const kx = baseX * rotationX - baseZ * rotationY
     const kz = baseZ * rotationX + baseX * rotationY
     const cx = -kz * 0.18,
@@ -117,7 +118,16 @@ uniform vec4 uWindResponse;
 vec4 windField(vec2 p, float footprint) {
   vec4 field = vec4(0.0);
   ${WAVE_SPECTRUM.map(
-    ({ wavelength: length, amplitude, phase, kx, kz, omega, small, sensitivity }) => `{
+    ({
+      wavelength: length,
+      amplitude,
+      phase,
+      kx,
+      kz,
+      omega,
+      small,
+      sensitivity,
+    }) => `if (footprint < ${gl(length * 0.5)}) {
       vec2 k = vec2(${gl(kx)}, ${gl(kz)});
       k = vec2(k.x * uWindRotation.x - k.y * uWindRotation.y, k.x * uWindRotation.y + k.y * uWindRotation.x);
       float spatial = dot(p, k);

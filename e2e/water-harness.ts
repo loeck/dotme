@@ -28,7 +28,7 @@ export async function exerciseSimulation() {
       current: number
     }
     const target = state.targets[state.current]!
-    const data = new Uint16Array(512 * 512 * 4)
+    const data = new Uint16Array(512 * 512 * simulation.channels)
     await renderer.readRenderTargetPixelsAsync(target, 0, 0, 512, 512, data)
     let signedVolume = 0,
       absoluteVolume = 0
@@ -38,8 +38,8 @@ export async function exerciseSimulation() {
       propagated = 0
     for (let z = 0; z < 512; z++)
       for (let x = 0; x < 512; x++) {
-        const h = DataUtils.fromHalfFloat(data[(z * 512 + x) * 4]!)
-        const v = DataUtils.fromHalfFloat(data[(z * 512 + x) * 4 + 1]!)
+        const h = DataUtils.fromHalfFloat(data[(z * 512 + x) * simulation.channels]!)
+        const v = DataUtils.fromHalfFloat(data[(z * 512 + x) * simulation.channels + 1]!)
         if (!Number.isFinite(h) || !Number.isFinite(v)) throw new Error('Non-finite GPU water')
         signedVolume += h
         absoluteVolume += Math.abs(h)
@@ -249,6 +249,14 @@ export function renderCloudShadowComparison(time: number, enabled: boolean) {
     render: (now: number) => void
   }
   state.elapsed = time
-  state.clouds.shadows.uniforms.uCloudShadowStrength.value = enabled ? 0.95 : 0
-  state.render(performance.now())
+  const update = state.clouds.update.bind(state.clouds)
+  state.clouds.update = () => {
+    update(time)
+    state.clouds.shadows.uniforms.uCloudShadowStrength.value = enabled ? 1 : 0
+  }
+  try {
+    state.render(performance.now())
+  } finally {
+    state.clouds.update = update
+  }
 }

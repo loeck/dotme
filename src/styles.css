@@ -146,3 +146,19 @@
     display: none;
   }
 }
+
+/* Follow the shared scene illumination without adding a veil over the sky. */
+.profile-panel {
+  --profile-primary: #e4e8ed;
+  --profile-muted: #cbd1d7;
+  --profile-icon: #d5dce3;
+  --profile-divider: #a0aab4;
+  --profile-focus: #b9dfff;
+}
+main[data-scene-tone='light'] .profile-panel {
+  --profile-primary: #17232d;
+  --profile-muted: #2e3d49;
+  --profile-icon: #263641;
+  --profile-divider: #465763;
+  --profile-focus: #003b61;
+}

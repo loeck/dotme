@@ -61,7 +61,7 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/details-test', (route) =>
+  await page.route('**/details-test*', (route) =>
     route.fulfill({
       contentType: 'text/html',
       body: '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0"><div id="scene" style="width:100vw;height:100vh"></div></body></html>',
@@ -70,7 +70,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/details-harness.js', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: harness }),
   )
-  await page.goto('/details-test')
+  await page.goto('/details-test?time=00:00')
 })
 
 test('details render with shared shadows, respond to rain, resize and dispose', async ({
@@ -185,4 +185,23 @@ test('reduced motion stays still and optional layer can be disabled', async ({ p
   expect((await page.locator('canvas').screenshot()).equals(enhanced)).toBe(false)
   await page.evaluate(async () => (await import('/details-harness.js')).stop())
   expect(errors).toEqual([])
+})
+
+test('details follow solar and rain inputs while preserving explicit overrides', async ({
+  page,
+}) => {
+  await page.goto('/details-test?time=08:30')
+  await page.evaluate(async () => (await import('/details-harness.js')).start(42, true, true, 0.8))
+  const environment = () =>
+    page.evaluate(async () => (await import('/details-harness.js')).status().environment)
+  await expect.poll(environment).toEqual({ rainIntensity: 0.8, daylight: 1 })
+  await page.evaluate(async () => (await import('/details-harness.js')).rain(0))
+  await expect.poll(environment).toEqual({ rainIntensity: 0, daylight: 1 })
+  await page.evaluate(async () => {
+    const scene = await import('/details-harness.js')
+    scene.environment({ daylight: 0.25 })
+    scene.rain(0.6)
+  })
+  await expect.poll(environment).toEqual({ rainIntensity: 0.6, daylight: 0.25 })
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
 })
