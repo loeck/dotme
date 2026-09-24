@@ -38,6 +38,7 @@ import { celestialVisibility, cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
 import { FullscreenPass } from './fullscreen-pass'
 import type { LightingState } from './lighting'
+import type { SkyAtmosphere } from './sky-atmosphere'
 
 export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float'>) {
   const tau = extinction.mul(distance)
@@ -71,6 +72,7 @@ export class VolumetricLight {
   private readonly sunDirection = uniform(new Vector3())
   private readonly sunRadiance = uniform(new Color())
   private readonly ambient = uniform(new Color())
+  private readonly skyAir = uniform(0)
   private readonly shadowBias = uniform(0)
   private readonly hasTerrain = uniform(false)
   private readonly airSize = uniform(new Vector2(1, 1))
@@ -80,6 +82,7 @@ export class VolumetricLight {
   private readonly composite: FullscreenPass
   constructor(
     renderer: WebGPURenderer,
+    sky: SkyAtmosphere,
     lowPower: boolean,
     clouds: CloudShadowUniforms,
     extinction: number,
@@ -112,7 +115,8 @@ export class VolumetricLight {
           radiance = vec3(0).toVar()
         const transmission = exp(sigma.mul(stride).negate()),
           integral = segmentIntegral(sigma, stride),
-          phase = airPhase(ray.dot(this.sunDirection))
+          phase = airPhase(ray.dot(this.sunDirection)),
+          ambient = this.ambient.rgb.add(sky.horizon(ray).mul(this.skyAir))
         If(stride.greaterThan(0).and(sigma.greaterThan(0)), () => {
           Loop(steps, ({ i }) => {
             const world = this.eye.add(ray.mul(entry.add(float(i).add(0.5).mul(stride))))
@@ -136,7 +140,7 @@ export class VolumetricLight {
               visible.mulAssign(celestialVisibility(clouds))
               visible.mulAssign(cloudShadow(world, clouds))
             })
-            const source = this.ambient.rgb
+            const source = ambient
               .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(6))
               .mul(sigma)
             radiance.addAssign(accumulated.mul(source).mul(integral))
@@ -195,7 +199,9 @@ export class VolumetricLight {
   update(light: LightingState) {
     this.sunDirection.value.copy(light.sunDirection)
     this.sunRadiance.value.copy(light.sunColor).multiplyScalar(light.sunIntensity)
-    this.ambient.value.copy(light.haze).multiplyScalar(1 - light.daylight * 0.7)
+    const airDay = 1 - light.daylight * 0.7
+    this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
+    this.skyAir.value = 0.5 * airDay
   }
   resize(width: number, height: number) {
     this.target.setSize(width, height)

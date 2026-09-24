@@ -68,6 +68,7 @@ import { ResourceScope } from './resource-scope'
 import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
 import type { DetailEnvironment } from './scene-details'
+import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { SolarClock, parseInitialTime } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
@@ -147,6 +148,7 @@ export class VoxelLandscapeEngine {
   private readonly diagnostics: RenderDiagnostics | undefined
   private readonly depthFocus: DepthFocus
   private readonly atmosphere: VolumetricLight
+  private readonly skyAtmosphere: SkyAtmosphere
   private readonly sceneContrast: SceneContrast
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
@@ -264,6 +266,8 @@ export class VoxelLandscapeEngine {
       engine.nightLightFade = initialLight.localLightStrength
       for (const lamp of engine.lampLights) lamp.light.visible = initialLight.localLightStrength > 0
       await engine.clouds.compileAsync()
+      await engine.skyAtmosphere.compileAsync()
+      engine.skyAtmosphere.update(initialLight.sunDirection, initialLight.skyExposure)
       await preparationFrame(signal)
       await engine.compileRain()
       await preparationFrame(signal)
@@ -408,9 +412,11 @@ export class VoxelLandscapeEngine {
       ),
     )
     this.clouds.shadows.applyToLight(this.moon)
+    this.skyAtmosphere = this.resources.own(new SkyAtmosphere(this.renderer, this.lowPower))
     this.atmosphere = this.resources.own(
       new VolumetricLight(
         this.renderer,
+        this.skyAtmosphere,
         this.lowPower,
         this.clouds.shadows.uniforms,
         WEATHER[this.weather].extinction,
@@ -418,7 +424,7 @@ export class VoxelLandscapeEngine {
     )
     this.shootingStars = new ShootingStars((options.seed ?? 0) >>> 0)
     this.skyMaterial = this.resources.own(
-      createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile, this.clouds),
+      createSkyMaterial((options.seed ?? 0) >>> 0, this.mobile, this.clouds, this.skyAtmosphere),
     )
     const skyGeometry = new SphereGeometry(260, 32, 16)
     this.sky = new Mesh(skyGeometry, this.skyMaterial)
@@ -1296,6 +1302,7 @@ export class VoxelLandscapeEngine {
     })
     const uniforms = this.water.material.uniforms
     this.applyLighting(light)
+    this.skyAtmosphere.update(light.sunDirection, light.skyExposure)
     if (!this.reducedMotion) this.starTime += activeDelta
     this.shootingStars.advance(
       activeDelta,

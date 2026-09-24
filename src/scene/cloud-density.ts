@@ -72,6 +72,7 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
     uDisplacement: uniform(new Vector2()),
     uTime: uniform(0),
     uMoonDirection: uniform(new Vector3(0, 1, 0)),
+    uCloudLightDirection: uniform(new Vector3(0, 1, 0)),
     uCloudAmbient: uniform(new Color()),
     uCloudDirect: uniform(new Color()),
   }

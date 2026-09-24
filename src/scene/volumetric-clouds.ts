@@ -177,7 +177,7 @@ export class VolumetricClouds {
         If(entry.lessThan(exit), () => {
           const stride = exit.sub(entry).div(this.profile.steps)
           const phase = float(0.75).div(
-            max(0.05, float(1.25).sub(ray.dot(u.uMoonDirection))).pow(1.5),
+            max(0.05, float(1.25).sub(ray.dot(u.uCloudLightDirection))).pow(1.5),
           )
           Loop(this.profile.steps, ({ i }) => {
             const p = ray.mul(entry.add(float(i).add(0.5).mul(stride)))
@@ -186,7 +186,7 @@ export class VolumetricClouds {
               const optical = float(0).toVar()
               Loop(3, ({ i: j }) => {
                 optical.addAssign(
-                  density(p.add(u.uMoonDirection.mul(float(j).mul(22).add(8))), false).mul(
+                  density(p.add(u.uCloudLightDirection.mul(float(j).mul(22).add(8))), false).mul(
                     float(j).mul(12).add(9),
                   ),
                 )
@@ -234,6 +234,7 @@ export class VolumetricClouds {
     u.uTime.value = time
     const light = this.lighting(time)
     u.uMoonDirection.value.copy(light.direction)
+    u.uCloudLightDirection.value.copy(light.cloudDirection)
     u.uCloudAmbient.value.copy(light.cloudAmbient)
     u.uCloudDirect.value.copy(light.cloudDirect)
   }
