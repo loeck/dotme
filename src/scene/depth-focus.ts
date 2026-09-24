@@ -120,6 +120,10 @@ export class DepthFocus {
     this.material.uniforms.uCssPixel!.value.set(1 / cssWidth, 1 / cssHeight)
   }
 
+  get depthTexture() {
+    return this.target.depthTexture!
+  }
+
   render(
     renderer: WebGLRenderer,
     scene: Scene,

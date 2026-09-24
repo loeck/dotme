@@ -17,6 +17,7 @@ import {
   PlaneGeometry,
   UnsignedIntType,
   WebGLRenderTarget,
+  Vector4,
   Float32BufferAttribute,
 } from 'three'
 import type { Scene, WebGLRenderer } from 'three'
@@ -31,7 +32,7 @@ export class SubmergedScene {
     stencilBuffer: false,
   })
   readonly depthField: DataTexture
-  readonly shoreField: DataTexture
+  readonly fieldLayout: Vector4
   readonly viewProjection = new Matrix4()
   readonly inverseViewProjection = new Matrix4()
   private readonly camera = new OrthographicCamera(-80, 80, 80, -80, 0.1, 80)
@@ -60,17 +61,21 @@ export class SubmergedScene {
     this.inverseViewProjection.copy(this.viewProjection).invert()
     if (floatColor) this.target.texture.type = HalfFloatType
     const n = bed.resolution
-    const depths = new Uint16Array(bed.depth.length)
-    for (let i = 0; i < depths.length; i++) depths[i] = DataUtils.toHalfFloat(bed.depth[i]!)
-    this.depthField = new DataTexture(depths, n, n, RedFormat, HalfFloatType)
+    // One red-channel atlas retains both native grids without resampling. This
+    // leaves a fragment sampler for rain even with the maximum lamp shadow count.
+    const shoreSize = Math.sqrt(bed.shore.length)
+    const atlasHeight = n + shoreSize
+    const data = new Uint16Array(shoreSize * atlasHeight)
+    for (let y = 0; y < n; y++) {
+      for (let x = 0; x < n; x++)
+        data[y * shoreSize + x] = DataUtils.toHalfFloat(bed.depth[y * n + x]!)
+    }
+    for (let i = 0; i < bed.shore.length; i++)
+      data[n * shoreSize + i] = DataUtils.toHalfFloat(bed.shore[i]!)
+    this.depthField = new DataTexture(data, shoreSize, atlasHeight, RedFormat, HalfFloatType)
     this.depthField.minFilter = this.depthField.magFilter = LinearFilter
     this.depthField.needsUpdate = true
-    const shore = new Uint16Array(bed.shore.length)
-    for (let i = 0; i < shore.length; i++) shore[i] = DataUtils.toHalfFloat(bed.shore[i]!)
-    const shoreSize = Math.sqrt(shore.length)
-    this.shoreField = new DataTexture(shore, shoreSize, shoreSize, RedFormat, HalfFloatType)
-    this.shoreField.minFilter = this.shoreField.magFilter = LinearFilter
-    this.shoreField.needsUpdate = true
+    this.fieldLayout = new Vector4(n / shoreSize, n / atlasHeight, 1 / shoreSize, 1 / atlasHeight)
     this.geometry = new PlaneGeometry(LAKE_BOUNDS.size, LAKE_BOUNDS.size, n - 1, n - 1)
     const positions = this.geometry.attributes.position!
     const colors = new Float32Array(n * n * 3)
@@ -138,7 +143,6 @@ export class SubmergedScene {
     this.group.removeFromParent()
     this.target.dispose()
     this.depthField.dispose()
-    this.shoreField.dispose()
     this.geometry.dispose()
     this.box.dispose()
     this.material.dispose()

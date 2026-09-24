@@ -46,6 +46,9 @@ import { sampleLighting } from './lighting'
 import { prepareWorld, prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
 import { ProfileLuminance } from './profile-luminance'
+import { DEFAULT_RAIN } from './rain-simulation'
+import type { RainState } from './rain-simulation'
+import { RAIN_LAYER, RainEffect } from './RainEffect'
 import { RenderDiagnostics } from './render-diagnostics'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { SolarClock, parseInitialTime } from './solar-clock'
@@ -68,6 +71,7 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   seed?: number
   diagnostics?: boolean
   prepared?: PreparedWorld
+  rain?: RainState
 }>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
@@ -167,6 +171,7 @@ export class VoxelLandscapeEngine {
   private readonly wind: WindModel
   private readonly windUniforms = createWindUniforms()
   private readonly clouds: VolumetricClouds
+  private readonly rain: RainEffect
   private readonly skyMaterial: ShaderMaterial
   private readonly sky: Mesh<SphereGeometry, ShaderMaterial>
   private readonly voxelGroup = new Group()
@@ -327,7 +332,7 @@ export class VoxelLandscapeEngine {
     uniforms.uBedColor!.value = this.submerged.target.texture
     uniforms.uBedDepth!.value = this.submerged.target.depthTexture
     uniforms.uBedHeight!.value = this.submerged.depthField
-    uniforms.uShore!.value = this.submerged.shoreField
+    uniforms.uBedFieldLayout!.value = this.submerged.fieldLayout
     this.renderer.domElement.dataset.waterMode = this.simulation.available ? 'gpu' : 'analytic'
     if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
@@ -338,6 +343,23 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.water)
     this.objects.push(this.water)
     this.geometries.push(waterGeometry)
+
+    this.rain = new RainEffect(
+      prepared.terrain.index,
+      this.mobile,
+      (options.seed ?? 0) >>> 0,
+      this.lampLights.map(({ light }) => light),
+      this.moon,
+      !!options.reducedMotion,
+      uniforms,
+      this.simulation.available,
+    )
+    this.rain.setRainState(options.rain ?? DEFAULT_RAIN)
+    this.rain.prime()
+    this.scene.add(this.rain.group)
+    this.water.getReflectionCamera(this.camera).layers.enable(RAIN_LAYER)
+    this.water.material.uniforms.uRainSlopeMap!.value = this.rain.texture
+    uniforms.uRainSlopesEnabled!.value = this.simulation.available ? 1 : 0
 
     this.camera.position.set(0, 2.3, 16)
     this.camera.lookAt(0, this.mobile ? 2.3 : 7.3, -25)
@@ -487,6 +509,7 @@ export class VoxelLandscapeEngine {
     this.objects.push(moteMesh)
     this.geometries.push(moteGeometry)
     this.materials.push(moteMaterial)
+    return world
   }
 
   private buildShadowCasters(batches: Float32Array[]) {
@@ -721,10 +744,20 @@ export class VoxelLandscapeEngine {
 
   private onVisibilityChange = () => {
     this.onPointerLeave()
-    if (document.hidden) return
+    if (document.hidden) {
+      cancelAnimationFrame(this.frame)
+      this.frame = 0
+      return
+    }
     this.lastFrameAt = performance.now()
-    if (this.options.reducedMotion && this.frame === 0)
-      this.frame = requestAnimationFrame(this.render)
+    if (this.frame === 0) this.frame = requestAnimationFrame(this.render)
+  }
+
+  /** Temporary URL parameters only initialize this state; weather may replace it later. */
+  setRainState(state: RainState) {
+    if (this.disposed) return
+    this.rain.setRainState(state)
+    if (!document.hidden && this.frame === 0) this.frame = requestAnimationFrame(this.render)
   }
 
   private onContextLost = (event: Event) => {
@@ -735,11 +768,13 @@ export class VoxelLandscapeEngine {
 
   private render = (now: number) => {
     if (this.disposed) return
+    this.frame = 0
+    if (document.hidden) return
     if (this.options.reducedMotion) this.frame = 0
     else this.frame = requestAnimationFrame(this.render)
-    if (document.hidden) return
     this.diagnostics?.begin(now)
-    const dt = clamp((now - this.lastFrameAt) / 1000, 0, 0.05)
+    const rainDelta = clamp((now - this.lastFrameAt) / 1000, 0, 0.1)
+    const dt = Math.min(rainDelta, 0.05)
     this.lastFrameAt = now
     if (!this.options.reducedMotion) this.elapsed += dt
     if (this.introStartedAt === null) this.introStartedAt = now
@@ -859,6 +894,13 @@ export class VoxelLandscapeEngine {
     if (!this.options.reducedMotion)
       this.measure('simulation', () => this.simulation.step(dt, this.elapsed))
     uniforms.uState!.value = this.simulation.texture
+
+    this.rain.update(
+      this.options.reducedMotion ? 0 : rainDelta,
+      this.camera,
+      smooth(0, 0.62, this.intro),
+    )
+    this.rain.renderSlopes(this.renderer, this.camera, this.elapsed)
     this.renderer.shadowMap.needsUpdate = true
     // Capture current lighting in all six directions every frame. Water has its
     // own planar reflection and is excluded to avoid recursive mirror captures.
@@ -895,6 +937,9 @@ export class VoxelLandscapeEngine {
       this.atmosphere,
       this.moon,
       this.diagnostics,
+    )
+    this.measure('rain', () =>
+      this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture),
     )
     this.diagnostics?.end()
     const profile = lightingHost?.querySelector('.profile-panel')
@@ -946,6 +991,12 @@ export class VoxelLandscapeEngine {
     )
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
+    this.rain.resize(
+      this.drawingBufferSize.x,
+      this.drawingBufferSize.y,
+      this.renderer.getPixelRatio(),
+    )
+    this.water.material.uniforms.uRainResolution!.value.copy(this.drawingBufferSize)
     this.depthFocus.resize(
       this.drawingBufferSize.x,
       this.drawingBufferSize.y,
@@ -1004,6 +1055,7 @@ export class VoxelLandscapeEngine {
     this.pointerRevision += 1
     this.simulation.dispose()
     this.submerged.dispose()
+    this.rain.dispose()
     this.water.dispose()
     this.depthFocus.dispose()
     for (const material of this.materials) material.dispose()

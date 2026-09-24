@@ -85,6 +85,8 @@ export function firstVoxelHit(
   origin: readonly number[],
   direction: readonly number[],
   far = 130,
+  includeInside = false,
+  accept?: (id: number) => boolean,
 ) {
   const { bounds, boxes, nodes, order } = index
   let nearest = far
@@ -104,7 +106,9 @@ export function firstVoxelHit(
         end = Math.min(end, Math.max(t1, t2))
       }
     }
-    return end < Math.max(0, near) || (solid && near < 0) ? Infinity : Math.max(0, near)
+    return end < Math.max(0, near) || (solid && !includeInside && near < 0)
+      ? Infinity
+      : Math.max(0, near)
   }
   const walk = (node: number) => {
     if (entry(bounds, node * 6) > nearest) return
@@ -120,8 +124,9 @@ export function firstVoxelHit(
       }
     } else {
       for (let i = nodes[node * 4 + 2]!; i < nodes[node * 4 + 3]!; i++) {
-        const id = order[i]!,
-          distance = entry(boxes, id * 6, true)
+        const id = order[i]!
+        if (accept && !accept(id)) continue
+        const distance = entry(boxes, id * 6, true)
         if (distance <= nearest) {
           nearest = distance
           hit = id
