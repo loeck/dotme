@@ -2,6 +2,7 @@ import type { Voxel } from './voxel-world'
 
 export type VoxelIndex = {
   boxes: Float64Array
+  columns: { x: number; z: number; width: number; height: number; tops: Float64Array }
   bounds: Float64Array
   nodes: Int32Array
   order: Uint32Array
@@ -50,7 +51,31 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
     return node
   }
   if (voxels.length) build(0, voxels.length)
-  return { boxes, bounds: new Float64Array(bounds), nodes: new Int32Array(nodes), order }
+  // Conservative two-metre columns reject airborne segments without walking the BVH.
+  // Float64 retains the exact tops used by narrow-phase tests, including grid boundaries.
+  const x = Math.floor((bounds[0] ?? 0) / 2)
+  const z = Math.floor((bounds[2] ?? 0) / 2)
+  const width = voxels.length ? Math.floor(bounds[3]! / 2) - x + 1 : 0
+  const height = voxels.length ? Math.floor(bounds[5]! / 2) - z + 1 : 0
+  const tops = new Float64Array(width * height).fill(-Infinity)
+  for (let i = 0; i < boxes.length; i += 6) {
+    const x0 = Math.floor(boxes[i]! / 2) - x,
+      x1 = Math.floor(boxes[i + 3]! / 2) - x
+    const z0 = Math.floor(boxes[i + 2]! / 2) - z,
+      z1 = Math.floor(boxes[i + 5]! / 2) - z
+    for (let row = z0; row <= z1; row++)
+      for (let column = x0; column <= x1; column++) {
+        const at = row * width + column
+        tops[at] = Math.max(tops[at]!, boxes[i + 4]!)
+      }
+  }
+  return {
+    boxes,
+    bounds: new Float64Array(bounds),
+    nodes: new Int32Array(nodes),
+    order,
+    columns: { x, z, width, height, tops },
+  }
 }
 
 export function overlappingVoxels(

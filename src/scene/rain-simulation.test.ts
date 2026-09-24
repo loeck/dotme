@@ -198,3 +198,31 @@ describe('rain collisions against the transferred terrain index', () => {
     expect(indexed.trace({ x: 5, y: 3, z: 0 }, { x: 5, y: -4, z: 0 })).toBe(Infinity)
   })
 })
+
+it('conservative columns never discard cell-boundary, empty-column or long-segment hits', () => {
+  const voxels = Array.from({ length: 64 }, (_, i) => ({
+    x: ((i % 8) - 4) * 2,
+    y: i % 5,
+    z: (Math.floor(i / 8) - 4) * 2,
+    size: i % 3 === 0 ? 0.125 : 1,
+    color: 0,
+  }))
+  const reference = new RainCollider(voxels)
+  const indexed = new RainCollider(createVoxelIndex(voxels))
+  for (let i = 0; i < 2000; i++) {
+    const a = { x: Math.sin(i * 7) * 12, y: (i % 8) - 1, z: Math.cos(i * 3) * 12 }
+    const b = { x: Math.cos(i * 5) * 12, y: -2, z: Math.sin(i * 11) * 12 }
+    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
+  }
+  for (const voxel of voxels) {
+    const a = { x: voxel.x, y: 20, z: voxel.z },
+      b = { ...a, y: -2 }
+    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
+    a.x += voxel.size / 2
+    b.x = a.x
+    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
+  }
+  expect(
+    new RainCollider(createVoxelIndex([])).trace({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 }),
+  ).toBe(Infinity)
+})

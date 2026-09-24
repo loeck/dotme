@@ -50,6 +50,10 @@ const output = resolve(process.env.BENCH_OUTPUT ?? 'artifacts/performance')
 const repetitions = Number(process.env.BENCH_REPEATS ?? 3)
 const seconds = Number(process.env.BENCH_SECONDS ?? 30)
 const profiles = (process.env.BENCH_PROFILES ?? 'desktop,mobile').split(',')
+const query = process.env.BENCH_QUERY ?? 'time=00:00&rain=heavy&weather=partly-cloudy'
+const seeds = (process.env.BENCH_SEEDS ?? '0,12,9182').split(',').map(Number)
+const rainCpuOnly = process.env.BENCH_RAIN_CPU === '1'
+const diagnosticRuns = process.env.BENCH_DIAGNOSTICS === '1'
 const captureOnly = process.env.BENCH_CAPTURE_ONLY === '1'
 const bedExperiment = process.env.BENCH_BED_EXPERIMENT === '1'
 const workspace = process.cwd()
@@ -60,8 +64,11 @@ const report = {
   reference: bedExperiment ? 'working-tree-full-bed' : reference,
   seconds,
   repetitions,
+  query,
+  diagnosticRuns,
   runs: [],
   images: [],
+  rainCpu: [],
 }
 try {
   await mkdir(output, { recursive: true })
@@ -119,7 +126,25 @@ try {
         ? { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 }
         : { ...devices['iPhone 13'], viewport: { width: 390, height: 664 } },
     )
-    for (const seed of [0, 12, 9182]) {
+    if (rainCpuOnly) {
+      for (let repeat = 0; repeat < repetitions; repeat++) {
+        for (const variant of repeat % 2 ? ['optimized', 'baseline'] : ['baseline', 'optimized']) {
+          const page = await context.newPage()
+          await page.goto(`${url}/?${query}`)
+          const result = await page.evaluate(async (v) => {
+            const module = await import(`/${v}/harness.js`)
+            module.start(9182)
+            const sample = module.rainCpu()
+            module.stop()
+            return sample
+          }, variant)
+          report.rainCpu.push({ profile, variant, repeat, ...result })
+          console.log(JSON.stringify({ profile, variant, repeat, ...result }))
+          await page.close()
+        }
+      }
+    }
+    for (const seed of rainCpuOnly ? [] : seeds) {
       const captures = []
       for (const variant of ['baseline', 'optimized']) {
         const page = await context.newPage()
@@ -128,7 +153,7 @@ try {
         page.on('console', (message) => {
           if (message.type() === 'error') errors.push(message.text())
         })
-        await page.goto(url)
+        await page.goto(`${url}/?${query}`)
         const data = await page.evaluate(
           async ({ variant: v, seed: s, bedExperiment: bed }) => {
             const module = await import(`/${bed ? 'optimized' : v}/harness.js`)
@@ -173,17 +198,20 @@ try {
       report.images.push(result)
       console.log(JSON.stringify({ ...result, diagnostics: undefined }))
     }
-    if (!captureOnly && !bedExperiment)
+    if (!captureOnly && !bedExperiment && !rainCpuOnly)
       for (let repeat = 0; repeat < repetitions; repeat++) {
         for (const variant of repeat % 2 ? ['optimized', 'baseline'] : ['baseline', 'optimized']) {
           await waitForQuiet()
           const page = await context.newPage()
-          await page.goto(url)
-          await page.evaluate(async (v) => {
-            const module = await import(`/${v}/harness.js`)
-            module.start(9182)
-            module.animate()
-          }, variant)
+          await page.goto(`${url}/?${query}`)
+          await page.evaluate(
+            async ({ v, diagnostics }) => {
+              const module = await import(`/${v}/harness.js`)
+              module.start(9182, diagnostics, v === 'baseline')
+              module.animate()
+            },
+            { v: variant, diagnostics: diagnosticRuns },
+          )
           const competing = new Set(competingBrowsers() ?? [])
           const monitor = setInterval(() => {
             for (const pid of competingBrowsers() ?? []) competing.add(pid)
@@ -195,6 +223,12 @@ try {
             variant,
           )
           await page.waitForTimeout(seconds * 1000)
+          const diagnosticData = diagnosticRuns
+            ? await page.evaluate(
+                async (v) => (await import(`/${v}/harness.js`)).readDiagnostics(),
+                variant,
+              )
+            : null
           const frames = await page.evaluate(async (v) => {
             const module = await import(`/${v}/harness.js`)
             const data = module.samples()
@@ -230,6 +264,11 @@ try {
               0.5,
             ),
           }
+          if (diagnosticData)
+            await writeFile(
+              join(output, `${profile}-${variant}-${repeat}-passes.json`),
+              JSON.stringify(diagnosticData),
+            )
           report.runs.push(result)
           await writeFile(
             join(output, `${profile}-${variant}-${repeat}.json`),

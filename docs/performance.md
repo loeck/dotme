@@ -5,7 +5,8 @@ water/bed resolutions, the 60 Hz physical clock and `?seed=` are preserved.
 
 After integration of `feat/sun-light`, `feat/rain` and `feat/bundle-size`, the scene also
 includes the solar cycle and rain, and starts from the static TypeScript lifecycle.
-The measurements below predate these integrations and do not measure the combined scene.
+The original results section predates these integrations. The combined-scene follow-up
+below uses the merged commit `59eada9` as its reference.
 
 ## Implementation
 
@@ -72,12 +73,20 @@ pnpm benchmark:scene <reference-commit>
 The benchmark builds production bundles of the reference and working-tree engine without
 changing either tree. It alternates A/B order, uses five seconds of warm-up and thirty seconds
 of measurement, and runs three repetitions for Chromium desktop and the WebKit iPhone profile.
-Captures use deterministic time 18 and seeds 0, 12, 9182. JSON samples, reports and PNGs are
+Captures use deterministic scene/solar time 18 and seeds 0, 12, 9182. The combined-scene
+harness also advances rain by three fixed-step seconds to include established impacts;
+animation timing enables rain and the real solar clock. JSON samples, reports and PNGs are
 written to `artifacts/performance/`. The scene is isolated from the page interface for timing; application
 startup and Worker integration are covered by the browser suite.
 
 Optional environment variables: `BENCH_PROFILES=desktop,mobile`, `BENCH_REPEATS=3`,
-`BENCH_SECONDS=30`, `BENCH_OUTPUT=...`, `BENCH_CAPTURE_ONLY=1`.
+`BENCH_SECONDS=30`, `BENCH_OUTPUT=...`, `BENCH_CAPTURE_ONLY=1`, `BENCH_SEEDS=0,12,9182`,
+`BENCH_QUERY='time=08:30&rain=heavy&weather=partly-cloudy'`.
+The default query fixes midnight with heavy rain and partly cloudy weather.
+`BENCH_DIAGNOSTICS=1` records separate per-pass histories and adds timer overhead; use it
+for investigation, not the headline frame-rate comparison.
+`BENCH_RAIN_CPU=1` compares 600 fixed rain steps with two wind reversals, with rendering
+stopped, and records a checksum of every drop and impact field.
 To evaluate the bed independently, use `BENCH_BED_EXPERIMENT=1` and a separate output directory.
 It compares the optimized engine with a stride-two index grid, retaining all depth textures,
 vertices at original sample centers, outer bounds and vertex attributes. This experimental
@@ -159,3 +168,69 @@ Reproducible raw outputs are written by the benchmark to `artifacts/performance/
 and per-run JSON/PNGs; the separate bed study uses `artifacts/bed-experiment/`. Artifacts are
 ignored by Git. `pnpm check` and the browser suite cover the implementation; actual phones
 and an uncontended machine remain validation requirements.
+
+## Follow-up after merging solar lighting, rain and the static page
+
+Reference: `59eada9`, containing all three local feature branches and the previous
+performance work. The new changes retain rain density, particle pools, fixed steps,
+lighting, shadow maps, air samples, post-processing and render resolutions.
+
+- The Worker prepares conservative two-metre columns containing the highest voxel top.
+  A rain segment above every crossed column cannot touch terrain and skips the BVH.
+  Remaining candidates use the same exact slab intersection, including inside starts.
+  Scratch ray vectors are reused, and steady wind skips only an exactly zero response.
+- Every vertex of a rain streak shares its world position. Its lighting now runs in
+  the vertex shader and is interpolated across the sheet, instead of repeating the
+  same lamp/glint calculation at every covered pixel. Splash crowns retain spatially
+  varying fragment lighting. Lights with exactly zero energy skip their calculations.
+- Air integration projects each ray origin and step into the terrain and two cloud
+  shadow frames once, instead of projecting all 16/32 sample positions separately.
+  Sample locations and midpoint quadrature are unchanged. Fully terrain-blocked
+  samples skip cloud lookups, and empty air segments return unit transmission.
+- Diagnostics include `rain-update` and `rain-slopes`, alongside the atmosphere and
+  rain overlay. GPU query totals on this ANGLE/Metal setup were inconsistent with
+  frame pacing; this follow-up uses CPU timings and diagnostic-free frame intervals
+  for conclusions rather than assigning precise GPU milliseconds to passes.
+
+For 600 fixed steps with heavy rain, including two wind changes, three alternating
+trials gave 621–634 ms before / 184–187 ms after on Chromium desktop, and 228–235 ms
+before / 65–67 ms after on the WebKit mobile profile: about 70–72% less simulation
+CPU time. Full drop/impact state checksums were identical for every A/B trial. This
+is an isolated simulation result, not a frame-rate or physical-phone measurement.
+
+At midnight, heavy-rain captures across seeds 0, 12 and 9182 were identical on WebKit;
+Chromium mean absolute RGB differences stayed below 0.000007 byte levels, with one
+pixel in seed 0 differing by five levels. At 08:30, after the air optimization, mean
+differences stayed below 0.000054 byte levels and maximum differences were three
+levels desktop / one mobile. These are sampled image checks, not all-time equivalence.
+
+Full-scene trials used five seconds of warm-up and thirty seconds of sampling, three
+alternating repetitions per variant/profile, with diagnostics disabled and heavy rain.
+The table includes only trials without detected competing automated browsers; counts
+are reference/candidate. Values are ranges of per-trial medians or p95s, not pooled samples.
+
+| Scenario / profile               | Clean trials | Median CPU ms, before → after | Frame p95 ms, before → after |
+| -------------------------------- | ------------ | ----------------------------- | ---------------------------- |
+| Midnight / Chromium              | 1 / 2        | 9.5 → 4.0–4.5                 | 66.7 → 33.4–66.6             |
+| Midnight / WebKit mobile profile | 2 / 2        | 2 → 2                         | 18–27 → 18                   |
+| 08:30 / Chromium                 | 3 / 3        | 4.0–4.1 → 2.3–2.7             | 33.3–33.4 → 33.3–49.9        |
+| 08:30 / WebKit mobile profile    | 3 / 1        | 2 → 1                         | 25–27 → 23                   |
+
+Seven of twenty-four trials detected concurrent browsers. Detection does not capture
+all system GPU load: even unflagged trials varied substantially, and one optimized
+desktop morning trial had a worse p95. These data establish neither a stable overall
+p95 improvement nor sustained 60 fps on desktop. WebKit CPU timings are quantized to
+milliseconds; the isolated fixed-step test above is the stronger CPU comparison.
+Physical-phone validation remains outstanding.
+
+Raw reports, frame samples and captures are in `artifacts/combined-perf-night/` and
+`artifacts/combined-perf-day/`; fixed-step checksums and timings are in
+`artifacts/merged-rain-cpu/`. Use `59eada9` with the benchmark commands above to repeat
+this comparison. The older `artifacts/performance/` report covers the pre-merge scene.
+
+Final combined validation: `pnpm check` passes (typecheck, lint, formatting, 124 unit
+tests and production build); Playwright reports 74 passed and four expected skips
+(two opt-in solar baseline benchmarks, the mobile mouse cursor and mobile WebGPU).
+Coverage includes the new column rejection against exact voxel intersections, rain
+and wind changes, solar scattering and shadows, reduced motion, RGBA8/analytic
+fallbacks, resize, page restoration, Worker cancellation and repeated disposal.

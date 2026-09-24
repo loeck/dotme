@@ -82,6 +82,9 @@ export class RainCollider {
   private readonly cells = new Map<number, Voxel[]>()
 
   private readonly index?: VoxelIndex
+  private readonly origin = [0, 0, 0]
+  private readonly direction = [0, 0, 0]
+  private readonly aboveWater = (id: number) => this.index!.boxes[id * 6 + 4]! >= WATER_Y
 
   constructor(voxels: readonly Voxel[] | VoxelIndex) {
     if ('boxes' in voxels) {
@@ -108,15 +111,29 @@ export class RainCollider {
   trace(a: Point, b: Point): number {
     if (this.index) {
       const index = this.index
+      const columns = index.columns
+      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) / 2) - columns.x)
+      const z0 = Math.max(0, Math.floor(Math.min(a.z, b.z) / 2) - columns.z)
+      const x1 = Math.min(columns.width - 1, Math.floor(Math.max(a.x, b.x) / 2) - columns.x)
+      const z1 = Math.min(columns.height - 1, Math.floor(Math.max(a.z, b.z) / 2) - columns.z)
+      const low = Math.min(a.y, b.y)
+      let candidate = false
+      for (let z = z0; z <= z1 && !candidate; z++)
+        for (let x = x0; x <= x1; x++)
+          if (low <= columns.tops[z * columns.width + x]!) {
+            candidate = true
+            break
+          }
+      if (!candidate) return Infinity
+      this.origin[0] = a.x
+      this.origin[1] = a.y
+      this.origin[2] = a.z
+      this.direction[0] = b.x - a.x
+      this.direction[1] = b.y - a.y
+      this.direction[2] = b.z - a.z
       return (
-        firstVoxelHit(
-          index,
-          [a.x, a.y, a.z],
-          [b.x - a.x, b.y - a.y, b.z - a.z],
-          1,
-          true,
-          (id) => index.boxes[id * 6 + 4]! >= WATER_Y,
-        )?.distance ?? Infinity
+        firstVoxelHit(index, this.origin, this.direction, 1, true, this.aboveWater)?.distance ??
+        Infinity
       )
     }
     let nearest = Infinity
@@ -257,9 +274,12 @@ export class RainSimulation {
       this.previous.x = x
       this.previous.y = y
       this.previous.z = z
-      const response = 1 - Math.exp(-RAIN_STEP / (0.09 + drop.size * 150))
-      drop.vx += (this.state.wind.x - drop.vx) * response
-      drop.vz += (this.state.wind.z - drop.vz) * response
+      // Most drops already match steady wind. The skipped contribution is exactly zero.
+      if (drop.vx !== this.state.wind.x || drop.vz !== this.state.wind.z) {
+        const response = 1 - Math.exp(-RAIN_STEP / (0.09 + drop.size * 150))
+        drop.vx += (this.state.wind.x - drop.vx) * response
+        drop.vz += (this.state.wind.z - drop.vz) * response
+      }
       drop.x += drop.vx * RAIN_STEP
       drop.y += drop.vy * RAIN_STEP
       drop.z += drop.vz * RAIN_STEP

@@ -52,20 +52,24 @@ uniform mat4 uCloudShadowPreviousMatrix;
 uniform mat4 uCloudShadowNextMatrix;
 uniform float uCloudShadowBlend;
 uniform float uCloudShadowStrength;
-float cloudTransmission(float offset, mat4 projection, vec3 world) {
-  vec2 uv = (projection * vec4(world, 1.0)).xy;
+float cloudTransmission(float offset, vec2 uv) {
   float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
   // Clamp within each 384-pixel tile so linear filtering never crosses timestamps.
   uv = clamp(uv, vec2(0.5 / 384.0), vec2(1.0 - 0.5 / 384.0));
   uv.x = uv.x / 3.0 + offset;
   return mix(1.0, texture2D(uCloudShadowAtlas, uv).r, smoothstep(0.0, 0.06, edge));
 }
-float cloudShadow(vec3 world) {
+float cloudShadowProjected(vec2 previous, vec2 next) {
   if (uCloudShadowStrength <= 0.0) return 1.0;
   float transmission = mix(
-    cloudTransmission(uCloudShadowPreviousOffset, uCloudShadowPreviousMatrix, world),
-    cloudTransmission(uCloudShadowNextOffset, uCloudShadowNextMatrix, world), uCloudShadowBlend);
+    cloudTransmission(uCloudShadowPreviousOffset, previous),
+    cloudTransmission(uCloudShadowNextOffset, next), uCloudShadowBlend);
   return mix(1.0, transmission, uCloudShadowStrength);
+}
+float cloudShadow(vec3 world) {
+  if (uCloudShadowStrength <= 0.0) return 1.0;
+  return cloudShadowProjected((uCloudShadowPreviousMatrix * vec4(world, 1.0)).xy,
+    (uCloudShadowNextMatrix * vec4(world, 1.0)).xy);
 }
 `
 

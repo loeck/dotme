@@ -50,8 +50,7 @@ uniform float uShadowBias;
 varying vec2 vUv;
 ${CLOUD_SHADOW_GLSL}
 ${AIR_INTEGRATION_GLSL}
-float terrainVisibility(vec3 world) {
-  vec4 projected = uShadowMatrix * vec4(world, 1.0);
+float terrainVisibility(vec4 projected) {
   vec3 p = projected.xyz / projected.w;
   if (any(lessThan(p, vec3(0.0))) || any(greaterThan(p, vec3(1.0)))) return 1.0;
   return texture(tTerrain, vec3(p.xy, p.z + uShadowBias));
@@ -72,6 +71,21 @@ void main() {
     distance = min(distance, max(a, b));
   } else if (uEye.y < -20.0 || uEye.y > 80.0) distance = 0.0;
   float stepLength = max(0.0, distance - entry) / float(AIR_STEPS);
+  if (stepLength <= 0.0 || uExtinction <= 0.0) {
+    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
+    return;
+  }
+  // Shadow projections are linear along this ray. Project origin and step once,
+  // retaining exactly the same midpoint samples and shadow-map resolutions.
+  vec4 start = vec4(uEye + ray * entry, 1.0);
+  vec4 step = vec4(ray * stepLength, 0.0);
+  vec4 terrainStart = uShadowMatrix * start;
+  vec4 terrainStep = uShadowMatrix * step;
+  vec2 previousStart = (uCloudShadowPreviousMatrix * start).xy;
+  vec2 previousStep = (uCloudShadowPreviousMatrix * step).xy;
+  vec2 nextStart = (uCloudShadowNextMatrix * start).xy;
+  vec2 nextStep = (uCloudShadowNextMatrix * step).xy;
+  bool directLight = uSunDirection.y > 0.0 && dot(uSunRadiance, vec3(1.0)) > 0.0;
   float transmission = exp(-uExtinction * stepLength);
   float integral = segmentIntegral(uExtinction, stepLength);
   float phase = airPhase(dot(ray, uSunDirection));
@@ -79,10 +93,15 @@ void main() {
   vec3 radiance = vec3(0.0);
   // Stable midpoint quadrature, no temporal history or frame-dependent jitter.
   for (int i = 0; i < AIR_STEPS; i++) {
-    vec3 p = uEye + ray * (entry + (float(i) + 0.5) * stepLength);
+    float midpoint = float(i) + 0.5;
     float visibility = 0.0;
-    if (uSunDirection.y > 0.0 && dot(uSunRadiance, vec3(1.0)) > 0.0)
-      visibility = terrainVisibility(p) * cloudShadow(p);
+    if (directLight) {
+      visibility = terrainVisibility(terrainStart + terrainStep * midpoint);
+      // Fully blocked terrain contributes no sunlight, regardless of cloud cover.
+      if (visibility > 0.0)
+        visibility *= cloudShadowProjected(previousStart + previousStep * midpoint,
+          nextStart + nextStep * midpoint);
+    }
     // Artistic solar exposure compensates for the normalized HG phase. Cloud
     // transmission remains Beer–Lambert: opaque cover cannot invent a beam.
     vec3 source = uExtinction * (uAmbient + uSunRadiance * visibility * phase * 6.0);

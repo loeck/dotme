@@ -55,6 +55,9 @@ adaptive profile contrast, the night cursor and rain URL controls are preserved.
 The solar and rain effects change the engine chunks, so the unchanged hashes noted
 above apply only to the original standalone migration.
 
+The subsequent rain/air optimization brings the total to 805,575 bytes raw /
+218,496 bytes gzip (+914 gzip bytes). Initial JavaScript remains 6,529 / 2,790 bytes.
+
 ## Verification
 
 `pnpm check` passes: TypeScript, lint, formatting, 92 unit tests and production build.

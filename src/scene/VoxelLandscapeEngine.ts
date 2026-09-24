@@ -895,12 +895,16 @@ export class VoxelLandscapeEngine {
       this.measure('simulation', () => this.simulation.step(dt, this.elapsed))
     uniforms.uState!.value = this.simulation.texture
 
-    this.rain.update(
-      this.options.reducedMotion ? 0 : rainDelta,
-      this.camera,
-      smooth(0, 0.62, this.intro),
+    this.measure('rain-update', () =>
+      this.rain.update(
+        this.options.reducedMotion ? 0 : rainDelta,
+        this.camera,
+        smooth(0, 0.62, this.intro),
+      ),
     )
-    this.rain.renderSlopes(this.renderer, this.camera, this.elapsed)
+    this.measure('rain-slopes', () =>
+      this.rain.renderSlopes(this.renderer, this.camera, this.elapsed),
+    )
     this.renderer.shadowMap.needsUpdate = true
     // Capture current lighting in all six directions every frame. Water has its
     // own planar reflection and is excluded to avoid recursive mirror captures.

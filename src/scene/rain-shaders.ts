@@ -1,5 +1,36 @@
 import { WATER_FIELD_GLSL } from './water-surface'
 
+const RAIN_ILLUMINATION = `
+uniform vec3 uMoonColor;
+uniform vec3 uMoonDirection;
+uniform vec3 uLampPosition[LAMP_COUNT];
+uniform vec3 uLampColor[LAMP_COUNT];
+varying vec3 vWorld;
+vec3 rainLight() {
+  vec3 viewDir = normalize(cameraPosition - vWorld);
+  float moonGlint = 0.35 + 0.65 * pow(abs(dot(viewDir, uMoonDirection)), 5.0);
+  vec3 light = uMoonColor * moonGlint;
+  for (int i = 0; i < LAMP_COUNT; i++) {
+    if (all(equal(uLampColor[i], vec3(0.0)))) continue;
+    vec3 delta = uLampPosition[i] - vWorld;
+    float d2 = dot(delta, delta);
+    float glint = 0.3 + 0.7 * pow(abs(dot(viewDir, normalize(delta))), 3.0);
+    light += uLampColor[i] * glint / (1.0 + d2);
+  }
+  return light * exp(-length(cameraPosition - vWorld) * 0.009);
+}
+`
+
+const RAIN_OCCLUSION = `
+uniform sampler2D uDepth;
+uniform bool uOverlay;
+uniform vec2 uResolution;
+uniform float uOpacity;
+void occludeRain() {
+  if (uOverlay && gl_FragCoord.z > texture2D(uDepth, gl_FragCoord.xy / uResolution).r + 0.000001)
+    discard;
+}`
+
 // All sizes are metres. The exposure is deliberately unrelated to the frame delta.
 export const RAIN_VERTEX = `
 #ifdef SURFACE_SPRAY
@@ -10,7 +41,8 @@ attribute vec4 aVelocity;
 uniform vec2 uResolution;
 uniform float uPixelRatio;
 varying vec2 vUv;
-varying vec3 vWorld;
+${RAIN_ILLUMINATION}
+varying vec3 vRainLight;
 varying float vCoverage;
 varying float vSeed;
 varying float vProfileContrast;
@@ -20,6 +52,8 @@ void main() {
   #ifdef SURFACE_SPRAY
     vWorld.y += heightAt(vWorld.xz, 0.0);
   #endif
+  // Every corner shares the same world-space drop position and lighting.
+  vRainLight = rainLight();
   vSeed = aVelocity.w;
   vec4 head = viewMatrix * vec4(vWorld, 1.0);
   vec3 motion = mat3(viewMatrix) * aVelocity.xyz / 48.0;
@@ -48,36 +82,9 @@ void main() {
 }
 `
 
-export const RAIN_LIGHTING = `
-uniform vec3 uMoonColor;
-uniform vec3 uMoonDirection;
-uniform vec3 uLampPosition[LAMP_COUNT];
-uniform vec3 uLampColor[LAMP_COUNT];
-uniform sampler2D uDepth;
-uniform bool uOverlay;
-uniform vec2 uResolution;
-uniform float uOpacity;
-varying vec3 vWorld;
-vec3 rainLight() {
-  vec3 viewDir = normalize(cameraPosition - vWorld);
-  float moonGlint = 0.35 + 0.65 * pow(abs(dot(viewDir, uMoonDirection)), 5.0);
-  vec3 light = uMoonColor * moonGlint;
-  for (int i = 0; i < LAMP_COUNT; i++) {
-    vec3 delta = uLampPosition[i] - vWorld;
-    float d2 = dot(delta, delta);
-    float glint = 0.3 + 0.7 * pow(abs(dot(viewDir, normalize(delta))), 3.0);
-    light += uLampColor[i] * glint / (1.0 + d2);
-  }
-  return light * exp(-length(cameraPosition - vWorld) * 0.009);
-}
-void occludeRain() {
-  if (uOverlay && gl_FragCoord.z > texture2D(uDepth, gl_FragCoord.xy / uResolution).r + 0.000001)
-    discard;
-}
-`
-
 export const RAIN_FRAGMENT = `
-${RAIN_LIGHTING}
+${RAIN_OCCLUSION}
+varying vec3 vRainLight;
 varying vec2 vUv;
 varying float vCoverage;
 varying float vSeed;
@@ -93,7 +100,7 @@ void main() {
   #ifdef SURFACE_SPRAY
     alpha = across * ends * min(0.85, vCoverage * 13.0) * uOpacity;
   #endif
-  gl_FragColor = vec4(rainLight(), alpha);
+  gl_FragColor = vec4(vRainLight, alpha);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -194,7 +201,8 @@ void main() {
 `
 
 export const CROWN_FRAGMENT = `
-${RAIN_LIGHTING}
+${RAIN_ILLUMINATION}
+${RAIN_OCCLUSION}
 varying vec2 vUv;
 varying float vFade;
 void main() {
