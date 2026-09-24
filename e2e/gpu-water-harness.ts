@@ -23,7 +23,7 @@ import { createWindNodes, sampleWindField, windFieldNode } from '../src/scene/wa
 import { updateWindUniforms, WindModel } from '../src/scene/wind'
 
 interface WaterVerification {
-  backend: 'webgpu'
+  backend: 'webgpu' | 'webgl'
   verify(steps?: number): Promise<{
     maxError: number
     height: number
@@ -62,19 +62,22 @@ const stats = (state: Float32Array) => {
 async function main() {
   const canvas = document.querySelector('#gpu-water')
   if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Missing verification canvas')
-  if (!navigator.gpu) throw new Error('The water verification requires WebGPU')
-  const renderer = new WebGPURenderer({ canvas, antialias: false })
+  const backend =
+    new URLSearchParams(location.search).get('backend') === 'webgl' ? 'webgl' : 'webgpu'
+  if (backend === 'webgpu' && !navigator.gpu)
+    throw new Error('The water verification requires WebGPU')
+  const renderer = new WebGPURenderer({ canvas, antialias: false, forceWebGL: backend === 'webgl' })
   await renderer.init()
-  if (!('isWebGPUBackend' in renderer.backend)) {
+  if (!((backend === 'webgpu' ? 'isWebGPUBackend' : 'isWebGLBackend') in renderer.backend)) {
     await renderer.dispose()
-    throw new Error('The water verification requires a genuine WebGPU backend')
+    throw new Error(`The water verification requires a genuine ${backend} backend`)
   }
   const simulation = new WaterSimulation(renderer, createLakeBed([], 42, true), true)
   await simulation.compileAsync()
   const n = simulation.resolution,
     dx = LAKE_BOUNDS.size / n
   window.gpuWater = {
-    backend: 'webgpu',
+    backend,
     async verifyWind() {
       const size = 32
       const target = new RenderTarget(size, size, { type: FloatType, depthBuffer: false })
@@ -118,7 +121,8 @@ async function main() {
                   coverage,
                 )
                 for (let component = 0; component < 4; component++) {
-                  const actual = required(pixels[(row * size + col) * 4 + component])
+                  const stored = backend === 'webgl' ? size - 1 - row : row
+                  const actual = required(pixels[(stored * size + col) * 4 + component])
                   if (!Number.isFinite(actual)) throw new Error('Nonfinite wind field')
                   maxErrors[component] = Math.max(
                     required(maxErrors[component]),

@@ -36,7 +36,8 @@ in `test-results/`. Browser test time limits exclude dependency installation.
 The initial entry loads a minimal TSL loader and Three.js runtime. Its first presented
 frame starts the dynamic landscape import. The loader and landscape share one canvas,
 one initialized `WebGPURenderer` and the same runtime. Browsers without a working WebGPU
-adapter display the static profile. Graphics failures also release the profile.
+adapter render the same scene through the renderer’s WebGL 2 backend; only browsers
+without either display the static profile. Graphics failures also release the profile.
 World generation runs in its own worker; weather and audio remain independent resources.
 
 `src/components/` owns page lifecycle and accessible controls. `src/scene/` contains

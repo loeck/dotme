@@ -10,7 +10,7 @@ export default defineConfig({
   projects: [
     {
       name: 'gpu',
-      testMatch: ['gpu-rendering.spec.ts', 'gpu-water.spec.ts'],
+      testMatch: ['gpu-rendering.spec.ts', 'gpu-water.spec.ts', 'webgl-fallback.spec.ts'],
       use: {
         ...devices['Desktop Chrome'],
         launchOptions: chromiumLaunchOptions(),
