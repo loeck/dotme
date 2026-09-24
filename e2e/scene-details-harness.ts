@@ -318,12 +318,9 @@ export function landingFrame(age = 0.22) {
   engine!.resize()
 }
 
-/** Inspect the production passes and shared water uniforms without public controls. */
-export async function livingProbe() {
+/** Compare production stellar radiance without public controls. */
+export async function stellarProbe() {
   const state = engine as unknown as {
-    camera: PerspectiveCamera
-    water: import('../src/scene/lake-water').LakeReflector
-    details: import('../src/scene/scene-details').SceneDetails
     renderer: WebGLRenderer
     skyMaterial: ShaderMaterial
     environmentAt: number
@@ -333,12 +330,6 @@ export async function livingProbe() {
   }
   state.cancelFrame()
   state.options.reducedMotion = true
-  const leaf = state.details.leaves.mesh
-  const passes: string[] = []
-  const mirror = state.water.getReflectionCamera(state.camera)
-  leaf.onBeforeRender = (_renderer, _scene, camera) => {
-    passes.push(camera === state.camera ? 'main' : camera === mirror ? 'reflection' : 'unexpected')
-  }
   state.environmentAt = -Infinity
   state.render(performance.now())
   const gl = state.renderer.getContext(),
@@ -373,29 +364,7 @@ export async function livingProbe() {
   state.skyMaterial.fragmentShader = original
   state.skyMaterial.needsUpdate = true
   state.render(performance.now())
-  return { count: leaf.count, passes, skyDifference, lowDifference }
-}
-
-export function leafContacts() {
-  const state = engine as unknown as {
-    camera: PerspectiveCamera
-    details: import('../src/scene/scene-details').SceneDetails
-    water: import('../src/scene/lake-water').LakeReflector
-  }
-  const leaves = state.details.leaves
-  const uniforms = (leaves as unknown as { uniforms: Record<string, { value: unknown }> }).uniforms
-  return {
-    sharedTexture: uniforms.uState === state.water.material.uniforms.uState,
-    contacts: leaves.drift.leaves.map((leaf) => {
-      const p = new Vector3(leaf.x, 0, leaf.z).project(state.camera)
-      return {
-        x: ((p.x + 1) * innerWidth) / 2,
-        y: ((1 - p.y) * innerHeight) / 2,
-        worldX: leaf.x,
-        worldZ: leaf.z,
-      }
-    }),
-  }
+  return { skyDifference, lowDifference }
 }
 
 export function meteorProbe() {
@@ -420,26 +389,4 @@ export function meteorProbe() {
     age: state.skyMaterial.uniforms.uMeteorAge!.value,
     attempts: state.shootingStars.attempts,
   }
-}
-
-/** Close inspection of the actual material and its water contact, not a separate demo. */
-export function leafCloseup() {
-  const state = engine as unknown as {
-    camera: PerspectiveCamera
-    details: import('../src/scene/scene-details').SceneDetails
-    options: { reducedMotion: boolean }
-    cancelFrame(): void
-    render(now: number): void
-  }
-  state.cancelFrame()
-  state.options.reducedMotion = true
-  const leaf = state.details.leaves.drift.leaves[1]!
-  const update = state.camera.updateMatrixWorld.bind(state.camera)
-  state.camera.updateMatrixWorld = (force) => {
-    state.camera.position.set(leaf.x + 0.4, 1.1, leaf.z + 1.1)
-    state.camera.lookAt(leaf.x, 0, leaf.z)
-    update(force)
-  }
-  state.render(performance.now())
-  state.camera.updateMatrixWorld = update
 }

@@ -229,3 +229,36 @@ test('refused background resume turns sound off, and renderer failure disables i
   })
   await expect(button).toBeDisabled()
 })
+
+test('a late background-suspension failure cannot disable a newer activation', async ({ page }) => {
+  await page.goto('/?seed=42')
+  const button = page.locator('.scene-sound-trigger')
+  await button.click()
+  await expect(button).toHaveAttribute('aria-busy', 'false')
+  await page.evaluate(() => {
+    const context = (window as unknown as { testAudioContexts: AudioContext[] })
+      .testAudioContexts[0]!
+    const suspend = context.suspend.bind(context)
+    context.suspend = () =>
+      new Promise<void>((_resolve, reject) => {
+        Object.assign(window, { rejectOldSuspension: () => reject(new Error('Late refusal')) })
+        context.suspend = suspend
+      })
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true })
+    document.dispatchEvent(new Event('visibilitychange'))
+  })
+  await expect.poll(() => page.evaluate(() => 'rejectOldSuspension' in window)).toBe(true)
+  await page.evaluate(() =>
+    Object.defineProperty(document, 'hidden', { configurable: true, value: false }),
+  )
+  await button.click()
+  await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await expect(button).toHaveAttribute('aria-busy', 'false')
+  await page.evaluate(async () => {
+    ;(window as unknown as { rejectOldSuspension(): void }).rejectOldSuspension()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  })
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('[data-sound-status]')).toBeEmpty()
+})

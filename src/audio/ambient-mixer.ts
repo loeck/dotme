@@ -6,7 +6,7 @@ export const AUDIO_LAYERS = ['water', 'wind', 'rain', 'insects', 'birds'] as con
 type Layer = (typeof AUDIO_LAYERS)[number]
 const CROSSFADE = 1.5
 
-/** One context is owned by the gesture component. Everything else loads on demand. */
+/** One context is owned by the sound control. Everything else loads on demand. */
 export class AmbientMixer {
   private readonly master: GainNode
   private readonly gains = new Map<Layer, GainNode>()
@@ -41,7 +41,7 @@ export class AmbientMixer {
   }
 
   async load() {
-    const results = await Promise.allSettled(
+    await Promise.allSettled(
       AUDIO_LAYERS.map(async (layer) => {
         const response = await fetch(`/audio/${layer}.mp3`, {
           signal: AbortSignal.any([this.loading.signal, AbortSignal.timeout(15000)]),
@@ -59,8 +59,7 @@ export class AmbientMixer {
       }),
     )
     if (this.disposed) return
-    if (results[0]!.status === 'rejected' || !this.buffers.has('water'))
-      throw new Error('Water audio unavailable')
+    if (!this.buffers.has('water')) throw new Error('Water audio unavailable')
     this.ready = true
   }
 
@@ -108,15 +107,13 @@ export class AmbientMixer {
       const next = this.next.get(layer) ?? now
       if (next > now + 0.75) continue
       const at = Math.max(now, next)
-      if (layer === 'water') {
-        const phrase = waterPhrase(buffer.duration, this.waterOffset)
-        this.waterOffset = phrase.offset
-        this.voice(layer, at, phrase.duration, phrase.offset, phrase.fade)
-        this.next.set(layer, at + phrase.duration - phrase.fade)
-      } else {
-        this.voice(layer, at, buffer.duration)
-        this.next.set(layer, at + buffer.duration - CROSSFADE)
-      }
+      const phrase =
+        layer === 'water'
+          ? waterPhrase(buffer.duration, this.waterOffset)
+          : { offset: 0, duration: buffer.duration, fade: CROSSFADE }
+      if (layer === 'water') this.waterOffset = phrase.offset
+      this.voice(layer, at, phrase.duration, phrase.offset, phrase.fade)
+      this.next.set(layer, at + phrase.duration - phrase.fade)
     }
     if (now >= this.nextBird) {
       this.nextBird = now + 20 + Math.random() * 40

@@ -97,3 +97,8 @@ initial JavaScript is 17,562 B raw / 7,031 B gzip; total emitted JavaScript is
 The longer water recording brings the five local MP3s to 1,274,625 B, still below
 2 MB. Autoplay now attempts to start by default; MP3 requests only begin after the
 browser allows the audio context to run. Refused autoplay stays off until activation.
+
+After removing floating leaves and reviewing audio lifecycle/scheduling, initial JavaScript
+is 17,626 B raw / 7,040 B gzip; total emitted JavaScript is 902,455 B raw / 250,598 B gzip.
+The audio assets are unchanged by that cleanup. Earlier leaf-related sizes above are
+historical measurements, not the current shipped scene.

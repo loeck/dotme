@@ -5,7 +5,6 @@ import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
 import { LakeFish } from './lake-fish'
-import { LakeLeaves } from './lake-leaves'
 import { LakeSplashes } from './lake-splashes'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
@@ -33,7 +32,6 @@ export function updateDetailEnvironment(
 /** Owns the optional detail layer; the engine retains the clock, wind, picking and light passes. */
 export class SceneDetails {
   private readonly caustics: LakeCaustics
-  readonly leaves: LakeLeaves
   private readonly fish: LakeFish
   private readonly splashes: LakeSplashes
   private readonly fireflies: LakeFireflies
@@ -50,7 +48,6 @@ export class SceneDetails {
     this.environment = updateDetailEnvironment(this.environment, environment)
     if (reducedMotion) this.wetness.setWetness(this.environment.rainIntensity)
     this.caustics = new LakeCaustics(reducedMotion)
-    this.leaves = new LakeLeaves(scene, world.lakeBed, world.seed, mobile, reducedMotion)
     this.fish = new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion)
     this.fireflies = new LakeFireflies(scene, world.lakeBed, world.seed, mobile)
     this.splashes = new LakeSplashes(scene, world.lakeBed, world.seed, mobile)
@@ -73,7 +70,6 @@ export class SceneDetails {
 
   setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: Record<string, IUniform>) {
     this.splashes.impacts.setWaterSurface(uniforms)
-    this.leaves.setWaterSurface(uniforms)
     this.splashes.onReturn = handler
   }
 
@@ -100,7 +96,6 @@ export class SceneDetails {
       (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
       localLightStrength > 0 ? waterPointer : null,
     )
-    this.leaves.update(dt, wind)
     this.fish.update(time, dt, waterPointer, scenePointer)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
@@ -115,7 +110,6 @@ export class SceneDetails {
   dispose() {
     this.caustics.dispose()
     this.fish.dispose()
-    this.leaves.dispose()
     this.splashes.dispose()
     this.fireflies.dispose()
     this.wetness.dispose()

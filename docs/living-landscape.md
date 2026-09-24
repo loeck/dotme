@@ -1,39 +1,12 @@
-# Leaves, stars and ambient sound
+# Stars and ambient sound
 
 Implemented in the isolated `feat/living-landscape` worktree. Commit `9ecef4f`
 snapshots the original dirty workspace, including its untracked source files, before
 these additions. No public URL options, runtime service or package dependency were added.
 
-## Floating leaves
-
-`SceneDetails` owns `LakeLeaves`: one instanced mesh and one shared standard material,
-with 12 desktop / 6 mobile blades, three silhouettes and olive/ochre/brown instance colors.
-Blades now use a curved, serrated 32×8 grid, a raised midrib, a narrow petiole and
-per-instance curl/lobing. Pixel-filtered procedural veins, mottling, dry edges and
-vein relief break up the albedo, normals and wet roughness without texture downloads.
-The shared water field still displaces every vertex. At the grazing scene angle,
-subpixel veins intentionally filter away. Material design references:
-[NVIDIA foliage shading](https://developer.nvidia.com/gpugems/gpugems3/part-iii-rendering/chapter-16-vegetation-procedural-animation-and-shading-crysis)
-and [Three.js standard material](https://threejs.org/docs/pages/MeshStandardMaterial.html).
-The seed determines placement, scale, heading and circulation phase. Candidates are in
-the camera's near lake and tested against terrain occlusion and the signed shore field.
-`LeafDrift` is independent of rendering. It integrates at 60 Hz, recovering at most four
-steps after an interruption. Weak wind-driven circulation and a broad return current
-keep the fixed population in its original visible area. Shore gradients remove inward
-velocity progressively; a conservative final clearance check prevents penetration.
-
-Validated moving water-pointer segments feed bounded lateral impulses. UI/terrain hits
-are rejected by the existing water picking path; stationary pointer events carry no energy.
-Touch uses the same water interaction path. Reduced motion freezes placement and input.
-
-Every blade vertex samples `WATER_FIELD_GLSL`, including the live interaction height and
-wind spectrum, with a small clearance for water-mesh interpolation. Face derivatives
-produce the tilted lighting normal. Shared uniform objects ensure the leaves receive the
-new ping-pong texture immediately after every water simulation update. Analytic fallback
-retains the wind field. Cloud shadows, scene lighting and received shadows use the existing
-material hooks. Leaves cast no shadows. Layer 0 includes them in the main and planar
-reflection views; they are explicitly hidden for the environment probe and excluded from
-underwater layers 1 and 3. No new capture or water-fragment sampler is used.
+Floating leaves were removed at the user's request after visual review. Their meshes,
+simulation, water-input hooks and dedicated tests are no longer part of the project.
+The refinement measurements below describe the earlier build that still included them.
 
 ## Stars and shooting stars
 
@@ -100,7 +73,7 @@ with a fade when previously enabled. Refused resume turns the command off. Rende
 for motion preference changes retain the context. Pagehide destroys audio; a restored page
 starts silent. A landscape failure disables the command. No preference is persisted.
 
-## Verification and limits
+## Initial verification and limits (before subsequent review)
 
 - `pnpm check`: TypeScript, lint, formatting, 204 unit tests and production build pass.
 - Unit tests cover seeded leaf populations, clearance during strong pushes, fixed-step
@@ -160,3 +133,18 @@ one six-second measured window per variant and no competing automated browser, r
 These are frame scheduling measurements on the development Mac, not a physical-phone
 or sustained-load guarantee. Raw runs are in
 `artifacts/living-landscape/refinements-performance/report.json`.
+
+## Final removal and review
+
+Floating leaves and their simulation/rendering modules have been removed completely.
+The meteor controller now owns its small seeded random generator. Leaf-only harness
+code and tests are deleted; the stellar capture checks remain. Audio activation uses
+one async flow with cancellation checks, and all ambient loops share one scheduling
+path. A generation check prevents a late background suspension failure from disabling
+newly enabled audio. Existing partial-load fallback and browser-autoplay behavior remain.
+
+`pnpm check` passes with 202 unit tests. After removal, the stellar and water-physics
+suites pass all 24 desktop/mobile browser tests. The audio suites pass 19 tests, with one
+Chromium-only autoplay-policy test skipped on WebKit; they include the delayed suspension
+failure regression. The latest bundle report is recorded below in the linked
+[bundle notes](./bundle-size.md); earlier leaf screenshots and timings are historical.

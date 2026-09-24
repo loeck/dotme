@@ -30,7 +30,7 @@ for (const [time, weather] of [
   ['00:00', 'overcast'],
   ['12:00', 'cloudy'],
 ]) {
-  test(`leaves and stars at ${time} in ${weather}`, async ({ page }, info) => {
+  test(`stars at ${time} in ${weather}`, async ({ page }, info) => {
     const errors: string[] = []
     page.on('pageerror', (e) => errors.push(e.message))
     page.on('console', (m) => {
@@ -50,14 +50,10 @@ for (const [time, weather] of [
       async ({ weather: preset }) => {
         const module = await import('/living-harness.js')
         await module.start(42, true, true, preset === 'cloudy' ? 0.7 : 0)
-        return module.livingProbe()
+        return module.stellarProbe()
       },
       { weather },
     )
-    expect(result.count).toBe(info.project.name === 'mobile' ? 6 : 12)
-    expect(result.passes).toContain('main')
-    expect(result.passes).toContain('reflection')
-    expect(result.passes).not.toContain('unexpected')
     if (time === '12:00' || time === '18:25' || time === '05:35')
       expect(result.skyDifference).toBe(0)
     if (weather === 'overcast') expect(result.skyDifference).toBeLessThan(50)
@@ -76,49 +72,9 @@ for (const [time, weather] of [
       await page.screenshot({ path: info.outputPath('meteor.png') })
     }
 
-    if (time === '12:00' && weather === 'clear') {
-      await page.evaluate(async () => (await import('/living-harness.js')).leafCloseup())
-      await page.screenshot({ path: info.outputPath('leaf-closeup.png') })
-    }
-
     await page.evaluate(async () => {
       ;(await import('/living-harness.js')).stop()
     })
     expect(errors).toEqual([])
   })
 }
-
-test('moving water gestures displace leaves while retaining the current water texture', async ({
-  page,
-}, info) => {
-  await page.route('**/living-test*', (route) =>
-    route.fulfill({
-      contentType: 'text/html',
-      body: '<meta name="viewport" content="width=device-width,initial-scale=1"><body style="margin:0"><div id="scene" style="width:100vw;height:100vh"></div>',
-    }),
-  )
-  await page.route('**/living-harness.js', (route) =>
-    route.fulfill({ contentType: 'text/javascript', body: harness }),
-  )
-  await page.goto('/living-test?startTime=12:00&weather=clear')
-  const before = await page.evaluate(async () => {
-    const module = await import('/living-harness.js')
-    await module.start(42, true, false)
-    return module.leafContacts()
-  })
-  const leaf = before.contacts[0]
-  await page.mouse.move(leaf.x - 30, leaf.y)
-  await page.mouse.down()
-  await page.mouse.move(leaf.x + 30, leaf.y, { steps: 15 })
-  await page.mouse.up()
-  await page.waitForTimeout(350)
-  const after = await page.evaluate(async () => (await import('/living-harness.js')).leafContacts())
-  expect(after.sharedTexture).toBe(true)
-  expect(after.contacts[0].worldX === leaf.worldX && after.contacts[0].worldZ === leaf.worldZ).toBe(
-    false,
-  )
-  await page.screenshot({ path: info.outputPath('leaves-gesture.png') })
-  await page.evaluate(async () => {
-    ;(await import('/living-harness.js')).stop()
-  })
-})

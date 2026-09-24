@@ -45,54 +45,46 @@ export function initAmbientSound(autoplay = true) {
   }
   const failure = () => disable('Ambient sound is unavailable. Please try again.')
 
-  const enable = (automatic = false) => {
+  const enable = async (automatic = false) => {
     if (failed || lifetime.signal.aborted || (automatic && document.hidden)) return
     enabled = true
     const version = ++generation
+    const isCurrent = () => enabled && version === generation
     clearTimeout(suspension)
     display(true)
     try {
-      // Explicit activation always creates/resumes synchronously in the gesture.
-      // Autoplay uses the same path but never waits indefinitely on browser policy.
+      // Creation/resume still happen synchronously, before the first await, so
+      // explicit activation retains the browser's original user gesture.
       if (!context || context.state === 'closed') context = new AudioContext({ sampleRate: 32000 })
       const audioContext = context
       const resumed = audioContext.resume()
-      const ready = automatic
-        ? Promise.race([resumed, new Promise<void>((resolve) => setTimeout(resolve, 300))])
-        : resumed
-      void ready
-        .then(async () => {
-          if (!enabled || version !== generation) return
-          if (audioContext.state !== 'running') {
-            disable()
-            return
-          }
-          // No mixer or MP3 download until the browser has actually allowed playback.
-          const module = await import('../audio/ambient-mixer')
-          if (!enabled || version !== generation) return
-          const instance = new module.AmbientMixer(audioContext)
-          mixer = instance
-          instance.setEnvironment(environment)
-          await instance.load()
-          if (!enabled || version !== generation) return
-          if (document.hidden) {
-            instance.pause()
-            await audioContext.suspend()
-          } else {
-            if (audioContext.state !== 'running') throw new Error('Audio suspended')
-            instance.resume()
-          }
-          display()
-          return undefined
-        })
-        .catch(() => {
-          if (version === generation) {
-            if (automatic && !mixer) disable()
-            else failure()
-          }
-        })
+      if (automatic)
+        await Promise.race([resumed, new Promise<void>((resolve) => setTimeout(resolve, 300))])
+      else await resumed
+      if (!isCurrent()) return
+      if (audioContext.state !== 'running') {
+        disable()
+        return
+      }
+      // No mixer or MP3 download until the browser has actually allowed playback.
+      const { AmbientMixer } = await import('../audio/ambient-mixer')
+      if (!isCurrent()) return
+      const instance = new AmbientMixer(audioContext)
+      mixer = instance
+      instance.setEnvironment(environment)
+      await instance.load()
+      if (!isCurrent()) return
+      if (document.hidden) {
+        instance.pause()
+        await audioContext.suspend()
+      } else {
+        if (audioContext.state !== 'running') throw new Error('Audio suspended')
+        instance.resume()
+      }
+      if (isCurrent()) display()
     } catch {
-      if (automatic) disable()
+      if (!isCurrent()) return
+      if (automatic && !mixer) disable()
       else failure()
     }
   }
@@ -101,7 +93,7 @@ export function initAmbientSound(autoplay = true) {
     'click',
     () => {
       if (enabled) disable()
-      else enable()
+      else void enable()
     },
     { signal: lifetime.signal },
   )
@@ -116,7 +108,9 @@ export function initAmbientSound(autoplay = true) {
         const version = generation
         suspension = setTimeout(() => {
           if (enabled && version === generation && document.hidden)
-            void context?.suspend().catch(failure)
+            void context?.suspend().catch(() => {
+              if (version === generation) failure()
+            })
         }, 50)
       } else {
         const version = generation
@@ -138,7 +132,7 @@ export function initAmbientSound(autoplay = true) {
   )
   if (button) button.hidden = false
   display()
-  if (autoplay) enable(true)
+  if (autoplay) void enable(true)
   return {
     setEnvironment(state: AmbientEnvironment) {
       environment = state

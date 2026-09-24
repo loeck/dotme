@@ -1,7 +1,13 @@
 import { Vector3 } from 'three'
 import type { PerspectiveCamera } from 'three'
 
-import { leafRandom } from './leaf-drift'
+function starRandom(seed: number) {
+  let state = seed >>> 0
+  return () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state / 4294967296
+  }
+}
 
 // Match the end of the shared daylight fade; no stars during twilight.
 const NIGHT_START = 0.12
@@ -25,7 +31,7 @@ export class ShootingStars {
   readonly start = new Vector3()
   readonly end = new Vector3()
   constructor(seed: number) {
-    this.random = leafRandom(seed ^ 0x57a25)
+    this.random = starRandom(seed ^ 0x57a25)
     this.remaining = this.interval()
   }
   private interval() {

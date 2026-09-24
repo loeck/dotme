@@ -745,14 +745,6 @@ export class VoxelLandscapeEngine {
             )
             if (contact) {
               this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
-              const fraction = 0.5 / samples
-              this.details?.leaves.drift.push(
-                contact.x - (point.x - start.x) * fraction,
-                contact.z - (point.z - start.z) * fraction,
-                contact.x + (point.x - start.x) * fraction,
-                contact.z + (point.z - start.z) * fraction,
-                Math.abs(velocity) * 3,
-              )
             }
           }
         }
@@ -922,7 +914,6 @@ export class VoxelLandscapeEngine {
       return
 
     this.water.visible = false
-    if (this.details) this.details.leaves.mesh.visible = false
     const environmentIntensity = this.scene.environmentIntensity
     this.scene.environmentIntensity = 0
     // Direct solar energy already comes from the directional light. Excluding the
@@ -933,7 +924,6 @@ export class VoxelLandscapeEngine {
       this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
     } finally {
       this.water.visible = true
-      if (this.details) this.details.leaves.mesh.visible = true
       this.scene.environmentIntensity = environmentIntensity
       this.skyMaterial.uniforms.uShowSun!.value = this.showSun ? 1 : 0
       this.skyMaterial.uniforms.uShowMoon!.value = 1
