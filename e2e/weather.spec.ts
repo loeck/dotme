@@ -68,7 +68,7 @@ test('times out and retains random weather after a late API reply', async ({ pag
   await expect(page.locator('[data-weather-credit]')).toBeHidden()
 })
 
-test('HTTP errors fall back and manual previews and loader loops skip weather', async ({
+test('HTTP errors fall back and retired URL controls no longer bypass live weather', async ({
   page,
 }) => {
   let requests = 0
@@ -81,9 +81,27 @@ test('HTTP errors fall back and manual previews and loader loops skip weather', 
   expect(requests).toBe(1)
   await page.goto('/?seed=42&weather=clear&rain=off')
   await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
-  await expect(page.locator('canvas[data-water-mode]')).toHaveAttribute('data-weather', 'clear')
-  await expect(page.locator('#landscape')).toHaveAttribute('data-rain-intensity', '0')
-  await page.goto('/?loader=loop')
-  await expect(page.locator('.scene-loader')).toHaveAttribute('data-rendered', 'true')
-  expect(requests).toBe(1)
+  await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'random')
+  expect(new URL(page.url()).searchParams.has('weather')).toBe(false)
+  expect(new URL(page.url()).searchParams.has('rain')).toBe(false)
+  expect(requests).toBe(2)
+})
+
+test('GPS selects the weather location while time independently selects night', async ({
+  page,
+}) => {
+  const requests: URL[] = []
+  await page.route('https://api.open-meteo.com/**', (route) => {
+    requests.push(new URL(route.request().url()))
+    return route.fulfill({
+      json: { ...parisWeatherFixture(), timezone: 'Asia/Singapore', utc_offset_seconds: 28800 },
+    })
+  })
+  await page.goto('/?seed=42&coordinates=1.3521,103.8198&startTime=23:00')
+  await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'live')
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
+  expect(requests).toHaveLength(1)
+  expect(requests[0]!.searchParams.get('latitude')).toBe('1.3521')
+  expect(requests[0]!.searchParams.get('longitude')).toBe('103.8198')
+  await expect(page.locator('main')).toHaveAttribute('data-local-lights', 'true')
 })

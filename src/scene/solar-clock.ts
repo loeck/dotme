@@ -15,6 +15,7 @@ export class SolarClock {
     readonly initialSeconds: number,
     private readonly frozen = false,
     private readonly startedAt = performance.now(),
+    readonly timeScale = 1,
   ) {}
 
   elapsed(now = performance.now()) {
@@ -22,6 +23,6 @@ export class SolarClock {
   }
 
   seconds(elapsed: number) {
-    return wrapDay(this.initialSeconds + elapsed)
+    return wrapDay(this.initialSeconds + elapsed * this.timeScale)
   }
 }

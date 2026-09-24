@@ -50,7 +50,7 @@ const output = resolve(process.env.BENCH_OUTPUT ?? 'artifacts/performance')
 const repetitions = Number(process.env.BENCH_REPEATS ?? 3)
 const seconds = Number(process.env.BENCH_SECONDS ?? 30)
 const profiles = (process.env.BENCH_PROFILES ?? 'desktop,mobile').split(',')
-const query = process.env.BENCH_QUERY ?? 'time=00:00&rain=heavy&weather=partly-cloudy'
+const query = process.env.BENCH_QUERY ?? 'startTime=00:00&rain=heavy&weather=partly-cloudy'
 const seeds = (process.env.BENCH_SEEDS ?? '0,12,9182').split(',').map(Number)
 const rainCpuOnly = process.env.BENCH_RAIN_CPU === '1'
 const diagnosticRuns = process.env.BENCH_DIAGNOSTICS === '1'

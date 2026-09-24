@@ -14,7 +14,6 @@ hold for a second, then return to their line in a 5.2-second loop. Both resting 
 visual center. Reduced motion shows the assembled shape and skips the fade.
 Initialization failures or a 20-second
 timeout release the profile; without JavaScript the static profile is immediately available.
-Use `?loader=loop` to preview the loader continuously, without loading the landscape or cursor.
 
 ## Requirements
 
@@ -31,17 +30,36 @@ pnpm dev
 For parallel visual work, start each preview with `pnpm dev --port 0`. Vite prints the free port it
 selected, so agents can capture separate previews without a shared fixed port.
 
+## Scene URL
+
+Only four query parameters are supported; other keys are removed from the URL.
+
+| Parameter     | Example          | Meaning                                                                               |
+| ------------- | ---------------- | ------------------------------------------------------------------------------------- |
+| `seed`        | `42`             | Reproduce the terrain and procedural composition (unsigned 32-bit integer).           |
+| `coordinates` | `48.8566,2.3522` | Latitude, longitude for current weather. Defaults to Paris.                           |
+| `startTime`   | `08:30`          | Initial artistic clock in 24-hour HH:MM format. Defaults to the visitor's local time. |
+| `timeScale`   | `20`             | Day/night speed multiplier, from 1 to 100; defaults to 1.                             |
+
+Example: `?seed=42&coordinates=48.8566,2.3522&startTime=08:30&timeScale=20`.
+Values outside the speed limits are clamped; invalid values use 1. Only the solar cycle
+accelerates: clouds, water, fish and rain retain their normal movement. Legacy `gps` and
+`time` links are rewritten to the canonical names.
+Weather is fetched live; changing the clock does not request a forecast for that hour.
+The same link can show different weather on another visit. Without a seed, each visit
+generates a fresh composition. Invalid values use the defaults.
+
 ## Live lighting
 
 Sunlight, moonlight and lamps cast shadows on the voxel scenery and water.
-The atmosphere follows local time at real speed, with an artistic 06:00 sunrise and
-18:00 sunset. Use `?seed=42&time=08:30&weather=partly-cloudy` for a reproducible
-starting composition. Weather accepts `clear`, `partly-cloudy` (default), `cloudy`
-and `overcast`; `sun=hidden` hides only the solar disc. Air scattering uses terrain
+The atmosphere follows local time at the selected speed, with an artistic 06:00 sunrise and
+18:00 sunset. Air scattering uses terrain
 and cloud shadows, so shafts can remain visible with the sun outside the frame.
-Profile text switches between dark and light palettes by measuring the rendered
-backdrop behind it. The custom mouse cursor stays visible during both day and night.
-Floating lamps, their halos and the cursor's illumination of the scenery appear only
+Profile text and icons use a GPU coverage mask: each pixel turns black or
+white from the rendered luminance underneath, including within a single letter.
+DOM text and controls retain keyboard access and screen-reader semantics.
+Text selection is disabled globally through Tailwind’s `select-none` on the body.
+Floating lamps and their halos appear only
 in low light; pointer ripples remain available during the day.
 Reduced motion freezes the initial time. Each animation
 frame updates the light state, shadow maps, a six-face environment capture, and the lake's planar
@@ -56,7 +74,7 @@ components form curved, localized packets; their analytic gradients preserve fin
 mobile resolution. A volume-balanced pressure profile is sampled along pointer strokes, with
 bounded input strength. A nine-point stencil propagates and combines waves; the terrain mask
 reflects them at banks and an absorbing border prevents waves returning from the outer domain.
-In low light, hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
+At night, hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
 the general camera parallax. See the rendering notes below for physical parameters and limitations.
 
 The solver is a damped linear surface-wave approximation with constant propagation speed. It does
@@ -73,9 +91,12 @@ camera. This is a rasterized rendering pipeline with approximate indirect illumi
 Visible terrain uses spatial batches of static meshes with covered faces removed. Shadow cameras
 use smaller batches of the original cubes to preserve back-face shadow depth. Mobile uses
 smaller shadow maps and reflection targets; every rendered frame still refreshes lighting and
-reflections. Reduced motion freezes the simulation while allowing pointer lighting and refreshes
-on resize or visibility changes. A luminous cursor softly lights the terrain and water; its smoke
-and tilt pause when hidden or reduced motion is enabled.
+reflections. Reduced motion freezes the simulation while allowing refreshes on resize or visibility changes.
+A 6-pixel outlined point follows the pointer immediately. Only its shape stretches slightly
+with speed and settles within 245 ms; reduced motion disables deformation. Links and buttons enlarge the same point. An inline SVG supplies the matching cursor before
+JavaScript starts, with no separate image request. At night, a short-range cool diffuse
+light follows the targeted terrain or water. It fades with solar elevation and pointer
+activity; daylight and twilight disable it regardless of weather. Reduced motion keeps its intensity immediate.
 
 ## Verification
 
@@ -97,7 +118,7 @@ Vercel serves `404.html` for unknown paths; development and preview use the same
 Other static hosts should also be configured to serve that page with a 404 status.
 
 See [bundle measurements](docs/bundle-size.md) for the initial and total JavaScript comparison, and
-[Paris weather access](docs/paris-weather.md) for the Open-Meteo preload. Paris conditions set the
+[Weather access](docs/paris-weather.md) for the Open-Meteo preload. Conditions at the selected GPS position set the
 clouds, rain and wind before the first frame. A 3-second deadline or API failure selects a stable,
 random weather preset for the visit. The small information button opens the creation notes and credits.
 
@@ -110,16 +131,15 @@ moisture when supplied with rain intensity. See [living lake details](docs/scene
 for rendering budgets, the rain/daylight integration API, reduced-motion behavior
 and validation.
 
-Small voxel fish travel in up to three compact shoals (up to 10 fish on mobile, 18 on desktop).
+Small voxel fish travel in up to four independent shoals (26 fish on desktop, three shoals / 15 fish on mobile).
 Their vertices are refracted analytically and composited on the water with depth-tested
-bank occlusion, avoiding fragmented silhouettes from the bed texture. Shoals fade while
-receding between passages; reduced motion keeps one quiet, static group. The submerged
+bank occlusion, avoiding fragmented silhouettes from the bed texture. Shoals overlap,
+arrive and dive away on independent routes; reduced motion keeps one quiet, static group. The submerged
 bed retains wave-driven caustics. Local mist billboards are removed to prevent long
 horizontal ribbons; distant volumetric haze remains. Rain reduces underwater clarity
 and adds a warmer scattering tint, while shared wind and rain roughen the surface.
 Cloud cover changes lighting without automatically making the water muddy. This is an
 artistic response to the weather, not a measurement of water quality.
-Compare `?seed=0&time=12:00&weather=clear&rain=off` with the same URL using `rain=heavy`.
 
 References: [GPU Gems: water caustics](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics),
 [GPU Gems: refraction](https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-19-generic-refraction-simulation),
@@ -127,15 +147,10 @@ and [USGS: turbidity](https://www.usgs.gov/water-science-school/science/turbidit
 
 ## Rain
 
-`RainEffect` receives the initial Paris weather state during loading. Use
+`RainEffect` receives the initial GPS weather state during loading. Use
 `engine.setRainState({ intensity: 0.55, wind: { x: 2, z: 0.5 } })` to replace its state.
 Intensity is clamped to 0–1; horizontal wind is in world metres per second, bounded to ±20.
 One world unit is treated as one metre. Non-finite values fall back to the defaults above.
-
-**Temporary preview parameters** initialize the effect only:
-`?seed=42&rain=off|light|moderate|heavy` (0, 0.25, 0.55, 1), or a numeric `rain` value,
-plus `windX` and `windZ`. Missing, empty or invalid values use the defaults. These controls
-are not a weather API and do not override subsequent `setRainState` calls.
 
 A fixed 120 Hz simulation shares world-space positions and velocity between streaks and
 segment/voxel collisions. Small drops are more frequent, fall more slowly and follow wind
@@ -167,7 +182,7 @@ The near-field emission volume narrows toward the camera to concentrate the budg
 Saturated drop pools skip births only after searching all slots. Rain retains real-time speed
 down to 10 fps with bounded 100 ms catch-up, independently of the water solver’s 50 ms limit.
 Reduced motion suppresses rain, animation stops while the page is hidden, and all buffers,
-materials and targets are disposed with the landscape. `rain=off` clears existing events and
+materials and targets are disposed with the landscape. Setting rain intensity to zero clears existing events and
 skips rain simulation/draw passes after clearing the slope target once. When floating-point
 render targets are unavailable, rain streaks and splashes remain but slope accumulation is disabled.
 The static depth/shore grids share one atlas, retaining their native resolution and filtering while

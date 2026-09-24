@@ -27,7 +27,7 @@ test.afterAll(async () => {
 })
 
 test.beforeEach(async ({ page }) => {
-  await page.route('**/water-test?time=00:00', (route) =>
+  await page.route('**/water-test?startTime=00:00', (route) =>
     route.fulfill({
       contentType: 'text/html',
       body: '<html><head><meta name="viewport" content="width=device-width, initial-scale=1"></head><body style="margin:0"><div id="scene" style="width:100vw;height:100vh"></div></body></html>',
@@ -36,7 +36,7 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/water-harness.js', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: harness }),
   )
-  await page.goto('/water-test?time=00:00')
+  await page.goto('/water-test?startTime=00:00')
 })
 
 test('GPU propagation, damping, shore barriers, stability, reset and frame independence', async ({
@@ -62,6 +62,8 @@ test('GPU propagation, damping, shore barriers, stability, reset and frame indep
   expect(result.windContact.energy).toBeGreaterThan(0.001)
   expect(result.windContact.peak).toBeLessThan(0.15)
   expect(result.openWind.energy).toBe(0)
+  expect(result.rebound[1].beyond).toBe(0)
+  expect(result.rebound[1].returning).toBeGreaterThan(result.rebound[0].returning * 2)
   expect(result.windSampled[0]).toBeCloseTo(result.windSampled[1], 5)
   expect(result.windSampled[1]).toBeCloseTo(result.windSampled[2], 5)
   for (const scenario of result.windScenarios) {
@@ -404,8 +406,6 @@ test('cloud shadows follow volume and moon projection while preserving local lig
   expect(result.moonDarkening).toBeGreaterThan(1)
   expect(result.ambientDarkening).toBeGreaterThan(1)
   expect(result.localDifference).toBe(0)
-  expect(result.cursorLight).toBeGreaterThan(1)
-  expect(result.cursorDifference).toBe(0)
   await page.evaluate(async () => {
     const url = '/water-harness.js'
     ;(await import(url)).startEngine(9182, true)

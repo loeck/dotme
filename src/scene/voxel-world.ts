@@ -18,6 +18,7 @@ export type VoxelGroup = Readonly<{
 export type VoxelLamp = Readonly<{
   x: number
   y: number
+  groundY: number
   z: number
   intensity: number
   phase: number
@@ -579,6 +580,7 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     lamps.push({
       x: cell.x,
       y: cell.height + hover,
+      groundY: cell.height,
       z: cell.z,
       intensity: 0.65 + hash(root, index, 0, 523) * 0.35,
       phase: hash(root, index, 0, 527) * Math.PI * 2,

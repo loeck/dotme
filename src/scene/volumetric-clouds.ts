@@ -27,6 +27,15 @@ export const CLOUD_PROFILES = {
   mobile: { resolution: 128, hz: 10, steps: 24 },
 } as const
 
+/** Ground-level calm must not freeze the upper cloud layer. Add a continuous
+ * prevailing drift only to clouds, retaining weather direction and gusts. */
+export function sampleCloudDisplacement(wind: WindModel, time: number): [number, number] {
+  const initial = wind.sample(0)
+  const drift = Math.max(0, 2.2 - initial.speed) * time
+  const current = wind.sample(time).displacement
+  return [current[0] + initial.direction[0] * drift, current[1] + initial.direction[1] * drift]
+}
+
 /** Decode before interpolation so sky and reflections compose linear radiance. */
 export const CLOUD_SAMPLING_GLSL = `
 uniform samplerCube uCloudPrevious;
@@ -119,7 +128,11 @@ void main() {
         opticalDepth += density(p + uMoonDirection * (8.0 + float(j) * 22.0), false) * stride;
       }
       float moonLight = exp(-opticalDepth * CLOUD_EXTINCTION);
-      vec3 source = uCloudAmbient
+      // Diffuse sky light also sees the cloud's changing thickness. A constant
+      // ambient source made opaque overcast converge to one flat grey value.
+      float skyDepth = density(p + vec3(0.0, 18.0, 0.0), false) * 18.0;
+      float skyLight = exp(-skyDepth * CLOUD_EXTINCTION);
+      vec3 source = uCloudAmbient * (0.25 + skyLight * 1.65)
         + uCloudDirect * moonLight * (0.3 + phase * 0.35);
       float opacity = 1.0 - exp(-d * stepLength * CLOUD_EXTINCTION);
       radiance += transmittance * opacity * source;
@@ -208,14 +221,15 @@ export class VolumetricClouds {
     })
     this.shadows = new CloudShadows(renderer, this.material.uniforms, this.uniforms.uCloudBlend)
     this.shadows.uniforms.uCloudShadowStrength.value = weather === 'clear' ? 0 : 1
+    this.shadows.uniforms.uHorizonSeed.value = (seed % 4096) / 379
+    this.shadows.uniforms.uHorizonMobile.value = mobile ? 1 : 0
     const sphere = new Mesh(this.geometry, this.material)
     sphere.frustumCulled = false
     this.scene.add(sphere)
   }
 
   private setCaptureTime(time: number) {
-    const wind = this.wind.sample(time)
-    this.material.uniforms.uDisplacement!.value.fromArray(wind.displacement)
+    this.material.uniforms.uDisplacement!.value.fromArray(sampleCloudDisplacement(this.wind, time))
     this.material.uniforms.uTime!.value = time
     const light = this.lighting(time)
     this.material.uniforms.uMoonDirection!.value.copy(light.direction)
@@ -259,8 +273,9 @@ export class VolumetricClouds {
   }
 
   update(time: number) {
-    if (!this.uniforms.uCloudEnabled.value) return
     const light = this.lighting(time)
+    this.shadows.uniforms.uHorizonDirection.value.copy(light.direction)
+    if (!this.uniforms.uCloudEnabled.value) return
     // Switching the sun/moon projection at the horizon must not pop the sky fill.
     this.shadows.uniforms.uCloudShadowStrength.value = Math.max(
       light.sunIntensity / 4.5,

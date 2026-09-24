@@ -1,22 +1,25 @@
-# Paris weather access
+# Weather by GPS position
 
-`src/weather/paris.ts` exports `fetchParisWeather({ signal? }): Promise<ParisWeather>` and the pure
-`interpretWmoCode(code)` function. The page preloads a Paris snapshot while loading the engine,
+`src/weather/current.ts` exports `fetchWeather({ signal?, position? }): Promise<WeatherSnapshot>` and the pure
+`interpretWmoCode(code)` function. The page preloads a snapshot for the URL’s `coordinates` position (Paris by default) while loading the engine,
 before creating its first frame. `src/weather/scene.ts` maps the response into scene settings.
 
 Consumers can also explicitly request a snapshot:
 
 ```ts
-import { fetchParisWeather } from './weather/paris'
+import { fetchWeather } from './weather/current'
 
 const controller = new AbortController()
-const weather = await fetchParisWeather({ signal: controller.signal })
+const weather = await fetchWeather({
+  signal: controller.signal,
+  position: { latitude: 1.3521, longitude: 103.8198 },
+})
 // Use weather.windSpeedMs, weather.condition, weather.indicators, etc.
 // Call controller.abort() if the consumer is disposed before completion.
 ```
 
-The request uses native `fetch`, without an SDK or key, for Paris (48.8566, 2.3522), with the
-`Europe/Paris` timezone. Fields retain their numeric values; property suffixes identify units.
+The request uses native `fetch`, without an SDK or key, for the selected coordinates, defaulting to Paris (48.8566, 2.3522).
+The API uses `timezone=auto`; its IANA timezone is validated and retained. Fields retain their numeric values; property suffixes identify units.
 `timestampUnixSeconds` is the original UTC Unix timestamp requested from the API. Format it using
 `new Date(weather.timestampUnixSeconds * 1000)` and `Intl.DateTimeFormat` with
 `timeZone: weather.timezone`. `utcOffsetSeconds` is also retained; do not add it to the Unix timestamp
@@ -59,8 +62,8 @@ Wind bearing and speed drive the rain and shared atmospheric/water wind model. R
 at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
 procedural gust strength. The local-time solar clock is unchanged.
 
-Explicit `weather` or `rain` query parameters select the existing manual preview and skip the API.
-`windX` / `windZ` can override the rain wind. `?loader=loop` loads neither weather nor the landscape.
+Only `seed`, `coordinates=latitude,longitude`, `startTime=HH:MM` and `timeScale=1..100` are public query parameters.
+The time changes the artistic day/night clock, independently of the live weather snapshot.
 The information button opens a dialog describing the scene and its libraries, including weather
 attribution when live API data is used.
 

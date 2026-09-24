@@ -45,8 +45,9 @@ describe('submerged fish', () => {
         expect(fish.schools).toEqual(repeat.schools)
         expect(fish.schoolSizes).toEqual(repeat.schoolSizes)
         expect(fish.count).toBeGreaterThan(0)
-        expect(fish.count).toBeLessThanOrEqual(mobile ? 10 : 18)
+        expect(fish.count).toBeLessThanOrEqual(mobile ? 15 : 26)
         repeat.dispose()
+        const visibleCounts = new Set<number>()
         for (let frame = 0; frame < 600; frame++) {
           fish.update(frame / 10, 0.1, fish.habitats[0]!)
           if (frame % 10 !== 0) continue
@@ -67,8 +68,10 @@ describe('submerged fish', () => {
               if (mesh.geometry.getAttribute('aFishVisibility').getX(i) > 0.1) visible++
             }
           }
-          expect(visible).toBeLessThanOrEqual(Math.max(...fish.schoolSizes))
+          visibleCounts.add(visible)
         }
+        expect(visibleCounts.size).toBeGreaterThan(2)
+        expect(Math.max(...visibleCounts)).toBeGreaterThan(Math.max(...fish.schoolSizes))
         fish.dispose()
       }
     }
@@ -101,8 +104,8 @@ describe('submerged fish', () => {
     const scene = new Scene()
     const bed = createVoxelWorld(12, true).lakeBed
     const fish = new LakeFish(scene, bed, 12, true)
-    expect(fish.count).toBe(10)
-    expect(fish.schoolSizes).toEqual([6, 4])
+    expect(fish.count).toBe(15)
+    expect(fish.schoolSizes).toEqual([6, 4, 5])
     expect(fish.mesh.layers.mask).toBe(8)
     const matrix = new Matrix4()
     const before = new Vector3()
@@ -110,20 +113,20 @@ describe('submerged fish', () => {
     fish.mesh.getMatrixAt(0, matrix)
     const size = new Vector3().setFromMatrixScale(matrix)
     expect(size.x).toBeGreaterThan(0.15)
-    expect(size.x).toBeLessThan(0.3)
+    expect(size.x).toBeLessThan(0.42)
     expect(size.z).toBeGreaterThan(0.35)
-    expect(size.z).toBeLessThan(0.65)
-    // The voxel body and animated tail both fit the validated footprint.
+    expect(size.z).toBeLessThan(0.85)
+    // The articulated body and tail fit the validated swimming footprint.
     const positions = fish.mesh.geometry.getAttribute('position')
-    const tail = fish.mesh.geometry.getAttribute('aFishTail')
     const normals = fish.mesh.geometry.getAttribute('normal')
     expect(positions.count).toBeGreaterThan(200)
     expect(fish.meshes.reduce((total, mesh) => total + mesh.count, 0)).toBe(fish.count)
     for (let i = 0; i < positions.count; i++) {
-      const maxX = (Math.abs(positions.getX(i)) + tail.getX(i) * 0.12) * size.x
+      const maxX = (Math.abs(positions.getX(i)) + 0.35) * size.x
       expect(Math.hypot(maxX, positions.getZ(i) * size.z)).toBeLessThan(0.8)
     }
-    expect(Array.from(normals.array).every((normal) => [-1, 0, 1].includes(normal))).toBe(true)
+    for (let i = 0; i < normals.count; i++)
+      expect(Math.hypot(normals.getX(i), normals.getY(i), normals.getZ(i))).toBeCloseTo(1, 5)
     before.setFromMatrixPosition(matrix)
     fish.update(1 / 60, 1 / 60, before)
     fish.mesh.getMatrixAt(0, matrix)
@@ -137,11 +140,11 @@ describe('submerged fish', () => {
     expect(scene.children).toHaveLength(0)
   })
 
-  it('keeps a stepped voxel silhouette with a vertical fork', () => {
+  it('keeps a tapered silhouette with a genuinely forked vertical tail', () => {
     const fish = new LakeFish(new Scene(), createVoxelWorld(42, true).lakeBed, 42, true)
     const material = new MeshBasicMaterial({ side: DoubleSide })
     const silhouette = new Mesh(fish.mesh.geometry, material)
-    const ray = new Raycaster(new Vector3(2, 0, -0.65), new Vector3(-1, 0, 0), 0, 4)
+    const ray = new Raycaster(new Vector3(2, 0, -0.76), new Vector3(-1, 0, 0), 0, 4)
     expect(ray.intersectObject(silhouette)).toHaveLength(0)
     ray.ray.origin.y = 0.22
     expect(ray.intersectObject(silhouette).length).toBeGreaterThan(0)
@@ -166,13 +169,21 @@ describe('submerged fish', () => {
       position.setFromMatrixPosition(matrix)
       const pointer = { x: position.x + 0.3, z: position.z, strength: 0 }
       boundary.update(frame / 60, 1 / 60, pointer)
+      hovered.mesh.getMatrixAt(0, matrix)
+      const previous = new Vector3().setFromMatrixPosition(matrix)
       hovered.update(frame / 60, 1 / 60, { ...pointer, strength: 1 })
+      hovered.mesh.getMatrixAt(0, matrix)
+      const movement = new Vector3().setFromMatrixPosition(matrix).sub(previous)
+      movement.y = 0
+      const forward = new Vector3(matrix.elements[8], 0, matrix.elements[10]).normalize()
+      // Escape must follow the fish's nose, never slide sideways as a rigid sprite.
+      expect(movement.normalize().dot(forward)).toBeGreaterThan(0.995)
     }
     expect(boundary.mesh.instanceMatrix.array).toEqual(baseline.mesh.instanceMatrix.array)
     hovered.mesh.getMatrixAt(0, matrix)
     displaced.setFromMatrixPosition(matrix)
     expect(displaced.distanceTo(position)).toBeGreaterThan(0.05)
-    expect(displaced.distanceTo(position)).toBeLessThan(0.25)
+    expect(displaced.distanceTo(position)).toBeLessThan(0.65)
     for (const fish of [baseline, boundary, hovered]) fish.dispose()
   })
 

@@ -9,6 +9,13 @@ const smooth = (a: number, b: number, x: number) => {
   return t * t * (3 - 2 * t)
 }
 
+/** Real-time adaptation stays gradual even when the solar clock is accelerated. */
+export function fadeNightLight(current: number, target: number, dt: number, frozen = false) {
+  if (frozen) return target
+  const value = current + (target - current) * (1 - Math.exp(-Math.max(0, dt) / 0.9))
+  return Math.abs(value - target) < 0.0001 ? target : value
+}
+
 /** Artistic 06:00–18:00 orbit. Directions always point FROM the scene TO the light. */
 export function sampleLighting(
   initialSeconds: number,
@@ -41,9 +48,12 @@ export function sampleLighting(
     .multiplyScalar(WEATHER[weather].diffuse)
   const ambientLuminance = ambient.r * 0.2126 + ambient.g * 0.7152 + ambient.b * 0.0722
   // Use the shared ambient illumination, including weather, rather than fixed hours.
-  const localLightStrength = 1 - smooth(0.04, 0.16, ambientLuminance)
+  const localLightStrength = 1 - smooth(0.04, 0.24, ambientLuminance)
+  // Cursor illumination starts only after the sky's daylight transition ends.
+  const pointerLightStrength = 1 - smooth(-0.24, -0.12, sunDirection.y)
   return {
     localLightStrength,
+    pointerLightStrength,
     ambientLuminance,
     sunDirection,
     moonDirection,
@@ -59,8 +69,8 @@ export function sampleLighting(
       .setRGB(0.007, 0.014, 0.023)
       .lerp(new Color().setRGB(0.32, 0.43, 0.55), daylight),
     waterScatter: new Color()
-      .setRGB(0.0022, 0.0043, 0.0065)
-      .lerp(new Color().setRGB(0.025, 0.075, 0.09), daylight),
+      .setRGB(0.0018, 0.0055, 0.007)
+      .lerp(new Color().setRGB(0.012, 0.12, 0.135), daylight),
     cloudAmbient: new Color()
       .setRGB(0.006, 0.009, 0.015)
       .lerp(new Color().setRGB(0.1, 0.14, 0.2), daylight)

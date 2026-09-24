@@ -1,10 +1,11 @@
 import { Mesh, MeshStandardMaterial } from 'three'
-import type { Object3D, Scene, Vector3 } from 'three'
+import type { IUniform, Object3D, Scene, Vector3 } from 'three'
 
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
 import { LakeFish } from './lake-fish'
+import { LakeSplashes } from './lake-splashes'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
 import type { WindState } from './wind'
@@ -32,6 +33,7 @@ export function updateDetailEnvironment(
 export class SceneDetails {
   private readonly caustics: LakeCaustics
   private readonly fish: LakeFish
+  private readonly splashes: LakeSplashes
   private readonly fireflies: LakeFireflies
   private readonly wetness = new ShoreWetness()
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
@@ -48,9 +50,10 @@ export class SceneDetails {
     this.caustics = new LakeCaustics(reducedMotion)
     this.fish = new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion)
     this.fireflies = new LakeFireflies(scene, world.lakeBed, world.seed, mobile)
+    this.splashes = new LakeSplashes(scene, world.lakeBed, world.seed, mobile)
   }
 
-  /** Called after global cloud and cursor hooks so every material retains all its effects. */
+  /** Called after global cloud hooks so every material retains all its effects. */
   attachMaterials(terrain: Object3D, submerged: readonly MeshStandardMaterial[]) {
     const materials = new Set<MeshStandardMaterial>()
     terrain.traverse((object) => {
@@ -59,6 +62,15 @@ export class SceneDetails {
     })
     for (const material of materials) this.wetness.applyTo(material)
     for (const material of submerged) this.caustics.applyTo(material)
+  }
+
+  get impactSlopes() {
+    return this.splashes.impacts.slopes
+  }
+
+  setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: Record<string, IUniform>) {
+    this.splashes.impacts.setWaterSurface(uniforms)
+    this.splashes.onReturn = handler
   }
 
   setEnvironment(environment: Partial<DetailEnvironment>) {
@@ -75,16 +87,18 @@ export class SceneDetails {
     scenePointer: FireflyPointer | null,
     moonIntensity: number,
     intro: number,
-    cursorLightStrength = 1,
+    pointerLightStrength = 1,
   ) {
     const { daylight, rainIntensity } = this.environment
     this.caustics.update(
       time,
       wind,
       (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
-      cursorLightStrength > 0 ? waterPointer : null,
+      waterPointer,
+      pointerLightStrength,
     )
-    this.fish.update(time, dt, waterPointer, scenePointer, wind, rainIntensity)
+    this.fish.update(time, dt, waterPointer, scenePointer)
+    this.splashes.update(time, wind, this.reducedMotion, intro)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
     this.fireflies.update(time, wind, {
       reducedMotion: this.reducedMotion,
@@ -97,6 +111,7 @@ export class SceneDetails {
   dispose() {
     this.caustics.dispose()
     this.fish.dispose()
+    this.splashes.dispose()
     this.fireflies.dispose()
     this.wetness.dispose()
   }

@@ -33,6 +33,15 @@ test('water motion at rest, slow hover, fast drag and release', async ({ page },
     await page.waitForTimeout(80)
   }
   await page.screenshot({ path: testInfo.outputPath('hover.png') })
+  for (let i = 0; i <= 32; i++) {
+    // A vertical round trip is the perspective-sensitive gesture: capture it
+    // separately so a deep streak cannot hide in the horizontal drag check.
+    // eslint-disable-next-line no-await-in-loop
+    await page.mouse.move(width * 0.54, height * (0.8 + Math.sin((i * Math.PI) / 16) * 0.1))
+    // eslint-disable-next-line no-await-in-loop
+    await page.waitForTimeout(40)
+  }
+  await page.screenshot({ path: testInfo.outputPath('vertical-hover.png') })
   await page.mouse.down()
   await page.mouse.move(width * 0.44, height * 0.85, { steps: 18 })
   await page.mouse.up()

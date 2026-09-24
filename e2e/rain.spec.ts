@@ -67,6 +67,8 @@ test('changes rain and wind at runtime, pauses when hidden, and releases the can
     context.rainEngine = new VoxelLandscapeEngine({
       container: document.querySelector('#host'),
       seed: 42,
+      // This fixture isolates rainfall; shore splashes share the same normal buffer.
+      sceneDetails: false,
       rain: { intensity: 0, wind: { x: 2, z: 0.5 } },
       onFirstFrame: () => {
         context.rainReady = true

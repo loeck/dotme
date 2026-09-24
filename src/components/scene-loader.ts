@@ -1,7 +1,7 @@
 import { createVoxelLoaderRenderer, VOXEL_LOADER_REST_TIME } from './voxel-loader-renderer'
 import type { LoaderMessage } from './voxel-loader.worker'
 
-export function initSceneLoader(loop = false) {
+export function initSceneLoader() {
   const root = document.documentElement
   const overlay = document.querySelector<HTMLDivElement>('.scene-loader')
   const main = document.querySelector('main')
@@ -18,7 +18,7 @@ export function initSceneLoader(loop = false) {
   let finished = false
   let removalTimer = 0
   let workerTimer = 0
-  root.dataset.sceneLoading = loop ? 'loop' : 'loading'
+  root.dataset.sceneLoading = 'loading'
   main.inert = true
   main.setAttribute('aria-busy', 'true')
   canvas.width = Math.round(144 * Math.min(devicePixelRatio || 1, 1.5))
@@ -126,7 +126,7 @@ export function initSceneLoader(loop = false) {
     delete overlay.dataset.paused
   }
   const reveal = () => {
-    if (finished || loop) return
+    if (finished) return
     finished = true
     clearTimeout(failsafe)
     main.inert = false
@@ -141,7 +141,7 @@ export function initSceneLoader(loop = false) {
     )
   }
   // A stalled network or graphics driver must not leave the profile inaccessible.
-  const failsafe = loop ? undefined : window.setTimeout(reveal, 20_000)
+  const failsafe = window.setTimeout(reveal, 20_000)
   return {
     reveal,
     dispose() {

@@ -70,7 +70,42 @@ test.beforeEach(async ({ page }) => {
   await page.route('**/details-harness.js', (route) =>
     route.fulfill({ contentType: 'text/javascript', body: harness }),
   )
-  await page.goto('/details-test?time=00:00')
+  await page.goto('/details-test?startTime=00:00')
+})
+
+test('shore foam remains visible in cloudy daylight and at night without pointer input', async ({
+  page,
+}, info) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  for (const time of ['14:00', '00:00']) {
+    // Identical camera, simulation time and fish: only foam is removed for comparison.
+    // eslint-disable-next-line no-await-in-loop
+    await page.goto(`/details-test?startTime=${time}&weather=cloudy`)
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => (await import('/details-harness.js')).start(0, true, true))
+    // eslint-disable-next-line no-await-in-loop
+    const visible = await page.locator('canvas').screenshot({ scale: 'css' })
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => (await import('/details-harness.js')).hideFoam())
+    // eslint-disable-next-line no-await-in-loop
+    const hidden = await page.locator('canvas').screenshot({ scale: 'css' })
+    // eslint-disable-next-line no-await-in-loop
+    const pixels = await visibleDifference(page, visible, hidden)
+    // eslint-disable-next-line no-await-in-loop
+    await info.attach(`foam-${time}`, { body: visible, contentType: 'image/png' })
+    // eslint-disable-next-line no-await-in-loop
+    await info.attach(`foam-pixels-${time}`, { body: String(pixels), contentType: 'text/plain' })
+    expect(pixels, 'The shoreline must remain legible after the final lens pass').toBeGreaterThan(
+      100,
+    )
+    // eslint-disable-next-line no-await-in-loop
+    await page.evaluate(async () => (await import('/details-harness.js')).stop())
+  }
+  expect(errors).toEqual([])
 })
 
 test('details render with shared shadows, respond to rain, resize and dispose', async ({
@@ -89,7 +124,7 @@ test('details render with shared shadows, respond to rain, resize and dispose', 
   expect(initial.fish).toBeGreaterThan(0)
   expect(initial.fireflies).toBeGreaterThan(0)
   const mobile = page.viewportSize()!.width < 768
-  expect(initial.fish).toBe(mobile ? 10 : 18)
+  expect(initial.fish).toBe(mobile ? 15 : 26)
   expect(initial.fireflies).toBeLessThanOrEqual(mobile ? 18 : 48)
   expect(initial.wetness).toBe(0)
   await page.screenshot({ path: info.outputPath('night-details.png') })
@@ -188,7 +223,7 @@ test('reduced motion stays still and optional layer can be disabled', async ({ p
 test('rain changes underwater visibility while fish remain readable in calm daylight', async ({
   page,
 }, info) => {
-  await page.goto('/details-test?time=12:00&weather=clear')
+  await page.goto('/details-test?startTime=12:00&weather=clear')
   await page.evaluate(async () => (await import('/details-harness.js')).start(0, true, true, 0))
   const calm = await page.evaluate(async () => (await import('/details-harness.js')).status())
   const visible = await page.locator('canvas').screenshot({ scale: 'css' })
@@ -223,7 +258,7 @@ test('rain changes underwater visibility while fish remain readable in calm dayl
 test('details follow solar and rain inputs while preserving explicit overrides', async ({
   page,
 }) => {
-  await page.goto('/details-test?time=08:30')
+  await page.goto('/details-test?startTime=08:30')
   await page.evaluate(async () => (await import('/details-harness.js')).start(42, true, true, 0.8))
   const environment = () =>
     page.evaluate(async () => (await import('/details-harness.js')).status().environment)
@@ -236,5 +271,116 @@ test('details follow solar and rain inputs while preserving explicit overrides',
     scene.rain(0.6)
   })
   await expect.poll(environment).toEqual({ rainIntensity: 0.6, daylight: 0.25 })
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
+})
+
+test('fish GPU rig keeps the head stable while the articulated tail changes direction', async ({
+  page,
+}) => {
+  const poses = await page.evaluate(async () =>
+    (await import('/details-harness.js')).fishRigProbe(),
+  )
+  expect(poses[0]).toEqual(poses[1])
+  expect(Math.abs(poses[2][0] - poses[3][0])).toBeGreaterThan(12)
+  expect(poses.every((pose: number[]) => pose[3] === 255)).toBe(true)
+})
+
+test('tail articulation changes the visible lake silhouette even when fish travel is frozen', async ({
+  page,
+}, info) => {
+  await page.goto('/details-test?startTime=12:00&weather=clear')
+  await page.evaluate(async () => (await import('/details-harness.js')).start(0, true, true, 0))
+  await page.evaluate(async () => (await import('/details-harness.js')).fishArticulationFrame(0))
+  const left = await page.locator('canvas').screenshot({ scale: 'css' })
+  await page.evaluate(async () =>
+    (await import('/details-harness.js')).fishArticulationFrame(Math.PI),
+  )
+  const right = await page.locator('canvas').screenshot({ scale: 'css' })
+  const difference = await visibleDifference(page, left, right)
+  await info.attach('articulation-pixels', { body: String(difference), contentType: 'text/plain' })
+  await info.attach('tail-left', { body: left, contentType: 'image/png' })
+  await info.attach('tail-right', { body: right, contentType: 'image/png' })
+  expect(difference).toBeGreaterThan(20)
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
+})
+
+test('surface reflection occludes fish completely instead of drawing fish over water', async ({
+  page,
+}) => {
+  await page.goto('/details-test?startTime=12:00&weather=clear')
+  await page.evaluate(async () => (await import('/details-harness.js')).start(0, true, true, 0))
+  await page.evaluate(async () => (await import('/details-harness.js')).opaqueWater())
+  const withFish = await page.locator('canvas').screenshot({ scale: 'css' })
+  await page.evaluate(async () => (await import('/details-harness.js')).fishProbe(false))
+  const withoutFish = await page.locator('canvas').screenshot({ scale: 'css' })
+  expect(
+    await visibleDifference(page, withFish, withoutFish),
+    'An opaque surface must cover the entire fish, including its specular highlights',
+  ).toBe(0)
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
+})
+
+test('windward wave impacts render rounded spray and breaking sheets without shader errors', async ({
+  page,
+}, info) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error' || /GL_INVALID|Shader Error/.test(message.text()))
+      errors.push(message.text())
+  })
+  await page.goto('/details-test?startTime=12:00&weather=clear')
+  await page.evaluate(async () =>
+    (await import('/details-harness.js')).start(42, true, true, 0, 8, -2.2),
+  )
+  const status = await page.evaluate(async () =>
+    (await import('/details-harness.js')).splashFrame(12, true),
+  )
+  expect(status.emitted).toBeGreaterThan(0)
+  expect(status.active).toBeGreaterThan(0)
+  if (info.project.name === 'mobile')
+    await page.evaluate(async () => (await import('/details-harness.js')).inspectAirborneSpray())
+  const withSpray = await page.locator('canvas').screenshot({ scale: 'css' })
+  await page.evaluate(async () => (await import('/details-harness.js')).hideSplashes())
+  const withoutSpray = await page.locator('canvas').screenshot({ scale: 'css' })
+  const difference = await visibleDifference(page, withSpray, withoutSpray)
+  await info.attach('impact-spray', { body: withSpray, contentType: 'image/png' })
+  await info.attach('impact-pixels', { body: String(difference), contentType: 'text/plain' })
+  expect(difference).toBeGreaterThan(0)
+  expect(errors).toEqual([])
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
+})
+
+test('falling splash drops leave visible surface impacts after airborne spray is hidden', async ({
+  page,
+}, info) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') errors.push(message.text())
+  })
+  await page.goto('/details-test?startTime=12:00&weather=clear')
+  await page.evaluate(async () =>
+    (await import('/details-harness.js')).start(42, true, true, 0, 8, -2.2),
+  )
+  const status = await page.evaluate(async () =>
+    (await import('/details-harness.js')).splashFrame(8),
+  )
+  expect(status.landed).toBeGreaterThan(0)
+  expect(status.impacts).toBeGreaterThan(0)
+  await page.evaluate(async () => (await import('/details-harness.js')).hideSplashes())
+  await page.evaluate(async () => (await import('/details-harness.js')).landingFrame())
+  await page.evaluate(async () => (await import('/details-harness.js')).hideLandingCrowns())
+  const impacts = await page.locator('canvas').screenshot({ scale: 'css' })
+  await page.evaluate(async () => (await import('/details-harness.js')).hideLandingImpacts())
+  const hidden = await page.locator('canvas').screenshot({ scale: 'css' })
+  const pixels = await visibleDifference(page, impacts, hidden)
+  await info.attach('landing-impacts', { body: impacts, contentType: 'image/png' })
+  await info.attach('landing-pixels', { body: String(pixels), contentType: 'text/plain' })
+  expect(
+    pixels,
+    'Landing waves must change actual water reflections even without the crown mesh',
+  ).toBeGreaterThan(5)
+  expect(errors).toEqual([])
   await page.evaluate(async () => (await import('/details-harness.js')).stop())
 })

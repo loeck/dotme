@@ -107,7 +107,13 @@ for (const fallback of [false, true]) {
           value: undefined,
         })
       })
-    await page.goto('/?loader=loop')
+    await page.route('**/assets/VoxelLandscapeEngine-*.js', (route) =>
+      route.fulfill({
+        contentType: 'application/javascript',
+        body: 'export class VoxelLandscapeEngine { static create() { return new Promise(() => {}); } }',
+      }),
+    )
+    await page.goto('/')
     const loader = page.locator('.scene-loader')
     await expect(loader).toHaveAttribute('data-rendered', 'true')
     await page.evaluate(() => {

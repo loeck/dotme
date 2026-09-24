@@ -13,7 +13,13 @@ import type { Camera, Scene } from 'three'
 
 import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import { fadeNightLight } from './lighting'
 import type { WindState } from './wind'
+
+const smooth = (start: number, end: number, value: number) => {
+  const t = Math.max(0, Math.min(1, (value - start) / (end - start)))
+  return t * t * (3 - 2 * t)
+}
 
 export type FireflyPointer = Readonly<{
   ndc: Readonly<{ x: number; y: number }>
@@ -59,7 +65,7 @@ void main() {
   float core = exp(-radius * 75.0);
   float halo = exp(-radius * 5.8) * 0.13;
   float glow = (core + halo) * edge * vPulse * uIntensity;
-  if (glow < 0.001) discard;
+  if (glow < 0.00001) discard;
   gl_FragColor = vec4(mix(vec3(1.0, 0.48, 0.09), vec3(1.0, 0.84, 0.37), core), glow);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -70,6 +76,7 @@ void main() {
 export class LakeFireflies {
   readonly mesh: Mesh<InstancedBufferGeometry, ShaderMaterial>
   private lastTime: number | null = null
+  private arrival = 0
   private readonly origins: Float32Array
   private readonly motions: Float32Array
   private readonly offsets: Float64Array
@@ -142,7 +149,7 @@ export class LakeFireflies {
     const material = new ShaderMaterial({
       uniforms: {
         uTime: { value: 0 },
-        uIntensity: { value: 1 },
+        uIntensity: { value: 0 },
       },
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -163,12 +170,22 @@ export class LakeFireflies {
   update(time: number, wind: WindState, options: LakeFirefliesOptions = {}) {
     const uniforms = this.mesh.material.uniforms
     const dt = this.lastTime === null ? 0 : Math.max(0, Math.min(0.05, time - this.lastTime))
+    if (this.lastTime === null && options.nightFactor === undefined) this.arrival = 1
     this.lastTime = time
+    const night = Math.max(0, Math.min(1, options.nightFactor ?? 1))
+    this.arrival = fadeNightLight(this.arrival, night, dt, options.reducedMotion)
     uniforms.uTime!.value = options.reducedMotion ? 0 : time
     this.updatePositions(options.reducedMotion ? 0 : time, dt, wind, options)
-    const night = Math.max(0, Math.min(1, options.nightFactor ?? 1))
-    uniforms.uIntensity!.value = night * Math.max(0, Math.min(1, options.intensity ?? 1))
-    this.mesh.visible = this.mesh.geometry.instanceCount > 0 && uniforms.uIntensity!.value > 0.001
+    // Stay luminous while travelling; fade only at the distant end of the path.
+    const visibility = options.reducedMotion ? night : smooth(0, 0.3, this.arrival)
+    const target = visibility * Math.max(0, Math.min(1, options.intensity ?? 1))
+    uniforms.uIntensity!.value = fadeNightLight(
+      uniforms.uIntensity!.value,
+      target,
+      dt,
+      options.reducedMotion,
+    )
+    this.mesh.visible = this.mesh.geometry.instanceCount > 0 && uniforms.uIntensity!.value > 0
   }
 
   private updatePositions(
@@ -212,6 +229,18 @@ export class LakeFireflies {
           Math.cos(flightTime * 0.53 + phase) * 0.38 +
           Math.sin(windZ * 0.028 + phase) * 0.24,
       )
+      if (!options.reducedMotion) {
+        // Each particle has its own elevated approach/escape route. A continuous
+        // night weight allows sunrise/sunset reversals without teleporting.
+        const delay = (0.5 + 0.5 * Math.sin(phase * 2.7)) * 0.18
+        const travel = 1 - smooth(delay, 0.82 + delay, this.arrival)
+        const angle = phase + i * 2.399963
+        const distance = travel * (7 + 5 * (0.5 + 0.5 * Math.sin(phase * 1.3)))
+        const bend = Math.sin(travel * Math.PI) * 1.2
+        this.center.x += Math.cos(angle) * distance - Math.sin(angle) * bend
+        this.center.z += Math.sin(angle) * distance + Math.cos(angle) * bend
+        this.center.y += travel * (3.5 + 3 * (0.5 + 0.5 * Math.cos(phase)))
+      }
       this.target.set(0, 0, 0)
       if (pointer) {
         this.viewCenter.copy(this.center).applyMatrix4(pointer.camera.matrixWorldInverse)

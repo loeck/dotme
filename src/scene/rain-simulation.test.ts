@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_RAIN,
   IMPACT_LIFETIME,
-  queryRainState,
   RAIN_STEP,
   RainCollider,
   RainSimulation,
@@ -12,35 +11,13 @@ import {
 import { createVoxelIndex } from './voxel-spatial'
 
 const empty = () => new RainCollider([])
+const wavySurface = (x: number, z: number, time: number) =>
+  WATER_Y + 0.11 * Math.sin(x * 2.3 + z * 1.1 + time * 3.7 + 0.8)
 const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
   const drop = simulation.drops[0]!
   Object.assign(drop, { x: 0, y, z: 0, vx: 2, vy: -6, vz: 0.5, size, seed: 0.2, alive: true })
   return drop
 }
-
-describe('temporary rain initialization', () => {
-  it('uses presets, bounded numbers, and defaults for invalid inputs', () => {
-    for (const [preset, intensity] of [
-      ['off', 0],
-      ['light', 0.25],
-      ['moderate', 0.55],
-      ['heavy', 1],
-    ] as const)
-      expect(queryRainState(`?rain=${preset}`).intensity).toBe(intensity)
-    expect(queryRainState('')).toEqual(DEFAULT_RAIN)
-    expect(queryRainState('?rain=0.4&windX=-3&windZ=0')).toEqual({
-      intensity: 0.4,
-      wind: { x: -3, z: 0 },
-    })
-    expect(queryRainState('?rain=2&windX=-100&windZ=100')).toEqual({
-      intensity: 1,
-      wind: { x: -20, z: 20 },
-    })
-    expect(queryRainState('?rain=-2').intensity).toBe(0)
-    for (const value of ['NaN', 'Infinity', 'invalid', '', 'constructor', 'toString'])
-      expect(queryRainState(`?rain=${value}&windX=${value}&windZ=${value}`)).toEqual(DEFAULT_RAIN)
-  })
-})
 
 describe('rain collision and impact lifecycle', () => {
   it('intercepts a fast diagonal segment at the first voxel, including thin roofs', () => {
@@ -176,6 +153,86 @@ describe('rain timing, wind and budgets', () => {
     expect(available.alive).toBe(true)
     expect(available.y).toBeGreaterThan(21)
     expect(simulation.drops.every((drop) => drop.alive)).toBe(true)
+  })
+})
+
+describe('rain contacts on moving water', () => {
+  it('keeps one shared contact on the moving surface at every display refresh rate', () => {
+    const results = [10, 30, 60, 120, 144].map((fps) => {
+      const simulation = new RainSimulation(empty(), true, 42)
+      simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.00001 })
+      simulation.setWaterSurface(wavySurface)
+      const drop = dropAt(simulation, 0.14)
+      for (let frame = 0; frame < fps; frame++) simulation.update(1 / fps)
+      expect(drop.alive).toBe(false)
+      const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
+      expect(impacts).toHaveLength(1)
+      const impact = impacts[0]!
+      expect(impact.born).toBeGreaterThan(0)
+      expect(impact.born).toBeLessThan((0.14 - WATER_Y) / 6)
+      expect(impact.y).toBe(wavySurface(impact.x, impact.z, impact.born))
+      expect(impact.y).toBeCloseTo(0.14 - 6 * impact.born, 6)
+      expect(impact.x).toBeCloseTo(2 * impact.born, 10)
+      expect(impact.z).toBeCloseTo(0.5 * impact.born, 10)
+      expect(impact.vy).toBe(-6)
+      return impact
+    })
+    for (const impact of results.slice(1)) expect(impact).toEqual(results[0])
+  })
+
+  it('resolves the first water or solid contact, including rocks exposed by a trough', () => {
+    for (const indexed of [false, true]) {
+      for (const fixture of [
+        { water: 0.12, block: 0.04, start: 0.16, impacts: 1 },
+        { water: -0.15, block: -0.07, start: 0, impacts: 0 },
+        { water: 0.12, block: 0.16, start: 0.2, impacts: 0 },
+      ]) {
+        const voxels = [{ x: 0, y: fixture.block, z: 0, size: 0.04, color: 0 }]
+        const collider = new RainCollider(indexed ? createVoxelIndex(voxels) : voxels)
+        const simulation = new RainSimulation(collider, true, 42)
+        simulation.setRainState({ intensity: 0.00001, wind: { x: 0, z: 0 } })
+        simulation.setWaterSurface(() => fixture.water)
+        const drop = dropAt(simulation, fixture.start)
+        Object.assign(drop, { vx: 0, vz: 0, vy: -24 })
+        simulation.update(RAIN_STEP)
+        expect(drop.alive).toBe(false)
+        const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
+        expect(impacts).toHaveLength(fixture.impacts)
+        expect(impacts.map((impact) => impact.y)).toEqual(
+          Array.from({ length: fixture.impacts }, () => fixture.water),
+        )
+      }
+    }
+  })
+
+  it('skips spectrum samples above the lake and restores flat-water behavior when detached', () => {
+    const simulation = new RainSimulation(empty(), true, 42)
+    simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.00001 })
+    let calls = 0
+    simulation.setWaterSurface(() => {
+      calls++
+      return 0.15
+    })
+    dropAt(simulation, 2)
+    simulation.update(RAIN_STEP)
+    expect(calls).toBe(0)
+    simulation.setWaterSurface()
+    dropAt(simulation, WATER_Y + 0.025)
+    simulation.update(RAIN_STEP)
+    const impact = simulation.impacts.find((value) => Number.isFinite(value.born))!
+    expect(impact.y).toBe(WATER_Y)
+    expect(impact.vy).toBe(-6)
+    expect(calls).toBe(0)
+  })
+
+  it('does not prime airborne drops below a wave crest', () => {
+    const simulation = new RainSimulation(empty(), true, 42)
+    simulation.setWaterSurface(() => 0.18)
+    simulation.prime()
+    const alive = simulation.drops.filter((drop) => drop.alive)
+    expect(alive.length).toBeGreaterThan(100)
+    expect(alive.every((drop) => drop.y > 0.18)).toBe(true)
+    expect(simulation.impacts.every((impact) => !Number.isFinite(impact.born))).toBe(true)
   })
 })
 

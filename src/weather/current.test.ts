@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { fetchParisWeather, interpretWmoCode, WeatherHttpError } from './paris'
+import { fetchWeather, interpretWmoCode, WeatherHttpError } from './current'
 import { parisWeatherFixture as fixture } from './paris.fixture'
 
 const fetchMock = vi.fn<typeof fetch>()
@@ -66,16 +66,27 @@ describe('WMO interpretation', () => {
   })
 })
 
-describe('fetchParisWeather', () => {
+describe('fetchWeather', () => {
+  it('requests custom GPS coordinates and retains the returned local timezone', async () => {
+    respond({ ...fixture(), timezone: 'Asia/Singapore', utc_offset_seconds: 28800 })
+    const weather = await fetchWeather({ position: { latitude: 1.3521, longitude: 103.8198 } })
+    const url = new URL(String(fetchMock.mock.calls[0]![0]))
+    expect(url.searchParams.get('latitude')).toBe('1.3521')
+    expect(url.searchParams.get('longitude')).toBe('103.8198')
+    expect(url.searchParams.get('timezone')).toBe('auto')
+    expect(weather.timezone).toBe('Asia/Singapore')
+    expect(weather.utcOffsetSeconds).toBe(28800)
+  })
+
   it('requests Paris with explicit units and preserves numeric values and time metadata', async () => {
     respond()
-    const weather = await fetchParisWeather()
+    const weather = await fetchWeather()
     const url = new URL(String(fetchMock.mock.calls[0]![0]))
     expect(url.origin + url.pathname).toBe('https://api.open-meteo.com/v1/forecast')
     expect(Object.fromEntries(url.searchParams)).toMatchObject({
       latitude: '48.8566',
       longitude: '2.3522',
-      timezone: 'Europe/Paris',
+      timezone: 'auto',
       wind_speed_unit: 'ms',
       precipitation_unit: 'mm',
       temperature_unit: 'celsius',
@@ -146,7 +157,7 @@ describe('fetchParisWeather', () => {
     const data = fixture()
     Object.assign(data.current, current)
     respond(data)
-    const weather = await fetchParisWeather()
+    const weather = await fetchWeather()
     expect(weather.indicators).toMatchObject(indicators)
     expect(weather.weatherCode).toBe(data.current.weather_code)
   })
@@ -158,7 +169,7 @@ describe('fetchParisWeather', () => {
       respond(data)
       // Each fixture is consumed before replacing the mock response.
       // eslint-disable-next-line no-await-in-loop
-      await expect(fetchParisWeather()).rejects.toThrow(TypeError)
+      await expect(fetchWeather()).rejects.toThrow(TypeError)
     }
   })
   it.each([
@@ -182,31 +193,31 @@ describe('fetchParisWeather', () => {
     const data = fixture()
     Object.assign(data.current, { [key]: value })
     respond(data)
-    await expect(fetchParisWeather()).rejects.toThrow(TypeError)
+    await expect(fetchWeather()).rejects.toThrow(TypeError)
   })
   it.each([
     null,
     [],
     {},
     { current: {} },
-    { ...fixture(), timezone: 'UTC' },
+    { ...fixture(), timezone: 'Invalid/Timezone' },
     { ...fixture(), utc_offset_seconds: null },
     { ...fixture(), current_units: {} },
     { ...fixture(), current_units: { ...fixture().current_units, wind_speed_10m: 'km/h' } },
   ])('rejects malformed data/metadata %#', async (data) => {
     respond(data)
-    await expect(fetchParisWeather()).rejects.toThrow(TypeError)
+    await expect(fetchWeather()).rejects.toThrow(TypeError)
   })
   it('rejects non-finite values without coercion', async () => {
     fetchMock.mockResolvedValue({
       ok: true,
       json: async () => ({ ...fixture(), current: { ...fixture().current, rain: Infinity } }),
     } as Response)
-    await expect(fetchParisWeather()).rejects.toThrow(TypeError)
+    await expect(fetchWeather()).rejects.toThrow(TypeError)
   })
   it('preserves HTTP status', async () => {
     fetchMock.mockResolvedValue(new Response('Unavailable', { status: 503 }))
-    await expect(fetchParisWeather()).rejects.toMatchObject({
+    await expect(fetchWeather()).rejects.toMatchObject({
       name: 'WeatherHttpError',
       status: 503,
     })
@@ -215,14 +226,14 @@ describe('fetchParisWeather', () => {
   it('propagates network and JSON errors', async () => {
     const error = new TypeError('Network unavailable')
     fetchMock.mockRejectedValueOnce(error)
-    await expect(fetchParisWeather()).rejects.toBe(error)
+    await expect(fetchWeather()).rejects.toBe(error)
     fetchMock.mockResolvedValueOnce(new Response('{'))
-    await expect(fetchParisWeather()).rejects.toThrow(SyntaxError)
+    await expect(fetchWeather()).rejects.toThrow(SyntaxError)
   })
 
   it('aborts a stalled request after exactly 10 seconds', async () => {
     pendingFetch()
-    const result = fetchParisWeather().catch((error: unknown) => error)
+    const result = fetchWeather().catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(9999)
     expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
@@ -241,14 +252,14 @@ describe('fetchParisWeather', () => {
             ),
         }) as Response,
     )
-    const result = fetchParisWeather().catch((error: unknown) => error)
+    const result = fetchWeather().catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(10_000)
     await expect(result).resolves.toMatchObject({ name: 'TimeoutError' })
   })
   it('rejects already aborted requests without fetching', async () => {
     const controller = new AbortController()
     controller.abort()
-    await expect(fetchParisWeather({ signal: controller.signal })).rejects.toMatchObject({
+    await expect(fetchWeather({ signal: controller.signal })).rejects.toMatchObject({
       name: 'AbortError',
     })
     expect(fetchMock).not.toHaveBeenCalled()
@@ -258,7 +269,7 @@ describe('fetchParisWeather', () => {
     const controller = new AbortController()
     const remove = vi.spyOn(controller.signal, 'removeEventListener')
     const reason = new Error('Stopped')
-    const result = fetchParisWeather({ signal: controller.signal }).catch((error: unknown) => error)
+    const result = fetchWeather({ signal: controller.signal }).catch((error: unknown) => error)
     controller.abort(reason)
     await expect(result).resolves.toBe(reason)
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
@@ -267,7 +278,7 @@ describe('fetchParisWeather', () => {
     respond()
     const controller = new AbortController()
     const remove = vi.spyOn(controller.signal, 'removeEventListener')
-    await fetchParisWeather({ signal: controller.signal })
+    await fetchWeather({ signal: controller.signal })
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
     controller.abort()
     expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false)

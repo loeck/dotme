@@ -36,25 +36,27 @@ import {
 } from 'three'
 import type { WebGLRenderTarget } from 'three'
 
-import { CursorGlow } from './cursor-glow'
+import { sceneParams } from '../scene-params'
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
-import { sampleLighting } from './lighting'
+import { fadeNightLight, sampleLighting } from './lighting'
+import { PointerLight } from './pointer-light'
 import { prepareWorld, prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
-import { ProfileLuminance } from './profile-luminance'
 import { DEFAULT_RAIN } from './rain-simulation'
 import type { RainState } from './rain-simulation'
 import { RAIN_LAYER, RainEffect } from './RainEffect'
 import { RenderDiagnostics } from './render-diagnostics'
+import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
 import type { DetailEnvironment } from './scene-details'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { SolarClock, parseInitialTime } from './solar-clock'
+import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
@@ -62,9 +64,10 @@ import { firstVoxelHit } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelLamp, VoxelMaterial } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
+import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
-import { WEATHER, parseWeather } from './weather'
+import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 import { WindModel, createWindUniforms, updateWindUniforms } from './wind'
 import type { WindOptions } from './wind'
@@ -128,10 +131,9 @@ export class VoxelLandscapeEngine {
   private readonly diagnostics?: RenderDiagnostics
   private readonly depthFocus: DepthFocus
   private readonly atmosphere: VolumetricLight
-  private readonly profileLuminance = new ProfileLuminance()
-  private profileMeterBusy = false
-  private profileMeterAt = -Infinity
+  private readonly sceneContrast: SceneContrast
   private readonly solarClock: SolarClock
+  private nightLightFade = 0
   private readonly weather
   private readonly showSun: boolean
   private readonly ambient = new AmbientLight()
@@ -141,7 +143,8 @@ export class VoxelLandscapeEngine {
   private readonly rayNdc = new Vector2()
   private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
-  private readonly cursorGlow = new CursorGlow()
+  private readonly pointerLight = new PointerLight()
+  private readonly lightHit = new Vector3()
   private readonly pointer = new Vector2(0, 0)
   private readonly pointerClient = new Vector2(-1, -1)
   private readonly detailPointerNdc = new Vector2()
@@ -222,13 +225,21 @@ export class VoxelLandscapeEngine {
     this.options = { ...options, prepared: undefined }
     this.detailEnvironment = { ...options.detailEnvironment }
     this.container = options.container
+    this.sceneContrast = new SceneContrast(this.container.closest('main'), () => {
+      if (this.options.reducedMotion) this.requestFrame()
+    })
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
       : window.innerWidth < 768
-    const params = new URLSearchParams(window.location.search)
-    this.solarClock = new SolarClock(parseInitialTime(params.get('time')), options.reducedMotion)
-    this.weather = options.weather ?? parseWeather(params.get('weather'))
-    this.showSun = params.get('sun') !== 'hidden'
+    const params = sceneParams(window.location.search)
+    this.solarClock = new SolarClock(
+      parseInitialTime(params.startTime ?? null),
+      options.reducedMotion,
+      performance.now(),
+      params.timeScale,
+    )
+    this.weather = options.weather ?? 'partly-cloudy'
+    this.showSun = true
     this.renderer = new WebGLRenderer({
       antialias: false,
       alpha: false,
@@ -305,7 +316,7 @@ export class VoxelLandscapeEngine {
       (options.seed ?? 0) >>> 0,
       this.mobile,
       this.wind,
-      (time) => sampleLighting(this.solarClock.initialSeconds, time, this.weather),
+      (time) => sampleLighting(this.solarClock.seconds(time), 0, this.weather),
       this.weather,
       prepared.noise,
     )
@@ -327,19 +338,25 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.voxelGroup, this.shadowGroup)
     this.buildWorld(prepared)
     this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile, this.wind)
-    this.camera.layers.enable(FISH_LAYER)
+    this.camera.layers.disable(FISH_LAYER)
+    this.camera.layers.enable(SPLASH_IMPACT_LAYER)
     this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
     this.scene.traverse((object) => {
-      if ('isLight' in object) object.layers.enable(1)
+      if ('isLight' in object) {
+        object.layers.enable(1)
+        object.layers.enable(FISH_LAYER)
+        object.layers.enable(SPLASH_IMPACT_LAYER)
+      }
     })
     const cloudReceivers = new Set<MeshStandardMaterial>()
     this.scene.traverse((object) => {
       if (object instanceof Mesh && object.material instanceof MeshStandardMaterial)
         cloudReceivers.add(object.material)
     })
-    for (const material of cloudReceivers) this.clouds.shadows.applyTo(material, this.camera)
-    // Add local cursor irradiance after cloud attenuation of the sky fill.
-    this.cursorGlow.attachSurfaces(this.scene)
+    for (const material of cloudReceivers) {
+      this.clouds.shadows.applyTo(material, this.camera)
+      this.pointerLight.applyTo(material)
+    }
     this.details?.attachMaterials(this.voxelGroup, this.submerged.surfaceMaterials)
     const waterGeometry = createWaterGeometry(this.mobile)
     this.water = createLakeReflector(waterGeometry, this.mobile, this.simulation.available)
@@ -361,15 +378,21 @@ export class VoxelLandscapeEngine {
       uniforms,
       this.windUniforms,
       this.clouds.shadows.uniforms,
-      this.cursorGlow.uniforms,
+      this.pointerLight.uniforms,
     )
     uniforms.uState!.value = this.simulation.texture
     uniforms.uMask!.value = this.simulation.mask
     uniforms.uCell!.value = LAKE_BOUNDS.size / this.simulation.resolution
     uniforms.uBedColor!.value = this.submerged.target.texture
     uniforms.uBedDepth!.value = this.submerged.target.depthTexture
+    uniforms.uBedAtlas!.value = this.submerged.atlasLayout
+    uniforms.uFishInverseViewProjection!.value = this.submerged.fishInverseViewProjection
     uniforms.uBedHeight!.value = this.submerged.depthField
     uniforms.uBedFieldLayout!.value = this.submerged.fieldLayout
+    this.details?.setWaterImpact(
+      (x, z, radius, velocity) => this.simulation.addImpulse(x, z, radius, velocity),
+      uniforms,
+    )
     this.renderer.domElement.dataset.waterMode = this.simulation.available ? 'gpu' : 'analytic'
     if (!this.simulation.available) this.water.getRenderTarget().texture.type = UnsignedByteType
     this.water.rotation.x = -Math.PI / 2
@@ -393,6 +416,8 @@ export class VoxelLandscapeEngine {
     )
     this.rain.setRainState(options.rain ?? DEFAULT_RAIN)
     this.rain.prime()
+    if (this.details && this.simulation.available)
+      this.rain.setImpactSlopes(this.details.impactSlopes)
     this.scene.add(this.rain.group)
     this.water.getReflectionCamera(this.camera).layers.enable(RAIN_LAYER)
     this.water.material.uniforms.uRainSlopeMap!.value = this.rain.texture
@@ -467,7 +492,15 @@ export class VoxelLandscapeEngine {
     const glowGeometry = new PlaneGeometry(1.3, 1.3)
     this.geometries.push(capGeometry, glowGeometry)
     world.lamps.forEach((lamp) => {
-      const cap = new Mesh(capGeometry, new MeshBasicMaterial({ color: 0xb4d9f5 }))
+      const cap = new Mesh(
+        capGeometry,
+        new MeshBasicMaterial({
+          color: 0xb4d9f5,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        }),
+      )
       cap.position.set(lamp.x, lamp.y, lamp.z)
       this.scene.add(cap)
       this.objects.push(cap)
@@ -597,15 +630,23 @@ export class VoxelLandscapeEngine {
     light.shadow.normalBias = 0.035
   }
 
-  private hitWater(clientX: number, clientY: number, throughOverlay = false): Vector3 | null {
+  private projectPointer(clientX: number, clientY: number): boolean {
     const canvas = this.renderer.domElement
-    if (!throughOverlay && document.elementFromPoint(clientX, clientY) !== canvas) return null
+    if (document.elementFromPoint(clientX, clientY) !== canvas) return false
     const bounds = this.pointerBounds ?? canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
-    if (Math.abs(x) > 1 || Math.abs(y) > 1) return null
+    if (Math.abs(x) > 1 || Math.abs(y) > 1) return false
     this.rayNdc.set(x, y)
     this.raycaster.setFromCamera(this.rayNdc, this.camera)
+    return true
+  }
+
+  private hitWater(clientX: number, clientY: number): Vector3 | null {
+    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay() : null
+  }
+
+  private waterPointOnRay(): Vector3 | null {
     const ray = this.raycaster.ray
     this.waterPlane.constant = -WATER_LEVEL
     if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
@@ -630,6 +671,29 @@ export class VoxelLandscapeEngine {
       if (i >= 0 && this.bed.obstacle[i]! >= ray.origin.y + ray.direction.y * d) return null
     }
     return this.waterHit.clone()
+  }
+
+  private updatePointerLight(
+    pointerOnScene: boolean,
+    waterPoint: Vector3 | null,
+    nightStrength: number,
+    dt: number,
+  ) {
+    let contact = null
+    if (nightStrength > 0 && pointerOnScene && this.pointerType === 'mouse' && this.focused) {
+      const ray = this.raycaster.ray
+      const solid = firstVoxelHit(this.voxelIndex, ray.origin.toArray(), ray.direction.toArray())
+      if (solid && (!waterPoint || solid.distance < ray.origin.distanceTo(waterPoint)))
+        contact = ray.at(solid.distance, this.lightHit)
+      else contact = waterPoint
+    }
+    this.pointerLight.update(
+      contact,
+      this.raycaster.ray.direction,
+      nightStrength * this.intro,
+      dt,
+      !!this.options.reducedMotion,
+    )
   }
 
   private async processPointer() {
@@ -657,25 +721,27 @@ export class VoxelLandscapeEngine {
         const start = this.hitWater(previous.x, previous.y)
         if (start) {
           const distance = start.distanceTo(point)
-          const seconds = Math.max(0.008, (event.time - previous.time) / 1000)
-          const speed = Math.min(25, distance / seconds)
-          const samples = Math.min(48, Math.ceil(distance / 0.22))
+          const pixels = Math.hypot(event.x - previous.x, event.y - previous.y)
+          const { samples, radius, velocity } = waterStroke(
+            pixels,
+            (event.time - previous.time) / 1000,
+            distance,
+            this.dragging,
+          )
+          const projected = start.clone()
+          const bounds = this.pointerBounds ?? this.renderer.domElement.getBoundingClientRect()
           for (let i = 1; i <= samples; i++) {
-            const t = i / samples
-            // Screen-space samples are visibility checked; a long stroke cannot cross a bank.
+            // Equal world spacing avoids bunching pressure samples at the near
+            // end of a vertical screen stroke. Still reject occluded/UI samples.
+            projected
+              .copy(start)
+              .lerp(point, (i - 0.5) / samples)
+              .project(this.camera)
             const contact = this.hitWater(
-              previous.x + (event.x - previous.x) * t,
-              previous.y + (event.y - previous.y) * t,
+              bounds.left + (projected.x + 1) * bounds.width * 0.5,
+              bounds.top + (1 - projected.y) * bounds.height * 0.5,
             )
-            if (contact)
-              this.simulation.addImpulse(
-                contact.x,
-                contact.z,
-                this.dragging ? 0.48 : 0.36,
-                -Math.min(0.45, 0.018 + speed * 0.018) *
-                  (this.dragging ? 1.5 : 0.55) *
-                  Math.min(1, distance / Math.max(1, samples) / 0.22),
-              )
+            if (contact) this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
           }
         }
       }
@@ -683,37 +749,6 @@ export class VoxelLandscapeEngine {
     } finally {
       this.pointerBusy = false
     }
-  }
-
-  private updateCursorGlow(waterPoint: Vector3 | null): boolean {
-    if (!this.pointerActive) return false
-    const bounds = this.pointerBounds ?? this.renderer.domElement.getBoundingClientRect()
-    if (
-      this.pointerClient.x < bounds.left ||
-      this.pointerClient.x > bounds.right ||
-      this.pointerClient.y < bounds.top ||
-      this.pointerClient.y > bounds.bottom
-    )
-      return false
-    // Transparent profile overlays must not hide the scene from the light picker.
-    // Water gestures still require direct contact with the canvas.
-    waterPoint ??= this.hitWater(this.pointerClient.x, this.pointerClient.y, true)
-    // hitWater has projected the cursor with this frame's camera.
-    // Test actual solid faces as well as water, including cliff faces and isolated rocks.
-    const ray = this.raycaster.ray
-    const solid = firstVoxelHit(this.voxelIndex, ray.origin.toArray(), ray.direction.toArray())
-    const position = this.cursorGlow.uniforms.uCursorGlowPosition.value
-    if (solid && (!waterPoint || solid.distance < this.camera.position.distanceTo(waterPoint))) {
-      ray.at(solid.distance, position)
-    } else if (waterPoint) {
-      position.copy(waterPoint)
-    } else return false
-    // Keep the soft emitter on the visible side of the contact, slightly raised.
-    // This gives neighboring voxel faces distinct shading without a spotlight cone.
-    const source = this.cursorGlow.uniforms.uCursorGlowSource.value
-    source.copy(position).addScaledVector(this.raycaster.ray.direction, -2.4)
-    source.y += 0.8
-    return true
   }
 
   private onPointerDown = (event: PointerEvent) => {
@@ -728,7 +763,7 @@ export class VoxelLandscapeEngine {
     const point = this.hitWater(event.clientX, event.clientY)
     if (!point) return
     // Queue the contact immediately so a quick touch ending before the next frame still ripples.
-    this.simulation.addImpulse(point.x, point.z, 0.48, -0.4)
+    this.simulation.addImpulse(point.x, point.z, 0.7, -0.26)
     this.dragging = true
     this.dragPointerId = event.pointerId
     this.pointerType = event.pointerType
@@ -851,6 +886,7 @@ export class VoxelLandscapeEngine {
   setRainState(state: RainState) {
     if (this.disposed) return
     this.rain.setRainState(state)
+    this.resizeReflection()
     this.requestFrame()
   }
 
@@ -877,14 +913,16 @@ export class VoxelLandscapeEngine {
     const environmentIntensity = this.scene.environmentIntensity
     this.scene.environmentIntensity = 0
     // Direct solar energy already comes from the directional light. Excluding the
-    // disc from the lighting probe also makes sun=hidden a purely visual switch.
+    // disc from the lighting probe keeps disc visibility independent of illumination.
     this.skyMaterial.uniforms.uShowSun!.value = 0
+    this.skyMaterial.uniforms.uShowMoon!.value = 0
     try {
       this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
     } finally {
       this.water.visible = true
       this.scene.environmentIntensity = environmentIntensity
       this.skyMaterial.uniforms.uShowSun!.value = this.showSun ? 1 : 0
+      this.skyMaterial.uniforms.uShowMoon!.value = 1
     }
     // Filter explicitly before the main render. Lazy filtering inside a
     // material upload would nest renderer calls and disturb texture bindings.
@@ -916,12 +954,12 @@ export class VoxelLandscapeEngine {
     this.intro = this.options.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
     const atmosphereTime = this.solarClock.elapsed(now)
-    const light = sampleLighting(this.solarClock.initialSeconds, atmosphereTime, this.weather)
+    const light = sampleLighting(this.solarClock.seconds(atmosphereTime), 0, this.weather)
     const lightingHost = this.container.closest('main')
     if (lightingHost) {
       const enabled = String(light.localLightStrength > 0)
       if (lightingHost.dataset.localLights !== enabled) lightingHost.dataset.localLights = enabled
-      // Initial fallback, replaced by measured backdrop luminance after rendering.
+      // DOM fallback; the GPU glyph mask adapts independently at every pixel.
       lightingHost.dataset.sceneTone ??= light.ambientLuminance > 0.16 ? 'light' : 'dark'
     }
 
@@ -936,21 +974,13 @@ export class VoxelLandscapeEngine {
     this.pointerBounds = this.pointerActive
       ? this.renderer.domElement.getBoundingClientRect()
       : null
-    const waterPoint = this.pointerActive
-      ? this.hitWater(this.pointerClient.x, this.pointerClient.y)
-      : null
+    const pointerOnScene =
+      this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
+    const waterPoint = pointerOnScene ? this.waterPointOnRay() : null
     if (waterPoint)
-      this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.localLightStrength)
+      this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
-    const glowTarget =
-      light.localLightStrength > 0 && this.updateCursorGlow(waterPoint)
-        ? light.localLightStrength
-        : 0
-    const cursorStrength = this.cursorGlow.uniforms.uCursorGlowStrength
-    cursorStrength.value +=
-      (glowTarget - cursorStrength.value) *
-      (this.options.reducedMotion ? 1 : 1 - Math.exp(-dt * (glowTarget ? 6 : 4)))
-    if (light.localLightStrength === 0 || cursorStrength.value < 0.001) cursorStrength.value = 0
+    this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
@@ -1008,7 +1038,7 @@ export class VoxelLandscapeEngine {
       fireflyPointer,
       light.moonIntensity,
       this.intro,
-      light.localLightStrength,
+      light.pointerLightStrength,
     )
     this.pointerBounds = null
     this.measure('clouds', () => this.clouds.update(atmosphereTime))
@@ -1022,9 +1052,15 @@ export class VoxelLandscapeEngine {
     waterPointer.z +=
       (this.waterPointerTarget.z - waterPointer.z) *
       (this.options.reducedMotion ? 1 : 1 - Math.exp(-dt * 8))
-    if (light.localLightStrength === 0) waterPointer.z = 0
+    if (light.pointerLightStrength === 0) waterPointer.z = 0
+    this.nightLightFade = fadeNightLight(
+      this.nightLightFade,
+      light.localLightStrength,
+      dt,
+      this.options.reducedMotion,
+    )
     for (const [index, lamp] of this.lampLights.entries()) {
-      lamp.cube.visible = lamp.glow.visible = lamp.light.visible = light.localLightStrength > 0
+      lamp.cube.visible = lamp.glow.visible = lamp.light.visible = this.nightLightFade > 0
       const source = lamp.source
       const motion = Math.sin(this.elapsed * source.speed + source.phase)
       // Long, independent quiet intervals separate soft changes tied to the bobbing.
@@ -1034,15 +1070,20 @@ export class VoxelLandscapeEngine {
           ? 0
           : smooth(0.15, 0.7, Math.sin(this.elapsed * source.speed * 0.29 + source.phase * 1.7))
       const breathing = 1 + motion * (0.1 + source.amplitude * 0.6) * active
-      const energy =
-        smooth(0.12 + index * 0.045, 0.55 + index * 0.045, this.intro) *
-        breathing *
-        light.localLightStrength
-      const drift = this.options.reducedMotion ? 0 : motion * source.amplitude
-      const sway = this.options.reducedMotion ? 0 : source.driftRadius
+      const delay = (0.5 + 0.5 * Math.sin(source.phase)) * 0.16
+      const emergence = this.options.reducedMotion
+        ? this.nightLightFade
+        : smooth(delay, 0.84 + delay, this.nightLightFade)
+      const presence = smooth(0.12 + index * 0.045, 0.55 + index * 0.045, this.intro) * emergence
+      const energy = presence * breathing
+      const drift = this.options.reducedMotion ? 0 : motion * source.amplitude * emergence
+      const sway = this.options.reducedMotion ? 0 : source.driftRadius * emergence
+      const descent = this.options.reducedMotion
+        ? 0
+        : (source.y - source.groundY + 0.25) * (1 - emergence)
       lamp.cube.position.set(
         source.x + Math.sin(this.elapsed * source.speed * 0.73 + source.phase) * sway,
-        source.y + drift,
+        source.y + drift - descent,
         source.z + Math.cos(this.elapsed * source.speed * 0.61 + source.phase * 1.3) * sway * 0.7,
       )
       lamp.light.position.copy(lamp.cube.position)
@@ -1050,12 +1091,12 @@ export class VoxelLandscapeEngine {
       lamp.glow.quaternion.copy(this.camera.quaternion)
       lamp.light.intensity = 22 * source.intensity * energy
       lamp.glowStrength.value = 0.58 * energy
-      lamp.cube.material.color.copy(lamp.color).multiplyScalar(energy)
+      lamp.cube.material.opacity = presence
+      lamp.cube.material.color.copy(lamp.color).multiplyScalar(breathing)
     }
     if (this.moteMesh) {
-      this.moteMesh.visible = light.localLightStrength > 0
-      this.moteMesh.material.opacity =
-        smooth(0.25, 0.9, this.intro) * 0.2 * light.localLightStrength
+      this.moteMesh.visible = this.nightLightFade > 0
+      this.moteMesh.material.opacity = smooth(0.25, 0.9, this.intro) * 0.2 * this.nightLightFade
       if (this.moteMesh.visible && !this.options.reducedMotion) {
         for (const [index, mote] of this.motes.entries()) {
           this.moteTransform.position.set(
@@ -1079,6 +1120,7 @@ export class VoxelLandscapeEngine {
         this.options.reducedMotion ? 0 : rainDelta,
         this.camera,
         smooth(0, 0.62, this.intro),
+        { time: this.elapsed, wind },
       ),
     )
     this.measure('rain-slopes', () =>
@@ -1086,7 +1128,7 @@ export class VoxelLandscapeEngine {
     )
     this.renderer.shadowMap.needsUpdate = true
     this.updateEnvironment(now, atmosphereTime)
-    this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene))
+    this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene, this.camera))
     this.depthFocus.render(
       this.renderer,
       this.scene,
@@ -1098,39 +1140,11 @@ export class VoxelLandscapeEngine {
     this.measure('rain', () =>
       this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture),
     )
+    this.measure('interface', () =>
+      this.sceneContrast.render(this.renderer, this.atmosphere.target.texture),
+    )
     this.diagnostics?.end()
-    const profile = lightingHost?.querySelector('.profile-panel')
-    if (profile && !this.profileMeterBusy && now - this.profileMeterAt >= 1000) {
-      this.profileMeterBusy = true
-      this.profileMeterAt = now
-      void this.profileLuminance
-        .read(
-          this.renderer,
-          this.atmosphere.target.texture,
-          profile.getBoundingClientRect(),
-          this.renderer.domElement.getBoundingClientRect(),
-          lightingHost!.dataset.sceneTone === 'light' ? 0.16 : 0.2,
-        )
-        .then((lightBackdrop) => {
-          if (!this.disposed) {
-            // Hysteresis prevents passing clouds from flickering the text palette.
-            const tone = lightBackdrop ? 'light' : 'dark'
-            if (lightingHost!.dataset.sceneTone !== tone) lightingHost!.dataset.sceneTone = tone
-          }
-          return lightBackdrop
-        })
-        .catch(() => {
-          /* Keep the ambient-light fallback if the query is unavailable. */
-        })
-        .finally(() => {
-          this.profileMeterBusy = false
-          if (!this.disposed && !this.rendered) {
-            this.rendered = true
-            this.options.onFirstFrame()
-          }
-        })
-    }
-    if (!this.rendered && !this.profileMeterBusy) {
+    if (!this.rendered) {
       this.rendered = true
       this.options.onFirstFrame()
     }
@@ -1148,11 +1162,7 @@ export class VoxelLandscapeEngine {
     )
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
-    this.rain.resize(
-      this.drawingBufferSize.x,
-      this.drawingBufferSize.y,
-      this.renderer.getPixelRatio(),
-    )
+    this.rain.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.water.material.uniforms.uRainResolution!.value.copy(this.drawingBufferSize)
     this.depthFocus.resize(
       this.drawingBufferSize.x,
@@ -1161,16 +1171,21 @@ export class VoxelLandscapeEngine {
       this.height,
     )
     this.atmosphere.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
-    this.profileMeterAt = -Infinity
-    this.submerged.resize(this.mobile)
-    this.water.material.uniforms.uBedTexel!.value.set(
-      1 / this.submerged.target.width,
-      1 / this.submerged.target.height,
-    )
+    this.sceneContrast.invalidate()
+    this.submerged.resize(this.mobile, this.drawingBufferSize.x, this.drawingBufferSize.y)
+    this.water.material.uniforms.uBedTexel!.value.copy(this.submerged.bedTexel)
+    this.resizeReflection()
+    if (this.options.reducedMotion && this.rendered) this.requestFrame()
+  }
+
+  private resizeReflection() {
+    const rain = this.rain.group.visible
+    const scale = this.mobile ? (rain ? 0.55 : 0.4) : rain ? 0.75 : 0.46
+    const detailed = rain && !this.mobile
     const reflectionScale = Math.min(
-      this.mobile ? 0.4 : 0.46,
-      768 / this.drawingBufferSize.x,
-      832 / this.drawingBufferSize.y,
+      scale,
+      (detailed ? 1536 : 768) / this.drawingBufferSize.x,
+      (detailed ? 1080 : 832) / this.drawingBufferSize.y,
     )
     this.water
       .getRenderTarget()
@@ -1178,7 +1193,6 @@ export class VoxelLandscapeEngine {
         Math.max(256, Math.round(this.drawingBufferSize.x * reflectionScale)),
         Math.max(256, Math.round(this.drawingBufferSize.y * reflectionScale)),
       )
-    if (this.options.reducedMotion && this.rendered) this.requestFrame()
   }
 
   dispose() {
@@ -1204,7 +1218,7 @@ export class VoxelLandscapeEngine {
     this.diagnostics?.dispose()
     this.clouds.dispose()
     this.atmosphere.dispose()
-    this.profileLuminance.dispose()
+    this.sceneContrast.dispose()
     this.environmentTarget.dispose()
     this.filteredEnvironment?.dispose()
     this.environmentFilter.dispose()

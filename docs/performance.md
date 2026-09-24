@@ -20,7 +20,7 @@ below uses the merged commit `59eada9` as its reference.
   the back-face depth of internal faces affects lamp visibility. Removing them caused a
   small but visible light leak in deterministic comparisons. The group is exposed only
   during shadow rendering; color, environment and reflection passes use the culled meshes.
-- The same BVH finds the nearest front-facing cube for cursor illumination and resolves
+- The same BVH resolves
   rain segments, including starts inside solids and exclusion of submerged obstacles. Move events
   only update the latest pending sample; pointer-down remains immediate. The canvas bounds
   are shared within a frame, and height readback remains asynchronous.
@@ -81,7 +81,8 @@ startup and Worker integration are covered by the browser suite.
 
 Optional environment variables: `BENCH_PROFILES=desktop,mobile`, `BENCH_REPEATS=3`,
 `BENCH_SECONDS=30`, `BENCH_OUTPUT=...`, `BENCH_CAPTURE_ONLY=1`, `BENCH_SEEDS=0,12,9182`,
-`BENCH_QUERY='time=08:30&rain=heavy&weather=partly-cloudy'`.
+`BENCH_QUERY='startTime=08:30&rain=heavy&weather=partly-cloudy'`.
+These are private benchmark-harness controls, not public page query parameters.
 The default query fixes midnight with heavy rain and partly cloudy weather.
 `BENCH_DIAGNOSTICS=1` records separate per-pass histories and adds timer overhead; use it
 for investigation, not the headline frame-rate comparison.
@@ -113,7 +114,7 @@ References: [Three.js WebGPU migration](https://threejs.org/manual/pages/webgpur
 
 ## Validation limits
 
-The browser suite covers gestures, cursor lighting, parallax, resize/cancellation, reduced
+The browser suite covers gestures, native cursors, parallax, resize/cancellation, reduced
 motion, hidden-tab behavior, the analytic fallback, cloud continuity, shadow projection and
 repeated mount/dispose cycles. Unit tests cover conservative face coverage, BVH picking against
 Three.js instanced raycasting, transferred data, Worker cancellation and non-overlapping timers.
@@ -237,6 +238,12 @@ fallbacks, resize, page restoration, Worker cancellation and repeated disposal.
 
 ## Periodic stalls in the complete page
 
+The measurements in this section describe the former region-wide contrast meter.
+The current UI uses a GPU glyph mask and shades ink directly against the scene;
+it performs neither luminance queries nor pixel readbacks. Its coverage texture
+updates only on layout, font or interaction changes, and its draw is recorded in
+the `interface` diagnostic pass. See [atmosphere notes](atmosphere.md).
+
 The isolated scene harness above has no `.profile-panel`, so it does not run the
 backdrop contrast meter. A subsequent trace of the **complete page** reproduced
 periodic stalls in Chromium with heavy rain, both day and night. The rain made the
@@ -244,7 +251,7 @@ pauses particularly visible, but the blocking operation was the meter's GPU read
 Even after Three.js's asynchronous fence had signaled, `getBufferSubData` blocked
 Chrome's main thread for up to 213 ms behind later queued rendering commands.
 
-The meter now keeps the same 32 backdrop samples, exposure, Reinhard mapping,
+At that stage, the meter kept the same 32 backdrop samples, exposure, Reinhard mapping,
 RGBA8 quantization, one-second cadence and contrast hysteresis. Its shader discards
 the pixel when the backdrop is dark, and an `ANY_SAMPLES_PASSED` query returns the
 classification. Query availability is polled on later tasks; the result is read only
@@ -314,7 +321,8 @@ Research used for this change:
   window blur does not imply that the page is hidden; handle both signals explicitly.
 - [MDN WebGL best practices](https://developer.mozilla.org/en-US/docs/Web/API/WebGL_API/WebGL_best_practices):
   reduce unnecessary submissions and avoid blocking GPU operations. The existing asynchronous
-  luminance query and readback paths are retained.
+  luminance query and readback paths were retained at that stage; the current GPU
+  glyph mask needs neither operation.
 - [Three.js CubeCamera](https://threejs.org/docs/pages/CubeCamera.html) and
   [PMREMGenerator](https://threejs.org/docs/pages/PMREMGenerator.html): environment capture
   and roughness filtering are distinct rendering work, so cache both together.

@@ -1,20 +1,10 @@
 import { expect, test } from '@playwright/test'
 
-import { mockParisWeather } from './weather-fixture'
+import { mockParisWeather, mockSceneWeather } from './weather-fixture'
 
 test.beforeEach(async ({ page }) => {
   await mockParisWeather(page)
 })
-
-function trackSmokeFrames() {
-  const draw = WebGL2RenderingContext.prototype.drawElements
-  WebGL2RenderingContext.prototype.drawElements = function (...args: Parameters<typeof draw>) {
-    const canvas = this.canvas
-    if (canvas instanceof HTMLCanvasElement && canvas.classList.contains('scene-cursor__smoke'))
-      canvas.dataset.frames = String(Number(canvas.dataset.frames ?? 0) + 1)
-    return draw.apply(this, args)
-  }
-}
 
 test('renders the profile and interactive scene', async ({ page }) => {
   const consoleErrors: string[] = []
@@ -95,86 +85,6 @@ test('keeps the profile available with JavaScript disabled', async ({ browser },
   await context.close()
 })
 
-test('cursor lights terrain and water with reduced motion', async ({ page }) => {
-  const mobile = page.viewportSize()!.width < 768
-  await page.setViewportSize(mobile ? { width: 390, height: 664 } : { width: 1440, height: 900 })
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?seed=9182&time=00:00')
-  const canvas = page.locator('canvas[data-water-mode]')
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  const surfaces = mobile
-    ? [
-        [80, 350],
-        [270, 520],
-      ]
-    : [
-        [200, 578],
-        [900, 760],
-      ]
-  // Compare scene illumination, excluding the decorative cursor overlay itself.
-  await page.addStyleTag({ content: '.scene-cursor { visibility: hidden !important; }' })
-  const settle = () =>
-    page.evaluate(
-      () =>
-        new Promise<void>((resolve) =>
-          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-        ),
-    )
-  // The same pointer and canvas must be sampled sequentially.
-  /* eslint-disable no-await-in-loop */
-  for (const [x, y] of surfaces) {
-    await page.mouse.move(mobile ? 300 : 950, 180)
-    await settle()
-    const unlit = await canvas.screenshot()
-    await page.mouse.move(x!, y!)
-    await settle()
-    expect((await canvas.screenshot()).equals(unlit), `No light at ${x},${y}`).toBe(false)
-  }
-  /* eslint-enable no-await-in-loop */
-})
-
-test('cursor smoke starts after lazy loading and pauses when hidden or motion is reduced', async ({
-  page,
-}) => {
-  test.skip(test.info().project.name === 'mobile', 'The custom cursor is mouse-only')
-  await page.addInitScript(trackSmokeFrames)
-  // A slow module response must still start smoke without requiring another pointer move.
-  await page.route('**/assets/cursor-smoke-*.js', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 350))
-    await route.continue()
-  })
-  await page.goto('/?seed=9182&time=08:30')
-  const scene = page.locator('canvas[data-water-mode]')
-  await expect(scene.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  const cursor = page.locator('.scene-cursor')
-  const smoke = cursor.locator('canvas')
-  const frames = async () => Number((await smoke.getAttribute('data-frames')) ?? 0)
-  await expect(smoke).not.toHaveAttribute('data-frames')
-  await page.mouse.move(400, 300)
-  await expect(cursor).toHaveAttribute('data-visible', 'true')
-  await expect.poll(frames).toBeGreaterThan(2)
-  await expect(cursor).toHaveCSS('width', '40px')
-
-  await page.evaluate(() => window.dispatchEvent(new Event('blur')))
-  await expect(cursor).toHaveAttribute('data-visible', 'false')
-  const hidden = await frames()
-  await page.waitForTimeout(250)
-  expect(await frames()).toBe(hidden)
-  await expect(cursor.locator('.scene-cursor__halo')).toHaveCSS('animation-play-state', 'paused')
-
-  const previousScene = await scene.elementHandle()
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.waitForFunction((old) => !old?.isConnected, previousScene)
-  await expect(scene.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  await page.mouse.move(401, 300)
-  await expect(cursor).toHaveAttribute('data-visible', 'true')
-  await expect.poll(frames).toBeGreaterThan(hidden)
-  const still = await frames()
-  await page.waitForTimeout(250)
-  expect(await frames()).toBe(still)
-  await expect(cursor.locator('.scene-cursor__halo')).toHaveCSS('animation-name', 'none')
-})
-
 for (const rain of ['off', 'light', 'moderate', 'heavy']) {
   test(`renders ${rain} rain without shader errors`, async ({ page }, testInfo) => {
     const errors: string[] = []
@@ -182,7 +92,12 @@ for (const rain of ['off', 'light', 'moderate', 'heavy']) {
     page.on('console', (message) => {
       if (message.type() === 'error' || /WebGL/.test(message.text())) errors.push(message.text())
     })
-    await page.goto(`/?seed=42&rain=${rain}&windX=-3&windZ=1`)
+    await mockSceneWeather(
+      page,
+      rain === 'off' ? 'clear' : 'cloudy',
+      { off: 0, light: 0.25, moderate: 0.55, heavy: 1 }[rain],
+    )
+    await page.goto('/?seed=42')
     const canvas = page.locator('canvas[data-water-mode]')
     await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
     // Let the intro settle and impacts cover a full lifecycle before sampling.
@@ -276,40 +191,24 @@ test('without WebGL the profile and pointer remain usable after weather preload'
   await page.getByRole('link', { name: /GitHub/ }).focus()
   await expect(page.getByRole('link', { name: /GitHub/ })).toBeFocused()
   await page.mouse.move(200, 300)
-  // The CSS cursor remains usable even when the scene and smoke cannot initialize.
   if (test.info().project.name === 'chromium') {
-    await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '1')
-    await expect(page.locator('main')).toHaveAttribute('data-cursor-active', 'true')
+    await expect(page.locator('main')).toHaveCSS('cursor', 'none')
     await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'none')
-  } else {
-    await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '0')
-    await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
-    await expect(page.getByRole('link', { name: /GitHub/ })).not.toHaveCSS('cursor', 'none')
   }
   expect(weatherRequests).toHaveLength(1)
   expect(errors).toEqual([])
 })
 
 test('page lifecycle disposes and restores the scene once', async ({ page }) => {
-  await page.addInitScript(trackSmokeFrames)
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?time=00:00')
+  await page.goto('/?startTime=00:00')
   const canvas = page.locator('canvas[data-water-mode]')
   await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
   const seed = await canvas.getAttribute('data-seed')
-  const smoke = page.locator('.scene-cursor__smoke')
-  const frames = async () => Number((await smoke.getAttribute('data-frames')) ?? 0)
-  const desktop = test.info().project.name === 'chromium'
-  if (desktop) {
-    await page.mouse.move(400, 300)
-    await expect.poll(frames).toBeGreaterThan(0)
-  }
-  const previousFrames = await frames()
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
   )
   await expect(canvas).toHaveCount(0)
-  await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
@@ -317,10 +216,6 @@ test('page lifecycle disposes and restores the scene once', async ({ page }) => 
   await expect(canvas).toHaveCount(1)
   await expect(canvas).toHaveAttribute('data-seed', seed!)
   await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  if (desktop) {
-    await page.mouse.move(401, 300)
-    await expect.poll(frames).toBeGreaterThan(previousFrames)
-  }
 })
 
 test('leaving during a lazy import does not create a disposed scene', async ({ page }) => {

@@ -1,6 +1,7 @@
 import { BackSide, ShaderMaterial } from 'three'
 
 import { DAYLIGHT_SKY_GLSL } from './daylight-sky'
+import { DISTANT_HORIZON_GLSL } from './distant-horizon'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { sampleMoonLight } from './moon-light'
@@ -30,28 +31,10 @@ uniform float uReflectionCapture;
 uniform float uMobile;
 uniform vec3 uMoonDirection;
 uniform float uMoonIntensity;
+uniform float uShowMoon;
 varying vec3 vDirection;
 
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
-
-float noise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-    mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
-    f.y
-  );
-}
-
-float ridge(float x, float centre, float width, float height) {
-  float distanceFromPeak = (x - centre) / width;
-  return height * exp(-distanceFromPeak * distanceFromPeak);
-}
-
+${DISTANT_HORIZON_GLSL}
 void main() {
   vec3 direction = normalize(vDirection);
   float azimuth = atan(direction.x, -direction.z);
@@ -59,13 +42,13 @@ void main() {
 
   // A faint pool of light follows the open water, with an irregular upper edge.
   // Its narrow height keeps the rest of the sky nearly black.
-  float horizonNoise = noise(vec2(azimuth * 7.0 + uSeed, 8.0));
-  float horizon = exp(-pow((elevation - 0.018 - (horizonNoise - 0.5) * 0.012) * 12.0, 2.0));
+  float horizonVariation = horizonNoise(vec2(azimuth * 7.0 + uSeed, 8.0));
+  float horizon = exp(-pow((elevation - 0.018 - (horizonVariation - 0.5) * 0.012) * 12.0, 2.0));
   float valleyLight = exp(-pow((azimuth - 0.08) / 0.46, 2.0));
   vec3 color = mix(
     vec3(0.0026, 0.0038, 0.0051),
     vec3(0.012, 0.018, 0.027),
-    horizon * (0.58 + 0.27 * horizonNoise + 0.15 * valleyLight)
+    horizon * (0.58 + 0.27 * horizonVariation + 0.15 * valleyLight)
   );
 
   color = mix(color, daylightSky(direction), uDaylight);
@@ -74,7 +57,7 @@ void main() {
   float moonAngle = acos(clamp(dot(direction, uMoonDirection), -1.0, 1.0));
   float moonDisc = 1.0 - smoothstep(0.008, 0.010, moonAngle);
   float moonHalo = exp(-moonAngle * moonAngle * 90.0) * 0.016;
-  color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 + moonHalo) * uMoonIntensity;
+  color += vec3(0.63, 0.77, 1.0) * (moonDisc * 2.0 * uShowMoon + moonHalo) * uMoonIntensity;
   // Clouds attenuate both the lunar disc and its halo before distant relief.
   vec4 cloud = sampleClouds(direction);
   color = color * cloud.a + cloud.rgb;
@@ -82,50 +65,8 @@ void main() {
 
   // Separate hills overlap at different bearings. Avoid a mirrored valley
   // function, which reads as two diagonal wedges at narrow viewports.
-  float farPeak;
-  float middlePeak;
-  float nearPeak;
-  if (uMobile > 0.5) {
-    farPeak = 0.004 + max(
-      ridge(azimuth, -0.165, 0.105, 0.072),
-      ridge(azimuth, 0.185, 0.112, 0.067)
-    );
-    middlePeak = 0.002 + max(
-      ridge(azimuth, -0.197, 0.073, 0.047),
-      max(ridge(azimuth, 0.135, 0.075, 0.043), ridge(azimuth, 0.066, 0.048, 0.028))
-    );
-    nearPeak = max(
-      ridge(azimuth, -0.215, 0.065, 0.034),
-      ridge(azimuth, 0.215, 0.061, 0.028)
-    );
-  } else {
-    farPeak = 0.005 + max(
-      max(ridge(azimuth, -0.64, 0.32, 0.108), ridge(azimuth, -0.32, 0.17, 0.075)),
-      max(
-        max(ridge(azimuth, 0.47, 0.27, 0.108), ridge(azimuth, 0.75, 0.13, 0.052)),
-        ridge(azimuth, 0.035, 0.12, 0.038)
-      )
-    );
-    middlePeak = 0.004 + max(
-      max(ridge(azimuth, -0.72, 0.24, 0.078), ridge(azimuth, -0.235, 0.14, 0.052)),
-      max(
-        max(ridge(azimuth, 0.42, 0.20, 0.067), ridge(azimuth, 0.71, 0.14, 0.066)),
-        ridge(azimuth, 0.16, 0.095, 0.037)
-      )
-    );
-    nearPeak = max(
-      max(ridge(azimuth, -0.57, 0.18, 0.052), ridge(azimuth, -0.27, 0.12, 0.032)),
-      max(ridge(azimuth, 0.55, 0.14, 0.053), ridge(azimuth, 0.28, 0.15, 0.030))
-    );
-  }
-
-  // Three scales roughen each crest without making an angular skyline.
-  float farDetail = noise(vec2(azimuth * 18.0 + uSeed, 4.7)) * 0.60
-    + noise(vec2(azimuth * 52.0, uSeed + 8.0)) * 0.30
-    + noise(vec2(azimuth * 109.0, uSeed + 3.0)) * 0.10;
-  farPeak += (farDetail - 0.5) * 0.031;
-  middlePeak += (noise(vec2(azimuth * 38.0 - uSeed, 22.1)) - 0.5) * 0.024;
-  nearPeak += (noise(vec2(azimuth * 54.0 + uSeed, 53.9)) - 0.5) * 0.016;
+  vec3 peaks = distantPeaks(azimuth, uSeed, uMobile);
+  float farPeak = peaks.x, middlePeak = peaks.y, nearPeak = peaks.z;
 
   // Keep the crests legible as the ridge feet dissolve into the low mist.
   // A tall base fade erased the smaller hills and flattened the entire valley.
@@ -134,7 +75,7 @@ void main() {
   color = mix(color, mix(vec3(0.0078, 0.0123, 0.0188), uHaze * 0.55, uDaylight), farEdge * baseFade * 0.88);
 
   // A wavering low veil pools in the open valley and softens only the far ridge.
-  float mistShape = noise(vec2(azimuth * 13.0 + drift * 0.8, uSeed + 73.0));
+  float mistShape = horizonNoise(vec2(azimuth * 13.0 + drift * 0.8, uSeed + 73.0));
   float mistHeight = 0.033 + (mistShape - 0.5) * 0.024;
   float farMist = exp(-pow((elevation - mistHeight) * 28.0, 2.0));
   float valleyPool = exp(-pow((azimuth - 0.13) / 0.32, 2.0));
@@ -151,8 +92,8 @@ void main() {
 
   // Thin, uneven mist separates the ridge layers close to the waterline.
   float lowMist = exp(-pow((elevation - 0.006) * 42.0, 2.0));
-  float mistNoise = noise(vec2(azimuth * 18.0 + drift * 0.8, elevation * 35.0 + 73.0));
-  float mistDetail = noise(vec2(azimuth * 43.0 - drift, elevation * 24.0 + uSeed));
+  float mistNoise = horizonNoise(vec2(azimuth * 18.0 + drift * 0.8, elevation * 35.0 + 73.0));
+  float mistDetail = horizonNoise(vec2(azimuth * 43.0 - drift, elevation * 24.0 + uSeed));
   float mist = lowMist * (0.12 + mistNoise * 0.16 + mistDetail * 0.055 + valleyPool * 0.22);
   color = mix(color, mix(vec3(0.023, 0.033, 0.044), uHaze * 0.95, uDaylight), mist);
 
@@ -180,6 +121,7 @@ export function createSkyMaterial(
       uSunIntensity: { value: 0 },
       uDaylight: { value: 0 },
       uShowSun: { value: 1 },
+      uShowMoon: { value: 1 },
       uHaze: { value: sampleLighting(0).haze },
       ...clouds.uniforms,
       uMoonDirection: { value: moon.offset.normalize() },

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { createFishSchools, sampleSchoolFish } from './fish-school'
+import { createFishSchools, sampleSchoolFish, schoolVisibility } from './fish-school'
 import type { LakeBed } from './lake-bed'
 
 const bed: LakeBed = {
@@ -13,6 +13,33 @@ const bed: LakeBed = {
 }
 
 describe('small fish shoals', () => {
+  it('varies the number of overlapping schools with smooth arrivals and departures', () => {
+    const schools = createFishSchools(
+      bed,
+      [-12, -4, 4, 12].map((x) => ({ x, z: 2 })),
+      42,
+      4,
+    )
+    expect(schools).toHaveLength(4)
+    expect(new Set(schools.map((school) => school.period)).size).toBe(4)
+    expect(new Set(schools.map((school) => school.direction)).size).toBe(2)
+    const counts = new Set<number>()
+    const ranges = schools.map(() => ({ min: 1, max: 0 }))
+    for (let time = 0; time <= 180; time += 0.25) {
+      counts.add(schools.filter((school) => schoolVisibility(school, time) > 0.35).length)
+      for (const [index, school] of schools.entries()) {
+        const visible = schoolVisibility(school, time)
+        ranges[index]!.min = Math.min(ranges[index]!.min, visible)
+        ranges[index]!.max = Math.max(ranges[index]!.max, visible)
+        expect(Math.abs(visible - schoolVisibility(school, time + 1 / 30))).toBeLessThan(0.01)
+      }
+    }
+    expect(counts.has(1)).toBe(true)
+    expect(counts.has(2)).toBe(true)
+    expect(Math.max(...counts)).toBeGreaterThanOrEqual(3)
+    expect(ranges.every(({ min, max }) => min === 0 && max === 1)).toBe(true)
+  })
+
   it('builds repeatable long paths and rejects dry corridors', () => {
     const anchors = [
       { x: -4, z: 2 },

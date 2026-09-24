@@ -13,6 +13,7 @@ import {
 import type { Camera, IUniform, MeshStandardMaterial, WebGLRenderer } from 'three'
 
 import { CLOUD_DENSITY_GLSL } from './cloud-density'
+import { DISTANT_HORIZON_GLSL } from './distant-horizon'
 
 // Orthographic light-space coverage encloses terrain and the 240-unit air volume.
 export const CLOUD_SHADOW_SIZE = 768
@@ -45,6 +46,10 @@ export function cloudShadowFrame(direction: Vector3) {
 }
 
 export const CLOUD_SHADOW_GLSL = `
+${DISTANT_HORIZON_GLSL}
+uniform vec3 uHorizonDirection;
+uniform float uHorizonSeed;
+uniform float uHorizonMobile;
 uniform sampler2D uCloudShadowAtlas;
 uniform float uCloudShadowPreviousOffset;
 uniform float uCloudShadowNextOffset;
@@ -52,6 +57,9 @@ uniform mat4 uCloudShadowPreviousMatrix;
 uniform mat4 uCloudShadowNextMatrix;
 uniform float uCloudShadowBlend;
 uniform float uCloudShadowStrength;
+float celestialVisibility() {
+  return distantLightVisibility(uHorizonDirection, uHorizonSeed, uHorizonMobile);
+}
 float cloudTransmission(float offset, vec2 uv) {
   float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
   // Clamp within each 384-pixel tile so linear filtering never crosses timestamps.
@@ -67,7 +75,6 @@ float cloudShadowProjected(vec2 previous, vec2 next) {
   return mix(1.0, transmission, uCloudShadowStrength);
 }
 float cloudShadow(vec3 world) {
-  if (uCloudShadowStrength <= 0.0) return 1.0;
   return cloudShadowProjected((uCloudShadowPreviousMatrix * vec4(world, 1.0)).xy,
     (uCloudShadowNextMatrix * vec4(world, 1.0)).xy);
 }
@@ -89,6 +96,9 @@ export class CloudShadows {
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private readonly material: ShaderMaterial
   readonly uniforms = {
+    uHorizonDirection: { value: new Vector3(0, 1, 0) },
+    uHorizonSeed: { value: 0 },
+    uHorizonMobile: { value: 0 },
     uCloudShadowAtlas: { value: this.atlas.texture },
     uCloudShadowPreviousOffset: { value: 0 },
     uCloudShadowNextOffset: { value: 1 / 3 },
@@ -204,7 +214,7 @@ export class CloudShadows {
             'float cloudVisibility = cloudShadow(vCloudWorldPosition);\n' +
               ShaderChunk.lights_fragment_begin.replace(
                 'getDirectionalLightInfo( directionalLight, directLight );',
-                'getDirectionalLightInfo( directionalLight, directLight );\n directLight.color *= cloudVisibility;',
+                'getDirectionalLightInfo( directionalLight, directLight );\n directLight.color *= cloudVisibility * celestialVisibility();',
               ),
           )
           .replace(

@@ -35,7 +35,8 @@ export async function exerciseSimulation() {
     let energy = 0,
       peak = 0,
       beyond = 0,
-      propagated = 0
+      propagated = 0,
+      returning = 0
     for (let z = 0; z < 512; z++)
       for (let x = 0; x < 512; x++) {
         const h = DataUtils.fromHalfFloat(data[(z * 512 + x) * simulation.channels]!)
@@ -48,6 +49,7 @@ export async function exerciseSimulation() {
         if (x >= 256) beyond = Math.max(beyond, Math.abs(h))
         const worldX = LAKE_BOUNDS.minX + ((x + 0.5) * 160) / 512
         const worldZ = LAKE_BOUNDS.minZ + ((z + 0.5) * 160) / 512
+        if (worldX > -2.5 && worldX < -0.8 && Math.abs(worldZ + 32) < 1.5) returning += h * h
         if (Math.hypot(worldX + 2, worldZ + 32) > 1.3)
           propagated = Math.max(propagated, Math.abs(h))
       }
@@ -56,6 +58,7 @@ export async function exerciseSimulation() {
       peak,
       beyond,
       propagated,
+      returning,
       volumeImbalance: Math.abs(signedVolume) / Math.max(absoluteVolume, 1e-12),
     }
   }
@@ -118,6 +121,19 @@ export async function exerciseSimulation() {
   simulation.reset()
   for (let i = 0; i < 120; i++) simulation.step(1 / 60, i / 60)
   const openWind = await read()
+  const rebound = []
+  for (const wall of [false, true]) {
+    mask.fill(255)
+    if (wall) for (let z = 0; z < n; z++) mask[z * n + 128] = 0
+    simulation.mask.needsUpdate = true
+    simulation.reset()
+    simulation.addImpulse(-2, -32, 0.8, -0.5)
+    // The pulse travels 2 m to the wall and back (~1.7 s); read after its return.
+    for (let i = 0; i < 120; i++) simulation.step(1 / 60)
+    // Compare the returning wave to the identical open-water pulse.
+    // eslint-disable-next-line no-await-in-loop
+    rebound.push(await read())
+  }
   simulation.dispose()
   renderer.dispose()
   return {
@@ -132,6 +148,7 @@ export async function exerciseSimulation() {
     windSampled,
     windScenarios,
     openWind,
+    rebound,
   }
 }
 
@@ -156,6 +173,8 @@ export function startEngine(seed: number, reducedMotion: boolean) {
     container: document.querySelector('#scene')!,
     seed,
     reducedMotion,
+    // Isolate pointer impulses; natural splash returns are covered by impact tests.
+    sceneDetails: false,
     onFirstFrame() {},
     onContextFailure() {
       throw new Error('WebGL context lost')

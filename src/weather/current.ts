@@ -1,3 +1,6 @@
+import { PARIS } from '../scene-params'
+import type { GpsPosition } from '../scene-params'
+
 export type WeatherKind =
   | 'clear'
   | 'mainly-clear'
@@ -41,8 +44,8 @@ export function interpretWmoCode(code: number): WmoCondition {
   }
 }
 
-export interface ParisWeather {
-  timezone: 'Europe/Paris'
+export interface WeatherSnapshot {
+  timezone: string
   /** Original API time, explicitly requested as UTC Unix seconds (no local-date parsing). */
   timestampUnixSeconds: number
   utcOffsetSeconds: number
@@ -118,14 +121,20 @@ function number(
   return value
 }
 
-function parseParisWeather(value: unknown): ParisWeather {
+function parseWeatherSnapshot(value: unknown): WeatherSnapshot {
   const data = object(value, 'response')
   const current = object(data.current, 'current')
   const units = object(data.current_units, 'current_units')
   for (const [key, unit] of Object.entries({ ...UNITS, time: 'unixtime', interval: 'seconds' })) {
     if (units[key] !== unit) throw new TypeError(`Invalid weather unit: ${key}`)
   }
-  if (data.timezone !== 'Europe/Paris') throw new TypeError('Invalid weather timezone')
+  if (typeof data.timezone !== 'string' || !data.timezone)
+    throw new TypeError('Invalid weather timezone')
+  try {
+    new Intl.DateTimeFormat('en', { timeZone: data.timezone }).format(0)
+  } catch {
+    throw new TypeError('Invalid weather timezone')
+  }
   const weatherCode = number(current, 'weather_code', 0, Infinity, true)
   const isDay = number(current, 'is_day', 0, 1, true) === 1
   const cloudCoverPercent = number(current, 'cloud_cover', 0, 100)
@@ -134,7 +143,7 @@ function parseParisWeather(value: unknown): ParisWeather {
   const snowfallCm = number(current, 'snowfall', 0)
   const condition = interpretWmoCode(weatherCode)
   return {
-    timezone: 'Europe/Paris',
+    timezone: data.timezone,
     timestampUnixSeconds: number(current, 'time', 0, 8_640_000_000_000, true),
     utcOffsetSeconds: number(data, 'utc_offset_seconds', -86_400, 86_400, true),
     intervalSeconds: number(current, 'interval', 1, Infinity, true),
@@ -173,10 +182,18 @@ export class WeatherHttpError extends Error {
 }
 
 /** On-demand only. Free API: non-commercial use; attribute Open-Meteo when integrating data. */
-export async function fetchParisWeather({
+export async function fetchWeather({
   signal,
-}: { signal?: AbortSignal } = {}): Promise<ParisWeather> {
+  position = PARIS,
+}: { signal?: AbortSignal; position?: GpsPosition } = {}): Promise<WeatherSnapshot> {
   signal?.throwIfAborted()
+  if (
+    !Number.isFinite(position.latitude) ||
+    !Number.isFinite(position.longitude) ||
+    Math.abs(position.latitude) > 90 ||
+    Math.abs(position.longitude) > 180
+  )
+    throw new TypeError('Invalid weather position')
   const controller = new AbortController()
   const abort = () => controller.abort(signal?.reason)
   signal?.addEventListener('abort', abort, { once: true })
@@ -188,9 +205,9 @@ export async function fetchParisWeather({
   try {
     const url = new URL('https://api.open-meteo.com/v1/forecast')
     url.search = new URLSearchParams({
-      latitude: '48.8566',
-      longitude: '2.3522',
-      timezone: 'Europe/Paris',
+      latitude: String(position.latitude),
+      longitude: String(position.longitude),
+      timezone: 'auto',
       current: Object.keys(UNITS).join(','),
       wind_speed_unit: 'ms',
       temperature_unit: 'celsius',
@@ -201,7 +218,7 @@ export async function fetchParisWeather({
     if (!response.ok) throw new WeatherHttpError(response.status)
     const data: unknown = await response.json()
     controller.signal.throwIfAborted()
-    return parseParisWeather(data)
+    return parseWeatherSnapshot(data)
   } finally {
     clearTimeout(timeout)
     signal?.removeEventListener('abort', abort)

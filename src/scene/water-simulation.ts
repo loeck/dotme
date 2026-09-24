@@ -34,6 +34,17 @@ export const WAVE_SPEED = 2.4
 export const WATER_DAMPING = 0.65
 export const MAX_WATER_STEPS = 4
 
+/** Match the reflecting wall to the rendered faces, rather than the expanded picking raster. */
+export function createWaterMask(bed: LakeBed) {
+  const resolution = Math.sqrt(bed.shore.length)
+  if (resolution === bed.resolution * 2)
+    return {
+      resolution,
+      water: Uint8Array.from(bed.shore, (distance) => (distance > 0 ? 255 : 0)),
+    }
+  return { resolution: bed.resolution, water: bed.water }
+}
+
 /** Shared clock: fixed physical time, bounded recovery after a hidden tab. */
 export class WaterClock {
   private remainder = 0
@@ -132,10 +143,11 @@ export class WaterSimulation {
     private readonly wind = new WindModel(0),
   ) {
     this.resolution = mobile ? 512 : 1024
+    const mask = createWaterMask(bed)
     this.mask = new DataTexture(
-      bed.water,
-      bed.resolution,
-      bed.resolution,
+      mask.water,
+      mask.resolution,
+      mask.resolution,
       RedFormat,
       UnsignedByteType,
     )
@@ -315,7 +327,7 @@ export class WaterSimulation {
         const time = (windTime ?? 0) - this.clock.pendingTime - (steps - i - 1) * WATER_STEP
         this.material.uniforms.uTime!.value = time
         updateWindUniforms(this.windUniforms, this.wind.sample(time))
-        this.material.uniforms.uWindContact!.value = windTime === undefined ? 0 : 0.8
+        this.material.uniforms.uWindContact!.value = windTime === undefined ? 0 : 1
         this.material.uniforms.uState!.value = this.texture
         const next = 1 - this.current
         this.renderer.setRenderTarget(this.targets[next]!)

@@ -129,12 +129,6 @@ export class LakeCaustics {
         // Caustics concentrate that light; darkness remains dark.
         reflectedLight.directDiffuse *= 1.0 + causticFocus;`,
         )
-      // CursorGlow enters via diffuse irradiance rather than a Three light.
-      // Concentrate only that existing local contribution, leaving ambient fill alone.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        'irradiance += cursorGlowAt(',
-        'irradiance += (1.0 + causticFocus) * cursorGlowAt(',
-      )
     }
     material.onBeforeCompile = compile
     material.customProgramCacheKey = () => `${cacheKey}:lake-caustics-v2`
@@ -147,7 +141,13 @@ export class LakeCaustics {
     })
   }
 
-  update(time: number, wind: WindState, lightStrength = 1, pointer: WaterPointer | null = null) {
+  update(
+    time: number,
+    wind: WindState,
+    lightStrength = 1,
+    pointer: WaterPointer | null = null,
+    pointerStrength = 1,
+  ) {
     const dt = Math.max(0, Math.min(0.1, time - this.previousTime))
     this.previousTime = time
     this.uniforms.uTime.value = this.reducedMotion ? 0 : time
@@ -163,8 +163,9 @@ export class LakeCaustics {
       contact.x = pointer.x
       contact.y = pointer.z
     }
-    const target = pointer && !this.reducedMotion ? 1 : 0
+    const target = pointer && !this.reducedMotion ? pointerStrength : 0
     contact.z += (target - contact.z) * (1 - Math.exp(-dt * 5))
+    if (pointerStrength === 0) contact.z = 0
   }
 
   dispose() {

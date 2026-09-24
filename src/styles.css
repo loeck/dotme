@@ -16,8 +16,7 @@ html[data-scene-loading] .scene-loader {
   display: grid;
 }
 
-html[data-scene-loading='loading'] .profile-panel,
-html[data-scene-loading='loop'] .profile-panel {
+html[data-scene-loading='loading'] .profile-panel {
   visibility: hidden;
 }
 
@@ -53,8 +52,8 @@ html[data-scene-loading] #landscape {
 
 .scene-loader__title {
   margin: 0;
-  color: #d5dce3;
-  font-size: 0.75rem;
+  color: #9aa6ad;
+  font-size: 0.6875rem;
   line-height: 1.6;
 }
 
@@ -69,7 +68,7 @@ html[data-scene-loading] #landscape {
   border: 0;
   background: transparent;
   color: var(--profile-muted);
-  opacity: 0.65;
+  opacity: 1;
   transition:
     opacity 150ms ease,
     transform 150ms ease;
@@ -233,184 +232,56 @@ html[data-scene-loading] #landscape {
   }
 }
 
-:root {
-  --scene-native-cursor: url('/light-cursor.svg') 20 20, none;
-  --scene-cursor-filter: none;
-}
-
-:root:has(main[data-scene-tone='light']) {
-  --scene-native-cursor: url('/dark-cursor.svg') 20 20, none;
-  --scene-cursor-filter: brightness(0.2) saturate(0.6);
-}
-
-:root:has(.scene-info-dialog[open]),
-:root[data-scene-loading] {
-  --scene-native-cursor: url('/light-cursor.svg') 20 20, none;
-  --scene-cursor-filter: none;
-}
-
 :root[data-cursor-active='true'] {
-  --scene-native-cursor: none !important;
+  --scene-native-cursor: none;
 }
-
-@media (hover: hover) and (pointer: fine) {
-  /* Cover controls, SVG children, text selection and the modal backdrop too. */
-  html,
-  html *,
-  html *::before,
-  html *::after,
-  dialog::backdrop {
-    cursor: var(--scene-native-cursor) !important;
-  }
-}
-
 .scene-cursor {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: auto;
-  bottom: auto;
+  inset: 0 auto auto 0;
+  width: 6px;
+  height: 6px;
   margin: 0;
   padding: 0;
   border: 0;
-  overflow: visible;
   background: transparent;
-  z-index: 50;
-  width: 40px;
-  height: 40px;
+  overflow: visible;
   pointer-events: none;
-  opacity: 0;
-  --cursor-scale: 1;
-  filter: var(--scene-cursor-filter);
 }
-
 .scene-cursor::backdrop {
   background: transparent;
   pointer-events: none;
 }
-
-.scene-cursor[data-visible='true'] {
-  opacity: 1;
-}
-.scene-cursor[data-interactive='true'] {
-  --cursor-scale: 1.1;
-}
-.scene-cursor[data-pressed='true'] {
-  --cursor-scale: 0.9;
-}
-
-.scene-cursor__halo {
-  position: absolute;
-  inset: 0;
+.scene-cursor > span {
+  display: block;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  border: 1px solid #253038;
   border-radius: 50%;
-  background: radial-gradient(circle, #c2e3ff30, #a8d6ff0c 45%, transparent 72%);
-  animation: cursor-breathe 4.5s ease-in-out infinite paused;
+  background: #edf2f5;
+  transition:
+    transform var(--cursor-response, 180ms) cubic-bezier(0.22, 1, 0.36, 1),
+    scale 140ms cubic-bezier(0.22, 1, 0.36, 1);
 }
-
-.scene-cursor__smoke {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 96px;
-  height: 96px;
-  translate: -50% -50%;
+.scene-cursor[data-stretched] {
+  --cursor-response: 25ms;
 }
-
-.scene-cursor__smoke,
-.scene-cursor__ring {
-  transform: perspective(240px) rotateX(calc(10deg + var(--cursor-tilt-x, 0deg)))
-    rotateY(calc(-8deg + var(--cursor-tilt-y, 0deg)));
-  scale: var(--cursor-scale);
-  transition: scale 180ms ease-out;
+.scene-cursor[data-interactive='true'] > span {
+  scale: 1.65;
 }
-
-.scene-cursor__ring {
-  position: absolute;
-  inset: 8px;
-  border: 1px solid #bcdfff80;
-  border-radius: 50%;
-  box-shadow:
-    0 0 4px #b5dcff66,
-    inset 0 0 3px #b5dcff40;
-  transform-style: preserve-3d;
-}
-
-.scene-cursor__ring::before {
-  content: '';
-  position: absolute;
-  inset: -1px;
-  border: 1px solid #729dbb40;
-  border-radius: inherit;
-  transform: translateZ(-2px);
-}
-
-.scene-cursor__glint {
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background: conic-gradient(
-    from 35deg,
-    transparent 0deg,
-    #e4f5ffb0 45deg,
-    transparent 100deg,
-    transparent 210deg,
-    #b5dcff50 250deg,
-    transparent 290deg
-  );
-  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1px));
-  transform: translateZ(0.5px);
-  animation: cursor-glint 11s linear infinite paused;
-}
-
-.scene-cursor[data-visible='true'] .scene-cursor__halo,
-.scene-cursor[data-visible='true'] .scene-cursor__glint {
-  animation-play-state: running;
-}
-
-.scene-cursor__core {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 3px;
-  height: 3px;
-  border-radius: 50%;
-  transform: translate(-50%, -50%);
-  background: radial-gradient(circle at 35% 25%, #fff 15%, #e4f7ff 45%, #8ebfdf 100%);
-  box-shadow:
-    0 0 4px #e7f7ff,
-    0 0 9px 2px #aedbff80;
-}
-
-@keyframes cursor-glint {
-  to {
-    transform: translateZ(0.5px) rotate(360deg);
-  }
-}
-@keyframes cursor-breathe {
-  50% {
-    opacity: 0.7;
-    transform: scale(1.06);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .scene-cursor__halo,
-  .scene-cursor__glint {
-    animation: none;
-  }
-  .scene-cursor__smoke,
-  .scene-cursor__ring {
-    transition: none;
+  .scene-cursor > span {
+    transition: none !important;
+    transform: none !important;
   }
 }
-
 @media (hover: none), (pointer: coarse) {
   .scene-cursor {
     display: none;
   }
 }
 
-/* Follow the shared scene illumination without adding a veil over the sky. */
+/* Accessible DOM fallback when the GPU mask is unavailable. */
 .profile-panel,
 .scene-info-trigger {
   --profile-primary: #e4e8ed;
@@ -426,4 +297,14 @@ main[data-scene-tone='light'] .scene-info-trigger {
   --profile-icon: #263641;
   --profile-divider: #465763;
   --profile-focus: #003b61;
+}
+/* Coverage is drawn once from these DOM glyphs; the GPU shades each covered
+   pixel from the scenery beneath it. DOM hit targets, selection and focus remain. */
+main[data-ui-mask='gpu'] .profile-panel,
+main[data-ui-mask='gpu'] .profile-panel *,
+main[data-ui-mask='gpu'] .scene-info-trigger {
+  color: transparent !important;
+}
+main[data-ui-mask='gpu'] .scene-info-trigger:focus-visible {
+  outline-color: var(--profile-focus);
 }

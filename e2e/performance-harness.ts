@@ -1,4 +1,5 @@
 import { VoxelLandscapeEngine } from '../src/scene/VoxelLandscapeEngine'
+import { parseWeather } from '../src/scene/weather'
 
 let engine: VoxelLandscapeEngine | undefined
 const state = () =>
@@ -34,6 +35,7 @@ export function start(seed = 9182, diagnostics = false, instrumentReferenceRain 
   engine = new VoxelLandscapeEngine({
     container: document.querySelector('#scene')!,
     seed,
+    weather: parseWeather(params.get('weather')),
     reducedMotion: false,
     rain: {
       intensity: Object.hasOwn(preset, rain) ? preset[rain]! : Number(rain),

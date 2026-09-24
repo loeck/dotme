@@ -21,7 +21,6 @@ import {
 import { CLOUD_DENSITY_GLSL, createCloudBodies } from '../src/scene/cloud-density'
 import { createCloudNoise } from '../src/scene/cloud-noise'
 import { CLOUD_SHADOW_GLSL } from '../src/scene/cloud-shadows'
-import { CursorGlow } from '../src/scene/cursor-glow'
 import { sampleMoonLight } from '../src/scene/moon-light'
 import { VolumetricClouds } from '../src/scene/volumetric-clouds'
 import { WindModel } from '../src/scene/wind'
@@ -139,8 +138,6 @@ export async function exerciseCloudShadows(mobile: boolean) {
     cubes.setMatrixAt(i, transform.matrix)
   }
   litScene.add(cubes)
-  const cursor = new CursorGlow()
-  cursor.attachSurfaces(litScene)
   const top = new OrthographicCamera(-80, 80, 80, -80, 0.1, 200)
   top.position.set(centerX, 100, centerZ)
   top.up.set(0, 0, -1)
@@ -175,19 +172,10 @@ export async function exerciseCloudShadows(mobile: boolean) {
   const ambientClear = await lightCapture(0),
     ambientShadow = await lightCapture(0.95)
   ambient.visible = false
-  cursor.uniforms.uCursorGlowPosition.value.set(centerX - 37.5, 1, centerZ - 37.5)
-  cursor.uniforms.uCursorGlowSource.value.set(centerX - 37.5, 5, centerZ - 37.5)
-  cursor.uniforms.uCursorGlowStrength.value = 1
-  const cursorClear = await lightCapture(0),
-    cursorShadow = await lightCapture(0.95)
-  let cursorLight = 0,
-    cursorDifference = 0
   let moonDarkening = 0,
     ambientDarkening = 0,
     localDifference = 0
   for (let i = 0; i < moonClear.length; i++) {
-    if (i % 4 !== 3) cursorLight += cursorClear[i]!
-    cursorDifference = Math.max(cursorDifference, Math.abs(cursorClear[i]! - cursorShadow[i]!))
     ambientDarkening += ambientClear[i]! - ambientShadow[i]!
     moonDarkening += moonClear[i]! - moonShadow[i]!
     localDifference = Math.max(localDifference, Math.abs(localClear[i]! - localShadow[i]!))
@@ -210,7 +198,5 @@ export async function exerciseCloudShadows(mobile: boolean) {
     moonDarkening,
     ambientDarkening,
     localDifference,
-    cursorLight,
-    cursorDifference,
   }
 }

@@ -13,8 +13,9 @@ import {
 import type { PlaneGeometry } from 'three'
 import { Reflector } from 'three/addons/objects/Reflector.js'
 
-import { CURSOR_GLOW_GLSL, createCursorGlowUniforms } from './cursor-glow'
+import { POINTER_LIGHT_GLSL, createPointerLightUniforms } from './pointer-light'
 import { WATER_LIGHTING_GLSL } from './water-lighting'
+import { WATER_INTERFACE_GLSL } from './water-optics'
 import { WATER_FIELD_GLSL } from './water-surface'
 import { createWindUniforms } from './wind'
 
@@ -50,6 +51,8 @@ uniform sampler2D tDiffuse;
 uniform mat4 textureMatrix;
 uniform sampler2D uBedColor;
 uniform sampler2D uBedDepth;
+uniform vec4 uBedAtlas;
+uniform mat4 uFishInverseViewProjection;
 uniform sampler2D uBedHeight;
 uniform vec4 uBedFieldLayout;
 uniform mat4 uBedInverseViewProjection;
@@ -68,7 +71,8 @@ uniform float uWaterAgitation;
 varying vec3 vWorldPosition;
 varying vec4 vMirrorCoord;
 ${WATER_LIGHTING_GLSL}
-${CURSOR_GLOW_GLSL}
+${POINTER_LIGHT_GLSL}
+${WATER_INTERFACE_GLSL}
 float contactNoise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
   f = f * f * (3.0 - 2.0 * f);
@@ -78,7 +82,7 @@ float contactNoise(vec2 p) {
   return mix(mix(values.x, values.y, f.x), mix(values.z, values.w, f.x), f.y);
 }
 vec3 bottomAt(vec2 uv) {
-  vec4 view = uBedInverseViewProjection * vec4(uv * 2.0 - 1.0, texture2D(uBedDepth, uv).r * 2.0 - 1.0, 1.0);
+  vec4 view = uBedInverseViewProjection * vec4(uv * 2.0 - 1.0, texture2D(uBedDepth, uv * uBedAtlas.xy).r * 2.0 - 1.0, 1.0);
   return view.xyz / view.w;
 }
 // Clamp inside each atlas region so bilinear filtering never crosses its border.
@@ -93,6 +97,12 @@ float shoreDistanceAt(vec2 uv) {
   vec2 coord = start + uv * vec2(1.0, 1.0 - start.y);
   return texture2D(uBedHeight, clamp(coord, start + halfTexel, vec2(1.0) - halfTexel)).r;
 }
+float wetHeight(vec2 p, float center) {
+  // A zero-height sample inside a rock would tilt the normal into the rock,
+  // visually swallowing the reflected wave at its strongest point.
+  return shoreDistanceAt(fieldUv(p)) <= 0.0
+    ? center : interactionHeight(p);
+}
 void main() {
   vec2 p = vWorldPosition.xz;
   // Estimate pixel coverage on the flat plane: displaced mesh triangles must
@@ -101,11 +111,24 @@ void main() {
     * ((cameraPosition.y + 0.035) / max(0.001, cameraPosition.y - vWorldPosition.y));
   float footprint = max(length(dFdx(flatP)), length(dFdy(flatP)));
   float e = max(uCell, footprint * 0.5);
-  vec2 rippleSlope = vec2(interactionHeight(p + vec2(e,0.0)) - interactionHeight(p - vec2(e,0.0)),
-    interactionHeight(p + vec2(0.0,e)) - interactionHeight(p - vec2(0.0,e))) / (2.0 * e);
+  vec2 state = texture2D(uState, clamp(fieldUv(p), 0.0, 1.0)).rg;
+  vec2 rippleSlope = vec2(wetHeight(p + vec2(e,0.0), state.x) - wetHeight(p - vec2(e,0.0), state.x),
+    wetHeight(p + vec2(0.0,e), state.x) - wetHeight(p - vec2(0.0,e), state.x)) / (2.0 * e);
   vec4 wind = windField(p, footprint);
-  vec3 rainField = texture2D(uRainSlopeMap, gl_FragCoord.xy / uRainResolution).rgb * uRainSlopesEnabled;
+  vec4 rainField = texture2D(uRainSlopeMap, gl_FragCoord.xy / uRainResolution) * uRainSlopesEnabled;
   vec2 slope = wind.yz + rippleSlope + rainField.xy;
+  float shore = shoreDistanceAt(fieldUv(p));
+  vec2 shoreNormal = vec2(0.0);
+  if (shore < 1.95) {
+    vec2 uv = fieldUv(p), stepUv = vec2(uCell / 160.0, 0.0);
+    shoreNormal = vec2(shoreDistanceAt(uv + stepUv) - shoreDistanceAt(uv - stepUv),
+      shoreDistanceAt(uv + stepUv.yx) - shoreDistanceAt(uv - stepUv.yx));
+    shoreNormal /= max(length(shoreNormal), 0.0001);
+    // Resolve the last sub-cell strip at the actual face. The total surface
+    // turns along the wall while the simulated reflection travels back out.
+    slope -= shoreNormal * dot(slope, shoreNormal)
+      * (1.0 - smoothstep(0.0, uCell * 2.0, max(0.0, shore)));
+  }
   vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 view = normalize(cameraPosition - vWorldPosition);
   float ndv = clamp(dot(normal, view), 0.0, 1.0);
@@ -131,21 +154,14 @@ void main() {
   #else
     vec3 environment = textureCube(uEnvironment, reflectedRay).rgb;
   #endif
-  vec2 blur = 1.5 / vec2(textureSize(tDiffuse, 0));
-  vec3 reflection = vec3(0.0);
+  vec2 halfTexel = 0.5 / vec2(textureSize(tDiffuse, 0));
   // Capture alpha stores local scenery coverage; the sky writes zero.
   // Reuse that channel instead of spending a seventeenth fragment sampler.
-  for (int i = 0; i < 5; i++) {
-    vec2 tap = vec2(0.0);
-    if (i == 1) tap.x = blur.x;
-    if (i == 2) tap.x = -blur.x;
-    if (i == 3) tap.y = blur.y;
-    if (i == 4) tap.y = -blur.y;
-    vec2 uv = clamp(mirrorUv + tap, blur, 1.0 - blur);
-    vec4 local = texture2D(tDiffuse, uv, 1.0);
-    reflection += (local.rgb + environment * (1.0 - clamp(local.a, 0.0, 1.0)))
-      * (i == 0 ? 0.333333333 : 0.166666667);
-  }
+  // One continuous, derivative-filtered footprint. The former five-tap cross
+  // and forced extra mip level turned isolated rain glints into detached halos.
+  // Trilinear mipmaps and anisotropy still filter stretched grazing reflections.
+  vec4 local = texture2D(tDiffuse, clamp(mirrorUv, halfTexel, 1.0 - halfTexel));
+  vec3 reflection = local.rgb + environment * (1.0 - clamp(local.a, 0.0, 1.0));
   reflection = mix(environment, reflection, smoothstep(0.0, 0.06, edge));
 
   vec3 refracted = refract(-view, normal, 1.0 / 1.333);
@@ -167,42 +183,79 @@ void main() {
     * (1.0 - smoothstep(0.5, 2.0, length(actualBottom - candidate)))
     * smoothstep(0.0, 0.045, captureEdge);
   float path = min(40.0, length(candidate - vWorldPosition));
-  // Clear near-shore water lets the shallow relief and shoals read without
-  // turning the distant, deep lake transparent. Hover opens a gentle window.
+  // The whole water column is clear in calm weather. Optical path length
+  // retains the depth gradient; rain adds suspended haze.
   float nearShallow = (1.0 - smoothstep(2.8, 6.0, depth))
     * (1.0 - smoothstep(24.0, 48.0, length(cameraPosition.xz - p)));
-  float clarity = max(nearShallow * uWaterClarity, reveal);
-  vec3 absorption = mix(vec3(0.72, 0.36, 0.22), vec3(0.14, 0.065, 0.045), clarity);
+  float clarity = max(uWaterClarity * (0.9 + 0.1 * nearShallow), reveal);
+  vec3 absorption = mix(vec3(0.48, 0.22, 0.14), vec3(0.18, 0.035, 0.016), clarity);
   vec3 transmission = exp(-absorption * path);
   // Broad diagonal taps erased silhouettes smaller than a metre in the atlas.
   vec2 bedBlur = uBedTexel * mix(1.1, 0.18, clarity);
-  vec3 bed = texture2D(uBedColor, refractUv).rgb * 0.4;
-  bed += texture2D(uBedColor, clamp(refractUv + bedBlur, 0.0, 1.0)).rgb * 0.3;
-  bed += texture2D(uBedColor, clamp(refractUv - bedBlur, 0.0, 1.0)).rgb * 0.3;
+  vec3 bed = texture2D(uBedColor, refractUv * uBedAtlas.xy).rgb * 0.4;
+  bed += texture2D(uBedColor, clamp(refractUv + bedBlur, uBedTexel, 1.0 - uBedTexel) * uBedAtlas.xy).rgb * 0.3;
+  bed += texture2D(uBedColor, clamp(refractUv - bedBlur, uBedTexel, 1.0 - uBedTexel) * uBedAtlas.xy).rgb * 0.3;
   // Cloud cover also shades the moonlit scattering inside the water.
   float cloudVisibility = cloudShadow(vWorldPosition);
   vec3 scatter = uWaterScatter * mix(0.25, 1.0, cloudVisibility)
     * mix(vec3(1.18, 1.12, 0.92), vec3(0.8, 1.08, 1.12), uWaterClarity);
   vec3 transmitted = mix(scatter, bed * transmission + scatter * (1.0 - transmission), valid);
+  // Fish occupy the second region of the same color/depth atlas. They are
+  // absent from the main camera: reflections, highlights and foam always cover
+  // their transmitted light, and wave normals gently distort the whole image.
+  vec2 fishUv = clamp(gl_FragCoord.xy / uRainResolution + normal.xz * 0.0025,
+    vec2(0.001), vec2(0.999));
+  vec2 fishAtlasUv = vec2(0.0, uBedAtlas.y) + fishUv * uBedAtlas.zw;
+  vec4 fish = texture2D(uBedColor, fishAtlasUv);
+  if (fish.a > 0.001) {
+    float fishZ = texture2D(uBedDepth, fishAtlasUv).r;
+    vec4 fishPoint = uFishInverseViewProjection * vec4(fishUv * 2.0 - 1.0, fishZ * 2.0 - 1.0, 1.0);
+    float fishDepth = max(0.0, (-0.035 - fishPoint.y / fishPoint.w) * 1.333);
+    float fishPath = fishDepth / max(0.35, -refracted.y);
+    vec3 fishTransmission = exp(-absorption * fishPath);
+    // Color in the transparent capture is already premultiplied by alpha.
+    transmitted = transmitted * (1.0 - fish.a) + fish.rgb * fishTransmission
+      + scatter * (1.0 - fishTransmission) * fish.a;
+  }
   // Preserve the readable shallow-water window under the smoother sky reflection.
-  float shallowFresnel = mix(fresnel, min(fresnel, mix(0.42, 0.2, uWaterClarity)), nearShallow);
+  float shallowFresnel = waterReflectance(fresnel, length(cameraPosition.xz - p), uWaterClarity);
   float reflectedFraction = mix(shallowFresnel, min(shallowFresnel, 0.16), reveal * 0.85);
   vec3 color = mix(transmitted, reflection, reflectedFraction);
 
-  // A narrow, broken foam line follows the real rock footprint and rises
-  // with the arriving crest. No permanent white outline or emissive foam.
-  float shore = shoreDistanceAt(fieldUv(p));
-  float contact = 1.0 - smoothstep(0.04, 0.38 + min(0.2, footprint), max(0.0, shore));
-  vec2 state = texture2D(uState, clamp(fieldUv(p), 0.0, 1.0)).rg;
-  float arrival = smoothstep(-0.016, 0.032, wind.x + state.x)
-    * smoothstep(-0.025, 0.045, wind.w + state.y * 0.5);
-  float grain = mix(contactNoise(p * 7.0 + vec2(uTime * 0.06, 0.0)), 0.5,
-    smoothstep(0.08, 0.3, footprint));
-  float foam = contact * arrival * mix(0.3, 0.9, grain) * 0.65;
+  float shorePixel = min(1.0, fwidth(shore));
+  float foam = 0.0;
+  if (shore < 1.95) {
+    float distance = max(0.0, shore);
+    float crest = smoothstep(-0.018, 0.04, wind.x + state.x);
+    float impact = smoothstep(0.008, 0.12, abs(wind.w + state.y));
+    float arrival = crest * mix(0.65, 1.0, impact);
+    vec2 tangent = vec2(-shoreNormal.y, shoreNormal.x);
+    vec2 anchor = p - shoreNormal * distance;
+    float patches = contactNoise(anchor * 0.9 + tangent * uTime * 0.045);
+    float width = max(mix(0.32, 1.15, arrival), shorePixel * 1.45)
+      * mix(0.65, 1.0, patches);
+    float contact = 1.0 - smoothstep(width * 0.25, width + shorePixel * 0.5, distance);
+    // Froth drifts away from each face, shears around corners, and breaks into
+    // lace as the wash thins. World-space flow keeps it attached during parallax.
+    vec2 flow = p - shoreNormal * (uTime * 0.16 + crest * 0.12)
+      - tangent * sin(uTime * 0.35 + patches * 6.0) * 0.09;
+    float lace = contactNoise(flow * 3.2);
+    float grain = mix(contactNoise(flow * 16.0), 0.5, smoothstep(0.035, 0.18, footprint));
+    float breakup = smoothstep(0.24, 0.67, lace + grain * 0.18);
+    float residual = mix(0.08, 0.6, smoothstep(0.32, 0.62, patches));
+    float film = contact * mix(residual, 0.9, arrival) * mix(0.28, 1.0, breakup);
+    // The expanding front detaches from the clinging film; scattered bubbles
+    // survive briefly on its outer side instead of the whole outline blinking.
+    float front = 1.0 - smoothstep(0.07 + shorePixel * 0.25, 0.19 + shorePixel * 0.6,
+      abs(distance - width * 0.7));
+    float fragments = front * arrival * smoothstep(0.38, 0.7, lace) * (1.0 - smoothstep(1.2, 1.9, distance));
+    foam = min(0.92, film + fragments * 0.5);
+  }
+  foam = min(0.92, foam + rainField.a);
   color *= 1.0 - foam;
   color += waterLighting(normal, view, roughness, foam, cloudVisibility);
-  // Broad, low-energy sheen for the diffuse cursor field; no point-source glint.
-  color += cursorGlowAt(vWorldPosition, normal) * (0.004 + fresnel * 0.025);
+  // Broad local sheen follows the displaced normals rather than a screen-space halo.
+  color += pointerLightAt(vWorldPosition, normal) * (0.006 + fresnel * 0.035) * (1.0 - foam * 0.65);
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
@@ -228,6 +281,7 @@ export function createLakeReflector(
         UniformsLib.lights,
         {
           color: { value: null },
+          ...createPointerLightUniforms(),
           tDiffuse: { value: null },
           textureMatrix: { value: null },
           uTime: { value: 0 },
@@ -240,13 +294,14 @@ export function createLakeReflector(
           uMask: { value: null },
           uBedColor: { value: null },
           uBedDepth: { value: null },
+          uBedAtlas: { value: new Vector4(1, 0.5, 1, 0.5) },
+          uFishInverseViewProjection: { value: new Matrix4() },
           uBedHeight: { value: null },
           uBedFieldLayout: { value: new Vector4(0.5, 1 / 3, 1, 1) },
           uBedInverseViewProjection: { value: new Matrix4() },
           uBedViewProjection: { value: new Matrix4() },
           uBedTexel: { value: new Vector2(1, 1) },
           uPointer: { value: new Vector3() },
-          ...createCursorGlowUniforms(),
           uWaterScatter: { value: new Color().setRGB(0.0022, 0.0043, 0.0065) },
           uWaterClarity: { value: 1 },
           uWaterAgitation: { value: 0.2 },
