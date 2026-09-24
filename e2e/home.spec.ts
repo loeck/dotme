@@ -137,7 +137,7 @@ test('cursor smoke starts after lazy loading and pauses when hidden or motion is
     await new Promise((resolve) => setTimeout(resolve, 350))
     await route.continue()
   })
-  await page.goto('/?seed=9182&time=00:00')
+  await page.goto('/?seed=9182&time=08:30')
   const scene = page.locator('canvas[data-water-mode]')
   await expect(scene.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
   const cursor = page.locator('.scene-cursor')
@@ -270,10 +270,16 @@ test('without WebGL the profile and pointer remain usable; no weather is request
   await page.getByRole('link', { name: /GitHub/ }).focus()
   await expect(page.getByRole('link', { name: /GitHub/ })).toBeFocused()
   await page.mouse.move(200, 300)
-  // The solar cursor follows scene lighting. Without a scene, retain the native pointer.
-  await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '0')
-  await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
-  await expect(page.getByRole('link', { name: /GitHub/ })).not.toHaveCSS('cursor', 'none')
+  // The CSS cursor remains usable even when the scene and smoke cannot initialize.
+  if (test.info().project.name === 'chromium') {
+    await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '1')
+    await expect(page.locator('main')).toHaveAttribute('data-cursor-active', 'true')
+    await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'none')
+  } else {
+    await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '0')
+    await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
+    await expect(page.getByRole('link', { name: /GitHub/ })).not.toHaveCSS('cursor', 'none')
+  }
   expect(weatherRequests).toEqual([])
   expect(errors).toEqual([])
 })

@@ -29,8 +29,9 @@ starting composition. Weather accepts `clear`, `partly-cloudy` (default), `cloud
 and `overcast`; `sun=hidden` hides only the solar disc. Air scattering uses terrain
 and cloud shadows, so shafts can remain visible with the sun outside the frame.
 Profile text switches between dark and light palettes by measuring the rendered
-backdrop behind it. Floating lamps, halos and the luminous cursor appear only in low
-light; pointer ripples remain available during the day.
+backdrop behind it. The custom mouse cursor stays visible during both day and night.
+Floating lamps, their halos and the cursor's illumination of the scenery appear only
+in low light; pointer ripples remain available during the day.
 Reduced motion freezes the initial time. Each animation
 frame updates the light state, shadow maps, a six-face environment capture, and the lake's planar
 reflection before the final lens pass. Floating light cubes, halos and water highlights share the

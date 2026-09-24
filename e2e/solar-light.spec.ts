@@ -168,7 +168,7 @@ test('daylight, clouds and atmosphere survive the RGBA8 fallback and resize', as
   expect(errors).toEqual([])
 })
 
-test('daylight has no profile veil or cursor light, including overcast weather', async ({
+test('daylight keeps the cursor without lighting the scene, including overcast weather', async ({
   page,
 }, info) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
@@ -186,6 +186,10 @@ test('daylight has no profile veil or cursor light, including overcast weather',
   const width = page.viewportSize()!.width
   const height = page.viewportSize()!.height
   await page.mouse.move(width * 0.8, height * 0.1)
+  // Isolate scene illumination from the cursor overlay, which stays visible by day.
+  const hideCursor = await page.addStyleTag({
+    content: '.scene-cursor { visibility: hidden !important; }',
+  })
   const unlit = await canvas.screenshot()
   await page.mouse.move(width * 0.65, height * 0.88)
   await page.evaluate(
@@ -194,9 +198,17 @@ test('daylight has no profile veil or cursor light, including overcast weather',
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   )
-  await expect(page.locator('.scene-cursor')).not.toHaveAttribute('data-visible', 'true')
-  await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active', 'true')
   expect((await canvas.screenshot()).equals(unlit)).toBe(true)
+  await hideCursor.evaluate((element) => element.remove())
+  if (info.project.name === 'chromium') {
+    await expect(page.locator('.scene-cursor')).toHaveAttribute('data-visible', 'true')
+    await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '1')
+    await expect(page.locator('main')).toHaveAttribute('data-cursor-active', 'true')
+    await expect(page.locator('main')).toHaveCSS('cursor', 'none')
+  } else {
+    await expect(page.locator('.scene-cursor')).not.toHaveAttribute('data-visible', 'true')
+    await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active', 'true')
+  }
   await page.screenshot({ path: info.outputPath('daylight-no-local-lights.png') })
 })
 

@@ -265,9 +265,11 @@ shafts and an opaque overcast layer blocks the direct source.
 
 Local lamps, halos, motes and cursor illumination fade with ambient luminance
 between 0.04 and 0.16 in linear space, including the weather's diffuse factor.
-Their emitted energy and visible geometry are zero in bright light. Water
+The lamps' emitted energy and visible geometry are zero in bright light. The custom
+mouse cursor stays visible; only its illumination of the scenery fades. Water
 gestures remain active. The profile measures 32 points in the rendered backdrop
-behind its bounds once per second, with a single asynchronous pixel readback.
+behind its bounds once per second, with an asynchronous occlusion query for the
+light/dark classification and no pixel readback.
 The measurement follows the final Reinhard tone mapping and uses linear luminance;
 hysteresis at 0.16/0.20 prevents palette flicker. Initial scene reveal waits for
 the first measurement, with ambient light as a fallback. Dark text covers bright

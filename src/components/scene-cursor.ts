@@ -16,8 +16,6 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
   let targetY = 0
   let lastFrame = 0
   let visible = false
-  let lastPointer: PointerEvent | null = null
-  const lightsEnabled = () => host.dataset.localLights === 'true'
   const lifetime = new AbortController()
   const { signal } = lifetime
   let smoke: ReturnType<typeof createCursorSmoke> | undefined
@@ -73,9 +71,7 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
     }
   }
   const move = (event: PointerEvent) => {
-    lastPointer = event
     if (!finePointer.matches || event.pointerType !== 'mouse') {
-      lastPointer = null
       hide()
       return
     }
@@ -86,11 +82,6 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
       event.clientY < bounds.top ||
       event.clientY > bounds.bottom
     ) {
-      lastPointer = null
-      hide()
-      return
-    }
-    if (!lightsEnabled()) {
       hide()
       return
     }
@@ -123,27 +114,17 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
   const release = () => {
     element.dataset.pressed = 'false'
   }
-  const leave = () => {
-    lastPointer = null
-    hide()
-  }
-  const lightingObserver = new MutationObserver(() => {
-    if (!lightsEnabled()) hide()
-    else if (lastPointer && !document.hidden) move(lastPointer)
-  })
-  lightingObserver.observe(host, { attributes: true, attributeFilter: ['data-local-lights'] })
   window.addEventListener('pointermove', move, { passive: true, signal })
   window.addEventListener('pointerdown', press, { passive: true, signal })
   window.addEventListener('pointerup', release, { signal })
-  window.addEventListener('pointercancel', leave, { signal })
-  window.addEventListener('blur', leave, { signal })
-  document.addEventListener('visibilitychange', leave, { signal })
-  document.documentElement.addEventListener('pointerleave', leave, { signal })
-  finePointer.addEventListener('change', leave, { signal })
-  reducedMotion.addEventListener('change', leave, { signal })
+  window.addEventListener('pointercancel', hide, { signal })
+  window.addEventListener('blur', hide, { signal })
+  document.addEventListener('visibilitychange', hide, { signal })
+  document.documentElement.addEventListener('pointerleave', hide, { signal })
+  finePointer.addEventListener('change', hide, { signal })
+  reducedMotion.addEventListener('change', hide, { signal })
   return () => {
     lifetime.abort()
-    lightingObserver.disconnect()
     hide()
     smoke?.dispose()
     // Disposal loses the WebGL context; a restored page needs a fresh canvas.
