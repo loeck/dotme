@@ -56,8 +56,53 @@ test('renders a visible production scene with a procedural waterfall using WebGP
 declare global {
   interface Window {
     loseSceneGpu?: () => void
+    scenePipelineCount?: number
   }
 }
+
+test('night shadows share pipelines across terrain batches', async ({ page }, info) => {
+  const failures: string[] = []
+  page.on('pageerror', (error) => failures.push(error.message))
+  page.on('console', (message) => {
+    if (message.type() === 'error') failures.push(message.text())
+  })
+  await page.addInitScript(() => {
+    const gpu = navigator.gpu
+    if (!gpu) return
+    window.scenePipelineCount = 0
+    const requestAdapter = gpu.requestAdapter.bind(gpu)
+    gpu.requestAdapter = async (options) => {
+      const adapter = await requestAdapter(options)
+      if (!adapter) return adapter
+      const requestDevice = adapter.requestDevice.bind(adapter)
+      adapter.requestDevice = async (descriptor) => {
+        const device = await requestDevice(descriptor)
+        const create = device.createRenderPipeline.bind(device)
+        const compile = device.createRenderPipelineAsync.bind(device)
+        device.createRenderPipeline = (pipeline) => {
+          window.scenePipelineCount = (window.scenePipelineCount ?? 0) + 1
+          return create(pipeline)
+        }
+        device.createRenderPipelineAsync = (pipeline) => {
+          window.scenePipelineCount = (window.scenePipelineCount ?? 0) + 1
+          return compile(pipeline)
+        }
+        return device
+      }
+      return adapter
+    }
+  })
+  await mockSceneWeather(page, 'clear')
+  await page.goto('/?seed=1&startTime=00:00')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-backend', 'webgpu')
+  const pipelines = await page.evaluate(() => window.scenePipelineCount)
+  expect(pipelines).toBeGreaterThan(0)
+  // Different terrain batch sizes must not create hundreds of unique shaders.
+  expect(pipelines).toBeLessThan(120)
+  expect(failures).toEqual([])
+  await info.attach('night-shadows', { body: await page.screenshot(), contentType: 'image/png' })
+})
 
 test('a lost WebGPU device leaves the profile usable on the same canvas', async ({ page }) => {
   await page.addInitScript(() => {
