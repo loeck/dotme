@@ -249,6 +249,14 @@ export function renderCloudShadowComparison(time: number, enabled: boolean) {
     render: (now: number) => void
   }
   state.elapsed = time
-  state.clouds.shadows.uniforms.uCloudShadowStrength.value = enabled ? 0.95 : 0
-  state.render(performance.now())
+  const update = state.clouds.update.bind(state.clouds)
+  state.clouds.update = () => {
+    update(time)
+    state.clouds.shadows.uniforms.uCloudShadowStrength.value = enabled ? 1 : 0
+  }
+  try {
+    state.render(performance.now())
+  } finally {
+    state.clouds.update = update
+  }
 }

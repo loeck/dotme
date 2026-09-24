@@ -1,5 +1,8 @@
 import { Vector4 } from 'three'
 
+import { WEATHER } from './weather'
+import type { WeatherPreset } from './weather'
+
 export const CLOUD_COUNT = 12
 export const CLOUD_PERIOD = 640
 const CLOUD_BASE = 80
@@ -7,7 +10,7 @@ const CLOUD_TOP = 140
 
 /** Separate seeded bodies: large banks and smaller clouds can overtake one another.
  * Periodic copies keep the distant layer populated without respawning or popping. */
-export function createCloudBodies(seed: number) {
+export function createCloudBodies(seed: number, weather: WeatherPreset = 'partly-cloudy') {
   let state = (seed ^ 0xc10d5eed) >>> 0
   const random = () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
@@ -29,7 +32,14 @@ export function createCloudBodies(seed: number) {
     )
     radii.push(new Vector4(radius, height, radius * (0.6 + random() * 0.45), random() * 10))
   }
+  const settings = WEATHER[weather]
+  for (const radius of radii) {
+    radius.x *= settings.bodyScale
+    radius.z *= settings.bodyScale
+  }
   return {
+    uCloudCoverage: { value: settings.coverage },
+    uCloudDensity: { value: settings.density },
     uCloudOrigins: { value: origins },
     uCloudRadii: { value: radii },
   }
@@ -41,6 +51,8 @@ precision highp sampler3D;
 uniform sampler3D uNoise;
 uniform vec2 uDisplacement;
 uniform float uTime;
+uniform float uCloudCoverage;
+uniform float uCloudDensity;
 uniform vec4 uCloudOrigins[${CLOUD_COUNT}];
 uniform vec4 uCloudRadii[${CLOUD_COUNT}];
 const float CLOUD_BASE = ${CLOUD_BASE.toFixed(1)};
@@ -51,7 +63,7 @@ float density(vec3 world, bool detail) {
   if (world.y <= CLOUD_BASE || world.y >= CLOUD_TOP) return 0.0;
   float envelope = smoothstep(CLOUD_BASE, CLOUD_BASE + 4.0, world.y)
     * (1.0 - smoothstep(CLOUD_TOP - 4.0, CLOUD_TOP, world.y));
-  float total = 0.0;
+  float total = uCloudCoverage * envelope;
   for (int i = 0; i < ${CLOUD_COUNT}; i++) {
     vec4 origin = uCloudOrigins[i];
     vec4 radii = uCloudRadii[i];
@@ -70,6 +82,6 @@ float density(vec3 world, bool detail) {
     if (detail) mass -= (1.0 - texture(uNoise, noisePoint * 2.7).g) * 0.12;
     total += smoothstep(0.03, 0.5, mass) * envelope * 0.75;
   }
-  return min(total, 1.0);
+  return min(total, 1.0) * uCloudDensity;
 }
 `

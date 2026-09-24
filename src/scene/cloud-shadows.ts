@@ -1,5 +1,6 @@
 import {
   LinearFilter,
+  Matrix4,
   Mesh,
   OrthographicCamera,
   PlaneGeometry,
@@ -9,34 +10,60 @@ import {
   Vector3,
   WebGLRenderTarget,
 } from 'three'
-import type { IUniform, MeshStandardMaterial, WebGLRenderer } from 'three'
+import type { Camera, IUniform, MeshStandardMaterial, WebGLRenderer } from 'three'
 
 import { CLOUD_DENSITY_GLSL } from './cloud-density'
 
-// Fixed world coverage, independent of every rendering camera. The scene is below
-// the cloud base; projection onto y=0 identifies an entire moonward light ray.
-export const CLOUD_SHADOW_BOUNDS = { minX: -256, minZ: -376, size: 512 } as const
+// Orthographic light-space coverage encloses terrain and the 240-unit air volume.
+export const CLOUD_SHADOW_SIZE = 768
+const TILE = 384
+const CENTER = new Vector3(0, 40, -120)
+
+export function cloudShadowFrame(direction: Vector3) {
+  const right = new Vector3(direction.z, 0, -direction.x).normalize()
+  if (right.lengthSq() < 0.5) right.set(1, 0, 0)
+  const up = new Vector3().crossVectors(direction, right).normalize()
+  const matrix = new Matrix4().set(
+    right.x / CLOUD_SHADOW_SIZE,
+    right.y / CLOUD_SHADOW_SIZE,
+    right.z / CLOUD_SHADOW_SIZE,
+    0.5 - right.dot(CENTER) / CLOUD_SHADOW_SIZE,
+    up.x / CLOUD_SHADOW_SIZE,
+    up.y / CLOUD_SHADOW_SIZE,
+    up.z / CLOUD_SHADOW_SIZE,
+    0.5 - up.dot(CENTER) / CLOUD_SHADOW_SIZE,
+    direction.x,
+    direction.y,
+    direction.z,
+    -direction.dot(CENTER),
+    0,
+    0,
+    0,
+    1,
+  )
+  return { matrix, right, up }
+}
 
 export const CLOUD_SHADOW_GLSL = `
 uniform sampler2D uCloudShadowAtlas;
 uniform float uCloudShadowPreviousOffset;
-uniform vec3 uCloudShadowPreviousDirection;
-uniform vec3 uCloudShadowNextDirection;
+uniform mat4 uCloudShadowPreviousMatrix;
+uniform mat4 uCloudShadowNextMatrix;
 uniform float uCloudShadowBlend;
 uniform float uCloudShadowStrength;
-float cloudTransmission(float offset, vec3 direction, vec3 world) {
-  vec2 ground = world.xz - world.y * direction.xz / max(direction.y, 0.1);
-  vec2 uv = (ground - vec2(${CLOUD_SHADOW_BOUNDS.minX.toFixed(1)}, ${CLOUD_SHADOW_BOUNDS.minZ.toFixed(1)})) / ${CLOUD_SHADOW_BOUNDS.size.toFixed(1)};
+float cloudTransmission(float offset, mat4 projection, vec3 world) {
+  vec2 uv = (projection * vec4(world, 1.0)).xy;
   float edge = min(min(uv.x, uv.y), min(1.0 - uv.x, 1.0 - uv.y));
-  // Clamp within each 256-pixel tile so linear filtering never crosses timestamps.
-  uv = clamp(uv, vec2(0.5 / 256.0), vec2(1.0 - 0.5 / 256.0));
+  // Clamp within each 384-pixel tile so linear filtering never crosses timestamps.
+  uv = clamp(uv, vec2(0.5 / 384.0), vec2(1.0 - 0.5 / 384.0));
   uv.x = uv.x * 0.5 + offset;
   return mix(1.0, texture2D(uCloudShadowAtlas, uv).r, smoothstep(0.0, 0.06, edge));
 }
 float cloudShadow(vec3 world) {
+  if (uCloudShadowStrength <= 0.0) return 1.0;
   float transmission = mix(
-    cloudTransmission(uCloudShadowPreviousOffset, uCloudShadowPreviousDirection, world),
-    cloudTransmission(0.5 - uCloudShadowPreviousOffset, uCloudShadowNextDirection, world), uCloudShadowBlend);
+    cloudTransmission(uCloudShadowPreviousOffset, uCloudShadowPreviousMatrix, world),
+    cloudTransmission(0.5 - uCloudShadowPreviousOffset, uCloudShadowNextMatrix, world), uCloudShadowBlend);
   return mix(1.0, transmission, uCloudShadowStrength);
 }
 `
@@ -45,13 +72,13 @@ float cloudShadow(vec3 world) {
 export class CloudShadows {
   // Both capture times share one sampler, leaving room for seven lamp shadow maps
   // in the water shader on devices with the WebGL2 minimum of 16 fragment samplers.
-  private readonly atlas = new WebGLRenderTarget(512, 256, {
+  private readonly atlas = new WebGLRenderTarget(TILE * 2, TILE, {
     minFilter: LinearFilter,
     magFilter: LinearFilter,
     depthBuffer: false,
     stencilBuffer: false,
   })
-  private readonly directions = [new Vector3(), new Vector3()]
+  private readonly matrices = [new Matrix4(), new Matrix4()]
   private readonly geometry = new PlaneGeometry(2, 2)
   private readonly scene = new Scene()
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
@@ -59,8 +86,8 @@ export class CloudShadows {
   readonly uniforms = {
     uCloudShadowAtlas: { value: this.atlas.texture },
     uCloudShadowPreviousOffset: { value: 0 },
-    uCloudShadowPreviousDirection: { value: this.directions[0]! },
-    uCloudShadowNextDirection: { value: this.directions[1]! },
+    uCloudShadowPreviousMatrix: { value: this.matrices[0]! },
+    uCloudShadowNextMatrix: { value: this.matrices[1]! },
     uCloudShadowBlend: { value: 0 },
     uCloudShadowStrength: { value: 0.95 },
   }
@@ -71,7 +98,11 @@ export class CloudShadows {
     blend: IUniform<number>,
   ) {
     this.uniforms.uCloudShadowBlend = blend
-    this.atlas.texture.name = 'Moonlight cloud transmission atlas'
+    this.atlas.texture.name = 'Light-space cloud transmission atlas'
+    Object.assign(volumeUniforms, {
+      uShadowRight: { value: new Vector3() },
+      uShadowUp: { value: new Vector3() },
+    })
     this.atlas.scissorTest = true
     this.material = new ShaderMaterial({
       uniforms: volumeUniforms,
@@ -81,12 +112,15 @@ export class CloudShadows {
       fragmentShader: `
         ${CLOUD_DENSITY_GLSL}
         uniform vec3 uMoonDirection;
+        uniform vec3 uShadowRight;
+        uniform vec3 uShadowUp;
         varying vec2 vUv;
         void main() {
-          vec3 ground = vec3(${CLOUD_SHADOW_BOUNDS.minX.toFixed(1)} + vUv.x * ${CLOUD_SHADOW_BOUNDS.size.toFixed(1)}, 0.0,
-            ${CLOUD_SHADOW_BOUNDS.minZ.toFixed(1)} + vUv.y * ${CLOUD_SHADOW_BOUNDS.size.toFixed(1)});
-          float stepLength = (CLOUD_TOP - CLOUD_BASE) / (uMoonDirection.y * float(SHADOW_STEPS));
-          float entry = CLOUD_BASE / uMoonDirection.y;
+          if (uMoonDirection.y <= 0.0001) { gl_FragColor = vec4(1.0); return; }
+          vec3 ground = vec3(0.0, 40.0, -120.0)
+            + ((vUv.x - 0.5) * uShadowRight + (vUv.y - 0.5) * uShadowUp) * ${CLOUD_SHADOW_SIZE.toFixed(1)};
+          float stepLength = min((CLOUD_TOP - CLOUD_BASE) / uMoonDirection.y, 2400.0) / float(SHADOW_STEPS);
+          float entry = clamp((CLOUD_BASE - ground.y) / uMoonDirection.y, -12000.0, 12000.0);
           float opticalDepth = 0.0;
           for (int i = 0; i < SHADOW_STEPS; i++) {
             vec3 p = ground + uMoonDirection * (entry + (float(i) + 0.5) * stepLength);
@@ -107,8 +141,11 @@ export class CloudShadows {
     const face = this.renderer.getActiveCubeFace()
     const mip = this.renderer.getActiveMipmapLevel()
     try {
-      this.directions[index]!.copy(this.material.uniforms.uMoonDirection!.value)
-      this.atlas.viewport.set(index * 256, 0, 256, 256)
+      const frame = cloudShadowFrame(this.material.uniforms.uMoonDirection!.value)
+      this.matrices[index]!.copy(frame.matrix)
+      this.material.uniforms.uShadowRight!.value.copy(frame.right)
+      this.material.uniforms.uShadowUp!.value.copy(frame.up)
+      this.atlas.viewport.set(index * TILE, 0, TILE, TILE)
       this.atlas.scissor.copy(this.atlas.viewport)
       this.renderer.setRenderTarget(this.atlas)
       this.renderer.render(this.scene, this.camera)
@@ -119,14 +156,18 @@ export class CloudShadows {
 
   select(previous: number) {
     this.uniforms.uCloudShadowPreviousOffset.value = previous * 0.5
-    this.uniforms.uCloudShadowPreviousDirection.value = this.directions[previous]!
-    this.uniforms.uCloudShadowNextDirection.value = this.directions[1 - previous]!
+    this.uniforms.uCloudShadowPreviousMatrix.value = this.matrices[previous]!
+    this.uniforms.uCloudShadowNextMatrix.value = this.matrices[1 - previous]!
   }
 
   /** Shade moonlight and approximate local sky visibility; preserve lamps and emission. */
-  applyTo(material: MeshStandardMaterial) {
+  applyTo(material: MeshStandardMaterial, mainCamera?: Camera) {
+    const fog = { value: 1 }
+    material.onBeforeRender = (_renderer, _scene, camera) => {
+      fog.value = camera === mainCamera ? 0 : 1
+    }
     material.onBeforeCompile = (shader) => {
-      Object.assign(shader.uniforms, this.uniforms)
+      Object.assign(shader.uniforms, this.uniforms, { uAtmosphereFog: fog })
       shader.vertexShader =
         'varying vec3 vCloudWorldPosition;\n' +
         shader.vertexShader.replace(
@@ -142,8 +183,12 @@ export class CloudShadows {
           vCloudWorldPosition = (modelMatrix * cloudPosition).xyz;`,
         )
       shader.fragmentShader =
-        `varying vec3 vCloudWorldPosition;\n${CLOUD_SHADOW_GLSL}\n` +
+        `uniform float uAtmosphereFog;\nvarying vec3 vCloudWorldPosition;\n${CLOUD_SHADOW_GLSL}\n` +
         shader.fragmentShader
+          .replace(
+            '#include <fog_fragment>',
+            'if (uAtmosphereFog > 0.5) {\n#include <fog_fragment>\n}',
+          )
           .replace(
             '#include <lights_fragment_begin>',
             'float cloudVisibility = cloudShadow(vCloudWorldPosition);\n' +

@@ -22,6 +22,8 @@ export function SceneCursor() {
     let targetY = 0
     let lastFrame = 0
     let visible = false
+    let lastPointer: PointerEvent | null = null
+    const lightsEnabled = () => host.dataset.localLights === 'true'
     let disposed = false
     let smoke: ReturnType<typeof createCursorSmoke> | undefined
     let smokeAttempted = false
@@ -76,7 +78,9 @@ export function SceneCursor() {
       }
     }
     const move = (event: PointerEvent) => {
+      lastPointer = event
       if (!finePointer.matches || event.pointerType !== 'mouse') {
+        lastPointer = null
         hide()
         return
       }
@@ -87,6 +91,11 @@ export function SceneCursor() {
         event.clientY < bounds.top ||
         event.clientY > bounds.bottom
       ) {
+        lastPointer = null
+        hide()
+        return
+      }
+      if (!lightsEnabled()) {
         hide()
         return
       }
@@ -119,28 +128,38 @@ export function SceneCursor() {
     const release = () => {
       element.dataset.pressed = 'false'
     }
+    const leave = () => {
+      lastPointer = null
+      hide()
+    }
+    const lightingObserver = new MutationObserver(() => {
+      if (!lightsEnabled()) hide()
+      else if (lastPointer && !document.hidden) move(lastPointer)
+    })
+    lightingObserver.observe(host, { attributes: true, attributeFilter: ['data-local-lights'] })
     window.addEventListener('pointermove', move, { passive: true })
     window.addEventListener('pointerdown', press, { passive: true })
     window.addEventListener('pointerup', release)
-    window.addEventListener('pointercancel', hide)
-    window.addEventListener('blur', hide)
-    document.addEventListener('visibilitychange', hide)
-    document.documentElement.addEventListener('pointerleave', hide)
-    finePointer.addEventListener('change', hide)
-    reducedMotion.addEventListener('change', hide)
+    window.addEventListener('pointercancel', leave)
+    window.addEventListener('blur', leave)
+    document.addEventListener('visibilitychange', leave)
+    document.documentElement.addEventListener('pointerleave', leave)
+    finePointer.addEventListener('change', leave)
+    reducedMotion.addEventListener('change', leave)
     return () => {
       disposed = true
+      lightingObserver.disconnect()
       hide()
       smoke?.dispose()
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerdown', press)
       window.removeEventListener('pointerup', release)
-      window.removeEventListener('pointercancel', hide)
-      window.removeEventListener('blur', hide)
-      document.removeEventListener('visibilitychange', hide)
-      document.documentElement.removeEventListener('pointerleave', hide)
-      finePointer.removeEventListener('change', hide)
-      reducedMotion.removeEventListener('change', hide)
+      window.removeEventListener('pointercancel', leave)
+      window.removeEventListener('blur', leave)
+      document.removeEventListener('visibilitychange', leave)
+      document.documentElement.removeEventListener('pointerleave', leave)
+      finePointer.removeEventListener('change', leave)
+      reducedMotion.removeEventListener('change', leave)
     }
   }, [])
 

@@ -21,7 +21,16 @@ selected, so agents can capture separate previews without a shared fixed port.
 
 ## Live lighting
 
-Moonlight and lamps cast shadows on the voxel scenery and water. Each animation
+Sunlight, moonlight and lamps cast shadows on the voxel scenery and water.
+The atmosphere follows local time at real speed, with an artistic 06:00 sunrise and
+18:00 sunset. Use `?seed=42&time=08:30&weather=partly-cloudy` for a reproducible
+starting composition. Weather accepts `clear`, `partly-cloudy` (default), `cloudy`
+and `overcast`; `sun=hidden` hides only the solar disc. Air scattering uses terrain
+and cloud shadows, so shafts can remain visible with the sun outside the frame.
+Profile text switches between dark and light palettes by measuring the rendered
+backdrop behind it. Floating lamps, halos and the luminous cursor appear only in low
+light; pointer ripples remain available during the day.
+Reduced motion freezes the initial time. Each animation
 frame updates the light state, shadow maps, a six-face environment capture, and the lake's planar
 reflection before the final lens pass. Floating light cubes, halos and water highlights share the
 same light intensity. Voxel materials store base colors without baked lamp illumination.
@@ -34,7 +43,7 @@ components form curved, localized packets; their analytic gradients preserve fin
 mobile resolution. A volume-balanced pressure profile is sampled along pointer strokes, with
 bounded input strength. A nine-point stencil propagates and combines waves; the terrain mask
 reflects them at banks and an absorbing border prevents waves returning from the outer domain.
-Hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
+In low light, hover subtly reveals the shallow, refracted lake bed. Dragging strengthens the wake and preserves
 the general camera parallax. See the rendering notes below for physical parameters and limitations.
 
 The solver is a damped linear surface-wave approximation with constant propagation speed. It does

@@ -1,5 +1,8 @@
 import { BackSide, ShaderMaterial } from 'three'
 
+import { DAYLIGHT_SKY_GLSL } from './daylight-sky'
+import { sampleLighting } from './lighting'
+import type { LightingState } from './lighting'
 import { sampleMoonLight } from './moon-light'
 import { CLOUD_SAMPLING_GLSL } from './volumetric-clouds'
 import type { VolumetricClouds } from './volumetric-clouds'
@@ -21,6 +24,7 @@ void main() {
 const fragmentShader = `
 uniform float uTime;
 ${CLOUD_SAMPLING_GLSL}
+${DAYLIGHT_SKY_GLSL}
 uniform float uSeed;
 uniform float uMobile;
 uniform vec3 uMoonDirection;
@@ -62,6 +66,8 @@ void main() {
     vec3(0.012, 0.018, 0.027),
     horizon * (0.58 + 0.27 * horizonNoise + 0.15 * valleyLight)
   );
+
+  color = mix(color, daylightSky(direction), uDaylight);
 
   // The visible moon and its halo track the same direction as the scene light.
   float moonAngle = acos(clamp(dot(direction, uMoonDirection), -1.0, 1.0));
@@ -124,7 +130,7 @@ void main() {
   // A tall base fade erased the smaller hills and flattened the entire valley.
   float baseFade = smoothstep(-0.008, 0.026, elevation);
   float farEdge = 1.0 - smoothstep(farPeak - 0.006, farPeak + 0.009, elevation);
-  color = mix(color, vec3(0.0078, 0.0123, 0.0188), farEdge * baseFade * 0.88);
+  color = mix(color, mix(vec3(0.0078, 0.0123, 0.0188), uHaze * 0.55, uDaylight), farEdge * baseFade * 0.88);
 
   // A wavering low veil pools in the open valley and softens only the far ridge.
   float mistShape = noise(vec2(azimuth * 13.0 + drift * 0.8, uSeed + 73.0));
@@ -133,21 +139,21 @@ void main() {
   float valleyPool = exp(-pow((azimuth - 0.13) / 0.32, 2.0));
   color = mix(
     color,
-    vec3(0.018, 0.026, 0.037),
+    mix(vec3(0.018, 0.026, 0.037), uHaze * 0.85, uDaylight),
     farMist * (0.08 + mistShape * 0.13 + valleyPool * 0.36)
   );
 
   float middleEdge = 1.0 - smoothstep(middlePeak - 0.004, middlePeak + 0.006, elevation);
-  color = mix(color, vec3(0.0053, 0.0085, 0.0131), middleEdge * baseFade * 0.91);
+  color = mix(color, mix(vec3(0.0053, 0.0085, 0.0131), uHaze * 0.36, uDaylight), middleEdge * baseFade * 0.91);
   float nearEdge = 1.0 - smoothstep(nearPeak - 0.003, nearPeak + 0.004, elevation);
-  color = mix(color, vec3(0.0031, 0.0051, 0.0081), nearEdge * baseFade * 0.86);
+  color = mix(color, mix(vec3(0.0031, 0.0051, 0.0081), uHaze * 0.22, uDaylight), nearEdge * baseFade * 0.86);
 
   // Thin, uneven mist separates the ridge layers close to the waterline.
   float lowMist = exp(-pow((elevation - 0.006) * 42.0, 2.0));
   float mistNoise = noise(vec2(azimuth * 18.0 + drift * 0.8, elevation * 35.0 + 73.0));
   float mistDetail = noise(vec2(azimuth * 43.0 - drift, elevation * 24.0 + uSeed));
   float mist = lowMist * (0.12 + mistNoise * 0.16 + mistDetail * 0.055 + valleyPool * 0.22);
-  color = mix(color, vec3(0.023, 0.033, 0.044), mist);
+  color = mix(color, mix(vec3(0.023, 0.033, 0.044), uHaze * 0.95, uDaylight), mist);
 
   gl_FragColor = vec4(color, 1.0);
   #include <tonemapping_fragment>
@@ -166,6 +172,12 @@ export function createSkyMaterial(
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
+      uSunDirection: { value: sampleLighting(0).sunDirection },
+      uSunColor: { value: sampleLighting(0).sunColor },
+      uSunIntensity: { value: 0 },
+      uDaylight: { value: 0 },
+      uShowSun: { value: 1 },
+      uHaze: { value: sampleLighting(0).haze },
       ...clouds.uniforms,
       uMoonDirection: { value: moon.offset.normalize() },
       uMoonIntensity: { value: moon.intensity },
@@ -176,4 +188,20 @@ export function createSkyMaterial(
     depthWrite: false,
     fog: false,
   })
+}
+
+export function updateSkyLighting(
+  material: ShaderMaterial,
+  light: LightingState,
+  showSun: boolean,
+) {
+  const u = material.uniforms
+  u.uSunDirection!.value.copy(light.sunDirection)
+  u.uSunColor!.value.copy(light.sunColor)
+  u.uSunIntensity!.value = light.sunIntensity
+  u.uDaylight!.value = light.daylight
+  u.uShowSun!.value = showSun ? 1 : 0
+  u.uHaze!.value.copy(light.haze)
+  u.uMoonDirection!.value.copy(light.moonDirection)
+  u.uMoonIntensity!.value = light.moonIntensity
 }
