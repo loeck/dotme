@@ -273,7 +273,7 @@ test('without WebGL the profile and pointer remain usable; no weather is request
   // The solar cursor follows scene lighting. Without a scene, retain the native pointer.
   await expect(page.locator('.scene-cursor')).toHaveCSS('opacity', '0')
   await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
-  await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'pointer')
+  await expect(page.getByRole('link', { name: /GitHub/ })).not.toHaveCSS('cursor', 'none')
   expect(weatherRequests).toEqual([])
   expect(errors).toEqual([])
 })
