@@ -9,12 +9,3 @@ export function sampleWaterOptics(rainIntensity: number, windSpeed: number) {
     agitation: Math.min(1, wind * 0.55 + rain * 0.65),
   }
 }
-
-/** An artistic clear-water window shared by the surface and submerged fish.
- * Keep the distant grazing reflection while opening the nearby water column. */
-export const WATER_INTERFACE_GLSL = `
-float waterReflectance(float fresnel, float distanceToCamera, float clarity) {
-  float window = (1.0 - smoothstep(30.0, 85.0, distanceToCamera)) * clarity;
-  return mix(fresnel, min(fresnel, 0.24), window);
-}
-`

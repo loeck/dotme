@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import {
   DEFAULT_RAIN,
   IMPACT_LIFETIME,
@@ -14,7 +15,7 @@ const empty = () => new RainCollider([])
 const wavySurface = (x: number, z: number, time: number) =>
   WATER_Y + 0.11 * Math.sin(x * 2.3 + z * 1.1 + time * 3.7 + 0.8)
 const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
-  const drop = simulation.drops[0]!
+  const drop = required(simulation.drops[0])
   Object.assign(drop, { x: 0, y, z: 0, vx: 2, vy: -6, vz: 0.5, size, seed: 0.2, alive: true })
   return drop
 }
@@ -39,10 +40,10 @@ describe('rain collision and impact lifecycle', () => {
     expect(drop.alive).toBe(false)
     const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
     expect(impacts).toHaveLength(1)
-    expect(impacts[0]!.x).toBeCloseTo((2 * 0.025) / 6)
-    expect(impacts[0]!.z).toBeCloseTo((0.5 * 0.025) / 6)
-    expect(impacts[0]!.y).toBe(WATER_Y)
-    expect(impacts[0]!.born).toBeCloseTo(0.025 / 6)
+    expect(required(impacts[0]).x).toBeCloseTo((2 * 0.025) / 6)
+    expect(required(impacts[0]).z).toBeCloseTo((0.5 * 0.025) / 6)
+    expect(required(impacts[0]).y).toBe(WATER_Y)
+    expect(required(impacts[0]).born).toBeCloseTo(0.025 / 6)
     simulation.update(RAIN_STEP)
     expect(simulation.impacts.filter((impact) => Number.isFinite(impact.born))).toHaveLength(1)
   })
@@ -100,7 +101,7 @@ describe('rain timing, wind and budgets', () => {
     const simulation = new RainSimulation(empty(), true, 1)
     simulation.setRainState({ intensity: 0.001, wind: { x: 8, z: -2 } })
     const small = dropAt(simulation, 10, 0.0006)
-    const large = simulation.drops[1]!
+    const large = required(simulation.drops[1])
     Object.assign(large, small, { size: 0.0044 })
     simulation.update(0.05)
     expect(small.vx).toBeGreaterThan(large.vx)
@@ -147,7 +148,7 @@ describe('rain timing, wind and budgets', () => {
     simulation.setRainState({ ...DEFAULT_RAIN, intensity: 1 })
     for (const drop of simulation.drops)
       Object.assign(drop, { alive: true, y: 10, vy: -7, size: 0.001 })
-    const available = simulation.drops.at(-1)!
+    const available = required(simulation.drops.at(-1))
     available.alive = false
     simulation.update(RAIN_STEP)
     expect(available.alive).toBe(true)
@@ -167,7 +168,7 @@ describe('rain contacts on moving water', () => {
       expect(drop.alive).toBe(false)
       const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
       expect(impacts).toHaveLength(1)
-      const impact = impacts[0]!
+      const impact = required(impacts[0])
       expect(impact.born).toBeGreaterThan(0)
       expect(impact.born).toBeLessThan((0.14 - WATER_Y) / 6)
       expect(impact.y).toBe(wavySurface(impact.x, impact.z, impact.born))
@@ -219,7 +220,7 @@ describe('rain contacts on moving water', () => {
     simulation.setWaterSurface()
     dropAt(simulation, WATER_Y + 0.025)
     simulation.update(RAIN_STEP)
-    const impact = simulation.impacts.find((value) => Number.isFinite(value.born))!
+    const impact = required(simulation.impacts.find((value) => Number.isFinite(value.born)))
     expect(impact.y).toBe(WATER_Y)
     expect(impact.vy).toBe(-6)
     expect(calls).toBe(0)

@@ -40,7 +40,7 @@ it('uses elapsed time rather than frame count to fade', () => {
     for (let frame = 0; frame < fps / 3; frame++) light.update(contact, direction, 0.8, 1 / fps)
     return light.uniforms.uPointerLightStrength.value
   })
-  for (const strength of strengths) expect(strength).toBeCloseTo(strengths[0]!, 8)
+  for (const strength of strengths) expect(strength).toBeCloseTo(strengths.at(0) ?? 0, 8)
 })
 
 it('clears lingering illumination as soon as night ends, even on an accelerated clock', () => {

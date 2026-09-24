@@ -1,6 +1,7 @@
 import { Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { cloudShadowFrame } from './cloud-shadows'
 import { fadeNightLight, sampleLighting } from './lighting'
@@ -80,7 +81,7 @@ describe('solar lighting and light-space projection', () => {
     }
   })
   it('only enables local lights in low ambient illumination, including weather', () => {
-    for (const weather of Object.keys(WEATHER) as Array<keyof typeof WEATHER>) {
+    for (const weather of ['clear', 'partly-cloudy', 'cloudy', 'overcast'] as const) {
       expect(sampleLighting(0, 0, weather).localLightStrength).toBe(1)
       for (const hour of [8.5, 12, 17.5])
         expect(sampleLighting(hour * 3600, 0, weather).localLightStrength).toBe(0)
@@ -99,7 +100,7 @@ describe('solar lighting and light-space projection', () => {
     ).toBeLessThan(0.0001)
   })
   it('reserves cursor light for night, independently of weather, with a gradual night transition', () => {
-    for (const weather of Object.keys(WEATHER) as Array<keyof typeof WEATHER>) {
+    for (const weather of ['clear', 'partly-cloudy', 'cloudy', 'overcast'] as const) {
       const daytime = Array.from({ length: 288 }, (_, i) =>
         sampleLighting(i * 300, 0, weather),
       ).filter((light) => light.daylight > 0)
@@ -112,7 +113,9 @@ describe('solar lighting and light-space projection', () => {
       expect(dusk.at(-1)).toBe(1)
       expect(dusk.filter((value) => value > 0 && value < 1).length).toBeGreaterThanOrEqual(2)
       expect(dusk).toEqual(dusk.toSorted((a, b) => a - b))
-      expect(sampleLighting(5.25 * 3600, 0, weather).pointerLightStrength).toBeCloseTo(dusk[2]!)
+      expect(sampleLighting(5.25 * 3600, 0, weather).pointerLightStrength).toBeCloseTo(
+        required(dusk[2]),
+      )
     }
   })
   it('projects every point along a light ray to the same UV, including the horizon', () => {
@@ -138,6 +141,8 @@ describe('solar lighting and light-space projection', () => {
     const overcast = createCloudBodies(9182, 'overcast')
     expect(overcast.uCloudDensity.value).not.toBe(partly.uCloudDensity.value)
     expect(WEATHER.overcast.coverage).toBeGreaterThan(WEATHER['partly-cloudy'].coverage)
-    expect(overcast.uCloudRadii.value[0]!.x).toBeGreaterThan(partly.uCloudRadii.value[0]!.x)
+    expect(required(overcast.uCloudRadii.value[0]).x).toBeGreaterThan(
+      required(partly.uCloudRadii.value[0]).x,
+    )
   })
 })

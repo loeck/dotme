@@ -1,42 +1,47 @@
-import { WebGLCoordinateSystem } from 'three'
-import type { Scene, WebGLRenderer, WebGLRenderTarget } from 'three'
+import { WebGPUCoordinateSystem } from 'three/webgpu'
+import type { RenderTarget } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
+import type { CloudRenderer } from './cloud-shadows'
+import { sampleLighting } from './lighting'
 import { VolumetricClouds, sampleCloudDisplacement } from './volumetric-clouds'
 import { WindModel } from './wind'
 
 function fixture() {
-  let target: WebGLRenderTarget | null = null,
+  let target: RenderTarget | null = null,
     face = 0
   const captures = new Map<unknown, number[]>()
-  const renderer = {
-    extensions: { has: () => false },
-    coordinateSystem: WebGLCoordinateSystem,
+  let captureTime = 0
+  const renderer: CloudRenderer = {
+    coordinateSystem: WebGPUCoordinateSystem,
+    autoClear: true,
     xr: { enabled: false },
-    state: { buffers: { depth: { getReversed: () => false } } },
+    getScissorTest: () => false,
+    setScissorTest: () => undefined,
     getRenderTarget: () => target,
     getActiveCubeFace: () => face,
     getActiveMipmapLevel: () => 0,
-    setRenderTarget(next: WebGLRenderTarget | null, nextFace = 0) {
+    setRenderTarget(next: RenderTarget | null, nextFace = 0) {
       target = next
       face = nextFace
     },
-    render(scene: Scene) {
-      const object = scene.children[0] as unknown as {
-        material: { uniforms: { uTime: { value: number } } }
-      }
-      if (!target || !('isWebGLCubeRenderTarget' in target)) return
+    compileAsync: async () => undefined,
+    render() {
+      if (!target || !('isCubeRenderTarget' in target)) return
       const parts = captures.get(target.texture) ?? []
-      parts[face] = object.material.uniforms.uTime.value
+      parts[face] = captureTime
       captures.set(target.texture, parts)
     },
-  } as unknown as WebGLRenderer
+  }
   const clouds = new VolumetricClouds(
     renderer,
     12,
     false,
     new WindModel(12),
-    undefined,
+    (time) => {
+      captureTime = time
+      return sampleLighting(0, time)
+    },
     undefined,
     new Uint8Array(32 ** 3 * 2),
   )

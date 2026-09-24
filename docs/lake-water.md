@@ -1,194 +1,29 @@
-# Calm lake rendering
+# Lake water
 
-The TypeScript landscape initializer loads the engine on demand. `?seed=9182` reproduces the bank,
-submerged relief and stones. World units are treated as metres for the optical and wave
-parameters; the landscape remains a stylized, nocturnal voxel scene.
+Water uses a damped linear surface-wave approximation and a shared analytic wind field.
+The persistent height/velocity state advances at a fixed time step through TSL passes on
+two alternating WebGPU render targets.
+Pointer impulses have bounded strength and a volume-balanced pressure profile.
 
-## Simulation
+The terrain mask reflects waves at banks and the outer border absorbs outgoing waves.
+The surface combines simulated gradients and directional wind waves with reflections,
+refraction, caustics and direct light. Textures retain explicit color-space, depth and
+orientation handling across passes. Rain and pointer interactions remain independent inputs.
 
-`WaterSimulation` exposes `step(seconds, windTime?)`, `addImpulse(x, z, radius, velocity)`, `reset()`,
-`dispose()` and `texture`. Two RGBA16F targets store height (R, metres) and vertical velocity
-(G, metres/second). B/A are unused. Resolution is 1024² on desktop, 512² below 768 CSS pixels
-at mount. The domain is fixed at x=[-80,80], z=[-112,48], independent of camera movement.
+Wind waves use crossing directions and shorter transverse packets at small wavelengths.
+The same field drives CPU motion, surface normals and caustics. Reflection filtering follows
+the water roughness without an additional blur floor; the environment probe uses 256-pixel
+faces on desktop and 128-pixel faces on mobile.
 
-A nine-point Laplacian (cardinal weight 4, diagonal weight 1, center weight -20, divided by 6) updates velocity, followed by semi-implicit height integration.
-The physical step is 1/60 second; propagation speed is 2.4 m/s. The Courant numbers are
-0.256 (desktop) and 0.128 (mobile), below the two-dimensional limit 1/sqrt(2). The accumulator
-executes at most four steps per call and drops excess wall time. Background-tab recovery
-resets the frame timestamp, preventing a backlog. Velocity damping is exp(-0.65 dt).
-An 8.8-metre perimeter sponge additionally damps both height and velocity.
+The solver does not model breaking waves, depth-dependent dispersion or volumetric fluid
+flow. Catch-up is bounded to prevent an unresponsive frame from creating an unstable burst.
+World generation and interaction sampling remain on the CPU; scene composition and water
+passes use node materials.
 
-The 1024²/512² collision mask comes from signed distances to the actual terrain faces,
-including foreground stones and isolated rocks. The separate conservative picking raster
-does not push reflections away from the visible shore. Fully submerged stones remain wet.
-Solid neighbors substitute the center height
-(no-flux reflecting boundary). Compact pressure splats add local velocity without reading the target being written.
-For q=(radius/brushRadius)², their profile is (1-q)²(1-4q) within q<1 and zero outside.
-Its continuous area integral is zero: displaced water feeds a surrounding shoulder, avoiding a
-persistent depressed trail. Their support is at least 2.5 simulation cells. A bounded queue (128 splats)
-and emergency height/velocity limits (±0.22 m, ±1.5 m/s) prevent pathological input from
-exploding the field. Ordinary motion stays well below those limits.
+Unit tests cover equations, fixed-step behavior, impulse bounds, shore handling and wind.
+`pnpm e2e:gpu` requires a genuine WebGPU adapter. Use the production benchmark to
+inspect seeded water at rest, during interaction and in rain; compare like-for-like captures.
 
-When `windTime` is supplied, solid neighbors also contribute the missing incident-wind
-slope to the boundary stencil (coupling 1.0). This approximates a no-flux boundary on the
-combined wind and simulated surface: ambient waves now generate reflected disturbances
-around rocks, even without pointer input. Open water receives no additional forcing.
-The scattered field keeps the solver's 2.4 m/s propagation speed, so this is an approximate
-coupling to the dispersive wind spectrum, not a full fluid solver.
-
-The wind spectrum uses twelve incommensurate wavelengths between 12.7 and 0.145 m, with
-amplitudes between 24 and 0.04 mm, and deep-water dispersion omega=sqrt(9.81 k). Sub-metre
-waves taper strongly so fast specular glints do not dominate the lit bank; the same calm spectrum
-applies across the entire lake. Along-wave
-packets move at the group velocity; cross-wave envelopes localize crests and gently bend them.
-The packet modulation is an artistic approximation, not a full spectral fluid solution.
-Both the CPU picking function and GPU displacement use this same field. Fragment normals use
-its analytic derivatives, independently of the interaction simulation's cell size. This keeps
-small wind ripples visible on mobile without inflating the GPU grid. Screen derivatives suppress
-unresolved wavelengths; normal variance broadens specular highlights to limit shimmer.
-Geometry is concentrated around the near lake. Fine vertex displacement is still an approximation
-of the fragment field. There are no breaking waves, spray or volumetric splashes.
-
-## Bottom and optics
-
-A deterministic chamfer distance from the rendered banks creates shallow shelves, seeded
-relief and a maximum 7.5 m depth. Submerged stones follow that field. The bottom and existing
-scene lights render through camera layer 1 into an oblique color/depth target (1024² desktop,
-512² mobile). Linear half-float color preserves the dark gradients. A half-float depth field
-provides world-space bathymetry for refraction; it requires no float render-target support.
-The bed is excluded from the primary and reflection cameras (layer 0).
-
-Pass order is simulation → light/shadow update → environment capture/filter → submerged color/depth → planar reflection (the Reflector's
-before-render callback) → main color/depth → depth of field. The bed camera inverse reconstructs
-bottom positions. Snell refraction uses n=1.333; four fixed-point iterations against the
-bathymetry estimate the bed intersection. Small fish use a separate analytic Snell
-projection into a dedicated perspective region of the submerged color/depth atlas.
-The water composites their transmitted light before reflection, highlights and foam;
-they are excluded from the main, environment and reflection cameras.
-Projection into the oblique submerged pass supplies
-color and resolved depth, without the disocclusion bands of a grazing camera capture. Schlick Fresnel uses F0=0.02037. Beer–Lambert RGB absorption coefficients are
-(0.48, 0.22, 0.14) m⁻¹ in turbid water, blending toward (0.18, 0.035, 0.016)
-in clear water. Rain controls clarity; shared wind and rain control surface roughness.
-Reflection, transmission, scattering and lamp specular terms compose
-in linear space before the final display conversion. Lamps use the simulated normal and
-existing world-space light positions/intensities. There is no cursor light or emissive crest.
-
-Hover gently reduces weather-driven optical roughness (0.035–0.085) to 0.025 and reduces transmission blur
-inside a Gaussian footprint. This is a deliberate interaction concession, not a physical
-change to water depth. Depth-dependent absorption and the distant grazing reflection remain in force, so the
-lake retains a depth-dependent turquoise tint. Refraction uses a height-field intersection and a projected bed capture; it is single-interface
-and approximate:
-there is no ray-traced self-occlusion, multiple scattering or caustic pass. Invalid bottom
-samples use the deep-water scattering color. Reflections are planar and distorted by the
-height-field normal; they do not trace individual displaced wave surfaces. A reflected-ray
-projection replaces fixed screen offsets. The live cube capture provides angular sky variation
-and a fallback at the planar texture edges. Direct water lighting uses the actual Three.js lamps,
-moon and individual shadow maps, with GGX visibility and Fresnel; surface diffuse lighting is
-excluded because volume scattering already supplies the water body color. Reinhard tone mapping
-is applied once in the final lens pass. Voxel colors contain albedo without baked lamp light.
-
-A separate signed shore-distance texture (1024² desktop / 512² mobile) follows actual
-terrain footprints, shared by the collision mask. Surface normals use reflecting samples at
-solid faces instead of falling toward a zero-height solid texel. In the last two simulation
-cells, the shore normal removes the unresolved slope into the wall. A broken contact foam
-band expands from 0.32 to 1.15 m with crest height and impact velocity, with a
-pixel-sized minimum for distant banks. An outward-moving, broken front sheds small flecks;
-a sheared residual film remains visible between crests. This is procedural persistence,
-not a stored foam simulation.
-Wind velocity uses the analytic time derivative of the same wave packets; simulated velocity
-contributes to the impact. Foam has diffuse albedo and increased roughness, lit and shadowed
-by the scene lights, with no emission. Its fine pattern is filtered at a distance. This is
-a restrained artistic approximation of lapping/aeration, not particle spray or simulated bubbles.
-Trees and fully submerged stones do not create a contact outline. The shore texture needs
-about 2 MB on desktop / 0.5 MB on mobile and is disposed with the submerged pass.
-
-## Input and lifecycle
-
-Only actual client-coordinate motion generates a wake. Both ends of a stroke are reprojected
-with the same camera. Samples are spaced evenly in world space and reprojected to check
-visibility along the stroke. CSS-pixel speed and distance set a shared impulse budget,
-so perspective cannot amplify vertical gestures or bunch samples at their near end.
-Hover uses a gentle 0.55 m brush; dragging uses 0.7 m and four times the motion budget.
-Each event is capped at 80 pixels of energy and 48 samples.
-Holding still stops injection; pointerdown adds
-one impulse and dragging increases strength. Dragging has no separate camera control.
-
-Picking iterates the analytic surface height and asynchronously reads GPU height on pointer
-movement. CPU picking uses the most recent GPU sample between reads; very steep fronts can
-therefore have a small picking error. A conservative height raster rejects occluding solids
-(including tree silhouettes), and `elementFromPoint` excludes UI. The raster can reject thin
-areas beneath tree canopies; it deliberately favors avoiding disturbances on solid scenery.
-Touch reveals water only during contact. Exit, cancellation, capture loss, blur and visibility
-changes clear input history. Asynchronous reads are invalidated at teardown.
-
-Reduced motion renders one static frame (and rerenders on resize), with no simulation steps,
-input impulses, parallax or animated introduction. Unsupported float render targets use a
-zero state texture and analytic swell; depth/reflection targets use 8-bit color in that mode.
-GPU waves and filtered indirect material illumination are unavailable in this fallback. Every target, texture, geometry, material, listener
-and animation frame is released on disposal. The existing context-loss path keeps the profile
-available if WebGL itself fails.
-
-## Verification
-
-`pnpm check` runs type checking, lint, formatting, unit tests and the production build.
-`pnpm e2e` exercises the production page in Chromium and portrait WebKit, with a separately
-bundled test harness for reading real GPU state and inspecting input behavior. It checks
-propagation, damping, barriers, finite values, reset, 30/60/144 Hz equality, ambient wave
-scattering only at obstacles, contact placement, static input,
-UI exclusion, reduced motion and float-target fallback. The harness is served only through
-Playwright routes and is not part of the application bundle.
-
-The motion test records a playable video plus timed captures of wind, slow hover, drag and decay.
-The visual test saves rest/wake screenshots and attaches median/p95 animation-frame intervals.
-On macOS Chromium uses ANGLE Metal: headless Chromium defaults to SwiftShader, which makes
-the pre-existing full desktop landscape too slow for a useful hardware performance comparison.
-Portrait WebKit is an emulated viewport on the development Mac, not a physical iPhone.
-Hardware acceptance remains 60 fps desktop / 30 fps mobile; validate on actual target devices
-with the same seed, viewport, DPR, motion preference and pointer sequence. Frame interval
-samples include browser scheduling and are not GPU timer-query measurements.
-
-Measured on the same development Mac on 2026-09-23, seed 9182, with animation enabled.
-The baseline sampled 90 steady-state frames after a 3-second warmup; the final production-page
-check sampled 30 frames after its warmup:
-
-| Browser / viewport                  | Before median / p95 | After median / p95 |
-| ----------------------------------- | ------------------- | ------------------ |
-| Chromium, ANGLE Metal, 1280×720     | 16.7 / 16.7 ms      | 16.7 / 16.7 ms     |
-| WebKit, iPhone 13 viewport, 390×664 | 17 / 18 ms          | 17 / 18 ms         |
-
-These runs reach the browser's roughly 60 Hz presentation limit; they do not establish GPU
-headroom or physical-phone performance. An additional 90-frame comparison bundled the previous committed engine and the initial
-implementation separately with identical camera, seed, viewport and warmup settings; both
-reached the same presentation limit. The merged live-lighting renderer also measured 16.7 ms median in Chromium and 17 ms in WebKit
-on the same machine. These local measurements do not certify performance on a physical phone.
-
-## Sources
-
-- [Evan Wallace — water simulation](https://github.com/evanw/webgl-water/blob/master/water.js):
-  inspiration for alternating height/velocity textures and propagating disturbances.
-- [Evan Wallace — renderer](https://github.com/evanw/webgl-water/blob/master/renderer.js):
-  reflection/refraction separation. This implementation is independently written for Three.js.
-- [GPU Gems, chapter 1](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-1-effective-water-simulation-physical-models):
-  summed wave fields, wavelength-dependent speed and consistent surface derivatives.
-
-## Dynamic-light integration
-
-`feat/dynamic-light` had uncommitted work on the same base revision at integration time.
-Its working tree was captured in `codex/dynamic-light-integration-snapshot` without changing that
-worktree, then merged here. The live lights, shadow maps, spatial material batches, environment
-capture, moon and synchronized lamp energy are retained. The two competing ripple solvers were
-consolidated into `WaterSimulation`; its nine-point propagation and balanced pressure retain the
-useful parts of the other solver while preserving the submerged bed and visible-water picking.
-
-## Shared atmosphere
-
-Cloud advection and the wave spectrum now share a seeded wind model. See
-[Shared wind and volumetric cloud layers](atmosphere.md) for the amplitude response,
-CPU/GPU derivative agreement, capture profiles, approximations and measurements.
-
-Calm water now transmits through the full water column, with a lighter mineral bed
-and RGB absorption `(0.18, 0.035, 0.016)` at maximum clarity. Red attenuates faster
-than green/blue, creating a depth-dependent turquoise gradient. The nearby artistic
-reflection cap is 0.24 and fades back to natural grazing Fresnel between 30 and 85
-world units. Fish pass through this same water composition, so reflections and
-highlights cover their silhouettes, including in clear water.
+References: [Evan Wallace's water](https://madebyevan.com/webgl-water/),
+[GPU Gems' 2D wave equation](https://developer.nvidia.com/gpugems/gpugems2/part-vi-simulation-and-numerical-algorithms/chapter-44-gpu-framework-solving),
+[fixed time steps](https://gafferongames.com/post/fix_your_timestep/).

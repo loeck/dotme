@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { createCloudNoise, periodicNoise } from './cloud-noise'
 import { sampleWindField, swellHeight } from './water-surface'
@@ -24,14 +25,12 @@ describe('shared atmospheric wind', () => {
       const before = wind.sample(t - h),
         after = wind.sample(t + h)
       for (let axis = 0; axis < 2; axis++) {
-        expect((after.displacement[axis]! - before.displacement[axis]!) / (2 * h)).toBeCloseTo(
-          state.direction[axis]! * state.speed,
-          6,
-        )
-        expect((after.response[axis]! - before.response[axis]!) / (2 * h)).toBeCloseTo(
-          state.response[axis + 2]!,
-          7,
-        )
+        expect(
+          (required(after.displacement[axis]) - required(before.displacement[axis])) / (2 * h),
+        ).toBeCloseTo(required(state.direction[axis]) * state.speed, 6)
+        expect(
+          (required(after.response[axis]) - required(before.response[axis])) / (2 * h),
+        ).toBeCloseTo(required(state.response[axis + 2]), 7)
       }
       expect((after.rotation[0] - before.rotation[0]) / (2 * h)).toBeCloseTo(
         -state.rotation[1] * state.rotationVelocity,
@@ -102,8 +101,8 @@ describe('shared atmospheric wind', () => {
     const weak = new WindModel(12, { meanSpeed: 0.6, gustStrength: 0 }).sample(0)
     const strong = new WindModel(12, { meanSpeed: 6, gustStrength: 0 }).sample(0)
     for (let x = 0; x < 100; x++) {
-      weakEnergy += sampleWindField(x, -3, 0, weak)[1]! ** 2
-      strongEnergy += sampleWindField(x, -3, 0, strong)[1]! ** 2
+      weakEnergy += required(sampleWindField(x, -3, 0, weak)[1]) ** 2
+      strongEnergy += required(sampleWindField(x, -3, 0, strong)[1]) ** 2
     }
     expect(strongEnergy).toBeGreaterThan(weakEnergy * 2)
   })
@@ -130,8 +129,8 @@ describe('shared atmospheric wind', () => {
     for (const p of [
       [0.3, 2.7, -1.1],
       [-0.001, 0, 4],
-    ]) {
-      const [x, y, z] = p as [number, number, number]
+    ] as const) {
+      const [x, y, z] = p
       const n = periodicNoise(x, y, z, 12, 4)
       expect(periodicNoise(x + 4, y, z, 12, 4)).toBeCloseTo(n, 12)
       expect(periodicNoise(x, y + 4, z, 12, 4)).toBeCloseTo(n, 12)

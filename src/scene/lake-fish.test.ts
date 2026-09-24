@@ -10,6 +10,7 @@ import {
 } from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { apparentFishSurface } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -26,56 +27,57 @@ function bottomHeight(bed: LakeBed, x: number, z: number) {
   const i = Math.floor(v) * n + Math.floor(u)
   const depth =
     fx + fz < 1
-      ? bed.depth[i]! * (1 - fx - fz) + bed.depth[i + 1]! * fx + bed.depth[i + n]! * fz
-      : bed.depth[i + n + 1]! * (fx + fz - 1) +
-        bed.depth[i + 1]! * (1 - fz) +
-        bed.depth[i + n]! * (1 - fx)
+      ? required(bed.depth[i]) * (1 - fx - fz) +
+        required(bed.depth[i + 1]) * fx +
+        required(bed.depth[i + n]) * fz
+      : required(bed.depth[i + n + 1]) * (fx + fz - 1) +
+        required(bed.depth[i + 1]) * (1 - fz) +
+        required(bed.depth[i + n]) * (1 - fx)
   return WATER_LEVEL - depth
 }
 
 describe('submerged fish', () => {
-  it('keeps actual shoals submerged and clear of terrain for a full passage across seeds', () => {
-    const matrix = new Matrix4()
-    const position = new Vector3()
-    for (const mobile of [false, true]) {
-      for (const seed of [0, 12, 42, 9182]) {
-        const bed = createVoxelWorld(seed, mobile).lakeBed
-        const fish = new LakeFish(new Scene(), bed, seed, mobile)
-        const repeat = new LakeFish(new Scene(), bed, seed, mobile)
-        expect(fish.schools).toEqual(repeat.schools)
-        expect(fish.schoolSizes).toEqual(repeat.schoolSizes)
-        expect(fish.count).toBeGreaterThan(0)
-        expect(fish.count).toBeLessThanOrEqual(mobile ? 15 : 26)
-        repeat.dispose()
-        const visibleCounts = new Set<number>()
-        for (let frame = 0; frame < 600; frame++) {
-          fish.update(frame / 10, 0.1, fish.habitats[0]!)
-          if (frame % 10 !== 0) continue
-          let visible = 0
-          for (const mesh of fish.meshes) {
-            for (let i = 0; i < mesh.count; i++) {
-              mesh.getMatrixAt(i, matrix)
-              position.setFromMatrixPosition(matrix)
-              expect(position.y + 0.2).toBeLessThan(WATER_LEVEL - 1)
-              for (const dx of [-0.5, 0, 0.5]) {
-                for (const dz of [-0.5, 0, 0.5]) {
-                  expect(bed.water[lakeIndex(bed, position.x + dx, position.z + dz)]).toBe(255)
-                  expect(position.y - 0.2).toBeGreaterThan(
-                    bottomHeight(bed, position.x + dx, position.z + dz),
-                  )
-                }
+  it.each([false, true].flatMap((mobile) => [0, 12, 42, 9182].map((seed) => ({ mobile, seed }))))(
+    'keeps actual shoals submerged and clear of terrain for a full passage (mobile=$mobile, seed=$seed)',
+    ({ mobile, seed }) => {
+      const matrix = new Matrix4()
+      const position = new Vector3()
+      const bed = createVoxelWorld(seed, mobile).lakeBed
+      const fish = new LakeFish(new Scene(), bed, seed, mobile)
+      const repeat = new LakeFish(new Scene(), bed, seed, mobile)
+      expect(fish.schools).toEqual(repeat.schools)
+      expect(fish.schoolSizes).toEqual(repeat.schoolSizes)
+      expect(fish.count).toBeGreaterThan(0)
+      expect(fish.count).toBeLessThanOrEqual(mobile ? 15 : 26)
+      repeat.dispose()
+      const visibleCounts = new Set<number>()
+      for (let frame = 0; frame < 600; frame++) {
+        fish.update(frame / 10, 0.1, required(fish.habitats[0]))
+        if (frame % 10 !== 0) continue
+        let visible = 0
+        for (const mesh of fish.meshes) {
+          for (let i = 0; i < mesh.count; i++) {
+            mesh.getMatrixAt(i, matrix)
+            position.setFromMatrixPosition(matrix)
+            expect(position.y + 0.2).toBeLessThan(WATER_LEVEL - 1)
+            for (const dx of [-0.5, 0, 0.5]) {
+              for (const dz of [-0.5, 0, 0.5]) {
+                expect(bed.water[lakeIndex(bed, position.x + dx, position.z + dz)]).toBe(255)
+                expect(position.y - 0.2).toBeGreaterThan(
+                  bottomHeight(bed, position.x + dx, position.z + dz),
+                )
               }
-              if (mesh.geometry.getAttribute('aFishVisibility').getX(i) > 0.1) visible++
             }
+            if (mesh.geometry.getAttribute('aFishVisibility').getX(i) > 0.1) visible++
           }
-          visibleCounts.add(visible)
         }
-        expect(visibleCounts.size).toBeGreaterThan(2)
-        expect(Math.max(...visibleCounts)).toBeGreaterThan(Math.max(...fish.schoolSizes))
-        fish.dispose()
+        visibleCounts.add(visible)
       }
-    }
-  })
+      expect(visibleCounts.size).toBeGreaterThan(2)
+      expect(Math.max(...visibleCounts)).toBeGreaterThan(Math.max(...fish.schoolSizes))
+      fish.dispose()
+    },
+  )
 
   it('keeps the opening shoal inside the actual refracted camera projection', () => {
     const matrix = new Matrix4()
@@ -87,8 +89,8 @@ describe('submerged fish', () => {
       camera.updateMatrixWorld()
       for (const seed of [0, 12, 42, 9182]) {
         const fish = new LakeFish(new Scene(), createVoxelWorld(seed, mobile).lakeBed, seed, mobile)
-        for (let i = 0; i < fish.schoolSizes[0]!; i++) {
-          fish.meshes[i % 3]!.getMatrixAt(Math.floor(i / 3), matrix)
+        for (let i = 0; i < required(fish.schoolSizes[0]); i++) {
+          required(fish.meshes[i % 3]).getMatrixAt(Math.floor(i / 3), matrix)
           position.setFromMatrixPosition(matrix)
           apparentFishSurface(position, camera.position, position).project(camera)
           expect(Math.abs(position.x)).toBeLessThan(0.95)
@@ -134,7 +136,7 @@ describe('submerged fish', () => {
     expect(before.distanceTo(after)).toBeGreaterThan(0)
     expect(before.distanceTo(after)).toBeLessThan(0.06)
     const index = lakeIndex(bed, after.x, after.z)
-    expect(after.y - 0.29).toBeGreaterThan(WATER_LEVEL - bed.depth[index]!)
+    expect(after.y - 0.29).toBeGreaterThan(WATER_LEVEL - required(bed.depth[index]))
     expect(after.y + 0.29).toBeLessThan(WATER_LEVEL)
     fish.dispose()
     expect(scene.children).toHaveLength(0)
@@ -227,13 +229,18 @@ describe('submerged fish', () => {
     expect(fish.count).toBeGreaterThan(0)
     const position = new Vector3()
     const previousPhases = fish.appearances.map((_, i) =>
-      fish.meshes[i % 3]!.geometry.getAttribute('aFishPhase').getX(Math.floor(i / 3)),
+      required(fish.meshes[i % 3])
+        .geometry.getAttribute('aFishPhase')
+        .getX(Math.floor(i / 3)),
     )
     // Cover a complete passage, including the shallowest part of its route.
     for (let frame = 1; frame <= 720; frame++) {
-      fish.update(frame / 10, 0.1, { x: fish.habitats[0]!.x, z: fish.habitats[0]!.z })
+      fish.update(frame / 10, 0.1, {
+        x: required(fish.habitats[0]).x,
+        z: required(fish.habitats[0]).z,
+      })
       for (let i = 0; i < fish.count; i++) {
-        const batch = fish.meshes[i % 3]!
+        const batch = required(fish.meshes[i % 3])
         const instance = Math.floor(i / 3)
         batch.getMatrixAt(instance, matrix)
         position.setFromMatrixPosition(matrix)
@@ -241,8 +248,8 @@ describe('submerged fish', () => {
         expect(position.y + 0.2).toBeLessThan(WATER_LEVEL - 1)
         expect(position.y - 0.2).toBeGreaterThan(bottomHeight(bed, position.x, position.z))
         const phase = batch.geometry.getAttribute('aFishPhase').getX(instance)
-        expect(phase).toBeGreaterThan(previousPhases[i]!)
-        expect(phase - previousPhases[i]!).toBeLessThan(0.9)
+        expect(phase).toBeGreaterThan(required(previousPhases[i]))
+        expect(phase - required(previousPhases[i])).toBeLessThan(0.9)
         previousPhases[i] = phase
       }
     }

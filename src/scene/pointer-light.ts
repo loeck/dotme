@@ -1,27 +1,11 @@
-import { Vector3 } from 'three'
-import type { MeshStandardMaterial } from 'three'
-
-/** Local diffuse illumination: finite reach, broad emitter, no extra shadow map. */
-export const POINTER_LIGHT_GLSL = `
-uniform vec3 uPointerLightPosition;
-uniform vec3 uPointerLightSource;
-uniform float uPointerLightStrength;
-vec3 pointerLightAt(vec3 worldPosition, vec3 worldNormal) {
-  vec3 offset = worldPosition - uPointerLightPosition;
-  float radius2 = dot(offset, offset) / 20.25;
-  float falloff = exp(-radius2 * 3.5) * (1.0 - smoothstep(0.5, 1.0, radius2));
-  vec3 toSource = uPointerLightSource - worldPosition;
-  vec3 direction = toSource / max(length(toSource), 0.001);
-  float facing = max(0.0, (dot(worldNormal, direction) + 0.18) / 1.18);
-  return vec3(0.85, 1.02, 1.2) * facing * falloff * uPointerLightStrength;
-}
-`
-
+import { exp, max, normalWorld, positionWorld, smoothstep, uniform, vec3 } from 'three/tsl'
+import { IrradianceNode, Vector3 } from 'three/webgpu'
+import type { MeshStandardNodeMaterial, Node } from 'three/webgpu'
 export function createPointerLightUniforms() {
   return {
-    uPointerLightPosition: { value: new Vector3() },
-    uPointerLightSource: { value: new Vector3() },
-    uPointerLightStrength: { value: 0 },
+    uPointerLightPosition: uniform(new Vector3()),
+    uPointerLightSource: uniform(new Vector3()),
+    uPointerLightStrength: uniform(0),
   }
 }
 
@@ -49,24 +33,27 @@ export class PointerLight {
     if (Math.abs(strength.value - target) < 0.0001) strength.value = target
   }
 
-  /** Apply once to each engine-owned material, after its cloud-shadow hook. */
-  applyTo(material: MeshStandardMaterial) {
-    const previousCompile = material.onBeforeCompile
-    const cacheKey = material.customProgramCacheKey()
-    material.onBeforeCompile = (shader, renderer) => {
-      previousCompile.call(material, shader, renderer)
-      Object.assign(shader.uniforms, this.uniforms)
-      shader.fragmentShader = `${POINTER_LIGHT_GLSL}\n${shader.fragmentShader}`.replace(
-        '#include <lights_fragment_end>',
-        `// Reuse Three's view-space position, including in reflection captures.
-        vec3 pointerWorld = cameraPosition - vViewPosition * mat3(viewMatrix);
-        // Foreground stone has deliberately dark baked albedo; give the diffuse
-        // field enough irradiance to reveal it without adding an emissive overlay.
-        irradiance += 4.0 * pointerLightAt(pointerWorld, inverseTransformDirection(normal, viewMatrix));
-        #include <lights_fragment_end>`,
-      )
-    }
-    material.customProgramCacheKey = () => `${cacheKey}:pointer-light-v2`
+  applyTo(material: MeshStandardNodeMaterial) {
+    const light = new IrradianceNode(
+      pointerLightAt(positionWorld, normalWorld, this.uniforms).mul(4),
+    )
+    const setup = material.setupMaterialLightings.bind(material)
+    const cacheKey = material.customProgramCacheKey.bind(material)
+    // Irradiance must pass through diffuse BRDF and occlusion, just like ambient
+    // light. An emissive overlay bypasses both and overexposes the dark shore.
+    material.setupMaterialLightings = (builder) => [...setup(builder), light]
+    material.customProgramCacheKey = () =>
+      `${cacheKey()}:pointer-irradiance:${this.uniforms.uPointerLightStrength.id}`
     material.needsUpdate = true
   }
+}
+export type PointerLightUniforms = ReturnType<typeof createPointerLightUniforms>
+export function pointerLightAt(world: Node<'vec3'>, normal: Node<'vec3'>, u: PointerLightUniforms) {
+  const offset = world.sub(u.uPointerLightPosition),
+    radius2 = offset.dot(offset).div(20.25)
+  const falloff = exp(radius2.mul(-3.5)).mul(smoothstep(0.5, 1, radius2).oneMinus())
+  const source = u.uPointerLightSource.sub(world),
+    direction = source.div(max(source.length(), 0.001))
+  const facing = max(0, normal.dot(direction).add(0.18).div(1.18))
+  return vec3(0.85, 1.02, 1.2).mul(facing).mul(falloff).mul(u.uPointerLightStrength)
 }

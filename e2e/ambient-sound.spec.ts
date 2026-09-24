@@ -1,24 +1,69 @@
 import { expect, test } from '@playwright/test'
+import type { Page, Route } from '@playwright/test'
 
+import { required } from '../src/invariant'
 import { mockSceneWeather } from './weather-fixture'
+
+async function waitForScene(page: Page) {
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  await expect
+    .poll(() => page.evaluate(() => window.testAudioContexts?.length ?? 0))
+    .toBeGreaterThan(0)
+  await expect(page.locator('.scene-sound-trigger')).toHaveAttribute('aria-busy', 'false')
+}
+
+function audioState() {
+  const context = window.testAudioContexts?.[0]
+  if (!context) throw new Error('Expected an audio context')
+  return context.state
+}
 
 test.beforeEach(async ({ page }, info) => {
   await mockSceneWeather(page, 'clear')
   await page.addInitScript((pendingAutoplay) => {
     const Original = window.AudioContext
     const contexts: AudioContext[] = []
+    let activated = false
+    window.audioEnabledDuringAutoplay = false
+    new MutationObserver((records) => {
+      if (activated) return
+      for (const record of records) {
+        const button = record.target
+        if (
+          button instanceof Element &&
+          button.matches('.scene-sound-trigger') &&
+          (record.oldValue === 'true' || button.getAttribute('aria-pressed') === 'true')
+        )
+          window.audioEnabledDuringAutoplay = true
+      }
+    }).observe(document, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['aria-pressed'],
+      attributeOldValue: true,
+    })
+    const observeGesture = (event: Event) => {
+      if (
+        event.isTrusted &&
+        event.target instanceof Element &&
+        event.target.closest('.scene-sound-trigger')
+      )
+        activated = true
+    }
+    document.addEventListener('click', observeGesture, true)
+    document.addEventListener('keydown', observeGesture, true)
     Object.assign(window, { testAudioContexts: contexts })
     window.AudioContext = class extends Original {
       // Model a browser refusing autoplay, while allowing real user gestures.
-      resume() {
-        if (!navigator.userActivation.isActive && !navigator.userActivation.hasBeenActive)
+      override resume() {
+        if (!activated)
           return pendingAutoplay
             ? new Promise<void>(() => {})
             : Promise.reject(new DOMException('Autoplay blocked', 'NotAllowedError'))
         return super.resume()
       }
-      get state() {
-        if (pendingAutoplay && !navigator.userActivation.hasBeenActive) return 'suspended' as const
+      override get state() {
+        if (pendingAutoplay && !activated) return 'suspended' as const
         return super.state
       }
       constructor(options?: AudioContextOptions) {
@@ -35,9 +80,11 @@ test('pending autoplay returns to off without downloading or starting later', as
     if (r.url().endsWith('.mp3')) requests.push(r.url())
   })
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
+  expect(await page.evaluate(() => window.audioEnabledDuringAutoplay)).toBe(false)
   expect(requests).toHaveLength(0)
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'true')
@@ -45,63 +92,73 @@ test('pending autoplay returns to off without downloading or starting later', as
   expect(requests).toHaveLength(5)
 })
 
-test('blocked autoplay loads nothing; a keyboard gesture decodes all MP3s and toggles playback', async ({
-  page,
-}) => {
-  const requests: string[] = []
-  page.on('request', (request) => {
-    if (request.url().endsWith('.mp3')) requests.push(request.url())
+for (const { seed, waterfall } of [
+  { seed: 0, waterfall: false },
+  { seed: 9182, waterfall: true },
+])
+  test(`blocked autoplay loads nothing; keyboard activation loads only present scene audio (seed=${seed})`, async ({
+    page,
+  }) => {
+    const requests: string[] = []
+    page.on('request', (request) => {
+      if (request.url().endsWith('.mp3')) requests.push(request.url())
+    })
+    await page.goto(`/?seed=${seed}&startTime=12:00`)
+    await waitForScene(page)
+    const button = page.locator('.scene-sound-trigger')
+    expect(requests).toHaveLength(0)
+    await button.focus()
+    await page.keyboard.press('Enter')
+    await expect(button).toHaveAttribute('aria-pressed', 'true')
+    await expect(button).toHaveAttribute('aria-busy', 'false')
+    await expect.poll(() => requests.length).toBe(waterfall ? 6 : 5)
+    expect(requests.some((url) => url.endsWith('/audio/waterfall.mp3'))).toBe(waterfall)
+    const snapshot = await page.evaluate(() => {
+      const c = window.testAudioContexts ?? []
+      const context = c[0]
+      if (!context) throw new Error('Expected an audio context')
+      return { count: c.length, state: context.state }
+    })
+    expect(snapshot).toEqual({ count: 1, state: 'running' })
+    await button.click()
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+    await expect.poll(() => page.evaluate(audioState)).toBe('suspended')
+    expect(await page.evaluate(() => window.testAudioContexts?.length)).toBe(1)
+    await page.reload()
+    await waitForScene(page)
+    await expect(button).toHaveAttribute('aria-pressed', 'false')
+    expect(requests).toHaveLength(waterfall ? 6 : 5)
   })
-  await page.goto('/?seed=42&startTime=12:00')
-  const button = page.locator('.scene-sound-trigger')
-  await expect(page.locator('#landscape canvas')).toBeVisible()
-  expect(requests).toHaveLength(0)
-  await button.focus()
-  await page.keyboard.press('Enter')
-  await expect(button).toHaveAttribute('aria-pressed', 'true')
-  await expect(button).toHaveAttribute('aria-busy', 'false')
-  expect(requests).toHaveLength(5)
-  const context = await page.evaluate(() => {
-    const c = (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts
-    return { count: c.length, state: c[0]!.state }
-  })
-  expect(context).toEqual({ count: 1, state: 'running' })
-  await button.click()
-  await expect(button).toHaveAttribute('aria-pressed', 'false')
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts[0]!.state,
-      ),
-    )
-    .toBe('suspended')
-  await page.reload()
-  await expect(button).toHaveAttribute('aria-pressed', 'false')
-  expect(requests).toHaveLength(5)
-})
 
 test('cancels a pending load without delayed playback and allows retry', async ({ page }) => {
-  await page.route('**/audio/*.mp3', async (route) => {
-    await new Promise((resolve) => setTimeout(resolve, 600))
-    await route.continue().catch(() => {})
+  const pendingRoutes: Route[] = []
+  const failedRequests: string[] = []
+  page.on('requestfailed', (request) => {
+    if (request.url().endsWith('.mp3')) failedRequests.push(request.url())
+  })
+  await page.route('**/audio/*.mp3', (route) => {
+    pendingRoutes.push(route)
   })
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
   await expect(button).toHaveAttribute('aria-busy', 'true')
+  await expect(button).toHaveAttribute('aria-pressed', 'false')
+  await expect(button).toHaveAttribute('aria-label', 'Cancel ambient sound loading')
+  await expect.poll(() => pendingRoutes.length).toBe(5)
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'false')
-  await page.waitForTimeout(800)
+  await Promise.all(pendingRoutes.map((route) => route.continue().catch(() => {})))
+  await expect.poll(() => failedRequests.length).toBe(5)
+  await expect.poll(() => page.evaluate(audioState)).toBe('suspended')
+  await page.unroute('**/audio/*.mp3')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await expect(button).toHaveAttribute('aria-pressed', 'true')
-  expect(
-    await page.evaluate(
-      () => (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts.length,
-    ),
-  ).toBe(1)
+  expect(await page.evaluate(() => (window.testAudioContexts ?? []).length)).toBe(1)
 })
 
 test('keeps available layers on secondary errors, but base-water failures are accessible and retryable', async ({
@@ -110,12 +167,14 @@ test('keeps available layers on secondary errors, but base-water failures are ac
   await page.route('**/audio/wind.mp3', (route) => route.abort())
   await page.route('**/audio/water.mp3', (route) => route.abort())
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
   await expect(page.locator('[data-sound-status]')).toContainText('Ambient sound is unavailable')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await page.unroute('**/audio/water.mp3')
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await expect(button).toHaveAttribute('aria-pressed', 'true')
 })
@@ -124,55 +183,33 @@ test('pauses/resumes, retains activation over motion preference changes and dest
   page,
 }) => {
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: true })
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts[0]!.state,
-      ),
-    )
-    .toBe('suspended')
+  await expect.poll(() => page.evaluate(audioState)).toBe('suspended')
   await page.evaluate(() => {
     Object.defineProperty(document, 'hidden', { configurable: true, value: false })
     document.dispatchEvent(new Event('visibilitychange'))
   })
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts[0]!.state,
-      ),
-    )
-    .toBe('running')
+  await expect.poll(() => page.evaluate(audioState)).toBe('running')
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await expect(page.locator('#landscape canvas')).toHaveCount(1)
   await expect(button).toHaveAttribute('aria-pressed', 'true')
-  expect(
-    await page.evaluate(
-      () => (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts.length,
-    ),
-  ).toBe(1)
+  expect(await page.evaluate(() => (window.testAudioContexts ?? []).length)).toBe(1)
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
   )
-  await expect
-    .poll(() =>
-      page.evaluate(
-        () =>
-          (window as unknown as { testAudioContexts: AudioContext[] }).testAudioContexts[0]!.state,
-      ),
-    )
-    .toBe('closed')
+  await expect.poll(() => page.evaluate(audioState)).toBe('closed')
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
   )
+  await waitForScene(page)
   await expect(button).toHaveAttribute('aria-pressed', 'false')
 })
 
@@ -185,19 +222,21 @@ test('decodes within the total buffer budget and draws both icons with GPU contr
     if (message.type() === 'error') errors.push(message.text())
   })
   await page.goto('/?seed=42&startTime=00:00')
+  await waitForScene(page)
   await expect(page.locator('main')).toHaveAttribute('data-ui-mask', 'gpu')
   const button = page.locator('.scene-sound-trigger')
-  const bounds = await button.boundingBox()
-  expect(bounds!.width).toBeGreaterThanOrEqual(44)
-  expect(bounds!.height).toBeGreaterThanOrEqual(44)
+  const bounds = required(await button.boundingBox())
+  expect(bounds.width).toBeGreaterThanOrEqual(44)
+  expect(bounds.height).toBeGreaterThanOrEqual(44)
   await page.screenshot({ path: info.outputPath('sound-off-night.png') })
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await page.screenshot({ path: info.outputPath('sound-on-night.png') })
   const bytes = await page.evaluate(async () => {
-    const context = new OfflineAudioContext(1, 1, 48000)
+    const context = new OfflineAudioContext(1, 1, 32000)
     const buffers = await Promise.all(
-      ['water', 'wind', 'rain', 'insects', 'birds'].map(async (name) => {
+      ['water', 'wind', 'rain', 'insects', 'birds', 'waterfall'].map(async (name) => {
         const response = await fetch(`/audio/${name}.mp3`)
         return context.decodeAudioData(await response.arrayBuffer())
       }),
@@ -208,36 +247,39 @@ test('decodes within the total buffer budget and draws both icons with GPU contr
   expect(errors).toEqual([])
 })
 
-test('refused background resume turns sound off, and renderer failure disables it', async ({
+test('refused background resume turns sound off, and scene failure releases audio', async ({
   page,
 }) => {
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await page.evaluate(() => {
-    const context = (window as unknown as { testAudioContexts: AudioContext[] })
-      .testAudioContexts[0]!
+    const context = window.testAudioContexts?.[0]
+    if (!context) throw new Error('Expected an audio context')
     context.resume = () => Promise.reject(new Error('Resume denied'))
     document.dispatchEvent(new Event('visibilitychange'))
   })
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await expect(page.locator('[data-sound-status]')).toContainText('Please try again')
-  await page.evaluate(() => {
-    const canvas = document.querySelector<HTMLCanvasElement>('#landscape canvas')!
-    canvas.dispatchEvent(new Event('webglcontextlost', { cancelable: true }))
-  })
-  await expect(button).toBeDisabled()
+  await page.evaluate(() => window.dispatchEvent(new Event('scene-timeout')))
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'failed')
+  await expect(button).toBeHidden()
+  await expect.poll(() => page.evaluate(audioState)).toBe('closed')
 })
 
 test('a late background-suspension failure cannot disable a newer activation', async ({ page }) => {
   await page.goto('/?seed=42')
+  await waitForScene(page)
   const button = page.locator('.scene-sound-trigger')
   await button.click()
+  await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await page.evaluate(() => {
-    const context = (window as unknown as { testAudioContexts: AudioContext[] })
-      .testAudioContexts[0]!
+    const context = window.testAudioContexts?.[0]
+    if (!context) throw new Error('Expected an audio context')
     const suspend = context.suspend.bind(context)
     context.suspend = () =>
       new Promise<void>((_resolve, reject) => {
@@ -256,8 +298,10 @@ test('a late background-suspension failure cannot disable a newer activation', a
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
   await page.evaluate(async () => {
-    ;(window as unknown as { rejectOldSuspension(): void }).rejectOldSuspension()
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    const reject = window.rejectOldSuspension
+    if (!reject) throw new Error('Expected a pending suspension')
+    reject()
+    await Promise.resolve()
   })
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(page.locator('[data-sound-status]')).toBeEmpty()

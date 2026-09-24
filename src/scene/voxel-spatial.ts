@@ -1,3 +1,4 @@
+import { required } from '../invariant'
 import type { Voxel } from './voxel-world'
 
 export type VoxelIndex = {
@@ -15,8 +16,8 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
     const half = Math.fround(voxel.size) / 2
     const center = [voxel.x, voxel.y, voxel.z].map(Math.fround)
     for (let axis = 0; axis < 3; axis++) {
-      boxes[i * 6 + axis] = center[axis]! - half
-      boxes[i * 6 + axis + 3] = center[axis]! + half
+      boxes[i * 6 + axis] = required(center[axis]) - half
+      boxes[i * 6 + axis + 3] = required(center[axis]) + half
     }
   })
   const order = Uint32Array.from(voxels, (_, i) => i)
@@ -28,21 +29,23 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
     const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
     for (let i = start; i < end; i++)
       for (let a = 0; a < 3; a++) {
-        box[a] = Math.min(box[a]!, boxes[order[i]! * 6 + a]!)
-        box[a + 3] = Math.max(box[a + 3]!, boxes[order[i]! * 6 + a + 3]!)
+        box[a] = Math.min(required(box[a]), required(boxes[required(order[i]) * 6 + a]))
+        box[a + 3] = Math.max(required(box[a + 3]), required(boxes[required(order[i]) * 6 + a + 3]))
       }
     bounds.push(...box)
     if (end - start > 8) {
       let axis = 0
-      for (let a = 1; a < 3; a++) if (box[a + 3]! - box[a]! > box[axis + 3]! - box[axis]!) axis = a
+      for (let a = 1; a < 3; a++)
+        if (required(box[a + 3]) - required(box[a]) > required(box[axis + 3]) - required(box[axis]))
+          axis = a
       order
         .subarray(start, end)
         .sort(
           (a, b) =>
-            boxes[a * 6 + axis]! +
-            boxes[a * 6 + axis + 3]! -
-            boxes[b * 6 + axis]! -
-            boxes[b * 6 + axis + 3]!,
+            required(boxes[a * 6 + axis]) +
+            required(boxes[a * 6 + axis + 3]) -
+            required(boxes[b * 6 + axis]) -
+            required(boxes[b * 6 + axis + 3]),
         )
       const middle = (start + end) >>> 1
       nodes[node * 4] = build(start, middle)
@@ -55,18 +58,18 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
   // Float64 retains the exact tops used by narrow-phase tests, including grid boundaries.
   const x = Math.floor((bounds[0] ?? 0) / 2)
   const z = Math.floor((bounds[2] ?? 0) / 2)
-  const width = voxels.length ? Math.floor(bounds[3]! / 2) - x + 1 : 0
-  const height = voxels.length ? Math.floor(bounds[5]! / 2) - z + 1 : 0
+  const width = voxels.length ? Math.floor(required(bounds[3]) / 2) - x + 1 : 0
+  const height = voxels.length ? Math.floor(required(bounds[5]) / 2) - z + 1 : 0
   const tops = new Float64Array(width * height).fill(-Infinity)
   for (let i = 0; i < boxes.length; i += 6) {
-    const x0 = Math.floor(boxes[i]! / 2) - x,
-      x1 = Math.floor(boxes[i + 3]! / 2) - x
-    const z0 = Math.floor(boxes[i + 2]! / 2) - z,
-      z1 = Math.floor(boxes[i + 5]! / 2) - z
+    const x0 = Math.floor(required(boxes[i]) / 2) - x,
+      x1 = Math.floor(required(boxes[i + 3]) / 2) - x
+    const z0 = Math.floor(required(boxes[i + 2]) / 2) - z,
+      z1 = Math.floor(required(boxes[i + 5]) / 2) - z
     for (let row = z0; row <= z1; row++)
       for (let column = x0; column <= x1; column++) {
         const at = row * width + column
-        tops[at] = Math.max(tops[at]!, boxes[i + 4]!)
+        tops[at] = Math.max(required(tops[at]), required(boxes[i + 4]))
       }
   }
   return {
@@ -86,17 +89,21 @@ export function overlappingVoxels(
   const { bounds, boxes, nodes, order } = index
   const overlaps = (data: Float64Array, offset: number) => {
     for (let a = 0; a < 3; a++)
-      if (data[offset + a]! > box[a + 3]! || data[offset + a + 3]! < box[a]!) return false
+      if (
+        required(data[offset + a]) > required(box[a + 3]) ||
+        required(data[offset + a + 3]) < required(box[a])
+      )
+        return false
     return true
   }
   const walk = (node: number) => {
     if (!overlaps(bounds, node * 6)) return
-    if (nodes[node * 4]! >= 0) {
-      walk(nodes[node * 4]!)
-      walk(nodes[node * 4 + 1]!)
+    if (required(nodes[node * 4]) >= 0) {
+      walk(required(nodes[node * 4]))
+      walk(required(nodes[node * 4 + 1]))
     } else {
-      for (let i = nodes[node * 4 + 2]!; i < nodes[node * 4 + 3]!; i++) {
-        const id = order[i]!
+      for (let i = required(nodes[node * 4 + 2]); i < required(nodes[node * 4 + 3]); i++) {
+        const id = required(order[i])
         if (overlaps(boxes, id * 6)) visit(id)
       }
     }
@@ -120,13 +127,13 @@ export function firstVoxelHit(
     let near = -Infinity,
       end = nearest
     for (let a = 0; a < 3; a++) {
-      const d = direction[a]!,
-        o = origin[a]!
+      const d = required(direction[a]),
+        o = required(origin[a])
       if (d === 0) {
-        if (o < data[offset + a]! || o > data[offset + a + 3]!) return Infinity
+        if (o < required(data[offset + a]) || o > required(data[offset + a + 3])) return Infinity
       } else {
-        const t1 = (data[offset + a]! - o) / d
-        const t2 = (data[offset + a + 3]! - o) / d
+        const t1 = (required(data[offset + a]) - o) / d
+        const t2 = (required(data[offset + a + 3]) - o) / d
         near = Math.max(near, Math.min(t1, t2))
         end = Math.min(end, Math.max(t1, t2))
       }
@@ -137,8 +144,8 @@ export function firstVoxelHit(
   }
   const walk = (node: number) => {
     if (entry(bounds, node * 6) > nearest) return
-    const left = nodes[node * 4]!,
-      right = nodes[node * 4 + 1]!
+    const left = required(nodes[node * 4]),
+      right = required(nodes[node * 4 + 1])
     if (left >= 0) {
       if (entry(bounds, left * 6) < entry(bounds, right * 6)) {
         walk(left)
@@ -148,8 +155,8 @@ export function firstVoxelHit(
         walk(left)
       }
     } else {
-      for (let i = nodes[node * 4 + 2]!; i < nodes[node * 4 + 3]!; i++) {
-        const id = order[i]!
+      for (let i = required(nodes[node * 4 + 2]); i < required(nodes[node * 4 + 3]); i++) {
+        const id = required(order[i])
         if (accept && !accept(id)) continue
         const distance = entry(boxes, id * 6, true)
         if (distance <= nearest) {

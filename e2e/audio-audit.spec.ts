@@ -33,6 +33,14 @@ test('three-minute production mix has headroom and no silent loop gaps', async (
     expect(result.peak).toBeLessThan(0.25)
     expect(result.maxStep).toBeLessThan(0.1)
     expect(Math.min(...result.rms.slice(2))).toBeGreaterThan(0.0001)
+    const flowing = [...result.waterfallRms.slice(40, 90), ...result.waterfallRms.slice(130, 150)]
+    expect(Math.min(...flowing)).toBeGreaterThan(0.000001)
+    const silent = [
+      ...result.waterfallRms.slice(15, 30),
+      ...result.waterfallRms.slice(110, 120),
+      ...result.waterfallRms.slice(170),
+    ]
+    expect(Math.max(...silent)).toBeLessThan(Math.min(...flowing) * 0.001)
     await info.attach('audio-audit.json', {
       body: JSON.stringify(result, null, 2),
       contentType: 'application/json',

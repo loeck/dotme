@@ -1,62 +1,5 @@
 @import 'tailwindcss';
 
-.scene-loader {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 100;
-  place-items: center;
-  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
-  background: #080a0d;
-  opacity: 1;
-  transition: opacity 600ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-html[data-scene-loading] .scene-loader {
-  display: grid;
-}
-
-html[data-scene-loading='loading'] .profile-panel {
-  visibility: hidden;
-}
-
-html[data-scene-loading='revealing'] .scene-loader {
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* The single opaque overlay reveals both the scene and the profile together. */
-html[data-scene-loading] #landscape {
-  transition: none;
-}
-
-.scene-loader__content {
-  width: min(100%, 360px);
-  text-align: center;
-  /* Optical centering accounts for the transparent space above the small cubes. */
-  transform: translateY(-16px);
-}
-
-.scene-loader__visual {
-  position: relative;
-  width: min(100%, 144px);
-  aspect-ratio: 288 / 160;
-  margin: 0 auto;
-}
-
-.scene-loader canvas {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.scene-loader__title {
-  margin: 0;
-  color: #9aa6ad;
-  font-size: 0.6875rem;
-  line-height: 1.6;
-}
-
 .scene-info-trigger,
 .scene-sound-trigger {
   position: absolute;
@@ -178,62 +121,6 @@ html[data-scene-loading] #landscape {
   .scene-info-trigger,
   .scene-sound-trigger {
     transition: none;
-  }
-}
-
-.scene-loader__fallback {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-}
-
-.scene-loader__fallback i {
-  width: 8px;
-  height: 8px;
-  background: #a3b9c8;
-  transform: rotate(-30deg) skewX(30deg) scaleY(0.86);
-  animation: loader-pulse 1400ms ease-in-out infinite;
-}
-
-.scene-loader__fallback i:nth-child(2) {
-  animation-delay: -1120ms;
-}
-.scene-loader__fallback i:nth-child(3) {
-  animation-delay: -840ms;
-}
-.scene-loader__fallback i:nth-child(4) {
-  animation-delay: -560ms;
-}
-.scene-loader__fallback i:nth-child(5) {
-  animation-delay: -280ms;
-}
-.scene-loader[data-paused='true'] .scene-loader__fallback i {
-  animation-play-state: paused;
-}
-
-.scene-loader[data-rendered='true'] .scene-loader__fallback {
-  display: none;
-}
-
-@keyframes loader-pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .scene-loader {
-    transition: none;
-  }
-  .scene-loader__fallback i {
-    animation: none;
   }
 }
 

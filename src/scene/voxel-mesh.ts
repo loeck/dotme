@@ -1,11 +1,15 @@
-import { BoxGeometry, Color } from 'three'
+import { BoxGeometry, Color } from 'three/webgpu'
 
+import { required } from '../invariant'
+import { prepareGeometryBounds, prepareShadowBounds } from './geometry-bounds'
+import type { PreparedBounds } from './geometry-bounds'
 import { createVoxelIndex, overlappingVoxels } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelMaterial, VoxelWorld } from './voxel-world'
 
 export type TerrainBatch = {
   material: VoxelMaterial
+  bounds: PreparedBounds
   positions: Float32Array
   normals: Int8Array
   colors: Float32Array
@@ -14,6 +18,7 @@ export type TerrainBatch = {
 export type PreparedTerrain = {
   batches: TerrainBatch[]
   shadowMatrices: Float32Array[]
+  shadowBounds: PreparedBounds[]
   index: VoxelIndex
   totalFaces: number
   exposedFaces: number
@@ -38,22 +43,24 @@ export function exposedVoxelFaces(index: VoxelIndex, id: number): boolean[] {
       positive = face % 2 === 0
     const u = (axis + 1) % 3,
       v = (axis + 2) % 3
-    const plane = box[axis + (positive ? 3 : 0)]!
-    let uncovered = [[box[u]!, box[v]!, box[u + 3]!, box[v + 3]!]]
+    const plane = required(box[axis + (positive ? 3 : 0)])
+    let uncovered: [number, number, number, number][] = [
+      [required(box[u]), required(box[v]), required(box[u + 3]), required(box[v + 3])],
+    ]
     for (const other of nearby) {
       const b = index.boxes.subarray(other * 6, other * 6 + 6)
       if (
         positive
-          ? b[axis]! > plane + epsilon || b[axis + 3]! <= plane + epsilon
-          : b[axis + 3]! < plane - epsilon || b[axis]! >= plane - epsilon
+          ? required(b[axis]) > plane + epsilon || required(b[axis + 3]) <= plane + epsilon
+          : required(b[axis + 3]) < plane - epsilon || required(b[axis]) >= plane - epsilon
       )
         continue
-      const next: number[][] = []
-      for (const [x0, y0, x1, y1] of uncovered as [number, number, number, number][]) {
-        const loX = Math.max(x0, b[u]!),
-          loY = Math.max(y0, b[v]!)
-        const hiX = Math.min(x1, b[u + 3]!),
-          hiY = Math.min(y1, b[v + 3]!)
+      const next: [number, number, number, number][] = []
+      for (const [x0, y0, x1, y1] of uncovered) {
+        const loX = Math.max(x0, required(b[u])),
+          loY = Math.max(y0, required(b[v]))
+        const hiX = Math.min(x1, required(b[u + 3])),
+          hiY = Math.min(y1, required(b[v + 3]))
         if (hiX <= loX || hiY <= loY) {
           next.push([x0, y0, x1, y1])
           continue
@@ -79,10 +86,10 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
   let offset = 0,
     exposedFaces = 0
   const color = new Color()
-  for (const material of Object.keys(world.groups) as VoxelMaterial[]) {
+  for (const material of ['ground', 'shore', 'rock'] as const) {
     const chunks = new Map<string, number[]>()
     for (let i = offset; i < offset + world.groups[material].count; i++) {
-      const voxel = world.voxels[i]!
+      const voxel = required(world.voxels[i])
       const key = `${Math.floor(voxel.x / 12)}:${Math.floor(voxel.z / 12)}`
       const chunk = chunks.get(key) ?? []
       if (!chunks.has(key)) chunks.set(key, chunk)
@@ -95,7 +102,7 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
         c: number[] = [],
         triangles: number[] = []
       for (const id of ids) {
-        const voxel = world.voxels[id]!
+        const voxel = required(world.voxels[id])
         color.setHex(voxel.color)
         const visible = exposedVoxelFaces(index, id)
         for (let face = 0; face < 6; face++) {
@@ -118,20 +125,25 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
           triangles.push(base, base + 2, base + 1, base + 2, base + 3, base + 1)
         }
       }
-      if (p.length)
+      if (p.length) {
+        const batchPositions = new Float32Array(p)
         batches.push({
           material,
-          positions: new Float32Array(p),
+          positions: batchPositions,
+          bounds: prepareGeometryBounds(batchPositions),
           normals: new Int8Array(n),
           colors: new Float32Array(c),
           indices: p.length / 3 <= 65535 ? new Uint16Array(triangles) : new Uint32Array(triangles),
         })
+      }
     }
   }
   cube.dispose()
+  const shadowMatrices = prepareShadowMatrices(world)
   return {
     batches,
-    shadowMatrices: prepareShadowMatrices(world),
+    shadowMatrices,
+    shadowBounds: shadowMatrices.map(prepareShadowBounds),
     index,
     totalFaces: world.voxels.length * 6,
     exposedFaces,
@@ -142,10 +154,10 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
 function prepareShadowMatrices(world: VoxelWorld) {
   const matrices: Float32Array[] = []
   let offset = 0
-  for (const kind of Object.keys(world.groups) as VoxelMaterial[]) {
+  for (const kind of ['ground', 'shore', 'rock'] as const) {
     const chunks = new Map<string, number[]>()
     for (let i = offset; i < offset + world.groups[kind].count; i++) {
-      const voxel = world.voxels[i]!
+      const voxel = required(world.voxels[i])
       const key = `${Math.floor(voxel.x / 6)}:${Math.floor(voxel.z / 6)}`
       const chunk = chunks.get(key) ?? []
       if (!chunks.has(key)) chunks.set(key, chunk)
@@ -155,7 +167,7 @@ function prepareShadowMatrices(world: VoxelWorld) {
     for (const ids of chunks.values()) {
       const batch = new Float32Array(ids.length * 16)
       ids.forEach((id, i) => {
-        const voxel = world.voxels[id]!,
+        const voxel = required(world.voxels[id]),
           start = i * 16
         batch[start] = batch[start + 5] = batch[start + 10] = voxel.size
         batch[start + 12] = voxel.x

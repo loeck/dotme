@@ -1,10 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/tsconfig",
-  "include": ["src/**/*.ts", "vite.config.ts", "vitest.config.ts", "playwright.config.ts"],
+  "include": ["src/**/*.ts", "e2e/**/*.ts", "scripts/**/*.ts", "scripts/**/*.mjs", "*.config.ts"],
   "compilerOptions": {
-    "target": "ES2022",
+    "target": "ES2023",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
-    "module": "ESNext",
+    "module": "Preserve",
     "moduleResolution": "Bundler",
     "moduleDetection": "force",
     "allowImportingTsExtensions": true,
@@ -18,6 +18,18 @@
     "noFallthroughCasesInSwitch": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "types": ["vite/client"]
+    "types": ["vite/client"],
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "exactOptionalPropertyTypes": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noUncheckedSideEffectImports": true,
+    "allowJs": true,
+    "checkJs": true,
+    "paths": {
+      "/audio-audit.js": ["./e2e/audio-audit-harness.ts"]
+    }
   }
 }

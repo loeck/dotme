@@ -14,6 +14,60 @@
     <link rel="canonical" href="https://loeck.me/" />
     <link rel="icon" href="/favicon.ico" />
     <style>
+      html,
+      body {
+        margin: 0;
+        min-height: 100%;
+        background: #080a0d;
+        color: #e4e8ed;
+      }
+      #landscape,
+      #scene-canvas {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+      #landscape {
+        z-index: -1;
+      }
+      #scene-canvas {
+        display: block;
+        touch-action: none;
+      }
+      .scene-loader {
+        display: none;
+      }
+      [data-scene-loading='loading'] .scene-loader {
+        display: block;
+        position: fixed;
+        z-index: 100;
+        top: calc(50% + 30px);
+        width: 100%;
+        text-align: center;
+        font: 10.5px/1.6 monospace;
+        letter-spacing: 0.015em;
+        color: #92a2a9;
+        pointer-events: none;
+      }
+      .scene-loader p {
+        margin: 0;
+        visibility: hidden;
+      }
+      [data-loader-rendered='true'] .scene-loader p {
+        visibility: visible;
+      }
+      [data-scene-loading='loading'] .profile-panel {
+        visibility: hidden;
+      }
+      html:not([data-scene-loading='ready']) .scene-info-trigger,
+      html:not([data-scene-loading='ready']) .scene-sound-trigger {
+        visibility: hidden;
+        pointer-events: none;
+      }
+      [data-scene-loading='failed'] #scene-canvas {
+        visibility: hidden;
+      }
       /* Inline so the custom point is available before JS or an image request. */
       @media (hover: hover) and (pointer: fine) {
         html {
@@ -31,17 +85,25 @@
     </style>
     <link rel="stylesheet" href="/src/styles.css" />
     <script>
-      document.documentElement.dataset.sceneLoading = 'loading'
-      // Also recover if the entry module itself cannot be downloaded.
-      window.setTimeout(() => {
-        if (document.documentElement.dataset.sceneLoading !== 'loading') return
-        delete document.documentElement.dataset.sceneLoading
-        const main = document.querySelector('main')
-        if (main) {
-          main.inert = false
-          main.removeAttribute('aria-busy')
+      ;(() => {
+        const root = document.documentElement
+        let deadline = 0
+        const stop = () => clearTimeout(deadline)
+        const start = () => {
+          stop()
+          root.dataset.sceneLoading = 'loading'
+          delete root.dataset.loaderRendered
+          deadline = window.setTimeout(() => {
+            root.dataset.sceneLoading = 'failed'
+            document.querySelector('main')?.removeAttribute('aria-busy')
+            window.dispatchEvent(new Event('scene-timeout'))
+          }, 20000)
         }
-      }, 22000)
+        window.addEventListener('scene-settled', stop)
+        window.addEventListener('pagehide', stop)
+        window.addEventListener('scene-restart', start)
+        start()
+      })()
     </script>
     <script type="module" src="/src/main.ts"></script>
   </head>
@@ -49,21 +111,10 @@
     class="m-0 min-h-full min-w-[280px] select-none overflow-x-hidden bg-[#080a0d] font-mono text-sm font-normal leading-6 text-[#e4e8ed] antialiased"
   >
     <div class="scene-loader" role="status" aria-live="polite" aria-label="Loading the scenery">
-      <div class="scene-loader__content">
-        <div class="scene-loader__visual" aria-hidden="true">
-          <canvas width="144" height="80"></canvas>
-          <div class="scene-loader__fallback"><i></i><i></i><i></i><i></i><i></i></div>
-        </div>
-        <p class="scene-loader__title">Building a little world…</p>
-      </div>
+      <p>Building a little world…</p>
     </div>
     <main class="relative isolate min-h-svh overflow-hidden bg-[#080a0d]">
-      <div class="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
-        <div
-          id="landscape"
-          class="pointer-events-auto absolute inset-0 opacity-0 transition-opacity duration-300 ease-out motion-reduce:transition-none"
-        ></div>
-      </div>
+      <div id="landscape" aria-hidden="true"><canvas id="scene-canvas"></canvas></div>
       <header
         class="profile-panel relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
         aria-labelledby="profile-title"
@@ -182,9 +233,9 @@
       </p>
       <h3>Made with</h3>
       <p>
-        <a href="https://threejs.org/" target="_blank" rel="noreferrer">Three.js</a> and WebGL for
-        the landscape, water and atmosphere. A tiny, independent WebGL canvas brings the loading
-        cubes to life.
+        <a href="https://threejs.org/" target="_blank" rel="noreferrer">Three.js</a> and WebGPU
+        bring the landscape, water and atmosphere to life. The loading cubes share the landscape’s
+        canvas. Browsers without WebGPU display the profile on its own.
       </p>
       <p>
         <a href="https://vite.dev/" target="_blank" rel="noreferrer">Vite</a>,
@@ -219,14 +270,21 @@
           rel="noreferrer"
           >Sclolex</a
         >
-        (insects), and
+        (insects),
         <a
           href="https://freesound.org/people/VKProduktion/sounds/231537/"
           target="_blank"
           rel="noreferrer"
           >VKProduktion</a
         >
-        (birds). Shared on Freesound under
+        (birds), and
+        <a
+          href="https://bigsoundbank.com/mini-waterfall-s0996.html"
+          target="_blank"
+          rel="noreferrer"
+          >Joseph SARDIN</a
+        >
+        (waterfall). Recordings shared under
         <a
           href="https://creativecommons.org/publicdomain/zero/1.0/"
           target="_blank"

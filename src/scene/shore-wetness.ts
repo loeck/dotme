@@ -1,4 +1,19 @@
-import type { MeshStandardMaterial } from 'three'
+import {
+  uniform,
+  float,
+  smoothstep,
+  positionWorld,
+  normalWorld,
+  mix,
+  sin,
+  materialColor,
+  materialRoughness,
+  min,
+  max,
+  nodeObject,
+} from 'three/tsl'
+import { ConvertNode } from 'three/webgpu'
+import type { MeshStandardNodeMaterial } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
 
@@ -16,103 +31,58 @@ export function advanceShoreWetness(wetness: number, rainIntensity: number, delt
   return unit(equilibrium + (previous - equilibrium) * Math.exp(-rate * delta))
 }
 
-type MaterialHook = MeshStandardMaterial['onBeforeCompile']
-type Attachment = {
-  material: MeshStandardMaterial
-  previousCompile: MaterialHook
-  previousCacheKey: MeshStandardMaterial['customProgramCacheKey']
-  compile: MaterialHook
-  cacheKey: MeshStandardMaterial['customProgramCacheKey']
-}
-
-/** A composable surface treatment; base albedo and material parameters stay intact. */
+/** Node composition preserves previous color/roughness treatments and restores them. */
 export class ShoreWetness {
-  private readonly uniforms = { uShoreWetness: { value: 0 } }
-  private readonly attachments: Attachment[] = []
-
+  private readonly amount = uniform(0)
+  private readonly restores = new Map<MeshStandardNodeMaterial, () => void>()
   constructor(initialWetness = 0) {
     this.setWetness(initialWetness)
   }
-
   get wetness() {
-    return this.uniforms.uShoreWetness.value
+    return this.amount.value
   }
-
   setWetness(value: number) {
-    this.uniforms.uShoreWetness.value = unit(value)
+    this.amount.value = unit(value)
   }
-
   update(delta: number, rainIntensity: number) {
     this.setWetness(advanceShoreWetness(this.wetness, rainIntensity, delta))
   }
-
-  applyTo(material: MeshStandardMaterial) {
-    if (this.attachments.some((attachment) => attachment.material === material)) return
-    const previousCompile = material.onBeforeCompile
-    const previousCacheKey = material.customProgramCacheKey
-    const previousKey = previousCacheKey.call(material)
-    const compile: MaterialHook = (shader, renderer) => {
-      previousCompile.call(material, shader, renderer)
-      Object.assign(shader.uniforms, this.uniforms)
-      shader.vertexShader = `varying vec3 vShoreWetnessWorld;
-        varying float vShoreWetnessUp;
-        ${shader.vertexShader}`
-        .replace(
-          '#include <defaultnormal_vertex>',
-          `#include <defaultnormal_vertex>
-            vShoreWetnessUp = inverseTransformDirection(transformedNormal, viewMatrix).y;`,
-        )
-        .replace(
-          '#include <project_vertex>',
-          `#include <project_vertex>
-            vec4 shoreWetnessWorld = vec4(transformed, 1.0);
-            #ifdef USE_BATCHING
-              shoreWetnessWorld = batchingMatrix * shoreWetnessWorld;
-            #endif
-            #ifdef USE_INSTANCING
-              shoreWetnessWorld = instanceMatrix * shoreWetnessWorld;
-            #endif
-            vShoreWetnessWorld = (modelMatrix * shoreWetnessWorld).xyz;`,
-        )
-      shader.fragmentShader = `uniform float uShoreWetness;
-        varying vec3 vShoreWetnessWorld;
-        varying float vShoreWetnessUp;
-        ${shader.fragmentShader}`
-        .replace(
-          '#include <color_fragment>',
-          `#include <color_fragment>
-            // Rain collects on upward faces; runoff leaves weaker marks on sides.
-            // Low bank ledges retain more moisture than high, exposed stone.
-            float shoreLow = 1.0 - smoothstep(${(WATER_LEVEL + 0.15).toFixed(3)}, 2.0, vShoreWetnessWorld.y);
-            float shoreExposure = mix(0.2, 1.0, smoothstep(0.1, 0.8, vShoreWetnessUp));
-            shoreExposure *= smoothstep(-0.8, -0.1, vShoreWetnessUp);
-            float shorePatch = 0.92 + 0.08 * sin(vShoreWetnessWorld.x * 2.7 + vShoreWetnessWorld.z * 1.3);
-            float shoreWet = uShoreWetness * shoreExposure * mix(0.65, 1.0, shoreLow) * shorePatch;
-            diffuseColor.rgb *= 1.0 - shoreWet * 0.28;`,
-        )
-        .replace(
-          '#include <roughnessmap_fragment>',
-          `#include <roughnessmap_fragment>
-            roughnessFactor = mix(roughnessFactor, min(roughnessFactor, max(0.12, roughnessFactor * 0.46)), shoreWet);`,
-        )
-    }
-    const cacheKey = () => `${previousKey}:shore-wetness-v1`
-    material.onBeforeCompile = compile
-    material.customProgramCacheKey = cacheKey
+  applyTo(material: MeshStandardNodeMaterial) {
+    if (this.restores.has(material)) return
+    const oldColor = material.colorNode,
+      oldRoughness = material.roughnessNode
+    const low = float(1).sub(smoothstep(WATER_LEVEL + 0.15, 2, positionWorld.y))
+    const exposure = mix(0.2, 1, smoothstep(0.1, 0.8, normalWorld.y)).mul(
+      smoothstep(-0.8, -0.1, normalWorld.y),
+    )
+    const patch = sin(positionWorld.x.mul(2.7).add(positionWorld.z.mul(1.3)))
+      .mul(0.08)
+      .add(0.92)
+    const wet = this.amount
+      .mul(exposure)
+      .mul(mix(0.65, 1, low))
+      .mul(patch)
+    const baseRoughness = oldRoughness
+      ? nodeObject(new ConvertNode<'float'>(oldRoughness, 'float'))
+      : materialRoughness
+    const color = (oldColor ?? materialColor).mul(float(1).sub(wet.mul(0.28)))
+    const roughness = mix(
+      baseRoughness,
+      min(baseRoughness, max(0.12, baseRoughness.mul(0.46))),
+      wet,
+    )
+    material.colorNode = color
+    material.roughnessNode = roughness
     material.needsUpdate = true
-    this.attachments.push({ material, previousCompile, previousCacheKey, compile, cacheKey })
-  }
-
-  dispose() {
-    // A later wrapper may still reference our uniforms. Zeroing them is safe in that case.
-    this.setWetness(0)
-    for (const { material, compile, cacheKey, previousCompile, previousCacheKey } of this
-      .attachments) {
-      if (material.onBeforeCompile === compile) material.onBeforeCompile = previousCompile
-      if (material.customProgramCacheKey === cacheKey)
-        material.customProgramCacheKey = previousCacheKey
+    this.restores.set(material, () => {
+      if (material.colorNode === color) material.colorNode = oldColor
+      if (material.roughnessNode === roughness) material.roughnessNode = oldRoughness
       material.needsUpdate = true
-    }
-    this.attachments.length = 0
+    })
+  }
+  dispose() {
+    this.setWetness(0)
+    for (const restore of this.restores.values()) restore()
+    this.restores.clear()
   }
 }

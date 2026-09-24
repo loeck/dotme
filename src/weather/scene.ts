@@ -1,3 +1,4 @@
+import { required } from '../invariant'
 import type { GpsPosition } from '../scene-params'
 import type { RainState } from '../scene/rain-simulation'
 import type { WeatherPreset } from '../scene/weather'
@@ -75,7 +76,7 @@ export function randomSceneWeather(seed: number): SceneWeather {
     ['overcast', 0.55],
     ['overcast', 1],
   ]
-  const [weather, intensity] = presets[Math.floor(random() * presets.length)]!
+  const [weather, intensity] = required(presets[Math.floor(random() * presets.length)])
   const angle = random() * Math.PI * 2
   const speed = 1 + random() * 4
   return {
@@ -105,7 +106,7 @@ export async function preloadSceneWeather({
     () => controller.abort(new DOMException('Weather preload timed out', 'TimeoutError')),
     timeoutMs,
   )
-  let onAbort!: () => void
+  let onAbort: (() => void) | undefined
   const cancelled = new Promise<never>((_resolve, reject) => {
     onAbort = () => reject(controller.signal.reason)
     controller.signal.addEventListener('abort', onAbort, { once: true })
@@ -114,7 +115,9 @@ export async function preloadSceneWeather({
     // The deadline covers the module download, fetch, body read and parsing.
     const request = import('./current').then(async ({ fetchWeather }) => {
       controller.signal.throwIfAborted()
-      return weatherForScene(await fetchWeather({ position, signal: controller.signal }))
+      return weatherForScene(
+        await fetchWeather({ ...(position ? { position } : {}), signal: controller.signal }),
+      )
     })
     return await Promise.race([request, cancelled])
   } catch {
@@ -123,6 +126,6 @@ export async function preloadSceneWeather({
   } finally {
     clearTimeout(timeout)
     signal.removeEventListener('abort', abort)
-    controller.signal.removeEventListener('abort', onAbort)
+    if (onAbort) controller.signal.removeEventListener('abort', onAbort)
   }
 }

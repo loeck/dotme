@@ -3,8 +3,8 @@ const interactive = (target: EventTarget | null) =>
 
 /** The position is immediate; only the point's shape deforms with pointer speed. */
 export function initSceneCursor(element: HTMLDivElement): () => void {
-  const shape = element.firstElementChild as HTMLElement | null
-  if (!shape || typeof element.showPopover !== 'function') return () => {}
+  const shape = element.firstElementChild
+  if (!(shape instanceof HTMLElement) || typeof element.showPopover !== 'function') return () => {}
   const root = document.documentElement
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)')
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')

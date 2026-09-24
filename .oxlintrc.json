@@ -26,7 +26,41 @@
       {
         "allow": ["**/*.css"]
       }
-    ]
+    ],
+    "typescript/no-non-null-assertion": "error",
+    "typescript/no-explicit-any": "error",
+    "typescript/ban-ts-comment": [
+      "error",
+      {
+        "ts-expect-error": true,
+        "ts-ignore": true,
+        "ts-nocheck": true,
+        "ts-check": false
+      }
+    ],
+    "typescript/consistent-type-assertions": [
+      "error",
+      {
+        "assertionStyle": "never"
+      }
+    ],
+    "typescript/no-unsafe-assignment": "error",
+    "typescript/no-unsafe-argument": "error",
+    "typescript/no-unsafe-call": "error",
+    "typescript/no-unsafe-member-access": "error",
+    "typescript/no-unsafe-return": "error",
+    "type-policy/no-definite-assignment": "error"
   },
-  "ignorePatterns": ["dist", "node_modules", ".vercel", ".cache"]
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    ".vercel",
+    ".cache",
+    "artifacts",
+    "test-results",
+    "playwright-report",
+    ".output",
+    ".tanstack"
+  ],
+  "jsPlugins": ["./scripts/type-policy.ts"]
 }

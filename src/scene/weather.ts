@@ -9,7 +9,10 @@ export const WEATHER = {
 } as const
 
 export function parseWeather(value: string | null): WeatherPreset {
-  return value !== null && Object.hasOwn(WEATHER, value)
-    ? (value as WeatherPreset)
+  return value === 'clear' ||
+    value === 'partly-cloudy' ||
+    value === 'cloudy' ||
+    value === 'overcast'
+    ? value
     : 'partly-cloudy'
 }

@@ -13,18 +13,26 @@ export function initAmbientSound(autoplay = true) {
     rainIntensity: 0,
   }
   let enabled = false,
-    generation = 0,
-    failed = false
+    requested = false,
+    loaded = false,
+    generation = 0
   let suspension: ReturnType<typeof setTimeout> | undefined
 
   const display = (loading = false, message = '') => {
     if (!button) return
     button.setAttribute('aria-pressed', String(enabled))
-    button.setAttribute('aria-label', enabled ? 'Disable ambient sound' : 'Enable ambient sound')
+    button.setAttribute(
+      'aria-label',
+      loading
+        ? 'Cancel ambient sound loading'
+        : enabled
+          ? 'Disable ambient sound'
+          : 'Enable ambient sound',
+    )
     button.setAttribute('aria-busy', String(loading))
     button.dataset.loading = String(loading)
-    const icon = button.querySelector('[data-sound-state]')!
-    icon.setAttribute(
+    const icon = button.querySelector('[data-sound-state]')
+    icon?.setAttribute(
       'd',
       enabled ? 'M16 9a5 5 0 0 1 0 6 M19 6a9 9 0 0 1 0 12' : 'M16 9l6 6 M22 9l-6 6',
     )
@@ -33,6 +41,8 @@ export function initAmbientSound(autoplay = true) {
   }
   const disable = (message = '') => {
     enabled = false
+    requested = false
+    loaded = false
     generation++
     mixer?.dispose(document.hidden ? 0 : 0.3)
     mixer = undefined
@@ -46,10 +56,10 @@ export function initAmbientSound(autoplay = true) {
   const failure = () => disable('Ambient sound is unavailable. Please try again.')
 
   const enable = async (automatic = false) => {
-    if (failed || lifetime.signal.aborted || (automatic && document.hidden)) return
-    enabled = true
+    if (lifetime.signal.aborted || (automatic && document.hidden)) return
+    requested = true
     const version = ++generation
-    const isCurrent = () => enabled && version === generation
+    const isCurrent = () => requested && version === generation
     clearTimeout(suspension)
     display(true)
     try {
@@ -74,12 +84,14 @@ export function initAmbientSound(autoplay = true) {
       instance.setEnvironment(environment)
       await instance.load()
       if (!isCurrent()) return
+      loaded = true
       if (document.hidden) {
         instance.pause()
         await audioContext.suspend()
       } else {
         if (audioContext.state !== 'running') throw new Error('Audio suspended')
         instance.resume()
+        enabled = true
       }
       if (isCurrent()) display()
     } catch {
@@ -92,7 +104,7 @@ export function initAmbientSound(autoplay = true) {
   button?.addEventListener(
     'click',
     () => {
-      if (enabled) disable()
+      if (requested) disable()
       else void enable()
     },
     { signal: lifetime.signal },
@@ -102,12 +114,12 @@ export function initAmbientSound(autoplay = true) {
     'visibilitychange',
     () => {
       clearTimeout(suspension)
-      if (!context || !enabled) return
+      if (!context || !requested || !loaded) return
       if (document.hidden) {
         mixer?.pause()
         const version = generation
         suspension = setTimeout(() => {
-          if (enabled && version === generation && document.hidden)
+          if (requested && version === generation && document.hidden)
             void context?.suspend().catch(() => {
               if (version === generation) failure()
             })
@@ -117,9 +129,13 @@ export function initAmbientSound(autoplay = true) {
         void context
           .resume()
           .then(() => {
-            if (enabled && version === generation && !document.hidden) {
+            if (requested && version === generation && !document.hidden) {
               if (context?.state !== 'running') failure()
-              else mixer?.resume()
+              else {
+                mixer?.resume()
+                enabled = true
+                display()
+              }
             }
             return undefined
           })
@@ -134,14 +150,13 @@ export function initAmbientSound(autoplay = true) {
   display()
   if (autoplay) void enable(true)
   return {
+    startAutoplay() {
+      // An explicit choice made during preparation always wins over delayed autoplay.
+      if (generation === 0) void enable(true)
+    },
     setEnvironment(state: AmbientEnvironment) {
       environment = state
       mixer?.setEnvironment(state)
-    },
-    fail() {
-      failed = true
-      disable()
-      if (button) button.disabled = true
     },
     dispose() {
       lifetime.abort()

@@ -1,0 +1,26 @@
+import { expect, test } from '@playwright/test'
+
+test('WebGPU water matches fixed-step reference and dissipates energy', async ({ page }) => {
+  await page.goto('http://127.0.0.1:4175/e2e/gpu-water.html')
+  await page.waitForFunction(() => Boolean(window.gpuWater || window.gpuWaterError))
+  expect(await page.evaluate(() => window.gpuWaterError)).toBeUndefined()
+  const result = await page.evaluate(async () => {
+    if (!window.gpuWater) throw new Error('Water harness failed to initialize')
+    const actualBackend = window.gpuWater.backend
+    const odd = await window.gpuWater.verify(1)
+    const diagnostics = await window.gpuWater.verify(24)
+    const wind = await window.gpuWater.verifyWind()
+    await window.gpuWater.dispose()
+    return { backend: actualBackend, oddError: odd.maxError, wind, ...diagnostics }
+  })
+  expect(result.backend).toBe('webgpu')
+  expect(result.finite).toBe(true)
+  expect(result.oddError).toBeLessThan(0.0001)
+  expect(result.maxError).toBeLessThan(0.0001)
+  expect(result.height).toBeGreaterThan(0)
+  expect(result.height).toBeLessThan(0.22)
+  expect(result.velocity).toBeLessThan(1.5)
+  expect(result.laterEnergy).toBeLessThan(result.energy)
+  expect(result.wind.samples).toBe(9216)
+  for (const error of result.wind.maxErrors) expect(error).toBeLessThan(0.0001)
+})

@@ -1,5 +1,9 @@
-import { BoxGeometry, BufferGeometry, Color, Float32BufferAttribute } from 'three'
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js'
+import { attribute, max, sin, cos, vec3, float } from 'three/tsl'
+import type { Node } from 'three/webgpu'
+import { BoxGeometry, BufferGeometry, Color, Float32BufferAttribute } from 'three/webgpu'
+
+import { required } from '../invariant'
 
 export type FishSpecies = 'carp' | 'roach' | 'perch'
 
@@ -29,10 +33,10 @@ export function createFishGeometry(species: FishSpecies) {
   }
   for (let ring = 0; ring < rings.length - 1; ring++)
     for (let side = 0; side < 8; side++) {
-      const a = point(rings[ring]!, side),
-        b = point(rings[ring]!, side + 1)
-      const c = point(rings[ring + 1]!, side),
-        d = point(rings[ring + 1]!, side + 1)
+      const a = point(required(rings[ring]), side),
+        b = point(required(rings[ring]), side + 1)
+      const c = point(required(rings[ring + 1]), side),
+        d = point(required(rings[ring + 1]), side + 1)
       triangle(a, c, b)
       triangle(b, c, d)
     }
@@ -79,7 +83,7 @@ export function createFishGeometry(species: FishSpecies) {
     eye.setAttribute('color', new Float32BufferAttribute(values, 3))
     parts.push(eye)
   }
-  const geometry = mergeGeometries(parts)!
+  const geometry = required(mergeGeometries(parts))
   for (const part of parts) part.dispose()
   const positions = geometry.getAttribute('position')
   const weights: number[] = []
@@ -92,33 +96,30 @@ export function createFishGeometry(species: FishSpecies) {
   return geometry
 }
 
-/** Three nested joints behind a stable head, shared by positions and normals. */
-export const FISH_RIG_GLSL = `
-attribute vec3 aFishJoints;
-attribute float aFishPhase;
-attribute vec3 aFishMotion;
-vec3 fishJoint(vec3 point, float pivot, float angle, bool normalOnly) {
-  if (!normalOnly) point.z -= pivot;
-  float c = cos(angle), s = sin(angle);
-  point.xz = mat2(c, -s, s, c) * point.xz;
-  if (!normalOnly) point.z += pivot;
-  return point;
+/** Distal joints first, in physical proportions, for positions and normals. */
+export function fishRigNode(point: Node<'vec3'>, normalOnly = false) {
+  const motion = attribute('aFishMotion', 'vec3'),
+    joints = attribute('aFishJoints', 'vec3'),
+    phase = attribute('aFishPhase', 'float')
+  const aspect = max(0.1, motion.z)
+  const body = sin(phase).mul(0.16).mul(motion.x).add(motion.y.mul(0.16))
+  const rear = sin(phase.sub(0.85)).mul(0.4).mul(motion.x).add(motion.y.mul(0.22))
+  const tail = sin(phase.sub(1.65)).mul(0.7).mul(motion.x).add(motion.y.mul(0.18))
+  let result = vec3(point.x.mul(normalOnly ? float(1).div(aspect) : aspect), point.yz)
+  for (const [pivot, angle] of [
+    [-0.51, tail.mul(joints.z)],
+    [-0.25, rear.mul(joints.y)],
+    [0.18, body.mul(joints.x)],
+  ] as const) {
+    const z = normalOnly ? result.z : result.z.sub(pivot)
+    result = vec3(
+      result.x.mul(cos(angle)).add(z.mul(sin(angle))),
+      result.y,
+      z
+        .mul(cos(angle))
+        .sub(result.x.mul(sin(angle)))
+        .add(normalOnly ? 0 : pivot),
+    )
+  }
+  return vec3(result.x.mul(normalOnly ? aspect : float(1).div(aspect)), result.yz)
 }
-vec3 fishRig(vec3 point, bool normalOnly) {
-  // Swim in physical proportions: the slender instance scale previously
-  // compressed lateral tail displacement until the whole fish looked rigid.
-  float aspect = max(0.1, aFishMotion.z);
-  point.x *= normalOnly ? 1.0 / aspect : aspect;
-  float effort = aFishMotion.x;
-  float turn = aFishMotion.y;
-  float body = sin(aFishPhase) * 0.16 * effort + turn * 0.16;
-  float rear = sin(aFishPhase - 0.85) * 0.40 * effort + turn * 0.22;
-  float tail = sin(aFishPhase - 1.65) * 0.70 * effort + turn * 0.18;
-  // Distal joints first; parent rotations carry both the child and its pivot.
-  point = fishJoint(point, -0.51, tail * aFishJoints.z, normalOnly);
-  point = fishJoint(point, -0.25, rear * aFishJoints.y, normalOnly);
-  point = fishJoint(point, 0.18, body * aFishJoints.x, normalOnly);
-  point.x *= normalOnly ? aspect : 1.0 / aspect;
-  return point;
-}
-`

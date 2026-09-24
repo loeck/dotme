@@ -1,82 +1,63 @@
-/** The visible distant relief also occludes direct celestial light on the lake. */
-export const DISTANT_HORIZON_GLSL = `
+import { exp, float, fract, max, mix, sin, smoothstep, vec2, vec3, atan } from 'three/tsl'
+import type { Node } from 'three/webgpu'
 
-float horizonHash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-}
+const hash = (v: Node<'vec2'>) => fract(sin(v.dot(vec2(127.1, 311.7))).mul(43758.5453))
+export function horizonNoise(p: Node<'vec2'>) {
+  const i = p.floor(),
+    f0 = fract(p),
+    f = f0.mul(f0).mul(float(3).sub(f0.mul(2)))
 
-float horizonNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
   return mix(
-    mix(horizonHash(i), horizonHash(i + vec2(1.0, 0.0)), f.x),
-    mix(horizonHash(i + vec2(0.0, 1.0)), horizonHash(i + vec2(1.0, 1.0)), f.x),
-    f.y
-  );
+    mix(hash(i), hash(i.add(vec2(1, 0))), f.x),
+    mix(hash(i.add(vec2(0, 1))), hash(i.add(1)), f.x),
+    f.y,
+  )
 }
-
-float horizonRidge(float x, float centre, float width, float height) {
-  float distanceFromPeak = (x - centre) / width;
-  return height * exp(-distanceFromPeak * distanceFromPeak);
+export function distantPeaks(azimuth: Node<'float'>, seed: Node<'float'>, mobile: Node<'float'>) {
+  const ridge = (centre: number, width: number, height: number) =>
+    exp(azimuth.sub(centre).div(width).pow2().negate()).mul(height)
+  const farMobile = max(ridge(-0.165, 0.105, 0.072), ridge(0.185, 0.112, 0.067)).add(0.004)
+  const middleMobile = max(
+    ridge(-0.197, 0.073, 0.047),
+    max(ridge(0.135, 0.075, 0.043), ridge(0.066, 0.048, 0.028)),
+  ).add(0.002)
+  const nearMobile = max(ridge(-0.215, 0.065, 0.034), ridge(0.215, 0.061, 0.028))
+  const farDesktop = max(
+    max(ridge(-0.64, 0.32, 0.108), ridge(-0.32, 0.17, 0.075)),
+    max(max(ridge(0.47, 0.27, 0.108), ridge(0.75, 0.13, 0.052)), ridge(0.035, 0.12, 0.038)),
+  ).add(0.005)
+  const middleDesktop = max(
+    max(ridge(-0.72, 0.24, 0.078), ridge(-0.235, 0.14, 0.052)),
+    max(max(ridge(0.42, 0.2, 0.067), ridge(0.71, 0.14, 0.066)), ridge(0.16, 0.095, 0.037)),
+  ).add(0.004)
+  const nearDesktop = max(
+    max(ridge(-0.57, 0.18, 0.052), ridge(-0.27, 0.12, 0.032)),
+    max(ridge(0.55, 0.14, 0.053), ridge(0.28, 0.15, 0.03)),
+  )
+  const detail = horizonNoise(vec2(azimuth.mul(18).add(seed), 4.7))
+    .mul(0.6)
+    .add(horizonNoise(vec2(azimuth.mul(52), seed.add(8))).mul(0.3))
+    .add(horizonNoise(vec2(azimuth.mul(109), seed.add(3))).mul(0.1))
+  return vec3(
+    mix(farDesktop, farMobile, mobile).add(detail.sub(0.5).mul(0.031)),
+    mix(middleDesktop, middleMobile, mobile).add(
+      horizonNoise(vec2(azimuth.mul(38).sub(seed), 22.1))
+        .sub(0.5)
+        .mul(0.024),
+    ),
+    mix(nearDesktop, nearMobile, mobile).add(
+      horizonNoise(vec2(azimuth.mul(54).add(seed), 53.9))
+        .sub(0.5)
+        .mul(0.016),
+    ),
+  )
 }
-
-vec3 distantPeaks(float azimuth, float seed, float mobile) {
-  float farPeak;
-  float middlePeak;
-  float nearPeak;
-  if (mobile > 0.5) {
-    farPeak = 0.004 + max(
-      horizonRidge(azimuth, -0.165, 0.105, 0.072),
-      horizonRidge(azimuth, 0.185, 0.112, 0.067)
-    );
-    middlePeak = 0.002 + max(
-      horizonRidge(azimuth, -0.197, 0.073, 0.047),
-      max(horizonRidge(azimuth, 0.135, 0.075, 0.043), horizonRidge(azimuth, 0.066, 0.048, 0.028))
-    );
-    nearPeak = max(
-      horizonRidge(azimuth, -0.215, 0.065, 0.034),
-      horizonRidge(azimuth, 0.215, 0.061, 0.028)
-    );
-  } else {
-    farPeak = 0.005 + max(
-      max(horizonRidge(azimuth, -0.64, 0.32, 0.108), horizonRidge(azimuth, -0.32, 0.17, 0.075)),
-      max(
-        max(horizonRidge(azimuth, 0.47, 0.27, 0.108), horizonRidge(azimuth, 0.75, 0.13, 0.052)),
-        horizonRidge(azimuth, 0.035, 0.12, 0.038)
-      )
-    );
-    middlePeak = 0.004 + max(
-      max(horizonRidge(azimuth, -0.72, 0.24, 0.078), horizonRidge(azimuth, -0.235, 0.14, 0.052)),
-      max(
-        max(horizonRidge(azimuth, 0.42, 0.20, 0.067), horizonRidge(azimuth, 0.71, 0.14, 0.066)),
-        horizonRidge(azimuth, 0.16, 0.095, 0.037)
-      )
-    );
-    nearPeak = max(
-      max(horizonRidge(azimuth, -0.57, 0.18, 0.052), horizonRidge(azimuth, -0.27, 0.12, 0.032)),
-      max(horizonRidge(azimuth, 0.55, 0.14, 0.053), horizonRidge(azimuth, 0.28, 0.15, 0.030))
-    );
-  }
-
-  // Three scales roughen each crest without making an angular skyline.
-  float farDetail = horizonNoise(vec2(azimuth * 18.0 + seed, 4.7)) * 0.60
-    + horizonNoise(vec2(azimuth * 52.0, seed + 8.0)) * 0.30
-    + horizonNoise(vec2(azimuth * 109.0, seed + 3.0)) * 0.10;
-  farPeak += (farDetail - 0.5) * 0.031;
-  middlePeak += (horizonNoise(vec2(azimuth * 38.0 - seed, 22.1)) - 0.5) * 0.024;
-  nearPeak += (horizonNoise(vec2(azimuth * 54.0 + seed, 53.9)) - 0.5) * 0.016;
-
-  return vec3(farPeak, middlePeak, nearPeak);
+export function distantLightVisibility(
+  direction: Node<'vec3'>,
+  seed: Node<'float'>,
+  mobile: Node<'float'>,
+) {
+  const peaks = distantPeaks(atan(direction.x, direction.z.negate()), seed, mobile)
+  const crest = max(0, max(peaks.x, max(peaks.y, peaks.z)))
+  return smoothstep(crest.sub(0.009), crest.add(0.009), direction.y)
 }
-float distantLightVisibility(vec3 direction, float seed, float mobile) {
-  // All procedural crests lie below this elevation; ordinary daylight/night
-  // avoids evaluating the ridge noise at every shaded surface pixel.
-  if (direction.y > 0.16) return 1.0;
-  if (direction.y < -0.02) return 0.0;
-  vec3 peaks = distantPeaks(atan(direction.x, -direction.z), seed, mobile);
-  float crest = max(0.0, max(peaks.x, max(peaks.y, peaks.z)));
-  // A finite angular disc emerges progressively over the ridge.
-  return smoothstep(crest - 0.009, crest + 0.009, direction.y);
-}
-`

@@ -1,146 +1,145 @@
-import { Vector3 } from 'three'
-import type { MeshStandardMaterial } from 'three'
+import {
+  Fn,
+  dFdx,
+  dFdy,
+  fwidth,
+  exp,
+  clamp,
+  float,
+  vec2,
+  vec3,
+  sin,
+  cos,
+  mix,
+  smoothstep,
+  positionWorld,
+  uniform,
+  max,
+  min,
+  materialColor,
+} from 'three/tsl'
+import { Vector3 } from 'three/webgpu'
+import type { MeshStandardNodeMaterial } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
-import { WIND_WAVES } from './water-surface'
-import { createWindUniforms, updateWindUniforms } from './wind'
+import { createWindNodes, WAVE_SPECTRUM } from './water-surface'
+import { updateWindUniforms } from './wind'
 import type { WindState } from './wind'
-
 type WaterPointer = Readonly<{ x: number; z: number }>
 
-// These resolvable short waves make the light folds. Coefficients, dispersion,
-// packet envelopes and phases come from the same spectrum as the visible water.
-const FOCUS_WAVES = WIND_WAVES.filter(([, wavelength]) => wavelength <= 5.1 && wavelength >= 1.07)
-const gl = (value: number) => value.toFixed(9)
-
-const CAUSTICS_GLSL = `
-varying vec3 vCausticWorld;
-uniform float uTime;
-uniform float uCausticStrength;
-uniform vec2 uWindRotation;
-uniform vec4 uWindResponse;
-uniform vec3 uCausticPointer;
-
-// Symmetric Hessian of the SAME surface height (xx, xz, zz). Analytic
-// curvature avoids several full-spectrum samples or another capture pass.
-vec3 causticCurvature(vec2 p, float footprint) {
-  vec3 curvature = vec3(0.0);
-  ${FOCUS_WAVES.map(([angle, wavelength, amplitude, initialPhase]) => {
-    const k = (Math.PI * 2) / wavelength
-    const omega = Math.sqrt(9.81 * k)
-    const small = Math.max(0, Math.min(1, (5 - wavelength) / 5))
-    return `{
-      vec2 k = vec2(${gl(Math.cos(angle) * k)}, ${gl(Math.sin(angle) * k)});
-      k = vec2(k.x * uWindRotation.x - k.y * uWindRotation.y, k.x * uWindRotation.y + k.y * uWindRotation.x);
-      float spatial = dot(p, k);
-      vec2 crossK = vec2(-k.y, k.x) * 0.18;
-      float crossPhase = dot(p, crossK) + uTime * ${gl(omega * 0.025)} + ${gl(initialPhase * 1.7)};
-      float phase = spatial - uTime * ${gl(omega)} + ${gl(initialPhase)} + 0.42 * sin(crossPhase * 0.57);
-      vec2 phaseGradient = k + crossK * 0.2394 * cos(crossPhase * 0.57);
-      float groupPhase = spatial * 0.14 - uTime * ${gl(omega * 0.07)} + ${gl(initialPhase * 2.3)};
-      float alongPacket = 0.72 + 0.28 * cos(groupPhase);
-      float crossPacket = 0.64 + 0.36 * cos(crossPhase);
-      float packet = alongPacket * crossPacket;
-      vec2 packetGradient = -k * 0.0392 * sin(groupPhase) * crossPacket
-        -crossK * 0.36 * sin(crossPhase) * alongPacket;
-      vec3 kk = vec3(k.x * k.x, k.x * k.y, k.y * k.y);
-      vec3 cc = vec3(crossK.x * crossK.x, crossK.x * crossK.y, crossK.y * crossK.y);
-      vec3 kc = vec3(2.0 * k.x * crossK.x, k.x * crossK.y + k.y * crossK.x, 2.0 * k.y * crossK.y);
-      vec3 packetCurvature = -kk * 0.005488 * cos(groupPhase) * crossPacket
-        -cc * 0.36 * cos(crossPhase) * alongPacket
-        +kc * 0.014112 * sin(groupPhase) * sin(crossPhase);
-      vec3 phaseCurvature = -cc * 0.136458 * sin(crossPhase * 0.57);
-      vec3 phaseSquared = vec3(phaseGradient.x * phaseGradient.x,
-        phaseGradient.x * phaseGradient.y, phaseGradient.y * phaseGradient.y);
-      vec3 crossGradient = vec3(2.0 * phaseGradient.x * packetGradient.x,
-        phaseGradient.x * packetGradient.y + phaseGradient.y * packetGradient.x,
-        2.0 * phaseGradient.y * packetGradient.y);
-      float strength = mix(uWindResponse.x, uWindResponse.y, ${gl(small)});
-      float amplitude = ${gl(amplitude)} * (1.0 + ${gl(0.22 + small * 0.78)} * (strength - 1.0))
-        * (1.0 - smoothstep(${gl(wavelength * 0.18)}, ${gl(wavelength * 0.5)}, footprint));
-      curvature += amplitude * (sin(phase) * (packetCurvature - phaseSquared * packet)
-        + cos(phase) * (phaseCurvature * packet + crossGradient));
-    }`
-  }).join('\n')}
-  return curvature;
-}
-
-float lakeCausticLight(vec3 world) {
-  float depth = ${WATER_LEVEL.toFixed(3)} - world.y;
-  float depthFade = smoothstep(0.03, 0.24, depth) * (1.0 - smoothstep(2.0, 6.0, depth));
-  float footprint = max(length(dFdx(world.xz)), length(dFdy(world.xz)));
-  vec3 curvature = causticCurvature(world.xz, footprint);
-  float distanceToPointer = length(world.xz - uCausticPointer.xy);
-  float cursorFocus = 1.0 + 0.12 * exp(-distanceToPointer * 0.6) * uCausticPointer.z;
-  // Approximate refracted-ray convergence. Its gain is deliberately stylized,
-  // but every fold follows a real crest instead of sliding as a second layer.
-  curvature *= min(depth, 2.5) * 2.8 * cursorFocus;
-  float jacobian = (1.0 + curvature.x) * (1.0 + curvature.z) - curvature.y * curvature.y;
-  float convergence = clamp(1.0 / max(0.35, jacobian) - 1.0, 0.0, 1.0);
-  float width = max(fwidth(convergence) * 1.5, 0.025);
-  float line = smoothstep(0.02 - width, 0.7 + width, convergence);
-  return depthFade * uCausticStrength * line;
-}
-`
-
-/** A material extension: no extra draw, texture or light, and no emissive glow. */
 export class LakeCaustics {
   readonly uniforms = {
-    uTime: { value: 0 },
-    uCausticStrength: { value: 0.35 },
-    ...createWindUniforms(),
-    uCausticPointer: { value: new Vector3() },
+    ...createWindNodes(),
+    uCausticStrength: uniform(0),
+    uCausticPointer: uniform(new Vector3()),
   }
-  private readonly restores = new Map<MeshStandardMaterial, () => void>()
+  private readonly restores = new Map<MeshStandardNodeMaterial, () => void>()
+  private readonly reducedMotion: boolean
   private previousTime = 0
   private initializedWind = false
-
-  constructor(private readonly reducedMotion = false) {}
-
-  applyTo(material: MeshStandardMaterial) {
+  constructor(reducedMotion = false) {
+    this.reducedMotion = reducedMotion
+  }
+  applyTo(material: MeshStandardNodeMaterial) {
     if (this.restores.has(material)) return
-    const previousCompile = material.onBeforeCompile
-    const previousCacheKey = material.customProgramCacheKey
-    const cacheKey = material.customProgramCacheKey()
-    const compile: typeof material.onBeforeCompile = (shader, renderer) => {
-      previousCompile.call(material, shader, renderer)
-      Object.assign(shader.uniforms, this.uniforms)
-      shader.vertexShader = `varying vec3 vCausticWorld;\n${shader.vertexShader}`.replace(
-        '#include <project_vertex>',
-        `#include <project_vertex>
-        vec4 causticWorld = vec4(transformed, 1.0);
-        #ifdef USE_BATCHING
-          causticWorld = batchingMatrix * causticWorld;
-        #endif
-        #ifdef USE_INSTANCING
-          causticWorld = instanceMatrix * causticWorld;
-        #endif
-        vCausticWorld = (modelMatrix * causticWorld).xyz;`,
-      )
-      shader.fragmentShader = `${CAUSTICS_GLSL}\n${shader.fragmentShader}`
-        .replace(
-          'void main() {',
-          'void main() {\nfloat causticFocus = lakeCausticLight(vCausticWorld);',
+    const u = this.uniforms
+    const footprint = max(dFdx(positionWorld.xz).length(), dFdy(positionWorld.xz).length())
+    const curvature = Fn(() => {
+      const result = vec3(0).toVar()
+      const p = positionWorld.xz
+      for (const w of WAVE_SPECTRUM.filter(
+        (wave) => wave.wavelength <= 5.1 && wave.wavelength >= 1.07,
+      )) {
+        const k = vec2(
+          u.uWindRotation.x.mul(w.kx).sub(u.uWindRotation.y.mul(w.kz)),
+          u.uWindRotation.y.mul(w.kx).add(u.uWindRotation.x.mul(w.kz)),
         )
-        .replace(
-          '#include <lights_fragment_end>',
-          `#include <lights_fragment_end>
-        // Existing direct illumination already includes terrain/cloud shadows.
-        // Caustics concentrate that light; darkness remains dark.
-        reflectedLight.directDiffuse *= 1.0 + causticFocus;`,
+        const spatial = p.dot(k),
+          crossK = vec2(k.y.negate(), k.x).mul(w.crossScale)
+        const crossPhase = p
+          .dot(crossK)
+          .add(u.uTime.mul(w.omega * 0.025))
+          .add(w.phase * 1.7)
+        const phase = spatial
+          .sub(u.uTime.mul(w.omega))
+          .add(w.phase)
+          .add(sin(crossPhase.mul(0.57)).mul(0.42))
+        const gradient = k.add(crossK.mul(0.2394).mul(cos(crossPhase.mul(0.57))))
+        const group = spatial
+          .mul(0.14)
+          .sub(u.uTime.mul(w.omega * 0.07))
+          .add(w.phase * 2.3)
+        const along = cos(group).mul(0.28).add(0.72),
+          across = cos(crossPhase).mul(0.36).add(0.64),
+          packet = along.mul(across)
+        const packetGradient = k
+          .mul(-0.0392)
+          .mul(sin(group))
+          .mul(across)
+          .sub(crossK.mul(0.36).mul(sin(crossPhase)).mul(along))
+        const kk = vec3(k.x.mul(k.x), k.x.mul(k.y), k.y.mul(k.y))
+        const cc = vec3(crossK.x.mul(crossK.x), crossK.x.mul(crossK.y), crossK.y.mul(crossK.y))
+        const kc = vec3(
+          k.x.mul(crossK.x).mul(2),
+          k.x.mul(crossK.y).add(k.y.mul(crossK.x)),
+          k.y.mul(crossK.y).mul(2),
         )
-    }
-    material.onBeforeCompile = compile
-    material.customProgramCacheKey = () => `${cacheKey}:lake-caustics-v2`
+        const packetCurvature = kk
+          .mul(-0.005488)
+          .mul(cos(group))
+          .mul(across)
+          .sub(cc.mul(0.36).mul(cos(crossPhase)).mul(along))
+          .add(kc.mul(0.014112).mul(sin(group)).mul(sin(crossPhase)))
+        const phaseCurvature = cc.mul(-0.136458).mul(sin(crossPhase.mul(0.57)))
+        const squared = vec3(
+          gradient.x.mul(gradient.x),
+          gradient.x.mul(gradient.y),
+          gradient.y.mul(gradient.y),
+        )
+        const crossGradient = vec3(
+          gradient.x.mul(packetGradient.x).mul(2),
+          gradient.x.mul(packetGradient.y).add(gradient.y.mul(packetGradient.x)),
+          gradient.y.mul(packetGradient.y).mul(2),
+        )
+        const amplitude = mix(u.uWindResponse.x, u.uWindResponse.y, w.small)
+          .sub(1)
+          .mul(w.sensitivity)
+          .add(1)
+          .mul(w.amplitude)
+          .mul(float(1).sub(smoothstep(w.wavelength * 0.18, w.wavelength * 0.5, footprint)))
+        result.addAssign(
+          sin(phase)
+            .mul(packetCurvature.sub(squared.mul(packet)))
+            .add(cos(phase).mul(phaseCurvature.mul(packet).add(crossGradient)))
+            .mul(amplitude),
+        )
+      }
+      return result
+    })()
+    const depth = float(WATER_LEVEL).sub(positionWorld.y)
+    const depthFade = smoothstep(0.03, 0.24, depth).mul(float(1).sub(smoothstep(2, 6, depth)))
+    const cursorFocus = exp(positionWorld.xz.sub(u.uCausticPointer.xy).length().mul(-0.6))
+      .mul(u.uCausticPointer.z)
+      .mul(0.12)
+      .add(1)
+    const focusedCurvature = curvature.mul(min(depth, 2.5)).mul(2.8).mul(cursorFocus)
+    const jacobian = focusedCurvature.x
+      .add(1)
+      .mul(focusedCurvature.z.add(1))
+      .sub(focusedCurvature.y.mul(focusedCurvature.y))
+    const convergence = clamp(float(1).div(max(0.35, jacobian)).sub(1), 0, 1)
+    const width = max(fwidth(convergence).mul(1.5), 0.025)
+    const line = smoothstep(float(0.02).sub(width), width.add(0.7), convergence)
+    const focus = depthFade.mul(u.uCausticStrength).mul(line)
+    const previous = material.colorNode
+    const color = (previous ?? materialColor).mul(focus.add(1))
+    material.colorNode = color
     material.needsUpdate = true
     this.restores.set(material, () => {
-      if (material.onBeforeCompile !== compile) return
-      material.onBeforeCompile = previousCompile
-      material.customProgramCacheKey = previousCacheKey
+      if (material.colorNode === color) material.colorNode = previous
       material.needsUpdate = true
     })
   }
-
   update(
     time: number,
     wind: WindState,

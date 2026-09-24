@@ -2,6 +2,7 @@
   "name": "dotme",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite dev --port 3000",
@@ -11,14 +12,16 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
-    "benchmark:scene": "node scripts/benchmark-scene.mjs",
-    "lint": "oxlint",
-    "lint:fix": "oxlint --fix",
+    "benchmark:scene": "node scripts/benchmark-scene.ts",
+    "lint": "oxlint --type-aware",
+    "lint:fix": "oxlint --type-aware --fix",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
-    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm build",
+    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm build && pnpm bundle:size",
     "prepare": "husky",
-    "bundle:size": "node scripts/bundle-size.mjs"
+    "bundle:size": "node scripts/bundle-size.ts",
+    "e2e:gpu": "playwright test --config playwright.gpu.config.ts",
+    "e2e:extended": "playwright test --config playwright.extended.config.ts"
   },
   "dependencies": {
     "three": "0.186.0"
@@ -26,12 +29,13 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@tailwindcss/vite": "4.3.3",
-    "@types/node": "24.10.1",
+    "@types/node": "24.13.6",
     "@types/three": "0.186.0",
     "husky": "9.1.7",
     "lint-staged": "17.5.1",
     "oxfmt": "0.70.0",
     "oxlint": "1.85.0",
+    "oxlint-tsgolint": "7.0.2002",
     "tailwindcss": "4.3.3",
     "typescript": "7.0.2",
     "vite": "8.3.0",
@@ -39,7 +43,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,cjs,mjs,cts,mts}": [
-      "oxlint --fix",
+      "oxlint --type-aware --fix",
       "oxfmt"
     ],
     "*.{json,jsonc,css,md,html}": [

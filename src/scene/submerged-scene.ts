@@ -1,37 +1,39 @@
 import {
   Color,
   DataTexture,
-  DataUtils,
   HalfFloatType,
   LinearFilter,
   RedFormat,
   DepthTexture,
   Group,
   Mesh,
-  MeshStandardMaterial,
+  MeshStandardNodeMaterial,
   OrthographicCamera,
   PerspectiveCamera,
   Matrix4,
-  PlaneGeometry,
+  BufferGeometry,
+  BufferAttribute,
+  Box3,
+  Sphere,
+  Vector3,
   UnsignedIntType,
-  WebGLRenderTarget,
+  RenderTarget,
   Vector4,
   Vector2,
-  Float32BufferAttribute,
-} from 'three'
-import type { Scene, WebGLRenderer } from 'three'
+} from 'three/webgpu'
+import type { Scene, WebGPURenderer } from 'three/webgpu'
 
-import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import type { PreparedSubmergedSurface } from './lake-geometry-data'
 
 /** Layer 1 contains only the lit bed. The main and mirror cameras use layer 0. */
 export class SubmergedScene {
   /** Material hooks are installed by the engine after shared light/shadow hooks. */
-  get surfaceMaterials(): readonly MeshStandardMaterial[] {
+  get surfaceMaterials(): readonly MeshStandardNodeMaterial[] {
     return [this.material]
   }
 
-  readonly target = new WebGLRenderTarget(1, 1, {
+  readonly target = new RenderTarget(1, 1, {
     depthTexture: new DepthTexture(1, 1, UnsignedIntType),
     stencilBuffer: false,
   })
@@ -50,14 +52,15 @@ export class SubmergedScene {
   // simulation domain made fish narrower than two texels even on desktop.
   private readonly camera = new OrthographicCamera(-28, 28, 28, -28, 0.1, 80)
   private readonly group = new Group()
-  private readonly geometry: PlaneGeometry
-  private readonly material = new MeshStandardMaterial({
+  private readonly geometry: BufferGeometry
+  private readonly material = new MeshStandardNodeMaterial({
     color: 0xb4b59e,
     roughness: 0.96,
     vertexColors: true,
+    fog: false,
   })
 
-  constructor(scene: Scene, bed: LakeBed, floatColor: boolean) {
+  constructor(scene: Scene, bed: LakeBed, floatColor: boolean, prepared: PreparedSubmergedSurface) {
     // A steep oblique capture approximates the refracted viewing direction.
     // Unlike a zenith view, it preserves fish flanks and vertical caudal fins;
     // unlike the grazing main camera, it can still see the shallow lake bed.
@@ -75,44 +78,19 @@ export class SubmergedScene {
     const n = bed.resolution
     // One red-channel atlas retains both native grids without resampling. This
     // leaves a fragment sampler for rain even with the maximum lamp shadow count.
-    const shoreSize = Math.sqrt(bed.shore.length)
-    const atlasHeight = n + shoreSize
-    const data = new Uint16Array(shoreSize * atlasHeight)
-    for (let y = 0; y < n; y++) {
-      for (let x = 0; x < n; x++)
-        data[y * shoreSize + x] = DataUtils.toHalfFloat(bed.depth[y * n + x]!)
-    }
-    for (let i = 0; i < bed.shore.length; i++)
-      data[n * shoreSize + i] = DataUtils.toHalfFloat(bed.shore[i]!)
-    this.depthField = new DataTexture(data, shoreSize, atlasHeight, RedFormat, HalfFloatType)
+    const { atlas, atlasWidth, atlasHeight, geometry, colors, bounds } = prepared
+    this.depthField = new DataTexture(atlas, atlasWidth, atlasHeight, RedFormat, HalfFloatType)
     this.depthField.minFilter = this.depthField.magFilter = LinearFilter
     this.depthField.needsUpdate = true
-    this.fieldLayout = new Vector4(n / shoreSize, n / atlasHeight, 1 / shoreSize, 1 / atlasHeight)
-    this.geometry = new PlaneGeometry(LAKE_BOUNDS.size, LAKE_BOUNDS.size, n - 1, n - 1)
-    const positions = this.geometry.attributes.position!
-    const colors = new Float32Array(n * n * 3)
-    for (let i = 0; i < positions.count; i++) {
-      const x = i % n,
-        z = Math.floor(i / n)
-      positions.setXYZ(
-        i,
-        LAKE_BOUNDS.minX + ((x + 0.5) * LAKE_BOUNDS.size) / n,
-        WATER_LEVEL - Math.max(0.04, bed.depth[i]!),
-        LAKE_BOUNDS.minZ + ((z + 0.5) * LAKE_BOUNDS.size) / n,
-      )
-      // Low-frequency world-space variation stays independent of grid
-      // resolution; alternating vertex colors formed a visible striped mesh.
-      const worldX = positions.getX(i),
-        worldZ = positions.getZ(i)
-      const shade =
-        0.76 +
-        0.055 * Math.sin(worldX * 0.71 + Math.sin(worldZ * 0.43)) +
-        0.035 * Math.sin(worldZ * 0.93 - worldX * 0.37)
-      colors.set([shade, shade * 0.93, shade * 0.81], i * 3)
-    }
-    // Rows grow toward positive world z, keeping the triangles upward-facing.
-    this.geometry.computeVertexNormals()
-    this.geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
+    this.fieldLayout = new Vector4(n / atlasWidth, n / atlasHeight, 1 / atlasWidth, 1 / atlasHeight)
+    this.geometry = new BufferGeometry()
+    this.geometry.setAttribute('position', new BufferAttribute(geometry.positions, 3))
+    this.geometry.setAttribute('normal', new BufferAttribute(geometry.normals, 3))
+    this.geometry.setAttribute('uv', new BufferAttribute(geometry.uv, 2))
+    this.geometry.setAttribute('color', new BufferAttribute(colors, 3))
+    this.geometry.setIndex(new BufferAttribute(geometry.indices, 1))
+    this.geometry.boundingBox = new Box3(new Vector3(...bounds.min), new Vector3(...bounds.max))
+    this.geometry.boundingSphere = new Sphere(new Vector3(...bounds.center), bounds.radius)
     const floor = new Mesh(this.geometry, this.material)
     floor.receiveShadow = true
     this.group.add(floor)
@@ -142,18 +120,62 @@ export class SubmergedScene {
     this.bedTexel.set(1 / this.bedSize, 1 / this.bedSize)
   }
 
-  render(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera) {
+  async compileAsync(renderer: WebGPURenderer, scene: Scene, mainCamera: PerspectiveCamera) {
+    this.fishCamera.copy(mainCamera)
+    this.fishCamera.layers.set(3)
+    const compileCapture = (camera: OrthographicCamera | PerspectiveCamera) => {
+      const previous = renderer.getRenderTarget()
+      const background = scene.background
+      let compiled: Promise<void>
+      try {
+        scene.background = null
+        renderer.setRenderTarget(this.target)
+        compiled = renderer.compileAsync(scene, camera)
+      } finally {
+        scene.background = background
+        renderer.setRenderTarget(previous)
+      }
+      return compiled
+    }
+    await compileCapture(this.camera)
+    this.viewProjection.multiplyMatrices(
+      this.camera.projectionMatrix,
+      this.camera.matrixWorldInverse,
+    )
+    this.inverseViewProjection.copy(this.viewProjection).invert()
+    await compileCapture(this.fishCamera)
+  }
+
+  render(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera) {
+    if (this.camera.coordinateSystem !== renderer.coordinateSystem) {
+      this.camera.coordinateSystem = renderer.coordinateSystem
+      this.camera.updateProjectionMatrix()
+      this.viewProjection.multiplyMatrices(
+        this.camera.projectionMatrix,
+        this.camera.matrixWorldInverse,
+      )
+      this.inverseViewProjection.copy(this.viewProjection).invert()
+    }
     const previous = renderer.getRenderTarget()
-    const background = scene.background,
-      fog = scene.fog
+    const background = scene.background
     const clearColor = renderer.getClearColor(new Color())
     const clearAlpha = renderer.getClearAlpha()
     const viewport = renderer.getViewport(new Vector4())
     const scissor = renderer.getScissor(new Vector4())
     const scissorTest = renderer.getScissorTest()
+    const autoClear = renderer.autoClear
     try {
-      scene.background = new Color(0x080c11)
-      scene.fog = null
+      // Attachment clears cover the entire texture on WebGPU, independent of
+      // the scissor. Clear the atlas once, then preserve both capture regions.
+      renderer.setScissorTest(false)
+      this.target.viewport.set(0, 0, this.target.width, this.target.height)
+      this.target.scissor.copy(this.target.viewport)
+      renderer.setRenderTarget(this.target)
+      renderer.setClearColor(0, 0)
+      renderer.clear()
+      renderer.autoClear = false
+      renderer.setScissorTest(true)
+      scene.background = null
       // Render-target regions use device pixels. Renderer.setViewport would
       // multiply by DPR again and move the fish region off-atlas on mobile.
       this.target.viewport.set(0, 0, this.bedSize, this.bedSize)
@@ -161,6 +183,8 @@ export class SubmergedScene {
       renderer.setRenderTarget(this.target)
       renderer.render(scene, this.camera)
       this.fishCamera.copy(camera)
+      this.fishCamera.coordinateSystem = renderer.coordinateSystem
+      this.fishCamera.updateProjectionMatrix()
       this.fishCamera.layers.set(3)
       this.fishCamera.updateMatrixWorld()
       this.fishInverseViewProjection.multiplyMatrices(
@@ -174,8 +198,8 @@ export class SubmergedScene {
       renderer.setRenderTarget(this.target)
       renderer.render(scene, this.fishCamera)
     } finally {
+      renderer.autoClear = autoClear
       scene.background = background
-      scene.fog = fog
       renderer.setClearColor(clearColor, clearAlpha)
       renderer.setRenderTarget(previous)
       renderer.setViewport(viewport)

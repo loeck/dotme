@@ -1,62 +1,34 @@
 import {
+  Discard,
+  Fn,
+  float,
+  max,
+  min,
+  renderOutput,
+  smoothstep,
+  texture,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from 'three/tsl'
+import {
   CanvasTexture,
+  DataTexture,
+  RGBAFormat,
   LinearFilter,
+  NoToneMapping,
+  LinearSRGBColorSpace,
+  SRGBColorSpace,
   Mesh,
+  MeshBasicNodeMaterial,
   OrthographicCamera,
   PlaneGeometry,
   Scene,
-  ShaderMaterial,
   Vector2,
-} from 'three'
-import type { Texture, WebGLRenderer } from 'three'
-
-export const CONTRAST_FRAGMENT = `
-  varying vec2 vUv;
-  uniform sampler2D tScene;
-  uniform sampler2D tMask;
-  uniform float uExposure;
-  uniform vec2 uSize;
-  float backdropLuminance(vec2 uv) {
-    vec3 scene = texture2D(tScene, uv).rgb * uExposure;
-    scene = scene / (1.0 + scene);
-    return dot(scene, vec3(0.2126, 0.7152, 0.0722));
-  }
-  void main() {
-    // The mask stores the dark stroke in alpha and white glyph coverage in RGB.
-    // Build both once on the CPU, avoiding a dilation pass on every scene pixel.
-    vec4 mask = texture2D(tMask, vUv);
-    float alpha = mask.r * mask.a;
-    float expanded = mask.a;
-    if (expanded < 0.002) discard;
-    if (alpha > 0.0) {
-      // Canvas ignores the DOM's grayscale font smoothing. A subpixel erosion
-      // restores the original regular weight, retaining layout and sharp edges.
-      vec2 inset = vec2(0.2) / uSize;
-      vec4 left = texture2D(tMask, vUv - vec2(inset.x, 0.0));
-      vec4 right = texture2D(tMask, vUv + vec2(inset.x, 0.0));
-      vec4 above = texture2D(tMask, vUv + vec2(0.0, inset.y));
-      vec4 below = texture2D(tMask, vUv - vec2(0.0, inset.y));
-      alpha = min(alpha, min(min(left.r * left.a, right.r * right.a), min(above.r * above.a, below.r * below.a)));
-    }
-    // Smooth the backdrop without blurring glyph coverage.
-    vec2 tap = vec2(1.5) / uSize;
-    float luminance = 0.0;
-    for (int y = -1; y <= 1; y++) for (int x = -1; x <= 1; x++) {
-      float weight = (x == 0 ? 0.5 : 0.25) * (y == 0 ? 0.5 : 0.25);
-      luminance += backdropLuminance(vUv + vec2(float(x), float(y)) * tap) * weight;
-    }
-    float transition = 0.025;
-    float ink = 1.0 - smoothstep(0.179 - transition, 0.179 + transition, luminance);
-    // A continuous dark keyline preserves the silhouette even when the fluid
-    // ink passes through the same gray as the sky. Coverage stays subpixel thin.
-    // Dark ink already contrasts with a bright scene: do not thicken it.
-    float support = smoothstep(0.08, 0.35, ink) * 0.7;
-    float outline = max(0.0, expanded - alpha) * support;
-    float coverage = alpha + outline;
-    gl_FragColor = vec4(vec3(ink * alpha / max(coverage, 0.001)), coverage);
-    #include <colorspace_fragment>
-  }
-`
+} from 'three/webgpu'
+import type { Texture, WebGPURenderer } from 'three/webgpu'
 
 /** Rasterize DOM glyph coverage only when layout changes; shade it on the GPU every frame. */
 export class SceneContrast {
@@ -65,16 +37,12 @@ export class SceneContrast {
   private readonly scene = new Scene()
   private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
   private readonly geometry = new PlaneGeometry(2, 2)
-  private readonly material = new ShaderMaterial({
-    vertexShader:
-      'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-    fragmentShader: CONTRAST_FRAGMENT,
-    uniforms: {
-      tScene: { value: null },
-      tMask: { value: this.texture },
-      uExposure: { value: 1 },
-      uSize: { value: new Vector2() },
-    },
+  private readonly fallback = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, RGBAFormat)
+  private readonly backdrop = texture(this.fallback)
+  private readonly mask = texture(this.texture)
+  private readonly exposure = uniform(1)
+  private readonly size = uniform(new Vector2(1, 1))
+  private readonly material = new MeshBasicNodeMaterial({
     transparent: true,
     depthTest: false,
     depthWrite: false,
@@ -89,10 +57,49 @@ export class SceneContrast {
   private height = 0
   private dpr = 0
 
-  constructor(
-    private readonly host: HTMLElement | null,
-    private readonly redraw: () => void,
-  ) {
+  private readonly host: HTMLElement | null
+  private readonly redraw: () => void
+  constructor(host: HTMLElement | null, redraw: () => void) {
+    this.host = host
+    this.redraw = redraw
+    this.canvas.width = this.canvas.height = 1
+    this.canvas.getContext('2d')?.clearRect(0, 0, 1, 1)
+    this.fallback.needsUpdate = true
+    this.material.vertexNode = vec4(uv().mul(2).sub(1), 0, 1)
+    this.material.fragmentNode = Fn(() => {
+      const mask = this.mask.sample(uv()),
+        expanded = mask.a
+      Discard(expanded.lessThan(0.002))
+      const alpha = mask.r.mul(mask.a).toVar(),
+        inset = vec2(0.2).div(this.size)
+      for (const direction of [vec2(1, 0), vec2(-1, 0), vec2(0, 1), vec2(0, -1)]) {
+        const neighbor = this.mask.sample(uv().add(inset.mul(direction)))
+        alpha.assign(min(alpha, neighbor.r.mul(neighbor.a)))
+      }
+      const luminance = float(0).toVar(),
+        tap = vec2(1.5).div(this.size)
+      for (let y = -1; y <= 1; y++)
+        for (let x = -1; x <= 1; x++) {
+          const scene = this.backdrop
+            .sample(uv().flipY().add(vec2(x, y).mul(tap)))
+            .rgb.mul(this.exposure)
+          luminance.addAssign(
+            scene
+              .div(scene.add(1))
+              .dot(vec3(0.2126, 0.7152, 0.0722))
+              .mul((x === 0 ? 0.5 : 0.25) * (y === 0 ? 0.5 : 0.25)),
+          )
+        }
+      const ink = smoothstep(0.154, 0.204, luminance).oneMinus(),
+        support = smoothstep(0.08, 0.35, ink).mul(0.7)
+      const coverage = alpha.add(max(0, expanded.sub(alpha)).mul(support))
+      return renderOutput(
+        vec4(vec3(ink.mul(alpha).div(max(coverage, 0.001))), coverage),
+        NoToneMapping,
+        SRGBColorSpace,
+      )
+    })()
+
     this.texture.minFilter = this.texture.magFilter = LinearFilter
     this.texture.generateMipmaps = false
     this.scene.add(new Mesh(this.geometry, this.material))
@@ -157,19 +164,19 @@ export class SceneContrast {
     if (!this.host) return false
     const ctx = this.canvas.getContext('2d')
     if (!ctx) return false
-    const width = Math.ceil(bounds.width * this.dpr)
-    const height = Math.ceil(bounds.height * this.dpr)
+    const width = Math.max(1, Math.ceil(bounds.width * this.dpr))
+    const height = Math.max(1, Math.ceil(bounds.height * this.dpr))
     const resized = this.canvas.width !== width || this.canvas.height !== height
     this.canvas.width = width
     this.canvas.height = height
     if (resized) {
-      // WebGL2 texture storage is immutable: a viewport resize needs a new
+      // GPU texture storage is immutable: a viewport resize needs a new
       // allocation, not a sub-image upload into the previous dimensions.
       this.texture.dispose()
       this.texture = new CanvasTexture(this.canvas)
       this.texture.minFilter = this.texture.magFilter = LinearFilter
       this.texture.generateMipmaps = false
-      this.material.uniforms.tMask!.value = this.texture
+      this.mask.value = this.texture
     }
     ctx.scale(this.dpr, this.dpr)
     ctx.fillStyle = 'white'
@@ -181,13 +188,15 @@ export class SceneContrast {
       const walker = document.createTreeWalker(profile, NodeFilter.SHOW_TEXT)
       const range = document.createRange()
       while (walker.nextNode()) {
-        const node = walker.currentNode as Text
-        const parent = node.parentElement!
+        const node = walker.currentNode
+        if (!(node instanceof Text)) continue
+        const parent = node.parentElement
+        if (!parent) continue
         if (!node.textContent?.trim() || parent.closest('.sr-only, svg')) continue
         const style = getComputedStyle(parent)
         ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
         for (let i = 0; i < node.length; i++) {
-          const char = node.data[i]!
+          const char = node.data.charAt(i)
           if (!char.trim()) continue
           range.setStart(node, i)
           range.setEnd(node, i + 1)
@@ -225,7 +234,7 @@ export class SceneContrast {
     return true
   }
 
-  render(renderer: WebGLRenderer, sceneTexture: Texture) {
+  render(renderer: WebGPURenderer, sceneTexture: Texture) {
     if (!this.host || this.disposed) return
     const bounds = renderer.domElement.getBoundingClientRect()
     const dpr = renderer.getPixelRatio()
@@ -236,15 +245,21 @@ export class SceneContrast {
       this.dirty = true
     }
     if (this.dirty && !this.rebuild(bounds)) return
-    this.material.uniforms.tScene!.value = sceneTexture
-    this.material.uniforms.uExposure!.value = renderer.toneMappingExposure
-    this.material.uniforms.uSize!.value.set(this.width, this.height)
-    const clear = renderer.autoClear
+    this.backdrop.value = sceneTexture
+    this.exposure.value = renderer.toneMappingExposure
+    this.size.value.set(this.width, this.height)
+    const clear = renderer.autoClear,
+      toneMapping = renderer.toneMapping,
+      outputColorSpace = renderer.outputColorSpace
+    renderer.toneMapping = NoToneMapping
+    renderer.outputColorSpace = LinearSRGBColorSpace
     renderer.autoClear = false
     try {
       renderer.render(this.scene, this.camera)
     } finally {
       renderer.autoClear = clear
+      renderer.toneMapping = toneMapping
+      renderer.outputColorSpace = outputColorSpace
     }
     this.host.dataset.uiMask = 'gpu'
     document.documentElement.dataset.uiMask = 'gpu'
@@ -254,12 +269,28 @@ export class SceneContrast {
     this.dirty = true
   }
 
+  async compileAsync(renderer: WebGPURenderer) {
+    const toneMapping = renderer.toneMapping,
+      outputColorSpace = renderer.outputColorSpace
+    let compiled: Promise<void>
+    try {
+      renderer.toneMapping = NoToneMapping
+      renderer.outputColorSpace = LinearSRGBColorSpace
+      compiled = renderer.compileAsync(this.scene, this.camera)
+    } finally {
+      renderer.toneMapping = toneMapping
+      renderer.outputColorSpace = outputColorSpace
+    }
+    await compiled
+  }
+
   dispose() {
     this.disposed = true
     this.lifetime.abort()
     this.observer.disconnect()
     this.dialogObserver.disconnect()
     this.texture.dispose()
+    this.fallback.dispose()
     this.geometry.dispose()
     this.material.dispose()
     if (this.host) delete this.host.dataset.uiMask

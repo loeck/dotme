@@ -1,6 +1,7 @@
 import { PerspectiveCamera, Scene, Vector3 } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
+import { required } from '../invariant'
 import { LAKE_BOUNDS } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { LakeFireflies } from './lake-fireflies'
@@ -86,14 +87,14 @@ describe('lake atmosphere', () => {
     expect(flies.mesh.visible).toBe(false)
     flies.update(5 + 1 / 60, wind, { nightFactor: 0.5 })
     expect(flies.mesh.visible).toBe(true)
-    const first = flies.mesh.material.uniforms.uIntensity!.value
+    const first = flies.diagnostics.intensity
     expect(first).toBeGreaterThan(0)
     expect(first).toBeLessThan(0.02)
     for (let frame = 2; frame <= 300; frame++)
       flies.update(5 + frame / 60, wind, { nightFactor: 0.5 })
-    expect(flies.mesh.material.uniforms.uIntensity!.value).toBeGreaterThan(0.99)
+    expect(flies.diagnostics.intensity).toBeGreaterThan(0.99)
     flies.update(10 + 1 / 60, wind, { nightFactor: 0 })
-    expect(flies.mesh.material.uniforms.uIntensity!.value).toBeGreaterThan(0.45)
+    expect(flies.diagnostics.intensity).toBeGreaterThan(0.45)
     flies.update(11, wind, { nightFactor: 0, reducedMotion: true })
     expect(flies.mesh.visible).toBe(false)
     for (const effect of [flies, repeated, mobile]) effect.dispose()
@@ -123,10 +124,10 @@ describe('lake atmosphere', () => {
         if (i % (hz / 2) === 0) samples.push(offset.clone())
         previousOffset = offset
       }
-      expect(samples[0]!.x).toBeGreaterThan(0.1)
-      expect(samples[1]!.x).toBeLessThan(-0.1)
-      expect(samples[3]!.length()).toBeGreaterThan(0.02)
-      expect(samples[3]!.length()).toBeLessThan(0.05)
+      expect(required(samples[0]).x).toBeGreaterThan(0.1)
+      expect(required(samples[1]).x).toBeLessThan(-0.1)
+      expect(required(samples[3]).length()).toBeGreaterThan(0.02)
+      expect(required(samples[3]).length()).toBeLessThan(0.05)
       expect(previousOffset.length()).toBeLessThan(0.00001)
       const sameFrame = firstFly(flies)
       flies.update(4, wind.sample(4), { pointer: hoverAt(baseline, camera, -35) })
@@ -137,7 +138,7 @@ describe('lake atmosphere', () => {
     }
     for (const response of responses.slice(1)) {
       response.forEach((sample, i) =>
-        expect(sample.distanceTo(responses[0]![i]!)).toBeLessThan(0.004),
+        expect(sample.distanceTo(required(required(responses[0])[i]))).toBeLessThan(0.004),
       )
     }
   })
@@ -220,9 +221,9 @@ describe('lake atmosphere', () => {
       pointer: hoverAt(flies, hoverCamera(flies), 0),
       nightFactor: 0.4,
     })
-    expect(flies.mesh.material.uniforms.uTime!.value).toBe(0)
+    expect(flies.diagnostics.time).toBe(0)
     expect(firstFly(flies)).toEqual(frozen)
-    expect(flies.mesh.material.uniforms.uIntensity!.value).toBe(0.4)
+    expect(flies.diagnostics.intensity).toBe(0.4)
     flies.dispose()
   })
 

@@ -1,3 +1,4 @@
+import { required } from '../invariant'
 import type { Voxel } from './voxel-world'
 
 export const LAKE_BOUNDS = { minX: -80, minZ: -112, size: 160 } as const
@@ -60,7 +61,7 @@ export function createLakeBed(
           const signed =
             Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dz), 0)
           const i = z * shoreResolution + x
-          shore[i] = Math.min(shore[i]!, signed)
+          shore[i] = Math.min(required(shore[i]), signed)
         }
     }
     const x0 = Math.max(0, Math.floor((voxel.x - voxel.size / 2 - LAKE_BOUNDS.minX) / cell))
@@ -76,7 +77,7 @@ export function createLakeBed(
     for (let z = z0; z <= z1; z++)
       for (let x = x0; x <= x1; x++) {
         const i = z * resolution + x
-        obstacle[i] = Math.max(obstacle[i]!, voxel.y + voxel.size / 2)
+        obstacle[i] = Math.max(required(obstacle[i]), voxel.y + voxel.size / 2)
         // Terrain columns continue down to the bed; trees do not become water barriers.
         if (voxelIndex < terrainCount) {
           water[i] = 0
@@ -96,12 +97,12 @@ export function createLakeBed(
         [-direction, -direction],
         [direction, -direction],
       ]) {
-        const nx = x + dx!,
-          nz = z + dz!
+        const nx = x + required(dx),
+          nz = z + required(dz)
         if (nx < 0 || nx >= resolution || nz < 0 || nz >= resolution) continue
         distance[i] = Math.min(
-          distance[i]!,
-          distance[nz * resolution + nx]! + cell * (dx && dz ? Math.SQRT2 : 1),
+          required(distance[i]),
+          required(distance[nz * resolution + nx]) + cell * (dx && dz ? Math.SQRT2 : 1),
         )
       }
     }
@@ -117,10 +118,16 @@ export function createLakeBed(
     const x = LAKE_BOUNDS.minX + ((i % resolution) + 0.5) * cell
     const z = LAKE_BOUNDS.minZ + (Math.floor(i / resolution) + 0.5) * cell
     const relief = 0.85 + 0.15 * Math.sin(x * 0.8 + (seed % 17)) * Math.cos(z * 0.65)
-    depth[i] = water[i] ? Math.min(7.5, 0.12 + distance[i]! * 0.42 * relief) : 0
-    if (water[i] && depth[i]! < 2.8 && noise(i) > 0.985) {
-      const size = 0.09 + noise(i + count) * Math.min(0.3, depth[i]!)
-      stones.push({ x, z, y: WATER_LEVEL - depth[i]! + size * 0.25, size, color: 0x566166 })
+    depth[i] = water[i] ? Math.min(7.5, 0.12 + required(distance[i]) * 0.42 * relief) : 0
+    if (water[i] && required(depth[i]) < 2.8 && noise(i) > 0.985) {
+      const size = 0.09 + noise(i + count) * Math.min(0.3, required(depth[i]))
+      stones.push({
+        x,
+        z,
+        y: WATER_LEVEL - required(depth[i]) + size * 0.25,
+        size,
+        color: 0x566166,
+      })
     }
   }
   return { resolution, water, depth, obstacle, shore, stones }

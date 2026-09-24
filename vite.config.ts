@@ -16,6 +16,12 @@ function configureNotFoundPage(server: ViteDevServer | PreviewServer) {
     // eslint-disable-next-line oxc/no-async-endpoint-handlers
     server.middlewares.use(async (request, response, next) => {
       if (request.method !== 'GET' && request.method !== 'HEAD') return next()
+      if (
+        'transformIndexHtml' in server &&
+        request.url?.startsWith('/e2e/') &&
+        request.url.split('?')[0]?.endsWith('.html')
+      )
+        return next()
       if (['/index.html', '/404.html'].includes(request.url?.split('?')[0] ?? '')) return next()
       try {
         let html = await readFile(resolve(root, '404.html'), 'utf8')

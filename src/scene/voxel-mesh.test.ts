@@ -1,6 +1,7 @@
 import { BoxGeometry, InstancedMesh, MeshBasicMaterial, Object3D, Raycaster, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { exposedVoxelFaces, prepareTerrain } from './voxel-mesh'
 import { createVoxelIndex, firstVoxelHit } from './voxel-spatial'
 import { createVoxelWorld } from './voxel-world'
@@ -57,7 +58,7 @@ describe('static terrain', () => {
     const ray = new Raycaster()
     ray.far = 130
     for (let i = 0; i < 300; i++) {
-      const v = voxels[i % voxels.length]!
+      const v = required(voxels[i % voxels.length])
       const origin = i % 3 === 0 ? new Vector3(v.x, v.y, v.z) : new Vector3(Math.sin(i) * 10, 4, 10)
       const direction =
         i % 5 === 0 ? new Vector3(0, 0, -1) : new Vector3(v.x, v.y, v.z).sub(origin).normalize()
@@ -87,10 +88,10 @@ describe('static terrain', () => {
         expect(batch.positions.length).toBe(batch.normals.length)
         expect(batch.colors.length).toBe(batch.positions.length)
         for (let i = 0; i < batch.indices.length; i += 6) {
-          a.fromArray(batch.positions, batch.indices[i]! * 3)
-          b.fromArray(batch.positions, batch.indices[i + 1]! * 3)
-          c.fromArray(batch.positions, batch.indices[i + 2]! * 3)
-          normal.fromArray(batch.normals, batch.indices[i]! * 3)
+          a.fromArray(batch.positions, required(batch.indices[i]) * 3)
+          b.fromArray(batch.positions, required(batch.indices[i + 1]) * 3)
+          c.fromArray(batch.positions, required(batch.indices[i + 2]) * 3)
+          normal.fromArray(batch.normals, required(batch.indices[i]) * 3)
           expect(b.sub(a).cross(c.sub(a)).dot(normal)).toBeGreaterThan(0)
         }
       }
@@ -101,7 +102,12 @@ describe('static terrain', () => {
       }
       for (const matrices of terrain.shadowMatrices)
         for (let i = 0; i < matrices.length; i += 16) {
-          const id = solidKey(matrices[i + 12]!, matrices[i + 13]!, matrices[i + 14]!, matrices[i]!)
+          const id = solidKey(
+            required(matrices[i + 12]),
+            required(matrices[i + 13]),
+            required(matrices[i + 14]),
+            required(matrices[i]),
+          )
           const remaining = (shadowSolids.get(id) ?? 0) - 1
           if (remaining === 0) shadowSolids.delete(id)
           else shadowSolids.set(id, remaining)

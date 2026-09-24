@@ -1,4 +1,4 @@
-import { Data3DTexture, LinearFilter, RepeatWrapping, RGFormat } from 'three'
+import { Data3DTexture, LinearFilter, RepeatWrapping, RGFormat } from 'three/webgpu'
 
 const smooth = (t: number) => t * t * (3 - 2 * t)
 const mix = (a: number, b: number, t: number) => a + (b - a) * t

@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 
+import { required } from '../src/invariant'
 import { parisWeatherFixture } from '../src/weather/paris.fixture'
+import { deferred } from './deferred'
 
 test('preloads Paris weather and keeps credits inside the information dialog', async ({ page }) => {
   const data = parisWeatherFixture()
@@ -11,10 +13,7 @@ test('preloads Paris weather and keeps credits inside the information dialog', a
     wind_speed_10m: 5,
     wind_direction_10m: 90,
   })
-  let release!: () => void
-  const pending = new Promise<void>((resolve) => {
-    release = resolve
-  })
+  const { promise: pending, resolve: release } = deferred()
   await page.route('https://api.open-meteo.com/**', async (route) => {
     await pending
     await route.fulfill({ json: data })
@@ -46,10 +45,7 @@ test('preloads Paris weather and keeps credits inside the information dialog', a
 })
 
 test('times out and retains random weather after a late API reply', async ({ page }) => {
-  let release!: () => void
-  const pending = new Promise<void>((resolve) => {
-    release = resolve
-  })
+  const { promise: pending, resolve: release } = deferred()
   await page.route('https://api.open-meteo.com/**', async (route) => {
     await pending
     // The browser may already have cancelled this request after the deadline.
@@ -61,14 +57,13 @@ test('times out and retains random weather after a late API reply', async ({ pag
   await expect(scene).toHaveAttribute('data-weather-source', 'random')
   const selected = await scene.getAttribute('data-weather')
   release()
-  await page.waitForTimeout(250)
   await expect(scene).toHaveAttribute('data-weather-source', 'random')
-  await expect(scene).toHaveAttribute('data-weather', selected!)
+  await expect(scene).toHaveAttribute('data-weather', required(selected))
   await page.getByRole('button', { name: 'About this landscape' }).click()
   await expect(page.locator('[data-weather-credit]')).toBeHidden()
 })
 
-test('HTTP errors fall back and retired URL controls no longer bypass live weather', async ({
+test('HTTP errors fall back and unsupported URL controls cannot override live weather', async ({
   page,
 }) => {
   let requests = 0
@@ -101,7 +96,8 @@ test('GPS selects the weather location while time independently selects night', 
   await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'live')
   await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
   expect(requests).toHaveLength(1)
-  expect(requests[0]!.searchParams.get('latitude')).toBe('1.3521')
-  expect(requests[0]!.searchParams.get('longitude')).toBe('103.8198')
+  const weatherRequest = required(requests[0])
+  expect(weatherRequest.searchParams.get('latitude')).toBe('1.3521')
+  expect(weatherRequest.searchParams.get('longitude')).toBe('103.8198')
   await expect(page.locator('main')).toHaveAttribute('data-local-lights', 'true')
 })

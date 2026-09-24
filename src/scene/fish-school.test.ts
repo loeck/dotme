@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { createFishSchools, sampleSchoolFish, schoolVisibility } from './fish-school'
 import type { LakeBed } from './lake-bed'
 
@@ -29,8 +30,8 @@ describe('small fish shoals', () => {
       counts.add(schools.filter((school) => schoolVisibility(school, time) > 0.35).length)
       for (const [index, school] of schools.entries()) {
         const visible = schoolVisibility(school, time)
-        ranges[index]!.min = Math.min(ranges[index]!.min, visible)
-        ranges[index]!.max = Math.max(ranges[index]!.max, visible)
+        required(ranges[index]).min = Math.min(required(ranges[index]).min, visible)
+        required(ranges[index]).max = Math.max(required(ranges[index]).max, visible)
         expect(Math.abs(visible - schoolVisibility(school, time + 1 / 30))).toBeLessThan(0.01)
       }
     }
@@ -56,14 +57,16 @@ describe('small fish shoals', () => {
   })
 
   it('keeps the group cohesive, with staggered positions and aligned headings', () => {
-    const school = createFishSchools(bed, [{ x: 0, z: 2 }], 0, 1)[0]!
+    const school = required(createFishSchools(bed, [{ x: 0, z: 2 }], 0, 1)[0])
     for (let time = 0; time < school.period * 2; time += 0.5) {
       const poses = Array.from({ length: 9 }, (_, i) =>
         sampleSchoolFish(school, i, time, { x: 0, z: 0, heading: 0 }),
       )
       for (const pose of poses) {
-        expect(Math.hypot(pose.x - poses[0]!.x, pose.z - poses[0]!.z)).toBeLessThan(3.5)
-        expect(Math.cos(pose.heading - poses[0]!.heading)).toBeGreaterThan(0.5)
+        expect(
+          Math.hypot(pose.x - required(poses[0]).x, pose.z - required(poses[0]).z),
+        ).toBeLessThan(3.5)
+        expect(Math.cos(pose.heading - required(poses[0]).heading)).toBeGreaterThan(0.5)
       }
       expect(new Set(poses.map((pose) => `${pose.x},${pose.z}`)).size).toBe(9)
     }

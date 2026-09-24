@@ -1,3 +1,4 @@
+import { required } from '../invariant'
 import { WATER_LEVEL, lakeIndex, LAKE_BOUNDS } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 
@@ -25,7 +26,11 @@ function clearPatch(bed: LakeBed, x: number, z: number) {
   ) {
     for (let column = first % bed.resolution; column <= last % bed.resolution; column++) {
       const i = row * bed.resolution + column
-      if (!bed.water[i] || bed.depth[i]! < 1.65 || bed.obstacle[i]! > WATER_LEVEL - 0.65)
+      if (
+        !bed.water[i] ||
+        required(bed.depth[i]) < 1.65 ||
+        required(bed.obstacle[i]) > WATER_LEVEL - 0.65
+      )
         return false
     }
   }
@@ -41,6 +46,16 @@ export function createFishSchools(
   count: number,
 ) {
   const schools: FishSchool[] = []
+  const addSchool = (route: Pick<FishSchool, 'x' | 'z' | 'radiusX' | 'radiusZ'>) => {
+    schools.push({
+      ...route,
+      // Separate cadences allow several shoals to visit the same safe water.
+      // The opening group stays in the foreground; later groups start along the route.
+      phase: schools.length === 0 ? 0 : schools.length * 1.7 + ((seed >>> 0) % 7) * 0.08,
+      period: 38 + (((seed >>> 0) + schools.length * 17) % 25),
+      direction: schools.length % 2 === 0 ? 1 : -1,
+    })
+  }
   for (const anchor of anchors) {
     if (schools.length >= count) break
     if (
@@ -62,19 +77,18 @@ export function createFishSchools(
         }
       }
       if (!safe) continue
-      schools.push({
-        x: anchor.x,
-        z,
-        radiusX,
-        radiusZ,
-        // Independent cadences let arrivals overlap and drift apart. The first
-        // group opens in the foreground; the others begin along their routes.
-        phase: schools.length === 0 ? 0 : schools.length * 1.7 + ((seed >>> 0) % 7) * 0.08,
-        period: 38 + (((seed >>> 0) + schools.length * 17) % 25),
-        direction: schools.length % 2 === 0 ? 1 : -1,
-      })
+      addSchool({ x: anchor.x, z, radiusX, radiusZ })
       break
     }
+  }
+  // Islands can leave fewer distinct cruising corridors inside the portrait view.
+  // Reuse a fully validated route with independent timing instead of relaxing its
+  // body/depth clearance or moving the remaining shoals outside the visible lake.
+  const distinctRoutes = schools.length
+  if (distinctRoutes === 0) return schools
+  while (schools.length < count) {
+    const route = required(schools[schools.length % distinctRoutes])
+    addSchool({ x: route.x, z: route.z, radiusX: route.radiusX, radiusZ: route.radiusZ })
   }
   return schools
 }

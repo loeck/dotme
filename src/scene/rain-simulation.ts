@@ -1,3 +1,4 @@
+import { required } from '../invariant'
 import { firstVoxelHit } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { Voxel } from './voxel-world'
@@ -73,7 +74,8 @@ export class RainCollider {
   private readonly index?: VoxelIndex
   private readonly origin = [0, 0, 0]
   private readonly direction = [0, 0, 0]
-  private readonly aboveWater = (id: number) => this.index!.boxes[id * 6 + 4]! >= WATER_MIN_Y
+  private readonly aboveWater = (id: number) =>
+    required(required(this.index).boxes[id * 6 + 4]) >= WATER_MIN_Y
 
   constructor(voxels: readonly Voxel[] | VoxelIndex) {
     if ('boxes' in voxels) {
@@ -109,7 +111,7 @@ export class RainCollider {
       let candidate = false
       for (let z = z0; z <= z1 && !candidate; z++)
         for (let x = x0; x <= x1; x++)
-          if (low <= columns.tops[z * columns.width + x]!) {
+          if (low <= required(columns.tops[z * columns.width + x])) {
             candidate = true
             break
           }
@@ -149,15 +151,14 @@ export class RainSimulation {
   private cursor = 0
   private impactCursor = 0
   private randomState: number
-  private waterSurface?: RainSurfaceSampler
+  private waterSurface: RainSurfaceSampler | undefined
   private readonly previous: Point = { x: 0, y: 0, z: 0 }
   readonly rate: number
 
-  constructor(
-    readonly collider: RainCollider,
-    mobile: boolean,
-    seed: number,
-  ) {
+  readonly collider: RainCollider
+
+  constructor(collider: RainCollider, mobile: boolean, seed: number) {
+    this.collider = collider
     this.randomState = (seed ^ 0x9e3779b9) >>> 0
     this.rate = mobile ? 1400 : 4200
     this.drops = Array.from({ length: mobile ? 4000 : 12000 }, () => ({
@@ -269,7 +270,7 @@ export class RainSimulation {
   prime() {
     const count = Math.min(this.drops.length, Math.round(this.rate * this.state.intensity * 2.75))
     for (let i = 0; i < count; i++) {
-      const drop = this.drops[i]!
+      const drop = required(this.drops[i])
       this.spawn(drop)
       this.previous.x = drop.x
       this.previous.y = drop.y
@@ -299,7 +300,7 @@ export class RainSimulation {
     this.emission += this.state.intensity * this.rate * RAIN_STEP
     let searched = 0
     while (this.emission >= 1 && searched < this.drops.length) {
-      const drop = this.drops[this.cursor]!
+      const drop = required(this.drops[this.cursor])
       this.cursor = (this.cursor + 1) % this.drops.length
       searched++
       if (drop.alive) continue
@@ -328,7 +329,7 @@ export class RainSimulation {
       if (solid <= 1 && solid <= water) drop.alive = false
       else if (water <= 1) {
         drop.alive = false
-        const impact = this.impacts[this.impactCursor]!
+        const impact = required(this.impacts[this.impactCursor])
         const hitX = x + (drop.x - x) * water
         const hitZ = z + (drop.z - z) * water
         const born = this.time - RAIN_STEP * (1 - water)

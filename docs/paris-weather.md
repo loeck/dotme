@@ -49,7 +49,7 @@ every outcome. The page wraps this helper in a shorter **3-second deadline**, co
 `WEATHER_PRELOAD_TIMEOUT_MS` in `src/weather/scene.ts`. That deadline also covers downloading the
 weather module. Timeout, HTTP, network and parsing failures select a seeded random preset and abort
 the request. Late responses cannot replace the chosen preset. Page disposal aborts the preload;
-it does not trigger the random fallback. Completed snapshots survive reduced-motion restarts and
+it does not trigger the random fallback. Completed snapshots survive motion preference changes and
 bfcache restores for the same page. There is no polling or persistent cache.
 
 Cloud cover selects clear (<20%), partly cloudy (<55%), cloudy (<85%) or overcast. Rain implies at

@@ -1,281 +1,249 @@
 import {
+  Fn,
+  If,
+  Loop,
+  abs,
+  clamp,
+  exp,
+  float,
+  floor,
+  fract,
+  getViewPosition,
+  length,
+  max,
+  min,
+  mix,
+  normalize,
+  sqrt,
+  texture,
+  uniform,
+  uv,
+  vec2,
+  vec3,
+  vec4,
+} from 'three/tsl'
+import {
   Color,
+  DepthTexture,
   HalfFloatType,
   Matrix4,
-  Mesh,
   NearestFilter,
-  OrthographicCamera,
-  PlaneGeometry,
-  Scene,
-  ShaderMaterial,
-  UnsignedByteType,
+  RenderTarget,
   Vector2,
   Vector3,
-  WebGLRenderTarget,
-} from 'three'
-import type { DirectionalLight, IUniform, PerspectiveCamera, WebGLRenderer } from 'three'
+} from 'three/webgpu'
+import type { DirectionalLight, Node, PerspectiveCamera, WebGPURenderer } from 'three/webgpu'
 
-import { CLOUD_SHADOW_GLSL } from './cloud-shadows'
+import { celestialVisibility, cloudShadow } from './cloud-shadows'
+import type { CloudShadowUniforms } from './cloud-shadows'
+import { FullscreenPass } from './fullscreen-pass'
 import type { LightingState } from './lighting'
 
-const vertexShader = `varying vec2 vUv;
-void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }`
-
-export const AIR_INTEGRATION_GLSL = `
-// Integral of exp(-extinction*x), including the zero-extinction limit.
-float segmentIntegral(float extinction, float length) {
-  float tau = extinction * length;
-  return tau < 0.001 ? length * (1.0 - tau * 0.5 + tau * tau / 6.0)
-    : (1.0 - exp(-tau)) / extinction;
+export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float'>) {
+  const tau = extinction.mul(distance)
+  return tau
+    .lessThan(0.001)
+    .select(
+      distance.mul(float(1).sub(tau.mul(0.5)).add(tau.mul(tau).div(6))),
+      exp(tau.negate()).oneMinus().div(max(extinction, 0.0000001)),
+    )
 }
-float airPhase(float cosine) {
-  // View ray points away from camera; light direction points toward sun. g=0.6.
-  return 0.0795774715 * 0.64 / pow(1.36 - 1.2 * cosine, 1.5);
+export function airPhase(cosine: Node<'float'>) {
+  return float(0.0795774715 * 0.64).div(float(1.36).sub(cosine.mul(1.2)).pow(1.5))
 }
-`
-
-const fragmentShader = `
-precision highp sampler2DShadow;
-uniform sampler2D tDepth;
-uniform sampler2DShadow tTerrain;
-uniform mat4 uInverseProjection;
-uniform mat4 uCameraWorld;
-uniform mat4 uShadowMatrix;
-uniform vec3 uEye;
-uniform vec3 uSunDirection;
-uniform vec3 uSunRadiance;
-uniform vec3 uAmbient;
-uniform float uExtinction;
-uniform float uShadowBias;
-varying vec2 vUv;
-${CLOUD_SHADOW_GLSL}
-${AIR_INTEGRATION_GLSL}
-float terrainVisibility(vec4 projected) {
-  vec3 p = projected.xyz / projected.w;
-  if (any(lessThan(p, vec3(0.0))) || any(greaterThan(p, vec3(1.0)))) return 1.0;
-  return texture(tTerrain, vec3(p.xy, p.z + uShadowBias));
-}
-void main() {
-  float depth = texture2D(tDepth, vUv).r;
-  vec4 view = uInverseProjection * vec4(vUv * 2.0 - 1.0, depth * 2.0 - 1.0, 1.0);
-  vec3 endPoint = (uCameraWorld * vec4(view.xyz / view.w, 1.0)).xyz;
-  vec3 delta = endPoint - uEye;
-  float distance = min(length(delta), 240.0);
-  vec3 ray = normalize(delta);
-  // Air is a separate medium beneath the clouds (y=80). Clip both slab boundaries.
-  float entry = 0.0;
-  if (abs(ray.y) > 0.00001) {
-    float a = (-20.0 - uEye.y) / ray.y;
-    float b = (80.0 - uEye.y) / ray.y;
-    entry = max(0.0, min(a, b));
-    distance = min(distance, max(a, b));
-  } else if (uEye.y < -20.0 || uEye.y > 80.0) distance = 0.0;
-  float stepLength = max(0.0, distance - entry) / float(AIR_STEPS);
-  if (stepLength <= 0.0 || uExtinction <= 0.0) {
-    gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);
-    return;
-  }
-  // Shadow projections are linear along this ray. Project origin and step once,
-  // retaining exactly the same midpoint samples and shadow-map resolutions.
-  vec4 start = vec4(uEye + ray * entry, 1.0);
-  vec4 step = vec4(ray * stepLength, 0.0);
-  vec4 terrainStart = uShadowMatrix * start;
-  vec4 terrainStep = uShadowMatrix * step;
-  vec2 previousStart = (uCloudShadowPreviousMatrix * start).xy;
-  vec2 previousStep = (uCloudShadowPreviousMatrix * step).xy;
-  vec2 nextStart = (uCloudShadowNextMatrix * start).xy;
-  vec2 nextStep = (uCloudShadowNextMatrix * step).xy;
-  float horizonVisibility = celestialVisibility();
-  bool directLight = uSunDirection.y > 0.0 && dot(uSunRadiance, vec3(1.0)) > 0.0;
-  float transmission = exp(-uExtinction * stepLength);
-  float integral = segmentIntegral(uExtinction, stepLength);
-  float phase = airPhase(dot(ray, uSunDirection));
-  float accumulated = 1.0;
-  vec3 radiance = vec3(0.0);
-  // Stable midpoint quadrature, no temporal history or frame-dependent jitter.
-  for (int i = 0; i < AIR_STEPS; i++) {
-    float midpoint = float(i) + 0.5;
-    float visibility = 0.0;
-    if (directLight) {
-      visibility = terrainVisibility(terrainStart + terrainStep * midpoint) * horizonVisibility;
-      // Fully blocked terrain contributes no sunlight, regardless of cloud cover.
-      if (visibility > 0.0)
-        visibility *= cloudShadowProjected(previousStart + previousStep * midpoint,
-          nextStart + nextStep * midpoint);
-    }
-    // Artistic solar exposure compensates for the normalized HG phase. Cloud
-    // transmission remains Beer–Lambert: opaque cover cannot invent a beam.
-    vec3 source = uExtinction * (uAmbient + uSunRadiance * visibility * phase * 6.0);
-    radiance += accumulated * source * integral;
-    accumulated *= transmission;
-  }
-  // Range 0..16 linear radiance in RGBA8 as well as half float. Alpha is transmission.
-  gl_FragColor = vec4(sqrt(max(radiance, vec3(0.0)) / 16.0), accumulated);
-}
-`
-
-const compositeShader = `
-uniform sampler2D tColor;
-uniform sampler2D tDepth;
-uniform sampler2D tAir;
-uniform vec2 uAirSize;
-uniform vec2 uCameraRange;
-varying vec2 vUv;
-float distanceAt(vec2 uv) {
-  float d = texture2D(tDepth, uv).r;
-  return uCameraRange.x * uCameraRange.y / (uCameraRange.y - d * (uCameraRange.y - uCameraRange.x));
-}
-void main() {
-  float center = distanceAt(vUv);
-  vec2 pixel = vUv * uAirSize - 0.5;
-  vec2 base = floor(pixel);
-  vec2 f = fract(pixel);
-  vec4 air = vec4(0.0);
-  float total = 0.0;
-  vec4 nearestAir = vec4(0.0, 0.0, 0.0, 1.0);
-  float nearestDifference = 1e10;
-  for (int y = 0; y < 2; y++) {
-    for (int x = 0; x < 2; x++) {
-      vec2 offset = vec2(float(x), float(y));
-      vec2 uv = clamp((base + offset + 0.5) / uAirSize, 0.5 / uAirSize, 1.0 - 0.5 / uAirSize);
-      float difference = abs(distanceAt(uv) - center);
-      vec4 value = texture2D(tAir, uv);
-      value.rgb = value.rgb * value.rgb * 16.0;
-      if (difference < nearestDifference) { nearestAir = value; nearestDifference = difference; }
-      vec2 bilinear = mix(1.0 - f, f, offset);
-      float weight = bilinear.x * bilinear.y * exp(-difference / max(0.25, center * 0.015));
-      air += value * weight;
-      total += weight;
-    }
-  }
-  air = total > 0.00001 ? air / total : nearestAir;
-  gl_FragColor = vec4(texture2D(tColor, vUv).rgb * air.a + air.rgb, 1.0);
-}
-`
-
-/** Half-resolution world-space single scattering, followed by bilateral reconstruction. */
 export class VolumetricLight {
-  readonly target: WebGLRenderTarget
-  readonly airTarget: WebGLRenderTarget
-  private readonly scene = new Scene()
-  private readonly camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
-  private readonly geometry = new PlaneGeometry(2, 2)
-  private readonly material: ShaderMaterial
-  private readonly composite: ShaderMaterial
-  private readonly quad: Mesh<PlaneGeometry, ShaderMaterial>
-
+  readonly target = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false })
+  readonly airTarget = new RenderTarget(1, 1, {
+    type: HalfFloatType,
+    depthBuffer: false,
+    minFilter: NearestFilter,
+    magFilter: NearestFilter,
+  })
+  private readonly fallbackDepth = new DepthTexture(1, 1)
+  private readonly depth = texture(this.fallbackDepth)
+  private readonly terrain = texture<'float'>(this.fallbackDepth)
+  private readonly source = texture(this.target.texture)
+  private readonly air = texture(this.airTarget.texture)
+  private readonly inverseProjection = uniform(new Matrix4())
+  private readonly cameraWorld = uniform(new Matrix4())
+  private readonly shadowMatrix = uniform(new Matrix4())
+  private readonly eye = uniform(new Vector3())
+  private readonly sunDirection = uniform(new Vector3())
+  private readonly sunRadiance = uniform(new Color())
+  private readonly ambient = uniform(new Color())
+  private readonly shadowBias = uniform(0)
+  private readonly hasTerrain = uniform(false)
+  private readonly airSize = uniform(new Vector2(1, 1))
+  private readonly cameraRange = uniform(new Vector2(0.05, 500))
+  private readonly scatter: FullscreenPass
+  private readonly composite: FullscreenPass
   constructor(
-    renderer: WebGLRenderer,
+    renderer: WebGPURenderer,
     mobile: boolean,
-    cloudUniforms: Record<string, IUniform>,
+    clouds: CloudShadowUniforms,
     extinction: number,
     steps = mobile ? 16 : 32,
   ) {
-    const type = renderer.extensions.has('EXT_color_buffer_float')
-      ? HalfFloatType
-      : UnsignedByteType
-    this.target = new WebGLRenderTarget(1, 1, { type, depthBuffer: false })
-    this.airTarget = new WebGLRenderTarget(1, 1, {
-      type,
-      depthBuffer: false,
-      minFilter: NearestFilter,
-      magFilter: NearestFilter,
-    })
     this.target.texture.name = 'Atmosphere composite'
     this.airTarget.texture.name = 'Air radiance / transmission'
-    this.material = new ShaderMaterial({
-      vertexShader,
-      fragmentShader,
-      defines: { AIR_STEPS: steps },
-      uniforms: {
-        ...cloudUniforms,
-        tDepth: { value: null },
-        tTerrain: { value: null },
-        uInverseProjection: { value: new Matrix4() },
-        uCameraWorld: { value: new Matrix4() },
-        uShadowMatrix: { value: new Matrix4() },
-        uEye: { value: new Vector3() },
-        uSunDirection: { value: new Vector3() },
-        uSunRadiance: { value: new Color() },
-        uAmbient: { value: new Color() },
-        uExtinction: { value: extinction },
-        uShadowBias: { value: 0 },
-      },
-      depthWrite: false,
-      depthTest: false,
-      toneMapped: false,
-    })
-    this.composite = new ShaderMaterial({
-      vertexShader,
-      fragmentShader: compositeShader,
-      uniforms: {
-        tColor: { value: null },
-        tDepth: { value: null },
-        tAir: { value: this.airTarget.texture },
-        uAirSize: { value: new Vector2() },
-        uCameraRange: { value: new Vector2() },
-      },
-      depthWrite: false,
-      depthTest: false,
-      toneMapped: false,
-    })
-    this.quad = new Mesh(this.geometry, this.material)
-    this.quad.frustumCulled = false
-    this.scene.add(this.quad)
+    const sigma = float(extinction)
+    this.scatter = new FullscreenPass(
+      renderer,
+      Fn(() => {
+        const depth = this.depth.sample(uv()).r
+        const view = getViewPosition(uv(), depth, this.inverseProjection)
+        const endpoint = this.cameraWorld.mul(vec4(view, 1)).xyz
+        const delta = endpoint.sub(this.eye),
+          distance = min(length(delta), 240).toVar(),
+          ray = normalize(delta),
+          entry = float(0).toVar()
+        If(abs(ray.y).greaterThan(0.00001), () => {
+          const a = float(-20).sub(this.eye.y).div(ray.y),
+            b = float(80).sub(this.eye.y).div(ray.y)
+          entry.assign(max(0, min(a, b)))
+          distance.assign(min(distance, max(a, b)))
+        }).ElseIf(this.eye.y.lessThan(-20).or(this.eye.y.greaterThan(80)), () => {
+          distance.assign(0)
+        })
+        const stride = max(0, distance.sub(entry)).div(steps),
+          accumulated = float(1).toVar(),
+          radiance = vec3(0).toVar()
+        const transmission = exp(sigma.mul(stride).negate()),
+          integral = segmentIntegral(sigma, stride),
+          phase = airPhase(ray.dot(this.sunDirection))
+        If(stride.greaterThan(0).and(sigma.greaterThan(0)), () => {
+          Loop(steps, ({ i }) => {
+            const world = this.eye.add(ray.mul(entry.add(float(i).add(0.5).mul(stride))))
+            const visible = float(0).toVar()
+            If(this.sunDirection.y.greaterThan(0), () => {
+              const projected = this.shadowMatrix.mul(vec4(world, 1)),
+                p = projected.xyz.div(projected.w)
+              visible.assign(1)
+              If(
+                this.hasTerrain
+                  .and(p.greaterThanEqual(vec3(0)).all())
+                  .and(p.lessThanEqual(vec3(1)).all()),
+                () => {
+                  // LightShadow.matrix produces bottom-left UVs; WebGPU depth
+                  // textures use top-left UVs, matching ShadowNode's conversion.
+                  visible.assign(
+                    this.terrain.sample(p.xy.flipY()).compare(p.z.add(this.shadowBias)),
+                  )
+                },
+              )
+              visible.mulAssign(celestialVisibility(clouds))
+              visible.mulAssign(cloudShadow(world, clouds))
+            })
+            const source = this.ambient.rgb
+              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(6))
+              .mul(sigma)
+            radiance.addAssign(accumulated.mul(source).mul(integral))
+            accumulated.mulAssign(transmission)
+          })
+        })
+        return vec4(sqrt(max(radiance, vec3(0)).div(16)), accumulated)
+      })(),
+    )
+    this.composite = new FullscreenPass(
+      renderer,
+      Fn(() => {
+        const distanceAt = (coord: Node<'vec2'>) =>
+          this.cameraRange.x
+            .mul(this.cameraRange.y)
+            .div(
+              this.cameraRange.y.sub(
+                this.depth.sample(coord).r.mul(this.cameraRange.y.sub(this.cameraRange.x)),
+              ),
+            )
+        const center = distanceAt(uv()),
+          pixel = uv().mul(this.airSize).sub(0.5),
+          base = floor(pixel),
+          f = fract(pixel)
+        const sum = vec4(0).toVar(),
+          total = float(0).toVar(),
+          nearest = vec4(0, 0, 0, 1).toVar(),
+          nearestDifference = float(1e10).toVar()
+        for (let y = 0; y < 2; y++)
+          for (let x = 0; x < 2; x++) {
+            const offset = vec2(x, y),
+              coord = clamp(
+                base.add(offset).add(0.5).div(this.airSize),
+                vec2(0.5).div(this.airSize),
+                vec2(1).sub(vec2(0.5).div(this.airSize)),
+              )
+            const difference = abs(distanceAt(coord).sub(center)),
+              value = this.air.sample(coord),
+              decoded = vec4(value.rgb.mul(value.rgb).mul(16), value.a)
+            If(difference.lessThan(nearestDifference), () => {
+              nearest.assign(decoded)
+              nearestDifference.assign(difference)
+            })
+            const bilinear = mix(f.oneMinus(), f, offset),
+              weight = bilinear.x
+                .mul(bilinear.y)
+                .mul(exp(difference.negate().div(max(0.25, center.mul(0.015)))))
+            sum.addAssign(decoded.mul(weight))
+            total.addAssign(weight)
+          }
+        const air = total.greaterThan(0.00001).select(sum.div(max(total, 0.00001)), nearest)
+        return vec4(this.source.sample(uv()).rgb.mul(air.a).add(air.rgb), 1)
+      })(),
+    )
   }
-
   update(light: LightingState) {
-    this.material.uniforms.uSunDirection!.value.copy(light.sunDirection)
-    this.material.uniforms
-      .uSunRadiance!.value.copy(light.sunColor)
-      .multiplyScalar(light.sunIntensity)
-    // Keep diffuse air fill subdued so cloud openings read as shafts, while
-    // preserving the night haze. Direct light is still gated by world shadows.
-    this.material.uniforms.uAmbient!.value.copy(light.haze).multiplyScalar(1 - light.daylight * 0.7)
+    this.sunDirection.value.copy(light.sunDirection)
+    this.sunRadiance.value.copy(light.sunColor).multiplyScalar(light.sunIntensity)
+    this.ambient.value.copy(light.haze).multiplyScalar(1 - light.daylight * 0.7)
   }
-
   resize(width: number, height: number) {
     this.target.setSize(width, height)
     this.airTarget.setSize(Math.max(1, Math.ceil(width / 2)), Math.max(1, Math.ceil(height / 2)))
-    this.composite.uniforms.uAirSize!.value.set(this.airTarget.width, this.airTarget.height)
+    this.airSize.value.set(this.airTarget.width, this.airTarget.height)
   }
-
+  private prepare(input: RenderTarget, camera: PerspectiveCamera, light: DirectionalLight) {
+    const depth = input.depthTexture
+    if (!depth) return false
+    this.depth.value = depth
+    this.source.value = input.texture
+    const shadow = light.shadow.map?.depthTexture
+    this.hasTerrain.value = !!shadow
+    if (shadow) this.terrain.value = shadow
+    this.shadowMatrix.value.copy(light.shadow.matrix)
+    this.shadowBias.value = light.shadow.bias
+    this.inverseProjection.value.copy(camera.projectionMatrixInverse)
+    this.cameraWorld.value.copy(camera.matrixWorld)
+    this.eye.value.copy(camera.position)
+    this.cameraRange.value.set(camera.near, camera.far)
+    return true
+  }
+  async compileAsync(input: RenderTarget, camera: PerspectiveCamera, light: DirectionalLight) {
+    if (!this.prepare(input, camera, light)) return
+    await this.scatter.compileAsync(this.airTarget)
+    await this.composite.compileAsync(this.target)
+  }
   render(
-    renderer: WebGLRenderer,
-    input: WebGLRenderTarget,
+    renderer: WebGPURenderer,
+    input: RenderTarget,
     camera: PerspectiveCamera,
     light: DirectionalLight,
   ) {
+    if (!this.prepare(input, camera, light)) return input.texture
     const previous = renderer.getRenderTarget()
-    const u = this.material.uniforms
-    u.tDepth!.value = input.depthTexture
-    u.tTerrain!.value = light.shadow.map?.depthTexture
-    u.uShadowMatrix!.value.copy(light.shadow.matrix)
-    u.uShadowBias!.value = light.shadow.bias
-    u.uInverseProjection!.value.copy(camera.projectionMatrixInverse)
-    u.uCameraWorld!.value.copy(camera.matrixWorld)
-    u.uEye!.value.copy(camera.position)
-    this.composite.uniforms.tColor!.value = input.texture
-    this.composite.uniforms.tDepth!.value = input.depthTexture
-    this.composite.uniforms.uCameraRange!.value.set(camera.near, camera.far)
     try {
-      this.quad.material = this.material
       renderer.setRenderTarget(this.airTarget)
-      renderer.render(this.scene, this.camera)
-      this.quad.material = this.composite
+      this.scatter.render()
       renderer.setRenderTarget(this.target)
-      renderer.render(this.scene, this.camera)
+      this.composite.render()
     } finally {
       renderer.setRenderTarget(previous)
     }
     return this.target.texture
   }
-
   dispose() {
     this.target.dispose()
     this.airTarget.dispose()
-    this.material.dispose()
+    this.fallbackDepth.dispose()
+    this.scatter.dispose()
     this.composite.dispose()
-    this.geometry.dispose()
   }
 }

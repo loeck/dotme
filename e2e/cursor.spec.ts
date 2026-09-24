@@ -1,28 +1,20 @@
 import { expect, test } from '@playwright/test'
 
+import { deferred } from './deferred'
 import { mockParisWeather } from './weather-fixture'
+
+const nativePoint = /data:image\/svg\+xml.*4 4, none/
 
 test.beforeEach(async ({ page }) => {
   await mockParisWeather(page)
-  await page.route('**/assets/VoxelLandscapeEngine-*.js', (route) =>
-    route.fulfill({
-      contentType: 'application/javascript',
-      body: `export class VoxelLandscapeEngine {
-        static async create(options) {
-          options.onFirstFrame?.();
-          return { dispose() {}, resize() {} };
-        }
-      }`,
-    }),
-  )
 })
 
 test('outlined point stays on controls and grows above the dialog', async ({ page }, info) => {
-  await page.goto('/')
-  await expect(page.locator('.scene-loader')).toBeHidden()
+  await page.goto('/?seed=42')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
   const main = page.locator('main')
   const desktop = info.project.name === 'chromium'
-  if (desktop) await expect(main).toHaveCSS('cursor', /data:image\/svg\+xml.*4 4, none/)
+  if (desktop) await expect(main).toHaveCSS('cursor', nativePoint)
   else await expect(main).toHaveCSS('cursor', 'auto')
   const trigger = page.getByRole('button', { name: 'About this landscape' })
   await trigger.hover()
@@ -49,86 +41,92 @@ test('outlined point stays on controls and grows above the dialog', async ({ pag
   await expect(trigger).toBeFocused()
 })
 
-test('point works during loading without an engine and falls back on blur', async ({
-  page,
-}, info) => {
-  await page.route('**/assets/VoxelLandscapeEngine-*.js', (route) =>
-    route.fulfill({
-      contentType: 'application/javascript',
-      body: 'export class VoxelLandscapeEngine { static create() { return new Promise(() => {}); } }',
-    }),
-  )
-  await page.goto('/')
-  const loader = page.locator('.scene-loader')
-  await expect(loader).toBeVisible()
-  if (info.project.name === 'chromium')
-    await expect(loader).toHaveCSS('cursor', /data:image\/svg\+xml.*4 4, none/)
+test('native point remains during landscape loading and returns after blur', async ({ page }) => {
+  const barrier = deferred()
+  await page.route('**/assets/landscape-*.js', async (route) => {
+    await barrier.promise
+    await route.continue()
+  })
+  const requested = page.waitForRequest('**/assets/landscape-*.js')
+  await page.goto('/?seed=42', { waitUntil: 'domcontentloaded' })
+  await requested
+  const root = page.locator('html')
+  const canvas = page.locator('#scene-canvas')
   const cursor = page.locator('.scene-cursor')
-  await page.mouse.move(200, 200)
-  if (info.project.name === 'chromium') {
-    await expect(cursor).toBeVisible()
-    await expect(cursor).toHaveCSS('width', '6px')
-    await expect(loader).toHaveCSS('cursor', 'none')
-  } else await expect(cursor).toBeHidden()
-  await page.emulateMedia({ reducedMotion: 'reduce' })
+  try {
+    await expect(root).toHaveAttribute('data-scene-loading', 'loading')
+    await expect(canvas).toHaveAttribute('data-loader-rendered', 'true')
+    await page.mouse.move(200, 200)
+    await expect(canvas).toHaveCSS('cursor', nativePoint)
+    await expect(root).not.toHaveAttribute('data-cursor-active')
+    await expect(cursor).toBeHidden()
+  } finally {
+    barrier.resolve()
+  }
+  await expect(root).toHaveAttribute('data-scene-loading', 'ready')
+  await page.mouse.move(240, 200)
+  await expect(cursor).toBeVisible()
+  await expect(cursor).toHaveCSS('width', '6px')
+  await expect(canvas).toHaveCSS('cursor', 'none')
   await page.evaluate(() => window.dispatchEvent(new Event('blur')))
-  if (info.project.name === 'chromium')
-    await expect(loader).toHaveCSS('cursor', /data:image\/svg\+xml.*4 4, none/)
+  await expect(cursor).toBeHidden()
+  await expect(root).not.toHaveAttribute('data-cursor-active')
+  await expect(canvas).toHaveCSS('cursor', nativePoint)
 })
 
 test('strain follows movement without shifting the hit point and settles at rest', async ({
   page,
-}, info) => {
-  test.skip(info.project.name !== 'chromium', 'Mouse-only deformation')
-  await page.goto('/')
-  await expect(page.locator('.scene-loader')).toBeHidden()
+}) => {
+  await page.goto('/?seed=42')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
   const cursor = page.locator('.scene-cursor')
   const shape = cursor.locator('span')
   const measure = async (deltaX: number, deltaY: number) =>
     page.evaluate(
-      async ({ dx, dy }) => {
-        const target = document.querySelector('main')!
-        target.dispatchEvent(
-          new PointerEvent('pointermove', {
+      ({ dx, dy }) => {
+        const target = document.querySelector('main')
+        const point = document.querySelector<HTMLElement>('.scene-cursor > span')
+        if (!target || !point) throw new Error('Cursor elements are missing')
+        window.dispatchEvent(new Event('blur'))
+        for (const [x, y, time] of [
+          [400, 400, 1000],
+          [400 + dx, 400 + dy, 1016],
+        ] as const) {
+          const event = new PointerEvent('pointermove', {
             bubbles: true,
             pointerType: 'mouse',
-            clientX: 400,
-            clientY: 400,
-          }),
-        )
-        await new Promise((resolve) => setTimeout(resolve, 16))
-        target.dispatchEvent(
-          new PointerEvent('pointermove', {
-            bubbles: true,
-            pointerType: 'mouse',
-            clientX: 400 + dx,
-            clientY: 400 + dy,
-          }),
-        )
-        await new Promise((resolve) => setTimeout(resolve, 32))
-        const rect = document.querySelector('.scene-cursor > span')!.getBoundingClientRect()
+            clientX: x,
+            clientY: y,
+          })
+          Object.defineProperty(event, 'timeStamp', { value: time })
+          target.dispatchEvent(event)
+        }
+        const rect = point.getBoundingClientRect()
+        const strain = new DOMMatrixReadOnly(point.style.transform)
         return {
           width: rect.width,
           height: rect.height,
           x: rect.x + rect.width / 2,
           y: rect.y + rect.height / 2,
+          stretchX: strain.a,
+          stretchY: strain.d,
         }
       },
       { dx: deltaX, dy: deltaY },
     )
-  // A single pointer must settle before testing its next direction.
+  // Each direction starts after the previous deformation has visibly settled.
   /* eslint-disable no-await-in-loop */
   for (const [dx, dy] of [
     [80, 0],
     [-80, 0],
     [0, 80],
     [0, -80],
-  ]) {
-    const rect = await measure(dx!, dy!)
-    expect(rect.x).toBeCloseTo(400 + dx!, 2)
-    expect(rect.y).toBeCloseTo(400 + dy!, 2)
-    expect(dx ? rect.width : rect.height).toBeGreaterThan(12)
-    expect(Math.max(rect.width, rect.height)).toBeLessThanOrEqual(16.81)
+  ] as const) {
+    const rect = await measure(dx, dy)
+    expect(rect.x).toBeCloseTo(400 + dx, 2)
+    expect(rect.y).toBeCloseTo(400 + dy, 2)
+    expect(dx ? rect.stretchX : rect.stretchY).toBeGreaterThan(2)
+    expect(Math.max(rect.stretchX, rect.stretchY)).toBeLessThanOrEqual(2.8)
     await expect(shape).toHaveCSS('transform', 'none')
   }
   /* eslint-enable no-await-in-loop */
@@ -142,39 +140,32 @@ test('strain follows movement without shifting the hit point and settles at rest
   await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'none')
 })
 
-test('the custom point is available before JavaScript starts, without a pointer move', async ({
-  page,
-}, info) => {
-  test.skip(info.project.name !== 'chromium', 'Mouse-only cursor')
+test('native point is available before the main JavaScript starts', async ({ page }) => {
   await page.route('**/assets/index-*.js', (route) =>
     route.fulfill({ contentType: 'application/javascript', body: '' }),
   )
+  const requested = page.waitForRequest('**/assets/index-*.js')
   await page.goto('/')
-  await expect(page.locator('.scene-loader')).toBeVisible()
+  await requested
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'loading')
   await expect(page.locator('html')).not.toHaveAttribute('data-cursor-active')
-  const cursor = await page
-    .locator('.scene-loader')
-    .evaluate((element) => getComputedStyle(element).cursor)
-  expect(cursor).toMatch(/^url\("data:image\/svg\+xml/)
-  expect(cursor).toMatch(/4 4, none$/)
-  expect(cursor).not.toContain('auto')
+  await expect(page.locator('#scene-canvas')).toHaveCSS('cursor', nativePoint)
+  await expect(page.locator('.scene-cursor')).toBeHidden()
 })
 
-test('equal pointer speeds produce equal strain at different event rates', async ({
-  page,
-}, info) => {
-  test.skip(info.project.name !== 'chromium', 'Mouse-only deformation')
-  await page.goto('/')
-  await expect(page.locator('.scene-loader')).toBeHidden()
+test('equal pointer speeds produce equal strain at different event rates', async ({ page }) => {
+  await page.goto('/?seed=42')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
   const strains = await page.evaluate(() => {
-    const target = document.querySelector('main')!
-    const shape = document.querySelector<HTMLElement>('.scene-cursor > span')!
+    const target = document.querySelector('main')
+    const shape = document.querySelector<HTMLElement>('.scene-cursor > span')
+    if (!target || !shape) throw new Error('Cursor elements are missing')
     const sample = (interval: number) => {
       window.dispatchEvent(new Event('blur'))
       for (const [x, time] of [
         [400, 1000],
         [400 + interval * 0.2, 1000 + interval],
-      ]) {
+      ] as const) {
         const event = new PointerEvent('pointermove', {
           bubbles: true,
           pointerType: 'mouse',
@@ -188,6 +179,8 @@ test('equal pointer speeds produce equal strain at different event rates', async
     }
     return [sample(16), sample(8), sample(4), sample(2)]
   })
-  expect(strains[0]).toBeGreaterThan(1.5)
-  for (const strain of strains) expect(strain).toBeCloseTo(strains[0]!, 4)
+  const baseline = strains[0]
+  if (baseline === undefined) throw new Error('No cursor strain samples were recorded')
+  expect(baseline).toBeGreaterThan(1.5)
+  for (const strain of strains) expect(strain).toBeCloseTo(baseline, 4)
 })

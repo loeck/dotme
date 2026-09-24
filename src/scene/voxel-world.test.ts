@@ -1,6 +1,57 @@
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
+import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
+import type { LakeBed } from './lake-bed'
 import { createVoxelWorld } from './voxel-world'
+
+const inRightIslandArea = (x: number, z: number) => x > 3 && x < 22 && z > -52 && z < -5
+
+/** Connected solid footprints must be surrounded by water, including diagonal neighbors. */
+function rightIslands(bed: LakeBed, mobile: boolean) {
+  const visited = new Uint8Array(bed.water.length)
+  const cellSize = LAKE_BOUNDS.size / bed.resolution
+  const position = (index: number) => ({
+    x: (LAKE_BOUNDS.minX + ((index % bed.resolution) + 0.5) * cellSize) * (mobile ? 2.8 : 1),
+    z: LAKE_BOUNDS.minZ + (Math.floor(index / bed.resolution) + 0.5) * cellSize,
+  })
+  const islands: { minX: number; maxX: number; minZ: number; maxZ: number; cells: number }[] = []
+  for (let start = 0; start < bed.water.length; start++) {
+    const origin = position(start)
+    if (visited[start] || bed.water[start] !== 0 || !inRightIslandArea(origin.x, origin.z)) continue
+    const pending = [start]
+    visited[start] = 1
+    let enclosed = true
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity
+    for (let cursor = 0; cursor < pending.length; cursor++) {
+      const index = required(pending[cursor])
+      const { x, z } = position(index)
+      enclosed &&= inRightIslandArea(x, z)
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minZ = Math.min(minZ, z)
+      maxZ = Math.max(maxZ, z)
+      const column = index % bed.resolution
+      const row = Math.floor(index / bed.resolution)
+      for (const dx of [-1, 0, 1])
+        for (const dz of [-1, 0, 1]) {
+          const nx = column + dx,
+            nz = row + dz
+          if (nx < 0 || nx >= bed.resolution || nz < 0 || nz >= bed.resolution) continue
+          const neighbor = nz * bed.resolution + nx
+          if (visited[neighbor] || bed.water[neighbor] !== 0) continue
+          visited[neighbor] = 1
+          pending.push(neighbor)
+        }
+    }
+    if (enclosed && pending.length >= 4)
+      islands.push({ minX, maxX, minZ, maxZ, cells: pending.length })
+  }
+  return islands.toSorted((a, b) => a.minZ - b.minZ)
+}
 
 describe('voxel lake world', () => {
   it('is deterministic and keeps desktop within an instancing budget', () => {
@@ -18,12 +69,29 @@ describe('voxel lake world', () => {
     for (const material of ['ground', 'shore', 'rock'] as const) {
       const positions = first.groups[material].positions
       for (let index = 0; index < positions.length; index += 3) {
-        const x = positions[index]!
-        const z = positions[index + 2]!
-        expect(x > 1 && x < 20 && z > -56).toBe(false)
+        const x = required(positions[index])
+        const z = required(positions[index + 2])
+        expect(x > 1 && x < 3 && z > -56).toBe(false)
       }
     }
   })
+
+  it.each([false, true])(
+    'seeds three detached right islands while keeping the lake channel open (mobile=%s)',
+    (mobile) => {
+      const layouts = [0, 9182].map((seed) => {
+        const world = createVoxelWorld(seed, mobile)
+        const islands = rightIslands(world.lakeBed, mobile)
+        expect(islands).toHaveLength(3)
+        for (let index = 1; index < islands.length; index++)
+          expect(required(islands[index - 1]).maxZ).toBeLessThan(required(islands[index]).minZ)
+        for (let z = -50; z <= -5; z++)
+          expect(world.lakeBed.water[lakeIndex(world.lakeBed, mobile ? 2 / 2.8 : 2, z)]).toBe(255)
+        return islands
+      })
+      expect(layouts[0]).not.toEqual(layouts[1])
+    },
+  )
 
   it('uses a materially lighter mobile world while retaining the lake corridor', () => {
     const desktop = createVoxelWorld(12, false)
@@ -41,7 +109,7 @@ describe('voxel lake world', () => {
   it('randomizes floating lights over solid land with independent safe motion', () => {
     for (const mobile of [false, true]) {
       const worlds = [0, 9182].map((seed) => createVoxelWorld(seed, mobile))
-      expect(worlds[0]!.lamps).not.toEqual(worlds[1]!.lamps)
+      expect(required(worlds[0]).lamps).not.toEqual(required(worlds[1]).lamps)
       for (const world of worlds) {
         expect(
           world.lamps.filter((lamp) => lamp.x < 0 && lamp.z < 0).length,
@@ -118,7 +186,7 @@ describe('voxel lake world', () => {
         expect(covered.size).toBeGreaterThan(foreground ? 500 : 10_000)
         let largestGap = 0
         for (const [key, column] of covered) {
-          const [x, z] = key.split(':').map(Number) as [number, number]
+          const [x = NaN, z = NaN] = key.split(':').map(Number)
           const lowerNeighbor = Math.min(
             ...[`${x - 1}:${z}`, `${x + 1}:${z}`, `${x}:${z - 1}`, `${x}:${z + 1}`].map(
               (neighbor) => covered.get(neighbor)?.top ?? -0.4,
@@ -150,11 +218,13 @@ describe('voxel lake world', () => {
             .filter((voxel) => Math.abs(voxel.x - x) < 1e-5 && Math.abs(voxel.z - z) < 1e-5)
             .toSorted((a, b) => a.y - b.y)
           expect(rocks.length).toBeGreaterThan(0)
-          expect(rocks[0]!.y - rocks[0]!.size / 2).toBeLessThanOrEqual(-0.4 + 1e-5)
-          expect(rocks.at(-1)!.y).toBe(0)
+          expect(required(rocks[0]).y - required(rocks[0]).size / 2).toBeLessThanOrEqual(
+            -0.4 + 1e-5,
+          )
+          expect(required(rocks.at(-1)).y).toBe(0)
           for (let index = 1; index < rocks.length; index += 1) {
-            const lower = rocks[index - 1]!
-            const upper = rocks[index]!
+            const lower = required(rocks[index - 1])
+            const upper = required(rocks[index])
             expect(upper.y - upper.size / 2).toBeLessThanOrEqual(lower.y + lower.size / 2 + 1e-5)
           }
         }
@@ -168,8 +238,8 @@ describe('voxel lake world', () => {
       const frontEdge = (minX: number, maxX: number) => {
         const depths: number[] = []
         for (let index = 0; index < world.shores.length; index += 3) {
-          const x = world.shores[index]!
-          if (x >= minX && x < maxX) depths.push(world.shores[index + 2]!)
+          const x = required(world.shores[index])
+          if (x >= minX && x < maxX) depths.push(required(world.shores[index + 2]))
         }
         return Math.max(...depths)
       }
@@ -190,13 +260,14 @@ describe('voxel lake world', () => {
         for (const material of ['ground', 'shore', 'rock'] as const) {
           const positions = world.groups[material].positions
           for (let index = 0; index < positions.length; index += 3) {
-            const x = positions[index]!
-            const z = positions[index + 2]!
-            if (x >= minX && x < maxX && z > minZ && z < maxZ) heights.push(positions[index + 1]!)
+            const x = required(positions[index])
+            const z = required(positions[index + 2])
+            if (x >= minX && x < maxX && z > minZ && z < maxZ)
+              heights.push(required(positions[index + 1]))
           }
         }
         heights.sort((a, b) => a - b)
-        return heights[Math.floor(heights.length * 0.9)]!
+        return required(heights[Math.floor(heights.length * 0.9)])
       }
 
       expect(ridgeHeight(-52, -43)).toBeGreaterThan(ridgeHeight(-22, -14) + 3)

@@ -1,80 +1,24 @@
-import { MeshStandardMaterial, ShaderChunk, ShaderLib } from 'three'
-import type { WebGLRenderer } from 'three'
-import { describe, expect, it, vi } from 'vitest'
+import { vec3 } from 'three/tsl'
+import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { describe, expect, it } from 'vitest'
 
 import { LakeCaustics } from './lake-caustics'
-import { WIND_FIELD_GLSL } from './water-surface'
 import { WindModel } from './wind'
 
-describe('lake caustics material extension', () => {
-  it('composes existing material hooks without adding illumination in shadow', () => {
-    const material = new MeshStandardMaterial()
-    const previous = vi.fn<MeshStandardMaterial['onBeforeCompile']>((shader) => {
-      // The cloud-shadow hook expands this include before caustics run.
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <lights_fragment_begin>',
-        ShaderChunk.lights_fragment_begin,
-      )
-    })
-    material.onBeforeCompile = previous
-    material.customProgramCacheKey = () => 'cloud-shadow'
+describe('lake caustics node composition', () => {
+  it('preserves previous material treatments and restores the owned graph', () => {
+    const material = new MeshStandardNodeMaterial()
+    const previous = vec3(0.3, 0.4, 0.5)
+    material.colorNode = previous
     const caustics = new LakeCaustics()
     caustics.applyTo(material)
+    const composed = material.colorNode
+    expect(composed).not.toBe(previous)
     caustics.applyTo(material)
-    const shader = {
-      vertexShader: ShaderLib.standard.vertexShader,
-      fragmentShader: ShaderLib.standard.fragmentShader,
-      uniforms: {},
-    } as Parameters<MeshStandardMaterial['onBeforeCompile']>[0]
-    material.onBeforeCompile(shader, {} as WebGLRenderer)
-    expect(previous).toHaveBeenCalledOnce()
-    expect(material.customProgramCacheKey()).toBe('cloud-shadow:lake-caustics-v2')
-    expect(shader.fragmentShader).toContain('reflectedLight.directDiffuse *=')
-    expect(shader.fragmentShader.indexOf('float causticFocus =')).toBeGreaterThan(0)
-    expect(shader.fragmentShader.indexOf('float causticFocus =')).toBeLessThan(
-      shader.fragmentShader.indexOf('reflectedLight.directDiffuse *='),
-    )
-    expect(shader.fragmentShader).not.toContain('totalEmissiveRadiance +=')
-    expect(shader.vertexShader).toContain('instanceMatrix * causticWorld')
+    expect(material.colorNode).toBe(composed)
+    expect(material.emissiveNode).toBeNull()
     caustics.dispose()
-    expect(material.onBeforeCompile).toBe(previous)
-    expect(material.customProgramCacheKey()).toBe('cloud-shadow')
-    material.dispose()
-  })
-
-  it('keeps selected wave phases and packets identical to the rendered surface', () => {
-    const material = new MeshStandardMaterial()
-    const caustics = new LakeCaustics()
-    caustics.applyTo(material)
-    const shader = {
-      vertexShader: ShaderLib.standard.vertexShader,
-      fragmentShader: ShaderLib.standard.fragmentShader,
-      uniforms: {},
-    } as Parameters<MeshStandardMaterial['onBeforeCompile']>[0]
-    material.onBeforeCompile(shader, {} as WebGLRenderer)
-    // This contract catches drift if the shared surface phase/envelope changes;
-    // equal clocks alone did not keep the old independent caustic field in sync.
-    for (const declaration of [
-      'vec2 k',
-      'float crossPhase',
-      'float phase',
-      'vec2 phaseGradient',
-      'float groupPhase',
-      'float alongPacket',
-      'float crossPacket',
-      'vec2 packetGradient',
-      'float strength',
-    ]) {
-      const pattern = new RegExp(`${declaration} = [^;]+;`, 'g')
-      const surface = WIND_FIELD_GLSL.match(pattern)!.map((line) => line.replace(/\s+/g, ' '))
-      const caustic = shader.fragmentShader.match(pattern)!.map((line) => line.replace(/\s+/g, ' '))
-      expect(caustic).toHaveLength(5)
-      for (const line of caustic) expect(surface).toContain(line)
-    }
-    expect(shader.fragmentShader).not.toContain('uCausticDrift')
-    expect(shader.fragmentShader).not.toContain('pointerWave')
-    expect(shader.fragmentShader.match(/lakeCausticLight\(vCausticWorld\)/g)).toHaveLength(1)
-    caustics.dispose()
+    expect(material.colorNode).toBe(previous)
     material.dispose()
   })
 

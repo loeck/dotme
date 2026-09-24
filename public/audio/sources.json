@@ -53,5 +53,24 @@
     "excerptStart": 4,
     "duration": 6,
     "sha256": "0bdc787ce089bef66c7ff1ce09aa09a022e6a6f727a4f3adc987c644673a7b69"
+  },
+  {
+    "layer": "waterfall",
+    "author": "Joseph SARDIN",
+    "source": "https://bigsoundbank.com/mini-waterfall-s0996.html",
+    "preview": "https://bigsoundbank.com/UPLOAD/mp3/0996.mp3",
+    "download": "https://bigsoundbank.com/UPLOAD/bwf-en/0996.wav",
+    "license": "CC0-1.0",
+    "licenseSource": "https://bigsoundbank.com/licenses.html",
+    "verified": "2026-09-24",
+    "excerptStart": 1,
+    "excerptDuration": 24,
+    "duration": 23,
+    "processing": [
+      "One-second equal-power circular crossfade between the excerpt tail and head, followed by the unchanged middle.",
+      "Gain reduced by 5.7 dB; final mean -30.0 dBFS and peak -8.2 dBFS measured after MP3 decoding.",
+      "Mono, 32000 Hz, MP3 80 kbit/s; source metadata removed."
+    ],
+    "sha256": "1e80a62db667cefa87b8ef34c61faada066a6726d289b0a27d2480e7469885c6"
   }
 ]

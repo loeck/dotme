@@ -1,28 +1,32 @@
-import { PlaneGeometry } from 'three'
+import { Fn, float, vec2, vec4, uniform, sin, cos, mix, smoothstep } from 'three/tsl'
+import { BufferAttribute, BufferGeometry, Sphere, Vector2, Vector3, Vector4 } from 'three/webgpu'
+import type { Node } from 'three/webgpu'
 
 import { LAKE_BOUNDS } from './lake-bed'
+import { prepareWaterSurface } from './lake-geometry-data'
+import type { PreparedWaterSurface } from './lake-geometry-data'
 import type { WindState } from './wind'
 
-// A narrow wind spectrum plus two crossing swells. Incommensurate wavelengths
-// and phases produce evolving packets instead of parallel, repeating stripes.
+// Crossing swells and directionally spread shorter wind waves. Band amplitudes
+// set the energy without one coherent family of parallel crests.
 export const WIND_WAVES = [
   [0.55, 12.7, 0.024, 1.3],
   [1.92, 8.3, 0.016, 4.7],
-  [0.83, 5.1, 0.014, 2.1],
-  [0.31, 3.6, 0.011, 5.8],
-  [0.97, 2.4, 0.008, 0.4],
+  [1.15, 5.1, 0.014, 2.1],
+  [-0.15, 3.6, 0.011, 5.8],
+  [1.62, 2.4, 0.008, 0.4],
   // Calm wind: fade short, fast waves before they dominate the lamp glints.
   // Keep this spectrum uniform across the lake, including the lit left bank.
-  [0.63, 1.61, 0.0048, 3.2],
-  [1.15, 1.07, 0.0024, 5.1],
-  [0.38, 0.72, 0.0012, 1.7],
-  [0.78, 0.49, 0.00055, 4.2],
-  [1.02, 0.33, 0.00025, 0.9],
-  [0.49, 0.22, 0.0001, 3.8],
-  [0.86, 0.145, 0.00004, 2.6],
+  [0.08, 1.61, 0.0048, 3.2],
+  [1.48, 1.07, 0.0024, 5.1],
+  [-0.4, 0.72, 0.0012, 1.7],
+  [1.95, 0.49, 0.00055, 4.2],
+  [0.63, 0.33, 0.00025, 0.9],
+  [-0.77, 0.22, 0.0001, 3.8],
+  [2.16, 0.145, 0.00004, 2.6],
 ] as const
 
-// Precompute the same spectrum coefficients for CPU sampling and GLSL generation.
+// Precompute the same spectrum coefficients for CPU sampling and TSL shading.
 export const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phase]) => {
   const k = (Math.PI * 2) / wavelength
   const small = Math.max(0, Math.min(1, (5 - wavelength) / 5))
@@ -31,6 +35,8 @@ export const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phas
     amplitude,
     phase,
     small,
+    // Short waves form shorter transverse packets; amplitudes remain unchanged.
+    crossScale: 0.18 + small * 0.22,
     kx: Math.cos(angle) * k,
     kz: Math.sin(angle) * k,
     omega: Math.sqrt(9.81 * k),
@@ -60,12 +66,13 @@ export function sampleWindField(
     omega,
     small,
     sensitivity,
+    crossScale,
   } of WAVE_SPECTRUM) {
     if (footprint >= wavelength * 0.5) continue
     const kx = baseX * rotationX - baseZ * rotationY
     const kz = baseZ * rotationX + baseX * rotationY
-    const cx = -kz * 0.18,
-      cz = kx * 0.18
+    const cx = -kz * crossScale,
+      cz = kx * crossScale
     const spatial = x * kx + z * kz
     const cross = x * cx + z * cz + omega * time * 0.025 + phase * 1.7
     const wavePhase = spatial - omega * time + phase + 0.42 * Math.sin(cross * 0.57)
@@ -107,86 +114,113 @@ export function swellHeight(x: number, z: number, time: number, wind?: WindState
   return sampleWindField(x, z, time, wind)[0]
 }
 
-const gl = (n: number) => n.toFixed(9)
-/** Height and exact wind derivatives share the same spectrum. Small normal
- * waves are evaluated analytically, independently of the simulation's cell size. */
-export const WIND_FIELD_GLSL = `
-uniform float uTime;
-uniform vec2 uWindRotation;
-uniform float uWindRotationVelocity;
-uniform vec4 uWindResponse;
-vec4 windField(vec2 p, float footprint) {
-  vec4 field = vec4(0.0);
-  ${WAVE_SPECTRUM.map(
-    ({
-      wavelength: length,
-      amplitude,
-      phase,
-      kx,
-      kz,
-      omega,
-      small,
-      sensitivity,
-    }) => `if (footprint < ${gl(length * 0.5)}) {
-      vec2 k = vec2(${gl(kx)}, ${gl(kz)});
-      k = vec2(k.x * uWindRotation.x - k.y * uWindRotation.y, k.x * uWindRotation.y + k.y * uWindRotation.x);
-      float spatial = dot(p, k);
-      vec2 crossK = vec2(-k.y, k.x) * 0.18;
-      float crossPhase = dot(p, crossK) + uTime * ${gl(omega * 0.025)} + ${gl(phase * 1.7)};
-      float phase = spatial - uTime * ${gl(omega)} + ${gl(phase)} + 0.42 * sin(crossPhase * 0.57);
-      vec2 phaseGradient = k + crossK * 0.2394 * cos(crossPhase * 0.57);
-      float groupPhase = spatial * 0.14 - uTime * ${gl(omega * 0.07)} + ${gl(phase * 2.3)};
-      float alongPacket = 0.72 + 0.28 * cos(groupPhase);
-      float crossPacket = 0.64 + 0.36 * cos(crossPhase);
-      float packet = alongPacket * crossPacket;
-      vec2 packetGradient = -k * 0.0392 * sin(groupPhase) * crossPacket
-        -crossK * 0.36 * sin(crossPhase) * alongPacket;
-      float baseAmplitude = ${gl(amplitude)} * (1.0 - smoothstep(${gl(length * 0.18)}, ${gl(length * 0.5)}, footprint));
-      float strength = mix(uWindResponse.x, uWindResponse.y, ${gl(small)});
-      float amplitude = baseAmplitude * (1.0 + ${gl(sensitivity)} * (strength - 1.0));
-      float amplitudeVelocity = baseAmplitude * ${gl(sensitivity)} * mix(uWindResponse.z, uWindResponse.w, ${gl(small)});
-      field.x += sin(phase) * amplitude * packet;
-      field.yz += amplitude * (phaseGradient * cos(phase) * packet + sin(phase) * packetGradient);
-      float spatialVelocity = uWindRotationVelocity * dot(p, vec2(-k.y, k.x));
-      float crossVelocity = uWindRotationVelocity * dot(p, vec2(-crossK.y, crossK.x)) + ${gl(omega * 0.025)};
-      float groupVelocity = spatialVelocity * 0.14 - ${gl(omega * 0.07)};
-      float phaseVelocity = spatialVelocity - ${gl(omega)} + 0.2394 * cos(crossPhase * 0.57) * crossVelocity;
-      float packetVelocity = -0.28 * sin(groupPhase) * groupVelocity * crossPacket
-        -0.36 * sin(crossPhase) * crossVelocity * alongPacket;
-      field.w += amplitude * (cos(phase) * phaseVelocity * packet + sin(phase) * packetVelocity)
-        + amplitudeVelocity * sin(phase) * packet;
-    }`,
-  ).join('\n')}
-  return field;
+/** One spectrum shared by CPU buoyancy and GPU shading. */
+export function createWindNodes() {
+  return {
+    uTime: uniform(0),
+    uWindRotation: uniform(new Vector2(1, 0)),
+    uWindRotationVelocity: uniform(0),
+    uWindResponse: uniform(new Vector4(1, 1, 0, 0)),
+  }
 }
-`
 
-export const WATER_FIELD_GLSL = `
-${WIND_FIELD_GLSL}
-uniform sampler2D uState;
-uniform sampler2D uMask;
-uniform float uCell;
-vec2 fieldUv(vec2 p) { return (p - vec2(${gl(LAKE_BOUNDS.minX)}, ${gl(LAKE_BOUNDS.minZ)})) / ${gl(LAKE_BOUNDS.size)}; }
-float interactionHeight(vec2 p) {
-  vec2 uv = fieldUv(p);
-  float inside = step(0.0, uv.x) * step(uv.x, 1.0) * step(0.0, uv.y) * step(uv.y, 1.0);
-  return texture2D(uState, clamp(uv, 0.0, 1.0)).r * inside;
+export function windFieldNode(
+  p: Node<'vec2'>,
+  footprint: Node<'float'>,
+  u: ReturnType<typeof createWindNodes>,
+) {
+  return Fn(() => {
+    // Separate accumulators avoid mutable vec4 swizzles in the Metal compiler,
+    // particularly when this field is evaluated inside shoreline conditionals.
+    const height = float(0).toVar()
+    const gradient = vec2(0).toVar()
+    const velocity = float(0).toVar()
+    for (const w of WAVE_SPECTRUM) {
+      const k = vec2(
+        u.uWindRotation.x.mul(w.kx).sub(u.uWindRotation.y.mul(w.kz)),
+        u.uWindRotation.y.mul(w.kx).add(u.uWindRotation.x.mul(w.kz)),
+      )
+      const spatial = p.dot(k)
+      const crossK = vec2(k.y.negate(), k.x).mul(w.crossScale)
+      const crossPhase = p
+        .dot(crossK)
+        .add(u.uTime.mul(w.omega * 0.025))
+        .add(w.phase * 1.7)
+      const phase = spatial
+        .sub(u.uTime.mul(w.omega))
+        .add(w.phase)
+        .add(sin(crossPhase.mul(0.57)).mul(0.42))
+      const phaseGradient = k.add(crossK.mul(0.2394).mul(cos(crossPhase.mul(0.57))))
+      const group = spatial
+        .mul(0.14)
+        .sub(u.uTime.mul(w.omega * 0.07))
+        .add(w.phase * 2.3)
+      const alongPacket = cos(group).mul(0.28).add(0.72)
+      const crossPacket = cos(crossPhase).mul(0.36).add(0.64)
+      const packet = alongPacket.mul(crossPacket)
+      const packetGradient = k
+        .mul(-0.0392)
+        .mul(sin(group))
+        .mul(crossPacket)
+        .sub(crossK.mul(0.36).mul(sin(crossPhase)).mul(alongPacket))
+      const base = float(w.amplitude).mul(
+        float(1).sub(smoothstep(w.wavelength * 0.18, w.wavelength * 0.5, footprint)),
+      )
+      const amplitude = base.mul(
+        mix(u.uWindResponse.x, u.uWindResponse.y, w.small).sub(1).mul(w.sensitivity).add(1),
+      )
+      const amplitudeVelocity = base
+        .mul(w.sensitivity)
+        .mul(mix(u.uWindResponse.z, u.uWindResponse.w, w.small))
+      height.addAssign(sin(phase).mul(amplitude).mul(packet))
+      gradient.addAssign(
+        amplitude.mul(
+          phaseGradient
+            .mul(cos(phase))
+            .mul(packet)
+            .add(packetGradient.mul(sin(phase))),
+        ),
+      )
+      const spatialVelocity = u.uWindRotationVelocity.mul(p.dot(vec2(k.y.negate(), k.x)))
+      const crossVelocity = u.uWindRotationVelocity
+        .mul(p.dot(vec2(crossK.y.negate(), crossK.x)))
+        .add(w.omega * 0.025)
+      const groupVelocity = spatialVelocity.mul(0.14).sub(w.omega * 0.07)
+      const phaseVelocity = spatialVelocity
+        .sub(w.omega)
+        .add(cos(crossPhase.mul(0.57)).mul(0.2394).mul(crossVelocity))
+      const packetVelocity = sin(group)
+        .mul(-0.28)
+        .mul(groupVelocity)
+        .mul(crossPacket)
+        .sub(sin(crossPhase).mul(0.36).mul(crossVelocity).mul(alongPacket))
+      velocity.addAssign(
+        amplitude
+          .mul(cos(phase).mul(phaseVelocity).mul(packet).add(sin(phase).mul(packetVelocity)))
+          .add(amplitudeVelocity.mul(sin(phase)).mul(packet)),
+      )
+    }
+    return vec4(height, gradient, velocity)
+  })()
 }
-float heightAt(vec2 p, float footprint) {
-  return windField(p, footprint).x + interactionHeight(p);
+
+export function fieldUvNode(p: Node<'vec2'>) {
+  return p.sub(vec2(LAKE_BOUNDS.minX, LAKE_BOUNDS.minZ)).div(LAKE_BOUNDS.size)
 }
-`
 
 /** More triangles in the near lake; the outer surface still reaches beyond the horizon. */
-export function createWaterGeometry(mobile: boolean) {
-  const segments = mobile ? 192 : 384
-  const geometry = new PlaneGeometry(1, 1, segments, segments)
-  const positions = geometry.attributes.position!
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i) * 2
-    const t = 0.5 + positions.getY(i)
-    positions.setXYZ(i, Math.sign(x) * Math.abs(x) ** 2.6 * 500, -(24 - t ** 2.6 * 524), 0)
-  }
-  geometry.computeBoundingSphere()
+export function createWaterGeometry(
+  mobile: boolean,
+  prepared: PreparedWaterSurface = prepareWaterSurface(mobile),
+) {
+  const geometry = new BufferGeometry()
+  geometry.setAttribute('position', new BufferAttribute(prepared.positions, 3))
+  geometry.setAttribute('normal', new BufferAttribute(prepared.normals, 3))
+  geometry.setAttribute('uv', new BufferAttribute(prepared.uv, 2))
+  geometry.setIndex(new BufferAttribute(prepared.indices, 1))
+  geometry.boundingSphere = new Sphere(
+    new Vector3(...prepared.boundingCenter),
+    prepared.boundingRadius,
+  )
   return geometry
 }

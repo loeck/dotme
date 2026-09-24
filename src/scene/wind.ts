@@ -1,4 +1,6 @@
-import { Vector2, Vector4 } from 'three'
+import type { Vector2, Vector4 } from 'three/webgpu'
+
+import { required } from '../invariant'
 
 export const WIND_BEARING = 0.72
 const REFERENCE_SPEED = 3
@@ -61,7 +63,7 @@ export class WindModel {
       0,
     ]
     GUSTS.forEach(([frequency, weight], i) => {
-      const phase = this.phases[i]!
+      const phase = required(this.phases[i])
       const amplitude = this.meanSpeed * weight * this.gustStrength
       const angle = frequency * time + phase
       const sine = Math.sin(angle),
@@ -73,13 +75,13 @@ export class WindModel {
         const lag = frequency * (band === 0 ? 8 : 2.5)
         // Expanded sin(angle - atan(lag)) with the filter's attenuation.
         const gain = amplitude / REFERENCE_SPEED / (1 + lag * lag)
-        response[band]! += gain * (sine - lag * cosine)
-        response[band + 2]! += gain * frequency * (cosine + lag * sine)
+        response[band] = required(response[band]) + gain * (sine - lag * cosine)
+        response[band + 2] = required(response[band + 2]) + gain * frequency * (cosine + lag * sine)
       }
     })
     // A slow crosswind veers to either side of the prevailing bearing. Both
     // velocity components have exact integrals, including through a left turn.
-    const turnPhase = this.phases[1]!
+    const turnPhase = required(this.phases[1])
     const turnAngle = TURN_FREQUENCY * time + turnPhase
     const turnAmplitude = this.meanSpeed * 1.4 * this.turnStrength
     const sine = Math.sin(turnAngle),
@@ -95,10 +97,11 @@ export class WindModel {
       const gain = turnAmplitude / REFERENCE_SPEED / (1 + lag * lag)
       const filtered = gain * (sine - lag * cosine)
       const derivative = gain * TURN_FREQUENCY * (cosine + lag * sine)
-      const strength = Math.hypot(response[band]!, filtered)
+      const strength = Math.hypot(required(response[band]), filtered)
       response[band + 2] =
         strength > 0
-          ? (response[band]! * response[band + 2]! + filtered * derivative) / strength
+          ? (required(response[band]) * required(response[band + 2]) + filtered * derivative) /
+            strength
           : 0
       response[band] = strength
     }
@@ -116,18 +119,13 @@ export class WindModel {
   }
 }
 
-export function createWindUniforms() {
-  return {
-    uWindRotation: { value: new Vector2(1, 0) },
-    uWindRotationVelocity: { value: 0 },
-    uWindResponse: { value: new Vector4(1, 1, 0, 0) },
-  }
+export interface WindUniforms {
+  readonly uWindRotation: { value: Vector2 }
+  readonly uWindRotationVelocity: { value: number }
+  readonly uWindResponse: { value: Vector4 }
 }
 
-export function updateWindUniforms(
-  uniforms: ReturnType<typeof createWindUniforms>,
-  wind: WindState,
-) {
+export function updateWindUniforms(uniforms: WindUniforms, wind: WindState) {
   uniforms.uWindRotation.value.fromArray(wind.rotation)
   uniforms.uWindRotationVelocity.value = wind.rotationVelocity
   uniforms.uWindResponse.value.fromArray(wind.response)

@@ -1,16 +1,40 @@
 import {
+  attribute,
+  uv,
+  float,
+  vec2,
+  vec3,
+  sin,
+  cos,
+  exp,
+  clamp,
+  smoothstep,
+  fract,
+  floor,
+  mix,
+  positionView,
+  normalize,
+  cross,
+  dFdx,
+  dFdy,
+  faceDirection,
+  positionLocal,
+} from 'three/tsl'
+import type { Node, NodeBuilder } from 'three/webgpu'
+import {
   DynamicDrawUsage,
   DoubleSide,
   InstancedBufferAttribute,
   InstancedMesh,
-  MeshStandardMaterial,
+  MeshStandardNodeMaterial,
   Object3D,
   PlaneGeometry,
   SphereGeometry,
   Vector3,
-} from 'three'
-import type { Scene } from 'three'
+} from 'three/webgpu'
+import type { Scene } from 'three/webgpu'
 
+import { required } from '../invariant'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { SplashImpacts } from './splash-impacts'
@@ -18,6 +42,28 @@ import { createSplashProfile } from './splash-profile'
 import type { SplashProfile } from './splash-profile'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
+
+const hash = (q: Node<'vec2'>) => fract(sin(q.dot(vec2(127.1, 311.7))).mul(43758.5453))
+
+const noise = (point: Node<'vec2'>) => {
+  const grid = floor(point),
+    f0 = fract(point),
+    f = f0.mul(f0).mul(vec2(3).sub(f0.mul(2)))
+
+  return mix(
+    mix(hash(grid), hash(grid.add(vec2(1, 0))), f.x),
+    mix(hash(grid.add(vec2(0, 1))), hash(grid.add(1)), f.x),
+    f.y,
+  )
+}
+
+class SheetMaterial extends MeshStandardNodeMaterial {
+  localPosition: Node<'vec3'> | null = null
+  override setupPosition(builder: NodeBuilder) {
+    if (this.localPosition) positionLocal.assign(this.localPosition)
+    return super.setupPosition(builder)
+  }
+}
 
 type Contact = { x: number; z: number; nx: number; nz: number; armed: boolean; next: number }
 type Drop = {
@@ -76,8 +122,8 @@ type Sheet = {
 
 /** Sparse impact jets tied to the same wind-wave field as the visible surface. */
 export class LakeSplashes {
-  readonly mesh: InstancedMesh<SphereGeometry, MeshStandardMaterial>
-  readonly sheets: InstancedMesh<PlaneGeometry, MeshStandardMaterial>
+  readonly mesh: InstancedMesh<SphereGeometry, MeshStandardNodeMaterial>
+  readonly sheets: InstancedMesh<PlaneGeometry, MeshStandardNodeMaterial>
   readonly impacts: SplashImpacts
   readonly contacts: Contact[] = []
   readonly capacity: number
@@ -97,12 +143,9 @@ export class LakeSplashes {
   emitted = 0
   active = 0
 
-  constructor(
-    scene: Scene,
-    private readonly bed: LakeBed,
-    seed: number,
-    mobile: boolean,
-  ) {
+  private readonly bed: LakeBed
+  constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean) {
+    this.bed = bed
     this.state = (seed ^ 0x591a7e) >>> 0
     this.impacts = new SplashImpacts(scene, mobile)
     this.capacity = mobile ? 144 : 320
@@ -115,13 +158,13 @@ export class LakeSplashes {
     for (let row = 1; row < n - 1; row += 2)
       for (let col = 1; col < n - 1; col += 2) {
         const index = row * n + col,
-          distance = bed.shore[index]!
+          distance = required(bed.shore[index])
         if (distance <= 0 || distance > cell * 1.7) continue
         const x = LAKE_BOUNDS.minX + (col + 0.5) * cell
         const z = LAKE_BOUNDS.minZ + (row + 0.5) * cell
         if (Math.abs(x) > (mobile ? 25 : 55) || z < -80 || z > 12) continue
-        let nx = bed.shore[index + 1]! - bed.shore[index - 1]!
-        let nz = bed.shore[index + n]! - bed.shore[index - n]!
+        let nx = required(bed.shore[index + 1]) - required(bed.shore[index - 1])
+        let nz = required(bed.shore[index + n]) - required(bed.shore[index - n])
         const length = Math.hypot(nx, nz)
         if (length < 0.0001) continue
         nx /= length
@@ -159,7 +202,7 @@ export class LakeSplashes {
       'aSplashOpacity',
       new InstancedBufferAttribute(new Float32Array(this.capacity), 1).setUsage(DynamicDrawUsage),
     )
-    const material = new MeshStandardMaterial({
+    const material = new MeshStandardNodeMaterial({
       color: 0xd3e7e6,
       roughness: 0.12,
       envMapIntensity: 1.35,
@@ -167,21 +210,7 @@ export class LakeSplashes {
       transparent: true,
       depthWrite: false,
     })
-    material.onBeforeCompile = (shader) => {
-      shader.vertexShader =
-        'attribute float aSplashOpacity; varying float vSplashOpacity;\n' +
-        shader.vertexShader.replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\nvSplashOpacity = aSplashOpacity;',
-        )
-      shader.fragmentShader =
-        'varying float vSplashOpacity;\n' +
-        shader.fragmentShader.replace(
-          '#include <color_fragment>',
-          '#include <color_fragment>\ndiffuseColor.a *= vSplashOpacity;',
-        )
-    }
-    material.customProgramCacheKey = () => 'shore-impact-droplets-v1'
+    material.opacityNode = attribute('aSplashOpacity', 'float')
     this.mesh = new InstancedMesh(geometry, material, this.capacity)
     this.mesh.name = 'shore-impact-splashes'
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -203,78 +232,63 @@ export class LakeSplashes {
       'aSheetTiming',
       new InstancedBufferAttribute(new Float32Array(24 * 3), 3).setUsage(DynamicDrawUsage),
     )
-    const sheetMaterial = new MeshStandardMaterial({
+    const sheetMaterial = new SheetMaterial({
       color: 0xbcd5d8,
       roughness: 0.12,
       envMapIntensity: 1.25,
       metalness: 0,
       transparent: true,
       side: DoubleSide,
+      forceSinglePass: true,
       depthWrite: false,
     })
-    sheetMaterial.onBeforeCompile = (shader) => {
-      shader.vertexShader = `attribute vec3 aSheet;
-attribute vec4 aSheetShape;
-attribute vec3 aSheetTiming;
-varying vec3 vSheetTiming;
-varying vec3 vSheet;
-varying vec2 vSheetUv;
-${shader.vertexShader}`.replace(
-        '#include <begin_vertex>',
-        `
-vSheet = aSheet;
-vSheetTiming = aSheetTiming;
-vSheetUv = uv;
-float angle = (uv.x - 0.5) * aSheetShape.x + aSheetShape.w;
-float phase = clamp(aSheet.x / aSheetTiming.x, 0.0, 1.0);
-float lobes = 3.0 + floor(fract(aSheet.z * 0.73) * 5.0);
-float scallop = 1.0 + sin(uv.x * lobes * 6.283185 + aSheet.z) * 0.1
-  + sin(uv.x * 17.0 + aSheet.z * 2.3) * 0.04;
-// A short wall-wide upwash that tears before its apex, not an arc traced
-// continuously from a nozzle to the water. Detached drops handle the return.
-float rise = (1.0 - exp(-phase * 3.5)) * (0.06 + aSheet.y * 0.22) * aSheetShape.y;
-float curl = pow(uv.y, 3.0) * phase * (0.07 + aSheet.y * 0.16);
-vec3 transformed = vec3(
-  (uv.x - 0.5) * aSheetTiming.z + sin(angle) * curl * aSheetShape.z,
-  uv.y * rise * scallop,
-  (uv.y * phase * 0.035 + cos(angle) * curl) * aSheetShape.z);
-`,
-      )
-      shader.fragmentShader =
-        `float sheetHash(vec2 p) { return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453); }
-float sheetNoise(vec2 p) {
-  vec2 cell = floor(p), f = fract(p); f = f*f*(3.0-2.0*f);
-  return mix(mix(sheetHash(cell), sheetHash(cell+vec2(1,0)), f.x),
-    mix(sheetHash(cell+vec2(0,1)), sheetHash(cell+vec2(1,1)), f.x), f.y);
-}
-varying vec3 vSheetTiming;
-varying vec3 vSheet;
-varying vec2 vSheetUv;
-${shader.fragmentShader}`
-          .replace(
-            '#include <color_fragment>',
-            `#include <color_fragment>
-vec2 p = vSheetUv;
-float edge = smoothstep(0.0, 0.09, p.x) * smoothstep(0.0, 0.09, 1.0 - p.x)
-  * smoothstep(0.0, 0.15, p.y) * smoothstep(0.0, 0.04, 1.0 - p.y);
-float holes = sheetNoise(p * vec2(19.0, 8.0) + vSheet.z);
-float threads = sheetNoise(p * vec2(37.0, 4.0) + vSheet.z * 2.0);
-float phase = vSheet.x / vSheetTiming.x;
-float breakup = smoothstep(vSheetTiming.y, 0.9, phase);
-float film = smoothstep(breakup * 0.85, breakup * 0.85 + 0.12, holes * 0.7 + threads * 0.3);
-diffuseColor.a *= edge * film * smoothstep(0.0, 0.03, vSheet.x)
-  * (1.0 - smoothstep(0.55, 1.0, phase)) * 0.32;
-if (diffuseColor.a < 0.005) discard;
-`,
-          )
-          .replace(
-            '#include <normal_fragment_begin>',
-            `#include <normal_fragment_begin>
-normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontFacing ? 1.0 : -1.0);
-`,
-          )
-    }
-    sheetMaterial.customProgramCacheKey = () => 'shore-impact-upwash-v3'
+    const sheet = attribute('aSheet', 'vec3'),
+      shape = attribute('aSheetShape', 'vec4'),
+      timing = attribute('aSheetTiming', 'vec3'),
+      p = uv()
+    const angle = p.x.sub(0.5).mul(shape.x).add(shape.w)
+    const phase = clamp(sheet.x.div(timing.x), 0, 1)
+    const lobes = floor(fract(sheet.z.mul(0.73)).mul(5)).add(3)
+    const scallop = sin(
+      p.x
+        .mul(lobes)
+        .mul(Math.PI * 2)
+        .add(sheet.z),
+    )
+      .mul(0.1)
+      .add(sin(p.x.mul(17).add(sheet.z.mul(2.3))).mul(0.04))
+      .add(1)
+    const rise = float(1)
+      .sub(exp(phase.mul(-3.5)))
+      .mul(sheet.y.mul(0.22).add(0.06))
+      .mul(shape.y)
+    const curl = p.y.pow(3).mul(phase).mul(sheet.y.mul(0.16).add(0.07))
+    sheetMaterial.localPosition = vec3(
+      p.x.sub(0.5).mul(timing.z).add(sin(angle).mul(curl).mul(shape.z)),
+      p.y.mul(rise).mul(scallop),
+      p.y.mul(phase).mul(0.035).add(cos(angle).mul(curl)).mul(shape.z),
+    )
+    const edge = smoothstep(0, 0.09, p.x)
+      .mul(smoothstep(0, 0.09, float(1).sub(p.x)))
+      .mul(smoothstep(0, 0.15, p.y))
+      .mul(smoothstep(0, 0.04, float(1).sub(p.y)))
+    const holes = noise(p.mul(vec2(19, 8)).add(sheet.z)),
+      threads = noise(p.mul(vec2(37, 4)).add(sheet.z.mul(2)))
+    const breakup = smoothstep(timing.y, 0.9, phase)
+    const film = smoothstep(
+      breakup.mul(0.85),
+      breakup.mul(0.85).add(0.12),
+      holes.mul(0.7).add(threads.mul(0.3)),
+    )
+    sheetMaterial.opacityNode = edge
+      .mul(film)
+      .mul(smoothstep(0, 0.03, sheet.x))
+      .mul(float(1).sub(smoothstep(0.55, 1, phase)))
+      .mul(0.32)
+    sheetMaterial.alphaTest = 0.005
+    sheetMaterial.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView))).mul(
+      faceDirection,
+    )
     this.sheets = new InstancedMesh(sheetGeometry, sheetMaterial, 24)
     this.sheets.name = 'shore-impact-sheets'
     this.sheets.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -289,7 +303,8 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
     for (let step = 0.5; step < distance; step += 0.45) {
       const t = step / distance
       const index = lakeIndex(this.bed, x * (1 - t), z + (16 - z) * t)
-      if (index >= 0 && this.bed.obstacle[index]! > WATER_LEVEL + 0.04 + t * 2.3) return false
+      if (index >= 0 && required(this.bed.obstacle[index]) > WATER_LEVEL + 0.04 + t * 2.3)
+        return false
     }
     return true
   }
@@ -310,8 +325,8 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
     const i = row * n + col,
       field = this.bed.shore
     return (
-      (field[i]! * (1 - fx) + field[i + 1]! * fx) * (1 - fz) +
-      (field[i + n]! * (1 - fx) + field[i + n + 1]! * fx) * fz
+      (required(field[i]) * (1 - fx) + required(field[i + 1]) * fx) * (1 - fz) +
+      (required(field[i + n]) * (1 - fx) + required(field[i + n + 1]) * fx) * fz
     )
   }
 
@@ -393,10 +408,11 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
         }
         this.sheetCursor = (this.sheetCursor + 1) % this.sheetsState.length
         for (let i = 0; i < count; i++) {
-          const jet =
+          const jet = required(
             profile.jets[
               i < profile.jets.length ? i : Math.floor(this.random() * profile.jets.length)
-            ]!
+            ],
+          )
           const angle = jet.angle + (this.random() - 0.5) * 0.1
           const fine = this.random() < 0.32
           const source =
@@ -436,7 +452,7 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
         }
       }
     }
-    const opacity = this.mesh.geometry.getAttribute('aSplashOpacity') as InstancedBufferAttribute
+    const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
     this.transform.quaternion.identity()
     this.active = 0
     for (let i = 0; i < this.capacity; i++) {
@@ -502,9 +518,9 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
     this.mesh.instanceMatrix.needsUpdate = true
     opacity.needsUpdate = true
     this.mesh.visible = this.active > 0
-    const sheetData = this.sheets.geometry.getAttribute('aSheet') as InstancedBufferAttribute
-    const shapeData = this.sheets.geometry.getAttribute('aSheetShape') as InstancedBufferAttribute
-    const timingData = this.sheets.geometry.getAttribute('aSheetTiming') as InstancedBufferAttribute
+    const sheetData = this.sheets.geometry.getAttribute('aSheet')
+    const shapeData = this.sheets.geometry.getAttribute('aSheetShape')
+    const timingData = this.sheets.geometry.getAttribute('aSheetTiming')
     let activeSheets = 0
     for (let i = 0; i < this.sheetsState.length; i++) {
       const sheet = this.sheetsState[i]
@@ -536,6 +552,36 @@ normal = normalize(cross(dFdx(vViewPosition), dFdy(vViewPosition))) * (gl_FrontF
     sheetData.needsUpdate = shapeData.needsUpdate = timingData.needsUpdate = true
     this.sheets.visible = activeSheets > 0
     this.impacts.update(time)
+  }
+
+  /** Compile inactive batches without advancing their seeded simulation or displaying them. */
+  compileAsync(compile: () => Promise<void>): Promise<void> {
+    return this.withActiveBatches(compile)
+  }
+
+  warmup(render: () => void) {
+    this.withActiveBatches(render)
+  }
+
+  private withActiveBatches<T>(prepare: () => T): T {
+    const states = [this.mesh, this.sheets, this.impacts.mesh, this.impacts.slopes].map((mesh) => ({
+      mesh,
+      visible: mesh.visible,
+      count: mesh.count,
+    }))
+    try {
+      for (const { mesh } of states) {
+        mesh.visible = true
+        mesh.count = Math.max(1, mesh.count)
+      }
+      // Three collects the render list before its first await. Restore before the loader's frame.
+      return prepare()
+    } finally {
+      for (const { mesh, visible, count } of states) {
+        mesh.visible = visible
+        mesh.count = count
+      }
+    }
   }
 
   dispose() {

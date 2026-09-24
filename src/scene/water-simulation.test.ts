@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { LAKE_BOUNDS, createLakeBed, lakeIndex } from './lake-bed'
 import {
   WaterClock,
@@ -36,7 +37,7 @@ describe('lake field', () => {
     expect(a.water[lakeIndex(a, 0, 0)]).toBe(0)
     expect(a.water[lakeIndex(a, 5, 0)]).toBe(0)
     expect(a.water[lakeIndex(a, 3, 0)]).toBe(255)
-    expect(a.depth[lakeIndex(a, 1.5, 0)]).toBeLessThan(a.depth[lakeIndex(a, 12, 0)]!)
+    expect(a.depth[lakeIndex(a, 1.5, 0)]).toBeLessThan(required(a.depth[lakeIndex(a, 12, 0)]))
     expect(a.stones.every((stone) => stone.y + stone.size * 0.325 < -0.035)).toBe(true)
     expect(createLakeBed(voxels, 20, false).depth).not.toEqual(a.depth)
     expect(lakeIndex(a, -200, 0)).toBe(-1)
@@ -58,7 +59,7 @@ describe('lake field', () => {
       const ix = Math.floor(((x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * n)
       const iz = Math.floor(((z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size) * n)
       return {
-        distance: bed.shore[iz * n + ix]!,
+        distance: required(bed.shore[iz * n + ix]),
         x: LAKE_BOUNDS.minX + ((ix + 0.5) * LAKE_BOUNDS.size) / n,
       }
     }

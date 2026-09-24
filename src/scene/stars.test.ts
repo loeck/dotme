@@ -10,7 +10,7 @@ it('reserves stars for full night, fades bright stars first and reverses at dawn
   expect(starVisibility(-0.2, 1)).toBeGreaterThan(starVisibility(-0.2, 0.1))
   expect(starVisibility(-0.4, 0.1)).toBe(1)
   const dusk = [0, -0.12, -0.2, -0.4].map((h) => starVisibility(h))
-  expect(dusk).toEqual(dusk.toSorted())
+  expect(dusk).toEqual(dusk.toSorted((a, b) => a - b))
 })
 it('keeps seeded 90–180 second attempts independent of solar speed, with one short event', () => {
   const camera = new PerspectiveCamera(54, 16 / 9, 0.1, 500)

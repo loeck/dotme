@@ -1,83 +1,93 @@
-import { CLOUD_SHADOW_GLSL } from './cloud-shadows'
+import type { LightingModelDirectInput } from 'three/src/nodes/core/LightingModel.js'
+import {
+  dFdx,
+  dFdy,
+  diffuseColor,
+  float,
+  max,
+  min,
+  mix,
+  nodeObject,
+  normalView,
+  normalize,
+  positionViewDirection,
+  vec3,
+} from 'three/tsl'
+import { ConvertNode, LightingModel, Node } from 'three/webgpu'
+import type { NodeBuilder } from 'three/webgpu'
 
-/** Direct water lighting uses Three's live lights and their individual shadow maps. */
-export const WATER_LIGHTING_GLSL = `
-${CLOUD_SHADOW_GLSL}
-// GGX with the dielectric Fresnel reflectance of water (IOR 1.333).
-vec3 waterBRDF(vec3 n, vec3 v, vec3 l, vec3 radiance, float roughness) {
-  float nl = max(dot(n, l), 0.0);
-  float nv = max(dot(n, v), 0.001);
-  vec3 h = normalize(l + v);
-  float nh = max(dot(n, h), 0.0);
-  float vh = max(dot(v, h), 0.0);
-  float alpha = roughness;
-  float a2 = alpha * alpha;
-  float d = nh * nh * (a2 - 1.0) + 1.0;
-  float distribution = a2 / max(PI * d * d, 0.000001);
-  float visibility = 0.5 / max(
-    nl * sqrt(nv * nv * (1.0 - a2) + a2) +
-    nv * sqrt(nl * nl * (1.0 - a2) + a2), 0.0001);
-  float fresnel = 0.0204 + 0.9796 * pow(1.0 - vh, 5.0);
-  return radiance * nl * distribution * visibility * fresnel;
-}
+export const WATER_IOR = 1.333
 
-vec3 waterLighting(vec3 worldNormal, vec3 worldView, float roughness, float foam, float cloudVisibility) {
-  vec3 n = normalize(mat3(viewMatrix) * worldNormal);
-  vec3 v = normalize(mat3(viewMatrix) * worldView);
-  vec3 viewPosition = (viewMatrix * vec4(vWorldPosition, 1.0)).xyz;
-  // Unresolved normal variance broadens highlights instead of flickering.
-  float filteredRoughness = sqrt(roughness * roughness + min(0.025,
-    0.25 * (dot(dFdx(worldNormal), dFdx(worldNormal)) + dot(dFdy(worldNormal), dFdy(worldNormal)))));
-  vec3 foamAlbedo = vec3(0.84, 0.89, 0.87) * foam;
-  // Ambient illumination already includes the weather's diffuse attenuation.
-  // A direct cloud shadow must not extinguish the sky-lit bubbles a second time.
-  vec3 result = ambientLightColor * foamAlbedo;
-  filteredRoughness = mix(filteredRoughness, 0.4, foam);
-  IncidentLight light;
-  float visibility;
-  #if defined(USE_SHADOWMAP) && NUM_POINT_LIGHT_SHADOWS > 0
-    PointLightShadow pointShadow;
-  #endif
-  #if defined(USE_SHADOWMAP) && NUM_DIR_LIGHT_SHADOWS > 0
-    DirectionalLightShadow directionalShadow;
-  #endif
+const vector = (node: Node) => nodeObject(new ConvertNode<'vec3'>(node, 'vec3'))
 
-  #if NUM_POINT_LIGHTS > 0
-  #pragma unroll_loop_start
-  for (int i = 0; i < NUM_POINT_LIGHTS; i++) {
-    getPointLightInfo(pointLights[i], viewPosition, light);
-    if (light.visible) {
-    visibility = 1.0;
-    #if defined(USE_SHADOWMAP) && UNROLLED_LOOP_INDEX < NUM_POINT_LIGHT_SHADOWS
-      pointShadow = pointLightShadows[i];
-      visibility = getPointShadow(pointShadowMap[i], pointShadow.shadowMapSize,
-        pointShadow.shadowIntensity, pointShadow.shadowBias, pointShadow.shadowRadius,
-        vPointShadowCoord[i], pointShadow.shadowCameraNear, pointShadow.shadowCameraFar);
-    #endif
-    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility * (1.0 - foam);
-    result += foamAlbedo * light.color * max(dot(n, light.direction), 0.0) * visibility / PI;
-    }
+/** Preserve the original water BRDF, with live Three lights and their shadow nodes. */
+export class WaterLightingModel extends LightingModel {
+  foamNode: Node<'float'> = float(0)
+  roughnessNode: Node<'float'> = float(0.035)
+  worldNormalNode: Node<'vec3'> = vec3(0, 1, 0)
+
+  override direct({ lightDirection, lightColor, reflectedLight }: LightingModelDirectInput) {
+    const normal = normalView,
+      view = positionViewDirection,
+      direction = vector(lightDirection),
+      radiance = vector(lightColor)
+    const nl = max(normal.dot(direction), 0)
+    const nv = max(normal.dot(view), 0.001)
+    const halfway = normalize(direction.add(view))
+    const nh = max(normal.dot(halfway), 0)
+    const vh = max(view.dot(halfway), 0)
+    const dx = dFdx(this.worldNormalNode),
+      dy = dFdy(this.worldNormalNode)
+    const filtered = this.roughnessNode
+      .pow(2)
+      .add(min(0.025, dx.dot(dx).add(dy.dot(dy)).mul(0.25)))
+      .sqrt()
+    // The original roughness is GGX alpha, not perceptual roughness squared.
+    const alpha = mix(filtered, 0.4, this.foamNode)
+    const a2 = alpha.pow(2)
+    const denominator = nh.pow(2).mul(a2.sub(1)).add(1)
+    const distribution = a2.div(max(denominator.pow(2).mul(Math.PI), 0.000001))
+    const visibility = float(0.5).div(
+      max(
+        nl
+          .mul(nv.pow(2).mul(float(1).sub(a2)).add(a2).sqrt())
+          .add(nv.mul(nl.pow(2).mul(float(1).sub(a2)).add(a2).sqrt())),
+        0.0001,
+      ),
+    )
+    const fresnel = float(1).sub(vh).pow(5).mul(0.9796).add(0.0204)
+    vector(reflectedLight.directSpecular).addAssign(
+      radiance
+        .mul(nl)
+        .mul(distribution)
+        .mul(visibility)
+        .mul(fresnel)
+        .mul(float(1).sub(this.foamNode)),
+    )
+    vector(reflectedLight.directDiffuse).addAssign(
+      diffuseColor.rgb.mul(radiance).mul(nl).div(Math.PI),
+    )
   }
-  #pragma unroll_loop_end
-  #endif
 
-  #if NUM_DIR_LIGHTS > 0
-  #pragma unroll_loop_start
-  for (int i = 0; i < NUM_DIR_LIGHTS; i++) {
-    getDirectionalLightInfo(directionalLights[i], light);
-    light.color *= cloudVisibility * celestialVisibility();
-    visibility = 1.0;
-    #if defined(USE_SHADOWMAP) && UNROLLED_LOOP_INDEX < NUM_DIR_LIGHT_SHADOWS
-      directionalShadow = directionalLightShadows[i];
-      visibility = getShadow(directionalShadowMap[i], directionalShadow.shadowMapSize,
-        directionalShadow.shadowIntensity, directionalShadow.shadowBias, directionalShadow.shadowRadius,
-        vDirectionalShadowCoord[i]);
-    #endif
-    result += waterBRDF(n, v, light.direction, light.color, filteredRoughness) * visibility * (1.0 - foam);
-    result += foamAlbedo * light.color * max(dot(n, light.direction), 0.0) * visibility / PI;
+  override indirect(builder: NodeBuilder) {
+    const context = builder.context
+    if (
+      !context ||
+      typeof context !== 'object' ||
+      !('irradiance' in context) ||
+      !(context.irradiance instanceof Node) ||
+      !('reflectedLight' in context)
+    )
+      throw new Error('Missing water lighting context')
+    const reflected = context.reflectedLight
+    if (
+      !reflected ||
+      typeof reflected !== 'object' ||
+      !('indirectDiffuse' in reflected) ||
+      !(reflected.indirectDiffuse instanceof Node)
+    )
+      throw new Error('Missing water diffuse lighting')
+    // Ambient foam in the original shader is not attenuated by an extra 1/pi.
+    vector(reflected.indirectDiffuse).addAssign(vector(context.irradiance).mul(diffuseColor.rgb))
   }
-  #pragma unroll_loop_end
-  #endif
-  return result;
 }
-`

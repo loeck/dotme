@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { required } from '../invariant'
 import { fetchWeather } from './current'
 import { parisWeatherFixture } from './paris.fixture'
 import { preloadSceneWeather, randomSceneWeather, weatherForScene } from './scene'
@@ -83,7 +84,7 @@ describe('weather preload deadline', () => {
     await expect(start()).resolves.toEqual(randomSceneWeather(42))
   })
   it('aborts at 3 seconds and ignores a late response even if fetch ignores cancellation', async () => {
-    let reply!: (response: Response) => void
+    let reply: ((response: Response) => void) | undefined
     fetchMock.mockImplementation(
       () =>
         new Promise((resolve) => {
@@ -97,23 +98,25 @@ describe('weather preload deadline', () => {
     // waitFor may advance the fake clock while the dynamic module is being imported.
     await vi.advanceTimersByTimeAsync(3000)
     await expect(result).resolves.toEqual(randomSceneWeather(42))
-    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(true)
-    reply(new Response(JSON.stringify(parisWeatherFixture())))
+    expect(required(required(required(fetchMock.mock.calls[0])[1]).signal).aborted).toBe(true)
+    required(reply)(new Response(JSON.stringify(parisWeatherFixture())))
     await vi.advanceTimersByTimeAsync(0)
     expect(resolved).toHaveBeenCalledTimes(1)
   })
   it('retains the deadline during body parsing', async () => {
-    fetchMock.mockImplementation(
-      async (_url, options) =>
-        ({
-          ok: true,
-          json: () =>
-            new Promise((_resolve, reject) =>
-              options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), {
+    fetchMock.mockImplementation(async (_url, options) =>
+      Object.assign(new Response(), {
+        json: () =>
+          new Promise((_resolve, reject) =>
+            required(required(options).signal).addEventListener(
+              'abort',
+              () => reject(required(required(options).signal).reason),
+              {
                 once: true,
-              }),
+              },
             ),
-        }) as Response,
+          ),
+      }),
     )
     const result = start()
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
@@ -124,9 +127,13 @@ describe('weather preload deadline', () => {
     fetchMock.mockImplementation(
       (_url, options) =>
         new Promise((_resolve, reject) => {
-          options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), {
-            once: true,
-          })
+          required(required(options).signal).addEventListener(
+            'abort',
+            () => reject(required(required(options).signal).reason),
+            {
+              once: true,
+            },
+          )
         }),
     )
     const controller = new AbortController()

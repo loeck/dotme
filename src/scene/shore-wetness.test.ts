@@ -1,10 +1,8 @@
-import { MeshStandardMaterial, ShaderLib } from 'three'
-import type { WebGLRenderer } from 'three'
-import { describe, expect, it, vi } from 'vitest'
+import { vec3 } from 'three/tsl'
+import { MeshStandardNodeMaterial } from 'three/webgpu'
+import { describe, expect, it } from 'vitest'
 
 import { ShoreWetness, advanceShoreWetness } from './shore-wetness'
-
-const existingCacheKey = () => 'existing-lighting'
 
 describe('rain retained by shore stone', () => {
   it('soaks quickly and retains a visible trace while drying slowly', () => {
@@ -42,35 +40,25 @@ describe('rain retained by shore stone', () => {
     expect(advanceShoreWetness(NaN, NaN, 1)).toBe(0)
   })
 
-  it('composes existing lighting hooks, preserves base material and restores owned hooks', () => {
-    const material = new MeshStandardMaterial({ color: 0x263742, roughness: 0.42 })
-    const previousCompile = vi.fn<MeshStandardMaterial['onBeforeCompile']>((shader) => {
-      shader.uniforms.uExistingLighting = { value: 7 }
-    })
-    material.onBeforeCompile = previousCompile
-    material.customProgramCacheKey = existingCacheKey
+  it('composes color and roughness nodes and restores the previous treatment', () => {
+    const material = new MeshStandardNodeMaterial({ color: 0x263742, roughness: 0.42 })
+    const previous = vec3(0.2, 0.3, 0.4)
+    material.colorNode = previous
     const color = material.color.clone()
     const wetness = new ShoreWetness(0.65)
     wetness.applyTo(material)
+    const composed = material.colorNode
     wetness.applyTo(material)
-    const shader = {
-      uniforms: {},
-      vertexShader: ShaderLib.standard.vertexShader,
-      fragmentShader: ShaderLib.standard.fragmentShader,
-    } as Parameters<MeshStandardMaterial['onBeforeCompile']>[0]
-    material.onBeforeCompile(shader, {} as WebGLRenderer)
-    expect(previousCompile).toHaveBeenCalledOnce()
-    expect(shader.uniforms.uExistingLighting!.value).toBe(7)
-    expect(shader.uniforms.uShoreWetness!.value).toBe(0.65)
-    expect(material.customProgramCacheKey()).toContain('existing-lighting')
+    expect(material.colorNode).toBe(composed)
+    expect(material.colorNode).not.toBe(previous)
     wetness.update(10, 1)
-    expect(shader.uniforms.uShoreWetness!.value).toBeGreaterThan(0.65)
+    expect(wetness.wetness).toBeGreaterThan(0.65)
     expect(material.roughness).toBe(0.42)
     expect(material.color).toEqual(color)
     wetness.dispose()
-    expect(material.onBeforeCompile).toBe(previousCompile)
-    expect(material.customProgramCacheKey).toBe(existingCacheKey)
-    expect(shader.uniforms.uShoreWetness!.value).toBe(0)
+    expect(material.colorNode).toBe(previous)
+    expect(material.roughnessNode).toBeNull()
+    expect(wetness.wetness).toBe(0)
     material.dispose()
   })
 })

@@ -1,44 +1,41 @@
 import {
   Color,
-  CustomBlending,
-  DoubleSide,
+  DepthTexture,
+  NoToneMapping,
+  LinearSRGBColorSpace,
   DynamicDrawUsage,
   Group,
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedBufferGeometry,
   Mesh,
-  OneFactor,
   PlaneGeometry,
   Scene,
-  ShaderMaterial,
+  MeshBasicNodeMaterial,
   UnsignedByteType,
   Vector2,
   Vector3,
-  Vector4,
-  WebGLRenderTarget,
-} from 'three'
+  RenderTarget,
+} from 'three/webgpu'
 import type {
-  IUniform,
   Object3D,
   DirectionalLight,
   PerspectiveCamera,
   PointLight,
   Texture,
-  WebGLRenderer,
-} from 'three'
+  WebGPURenderer,
+} from 'three/webgpu'
 
+import { required } from '../invariant'
 import {
-  CROWN_FRAGMENT,
-  CROWN_VERTEX,
-  RAIN_FRAGMENT,
-  RAIN_VERTEX,
+  createRainParticleMaterial,
+  createRainSlopeMaterial,
+  createRainUniforms,
   RAIN_EXPOSURE,
   RAIN_CROWN_LIFETIME,
   RAIN_SPRAY_LIFETIME,
-  SLOPE_FRAGMENT,
-  SLOPE_VERTEX,
 } from './rain-shaders'
+import type { RainSurface } from './rain-shaders'
 import { IMPACT_LIFETIME, RainCollider, RainSimulation, WATER_Y } from './rain-simulation'
 import type { RainImpact, RainState } from './rain-simulation'
 import type { VoxelIndex } from './voxel-spatial'
@@ -56,7 +53,7 @@ export const RAIN_LAYER = 2
 function instancedPlane(capacity: number, firstName: string, secondName: string, segments = 1) {
   const plane = new PlaneGeometry(1, 1, segments, 1)
   const geometry = new InstancedBufferGeometry()
-  geometry.setIndex(plane.index!.clone())
+  geometry.setIndex(required(plane.index).clone())
   geometry.setAttribute('position', plane.getAttribute('position').clone())
   geometry.setAttribute('uv', plane.getAttribute('uv').clone())
   plane.dispose()
@@ -77,7 +74,8 @@ export class RainEffect {
   readonly group = new Group()
   readonly simulation: RainSimulation
   private readonly slopes = new Scene()
-  private readonly slopeTarget = new WebGLRenderTarget(1, 1, {
+  private readonly emptyDepth = new DepthTexture(1, 1)
+  private readonly slopeTarget = new RenderTarget(1, 1, {
     type: HalfFloatType,
     depthBuffer: false,
     stencilBuffer: false,
@@ -87,13 +85,13 @@ export class RainEffect {
   private readonly waves
   private readonly crowns
   private readonly spray
-  private readonly particleMaterials: ShaderMaterial[]
+  private readonly particleMaterials: MeshBasicNodeMaterial[]
   private readonly uniforms
-  private readonly slopeMaterial: ShaderMaterial
+  private readonly slopeMaterial: MeshBasicNodeMaterial
   private readonly clearColor = new Color()
+  private activeRenderer: WebGPURenderer | undefined
   private bufferHeight = 1
   private readonly renderResolution = new Vector2(1, 1)
-  private readonly viewport = new Vector4()
   private readonly lampPositions: Vector3[]
   private readonly lampColors: Color[]
   private readonly moonColor = new Color()
@@ -107,16 +105,23 @@ export class RainEffect {
   private readonly sampleSurface = (x: number, z: number, time: number) =>
     WATER_Y + sampleWindField(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
 
+  private readonly lamps: readonly PointLight[]
+  private readonly moon: DirectionalLight
+  private readonly reducedMotion: boolean
+
   constructor(
     voxels: readonly Voxel[] | VoxelIndex,
     mobile: boolean,
     seed: number,
-    private readonly lamps: readonly PointLight[],
-    private readonly moon: DirectionalLight,
-    private readonly reducedMotion: boolean,
-    surfaceUniforms: Record<string, IUniform>,
+    lamps: readonly PointLight[],
+    moon: DirectionalLight,
+    reducedMotion: boolean,
+    surfaceUniforms: RainSurface,
     slopesSupported: boolean,
   ) {
+    this.lamps = lamps
+    this.moon = moon
+    this.reducedMotion = reducedMotion
     this.simulation = new RainSimulation(new RainCollider(voxels), mobile, seed)
     this.splashLimit = mobile ? 48 : 128
     this.drops = instancedPlane(this.simulation.drops.length, 'aDrop', 'aVelocity')
@@ -131,90 +136,36 @@ export class RainEffect {
     this.spray = instancedPlane(this.splashLimit * 3, 'aDrop', 'aVelocity')
     this.lampPositions = Array.from({ length: Math.max(1, lamps.length) }, () => new Vector3())
     this.lampColors = Array.from({ length: Math.max(1, lamps.length) }, () => new Color(0))
-    const surface = Object.fromEntries(
-      [
-        'uTime',
-        'uState',
-        'uMask',
-        'uCell',
-        'uWindRotation',
-        'uWindRotationVelocity',
-        'uWindResponse',
-      ].map((key) => [key, surfaceUniforms[key]!]),
+    this.uniforms = createRainUniforms(
+      surfaceUniforms,
+      this.renderResolution,
+      this.moonColor,
+      this.moonDirection,
+      this.lampPositions,
+      this.lampColors,
+      this.emptyDepth,
     )
-    this.uniforms = {
-      ...surface,
-      uResolution: { value: this.renderResolution },
-      uPixelRatio: { value: 1 },
-      uMoonColor: { value: this.moonColor },
-      uMoonDirection: { value: this.moonDirection },
-      uLampPosition: { value: this.lampPositions },
-      uLampColor: { value: this.lampColors },
-      uDepth: { value: null as Texture | null },
-      uOverlay: { value: false },
-      uReflectionPass: { value: false },
-      uOpacity: { value: 1 },
-    }
-    this.slopeMaterial = new ShaderMaterial({
-      name: 'RainScreenSlopes',
-      vertexShader: SLOPE_VERTEX,
-      fragmentShader: SLOPE_FRAGMENT,
-      uniforms: surface,
-      transparent: true,
-      depthWrite: false,
-      depthTest: false,
-      side: DoubleSide,
-      forceSinglePass: true,
-      // Explicit ONE + ONE preserves signed slope contributions in the half-float target.
-      blending: CustomBlending,
-      blendSrc: OneFactor,
-      blendDst: OneFactor,
-      toneMapped: false,
-    })
-    // Shared lighting/occlusion uniforms, with one material per particle shape.
+    this.slopeMaterial = createRainSlopeMaterial(surfaceUniforms)
     this.particleMaterials = [
-      {
-        name: 'RainStreaks',
-        geometry: this.drops.geometry,
-        vertexShader: RAIN_VERTEX,
-        fragmentShader: RAIN_FRAGMENT,
-        spray: false,
-      },
-      {
-        name: 'RainCrowns',
-        geometry: this.crowns.geometry,
-        vertexShader: CROWN_VERTEX,
-        fragmentShader: CROWN_FRAGMENT,
-        spray: false,
-      },
-      {
-        name: 'RainSpray',
-        geometry: this.spray.geometry,
-        vertexShader: RAIN_VERTEX,
-        fragmentShader: RAIN_FRAGMENT,
-        spray: true,
-      },
-    ].map(({ geometry, spray, ...shader }) => {
-      const material = new ShaderMaterial({
-        ...shader,
-        uniforms: this.uniforms,
-        defines: { LAMP_COUNT: this.lampPositions.length, ...(spray ? { SURFACE_SPRAY: 1 } : {}) },
-        transparent: true,
-        depthWrite: false,
-        side: DoubleSide,
-        forceSinglePass: true,
-      })
+      { kind: 'streak', geometry: this.drops.geometry },
+      { kind: 'crown', geometry: this.crowns.geometry },
+      { kind: 'spray', geometry: this.spray.geometry },
+    ].map(({ geometry, kind }) => {
+      if (kind !== 'streak' && kind !== 'crown' && kind !== 'spray')
+        throw new Error('Invalid rain material')
+      const material = createRainParticleMaterial(kind, this.uniforms, this.lampPositions.length)
       const mesh = new Mesh(geometry, material)
       mesh.frustumCulled = false
       mesh.layers.set(RAIN_LAYER)
-      mesh.onBeforeRender = (renderer) => {
-        // Reconstruct in the active pass's pixels, including the smaller mirror target.
+      mesh.onBeforeRender = () => {
+        const renderer = this.activeRenderer
+        if (!renderer) return
+        const target = renderer.getRenderTarget()
+        if (target) this.renderResolution.set(target.viewport.z, target.viewport.w)
+        else renderer.getDrawingBufferSize(this.renderResolution)
         this.uniforms.uReflectionPass.value = !this.uniforms.uOverlay.value
-        renderer.getCurrentViewport(this.viewport)
-        this.renderResolution.set(this.viewport.z, this.viewport.w)
         this.uniforms.uPixelRatio.value =
-          (renderer.getPixelRatio() * this.viewport.w) / this.bufferHeight
-        material.uniformsNeedUpdate = true
+          (renderer.getPixelRatio() * this.renderResolution.y) / this.bufferHeight
       }
       this.group.add(mesh)
       return material
@@ -277,8 +228,10 @@ export class RainEffect {
     this.moonColor.copy(this.moon.color).multiplyScalar(this.moon.intensity * 1.8)
     this.moonDirection.copy(this.moon.position).sub(this.moon.target.position).normalize()
     this.lamps.forEach((lamp, i) => {
-      this.lampPositions[i]!.copy(lamp.position)
-      this.lampColors[i]!.copy(lamp.color).multiplyScalar(lamp.intensity * 1.6)
+      required(this.lampPositions[i]).copy(lamp.position)
+      required(this.lampColors[i])
+        .copy(lamp.color)
+        .multiplyScalar(lamp.intensity * 1.6)
     })
     let count = 0
     for (const drop of this.simulation.drops) {
@@ -360,13 +313,14 @@ export class RainEffect {
     }
   }
 
-  renderSlopes(renderer: WebGLRenderer, camera: PerspectiveCamera, lakeTime: number) {
+  renderSlopes(renderer: WebGPURenderer, camera: PerspectiveCamera, lakeTime: number) {
+    this.activeRenderer = renderer
     if (!this.slopeDirty && !this.impactSlopes?.visible && !this.impactsWereVisible) return
     const previousTarget = renderer.getRenderTarget()
     renderer.getClearColor(this.clearColor)
     const alpha = renderer.getClearAlpha()
     const autoClear = renderer.autoClear
-    this.slopeMaterial.uniforms.uTime!.value = lakeTime
+    this.uniforms.uTime.value = lakeTime
     try {
       renderer.setRenderTarget(this.slopeTarget)
       renderer.setClearColor(0, 0)
@@ -382,11 +336,18 @@ export class RainEffect {
   }
 
   /** Composite after surface DOF, depth-testing against the opaque scene explicitly. */
-  renderOverlay(renderer: WebGLRenderer, scene: Scene, camera: PerspectiveCamera, depth: Texture) {
+  renderOverlay(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, depth: Texture) {
     if (!this.group.visible) return
     const layers = camera.layers.mask
     const background = scene.background
-    const autoClear = renderer.autoClear
+    const autoClear = renderer.autoClear,
+      toneMapping = renderer.toneMapping,
+      outputColorSpace = renderer.outputColorSpace
+    renderer.toneMapping = NoToneMapping
+    renderer.outputColorSpace = LinearSRGBColorSpace
+    renderer.getDrawingBufferSize(this.renderResolution)
+    this.uniforms.uPixelRatio.value = renderer.getPixelRatio()
+    this.uniforms.uReflectionPass.value = false
     this.uniforms.uDepth.value = depth
     this.uniforms.uOverlay.value = true
     for (const material of this.particleMaterials) material.depthTest = false
@@ -399,8 +360,31 @@ export class RainEffect {
       camera.layers.mask = layers
       scene.background = background
       renderer.autoClear = autoClear
+      renderer.toneMapping = toneMapping
+      renderer.outputColorSpace = outputColorSpace
       this.uniforms.uOverlay.value = false
+      this.uniforms.uReflectionPass.value = true
       for (const material of this.particleMaterials) material.depthTest = true
+    }
+  }
+
+  async compileAsync(renderer: WebGPURenderer, camera: PerspectiveCamera) {
+    this.activeRenderer = renderer
+    const previous = renderer.getRenderTarget()
+    let compiled: Promise<void>
+    try {
+      renderer.setRenderTarget(this.slopeTarget)
+      compiled = renderer.compileAsync(this.slopes, camera)
+    } finally {
+      renderer.setRenderTarget(previous)
+    }
+    await compiled
+    const layers = camera.layers.mask
+    camera.layers.enable(RAIN_LAYER)
+    try {
+      await renderer.compileAsync(this.group, camera)
+    } finally {
+      camera.layers.mask = layers
     }
   }
 
@@ -410,5 +394,6 @@ export class RainEffect {
     for (const material of this.particleMaterials) material.dispose()
     this.slopeMaterial.dispose()
     this.slopeTarget.dispose()
+    this.emptyDepth.dispose()
   }
 }

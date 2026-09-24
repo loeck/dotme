@@ -1,4 +1,9 @@
 import { createCloudNoiseData } from './cloud-noise'
+import {
+  prepareSubmergedSurface,
+  prepareWaterSurface,
+  prepareWaterMask,
+} from './lake-geometry-data'
 import { prepareTerrain } from './voxel-mesh'
 import { createVoxelWorld } from './voxel-world'
 
@@ -7,7 +12,16 @@ export function prepareWorld(seed: number, mobile: boolean) {
   const terrain = prepareTerrain(world)
   // The renderer needs typed mesh/BVH buffers, not 60k structured-cloned objects.
   const { voxels: _voxels, ...data } = world
-  return { world: data, terrain, noise: createCloudNoiseData(seed) }
+  return {
+    world: data,
+    terrain,
+    noise: createCloudNoiseData(seed),
+    surfaces: {
+      submerged: prepareSubmergedSurface(world.lakeBed),
+      water: prepareWaterSurface(mobile),
+      mask: prepareWaterMask(world.lakeBed),
+    },
+  }
 }
 export type PreparedWorld = ReturnType<typeof prepareWorld>
 

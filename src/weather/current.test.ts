@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { required } from '../invariant'
 import { fetchWeather, interpretWmoCode, WeatherHttpError } from './current'
 import { parisWeatherFixture as fixture } from './paris.fixture'
 
@@ -13,9 +14,13 @@ const pendingFetch = () =>
   fetchMock.mockImplementation(
     (_url, options) =>
       new Promise((_resolve, reject) => {
-        options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), {
-          once: true,
-        })
+        required(required(options).signal).addEventListener(
+          'abort',
+          () => reject(required(required(options).signal).reason),
+          {
+            once: true,
+          },
+        )
       }),
   )
 
@@ -70,7 +75,8 @@ describe('fetchWeather', () => {
   it('requests custom GPS coordinates and retains the returned local timezone', async () => {
     respond({ ...fixture(), timezone: 'Asia/Singapore', utc_offset_seconds: 28800 })
     const weather = await fetchWeather({ position: { latitude: 1.3521, longitude: 103.8198 } })
-    const url = new URL(String(fetchMock.mock.calls[0]![0]))
+    const input = required(fetchMock.mock.calls[0])[0]
+    const url = new URL(input instanceof Request ? input.url : input)
     expect(url.searchParams.get('latitude')).toBe('1.3521')
     expect(url.searchParams.get('longitude')).toBe('103.8198')
     expect(url.searchParams.get('timezone')).toBe('auto')
@@ -81,7 +87,8 @@ describe('fetchWeather', () => {
   it('requests Paris with explicit units and preserves numeric values and time metadata', async () => {
     respond()
     const weather = await fetchWeather()
-    const url = new URL(String(fetchMock.mock.calls[0]![0]))
+    const input = required(fetchMock.mock.calls[0])[0]
+    const url = new URL(input instanceof Request ? input.url : input)
     expect(url.origin + url.pathname).toBe('https://api.open-meteo.com/v1/forecast')
     expect(Object.fromEntries(url.searchParams)).toMatchObject({
       latitude: '48.8566',
@@ -209,10 +216,11 @@ describe('fetchWeather', () => {
     await expect(fetchWeather()).rejects.toThrow(TypeError)
   })
   it('rejects non-finite values without coercion', async () => {
-    fetchMock.mockResolvedValue({
-      ok: true,
-      json: async () => ({ ...fixture(), current: { ...fixture().current, rain: Infinity } }),
-    } as Response)
+    fetchMock.mockResolvedValue(
+      Object.assign(new Response(), {
+        json: async () => ({ ...fixture(), current: { ...fixture().current, rain: Infinity } }),
+      }),
+    )
     await expect(fetchWeather()).rejects.toThrow(TypeError)
   })
   it('preserves HTTP status', async () => {
@@ -235,22 +243,24 @@ describe('fetchWeather', () => {
     pendingFetch()
     const result = fetchWeather().catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(9999)
-    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false)
+    expect(required(required(required(fetchMock.mock.calls[0])[1]).signal).aborted).toBe(false)
     await vi.advanceTimersByTimeAsync(1)
     await expect(result).resolves.toMatchObject({ name: 'TimeoutError' })
   })
   it('keeps the timeout active while reading the body', async () => {
-    fetchMock.mockImplementation(
-      async (_url, options) =>
-        ({
-          ok: true,
-          json: () =>
-            new Promise((_resolve, reject) =>
-              options!.signal!.addEventListener('abort', () => reject(options!.signal!.reason), {
+    fetchMock.mockImplementation(async (_url, options) =>
+      Object.assign(new Response(), {
+        json: () =>
+          new Promise((_resolve, reject) =>
+            required(required(options).signal).addEventListener(
+              'abort',
+              () => reject(required(required(options).signal).reason),
+              {
                 once: true,
-              }),
+              },
             ),
-        }) as Response,
+          ),
+      }),
     )
     const result = fetchWeather().catch((error: unknown) => error)
     await vi.advanceTimersByTimeAsync(10_000)
@@ -281,6 +291,6 @@ describe('fetchWeather', () => {
     await fetchWeather({ signal: controller.signal })
     expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
     controller.abort()
-    expect(fetchMock.mock.calls[0]![1]!.signal!.aborted).toBe(false)
+    expect(required(required(required(fetchMock.mock.calls[0])[1]).signal).aborted).toBe(false)
   })
 })

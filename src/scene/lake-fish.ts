@@ -1,15 +1,30 @@
 import {
+  Fn,
+  attribute,
+  positionLocal,
+  normalLocal,
+  positionWorld,
+  cameraPosition,
+  cameraViewMatrix,
+  cameraProjectionMatrix,
+  max,
+  float,
+  vec3,
+  vec4,
+} from 'three/tsl'
+import {
   Color,
   DynamicDrawUsage,
   InstancedMesh,
   InstancedBufferAttribute,
   DoubleSide,
-  MeshStandardMaterial,
+  MeshStandardNodeMaterial,
   Object3D,
-} from 'three'
-import type { Scene } from 'three'
+} from 'three/webgpu'
+import type { Scene, NodeBuilder } from 'three/webgpu'
 
-import { createFishGeometry, FISH_RIG_GLSL } from './fish-anatomy'
+import { required } from '../invariant'
+import { createFishGeometry, fishRigNode } from './fish-anatomy'
 import type { FishSpecies } from './fish-anatomy'
 import { sampleFishPointer } from './fish-pointer'
 import type { FishPointerTarget } from './fish-pointer'
@@ -48,8 +63,8 @@ function bedDepth(bed: LakeBed, x: number, z: number) {
   const u = Math.max(0, Math.min(1, gridX - column))
   const v = Math.max(0, Math.min(1, gridZ - row))
   const i = row * n + column
-  const near = bed.depth[i]! * (1 - u) + bed.depth[i + 1]! * u
-  const far = bed.depth[i + n]! * (1 - u) + bed.depth[i + n + 1]! * u
+  const near = required(bed.depth[i]) * (1 - u) + required(bed.depth[i + 1]) * u
+  const far = required(bed.depth[i + n]) * (1 - u) + required(bed.depth[i + n + 1]) * u
   return near * (1 - v) + far * v
 }
 
@@ -89,7 +104,11 @@ function safeHabitat(bed: LakeBed, x: number, z: number) {
   for (let row = Math.floor(first / n); row <= Math.floor(last / n); row++) {
     for (let column = first % n; column <= last % n; column++) {
       const i = row * n + column
-      if (!bed.water[i] || bed.depth[i]! < MIN_DEPTH || bed.obstacle[i]! >= WATER_LEVEL - 0.65)
+      if (
+        !bed.water[i] ||
+        required(bed.depth[i]) < MIN_DEPTH ||
+        required(bed.obstacle[i]) >= WATER_LEVEL - 0.65
+      )
         return false
     }
   }
@@ -112,7 +131,7 @@ export function createFishHabitats(
   for (let z = -34; z <= 5; z += cell * 2) {
     for (let x = -22; x <= 22; x += cell * 2) {
       const i = lakeIndex(bed, x, z)
-      if (i < 0 || bed.depth[i]! < MIN_DEPTH) continue
+      if (i < 0 || required(bed.depth[i]) < MIN_DEPTH) continue
       const centerX = LAKE_BOUNDS.minX + ((i % bed.resolution) + 0.5) * cell
       const centerZ = LAKE_BOUNDS.minZ + (Math.floor(i / bed.resolution) + 0.5) * cell
       const forward = 16 - centerZ
@@ -128,7 +147,7 @@ export function createFishHabitats(
         z: centerZ,
         foreground: centerZ > -8 && extent < forward * (mobile ? 0.21 : 0.55),
         score:
-          Math.abs(bed.depth[i]! - 3.2) * 0.12 +
+          Math.abs(required(bed.depth[i]) - 3.2) * 0.12 +
           Math.abs(centerZ - 2) * 0.12 +
           Math.abs(centerX) * 0.06 +
           random() * 0.12,
@@ -145,6 +164,15 @@ export function createFishHabitats(
   return habitats
 }
 
+/** Deform anatomy before Three applies each instance's scale and heading. */
+class FishMaterial extends MeshStandardNodeMaterial {
+  override setupPosition(builder: NodeBuilder) {
+    positionLocal.assign(fishRigNode(positionLocal))
+    normalLocal.assign(fishRigNode(normalLocal, true))
+    return super.setupPosition(builder)
+  }
+}
+
 const SPECIES: readonly FishSpecies[] = ['carp', 'roach', 'perch']
 
 /** Articulated shoals in three instanced anatomical variants. */
@@ -156,7 +184,7 @@ export class LakeFish {
   readonly meshes: readonly InstancedMesh[]
   readonly appearances: readonly FishAppearance[]
   private readonly geometries = SPECIES.map(createFishGeometry)
-  private readonly material = new MeshStandardMaterial({
+  private readonly material = new FishMaterial({
     color: 0xffffff,
     roughness: 0.58,
     metalness: 0,
@@ -165,6 +193,7 @@ export class LakeFish {
     side: DoubleSide,
     transparent: true,
     depthWrite: true,
+    fog: false,
   })
   private readonly transform = new Object3D()
   private readonly poses: FishPose[] = []
@@ -184,17 +213,20 @@ export class LakeFish {
   }> = []
   private readonly pointerTarget: FishPointerTarget = { x: 0, z: 0, strength: 0 }
 
-  constructor(
-    scene: Scene,
-    private readonly bed: LakeBed,
-    seed: number,
-    private readonly mobile: boolean,
-    private readonly reducedMotion = false,
-  ) {
+  private readonly bed: LakeBed
+  private readonly mobile: boolean
+  private readonly reducedMotion: boolean
+
+  constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean, reducedMotion = false) {
+    this.bed = bed
+    this.mobile = mobile
+    this.reducedMotion = reducedMotion
     this.habitats = createFishHabitats(bed, seed, 16, mobile)
     this.schools = createFishSchools(bed, this.habitats, seed, mobile ? 3 : 4)
     const sizes = mobile ? [6, 4, 5] : [8, 5, 7, 6]
-    this.schoolSizes = this.schools.map((_, i) => sizes[(i + (seed >>> 0)) % sizes.length]!)
+    this.schoolSizes = this.schools.map((_, i) =>
+      required(sizes[(i + (seed >>> 0)) % sizes.length]),
+    )
     this.membership = this.schoolSizes.flatMap((size, school) =>
       Array.from({ length: size }, (_, member) => ({ school, member })),
     )
@@ -211,8 +243,8 @@ export class LakeFish {
     }
     const random = randomGenerator(seed ^ 0x82ae)
     this.appearances = Array.from({ length: this.count }, (_, i) => {
-      const species = SPECIES[i % 3]!
-      const schoolScale = [1, 0.82, 0.92, 1.04][this.membership[i]!.school]!
+      const species = required(SPECIES[i % 3])
+      const schoolScale = required([1, 0.82, 0.92, 1.04][required(this.membership[i]).school])
       const scale = (0.8 + random() * 0.3) * schoolScale
       const rate =
         (species === 'carp' ? 0.76 : species === 'roach' ? 1.12 : 0.92) * (0.92 + random() * 0.16)
@@ -227,7 +259,7 @@ export class LakeFish {
       mesh.receiveShadow = true
       mesh.instanceMatrix.setUsage(DynamicDrawUsage)
       for (let instance = 0; instance < count; instance++) {
-        const traits = this.appearances[instance * 3 + speciesIndex]!
+        const traits = required(this.appearances[instance * 3 + speciesIndex])
         mesh.setColorAt(instance, new Color().setScalar(traits.tone))
       }
       geometry.setAttribute(
@@ -244,8 +276,8 @@ export class LakeFish {
       )
       return mesh
     })
-    this.mesh = this.meshes[0]!
-    this.mesh.add(this.meshes[1]!, this.meshes[2]!)
+    this.mesh = required(this.meshes[0])
+    this.mesh.add(required(this.meshes[1]), required(this.meshes[2]))
     for (let i = 0; i < this.count; i++) this.poses.push({ x: 0, y: 0, z: 0, heading: 0 })
     this.swimming = this.appearances.map((traits) => ({
       heading: 0,
@@ -267,56 +299,25 @@ export class LakeFish {
   }
 
   private attachMotionShader() {
-    const previous = this.material.onBeforeCompile
-    const cacheKey = this.material.customProgramCacheKey()
-    this.material.onBeforeCompile = (shader, renderer) => {
-      previous.call(this.material, shader, renderer)
-      shader.vertexShader = `${FISH_RIG_GLSL}
-${shader.vertexShader}`
-        .replace(
-          '#include <beginnormal_vertex>',
-          '#include <beginnormal_vertex>\nobjectNormal = normalize(fishRig(objectNormal, true));',
-        )
-        .replace(
-          '#include <begin_vertex>',
-          '#include <begin_vertex>\ntransformed = fishRig(transformed, false);',
-        )
-      // Capture fish separately, at their apparent underwater depth. The main
-      // water pass composites this lighting BEFORE surface reflection and foam.
-      shader.vertexShader = `attribute float aFishVisibility;
-varying float vFishVisibility;
-${shader.vertexShader}`.replace(
-        '#include <project_vertex>',
-        `
-vec4 fishWorld = modelMatrix * instanceMatrix * vec4(transformed, 1.0);
-float fishDepth = max(0.0, ${WATER_LEVEL} - fishWorld.y);
-vec2 towardCamera = cameraPosition.xz - fishWorld.xz;
-float horizontal = max(0.001, length(towardCamera));
-float cameraHeight = max(0.001, cameraPosition.y - ${WATER_LEVEL});
-float offset = 0.0;
-for (int i = 0; i < 3; i++) {
-  float distance = max(0.0, horizontal - offset);
-  float sine = distance / sqrt(distance * distance + cameraHeight * cameraHeight) / 1.333;
-  offset = fishDepth * sine / sqrt(1.0 - sine * sine);
-}
-vec3 surface = vec3(fishWorld.xz + towardCamera / horizontal * offset, ${WATER_LEVEL}).xzy;
-// Extend the refracted viewing ray below the interface, retaining a volume
-// and useful depth in the capture instead of flattening fish onto the lake.
-vec3 apparent = surface + (surface - cameraPosition) * (fishDepth / 1.333 / cameraHeight);
-vec4 mvPosition = viewMatrix * vec4(apparent, 1.0);
-gl_Position = projectionMatrix * mvPosition;
-vFishVisibility = aFishVisibility;
-`,
+    this.material.opacityNode = attribute('aFishVisibility', 'float')
+    this.material.vertexNode = Fn(() => {
+      const world = positionWorld
+      const depth = max(0, float(WATER_LEVEL).sub(world.y))
+      const towardCamera = cameraPosition.xz.sub(world.xz)
+      const horizontal = max(0.001, towardCamera.length())
+      const cameraHeight = max(0.001, cameraPosition.y.sub(WATER_LEVEL))
+      const offset = float(0).toVar()
+      for (let i = 0; i < 3; i++) {
+        const distance = max(0, horizontal.sub(offset))
+        const sine = distance.div(distance.pow(2).add(cameraHeight.pow(2)).sqrt()).div(1.333)
+        offset.assign(depth.mul(sine).div(float(1).sub(sine.pow(2)).sqrt()))
+      }
+      const surface = vec3(world.xz.add(towardCamera.div(horizontal).mul(offset)), WATER_LEVEL).xzy
+      const apparent = surface.add(
+        surface.sub(cameraPosition).mul(depth.div(1.333).div(cameraHeight)),
       )
-      shader.fragmentShader = `varying float vFishVisibility;\n${shader.fragmentShader}`.replace(
-        '#include <color_fragment>',
-        `#include <color_fragment>
-diffuseColor.a *= vFishVisibility;
-if (diffuseColor.a < 0.001) discard;`,
-      )
-    }
-    this.material.customProgramCacheKey = () => `${cacheKey}:submerged-articulated-shoals-v5`
-    this.material.needsUpdate = true
+      return cameraProjectionMatrix.mul(cameraViewMatrix).mul(vec4(apparent, 1))
+    })()
   }
 
   update(
@@ -329,14 +330,14 @@ if (diffuseColor.a < 0.001) discard;`,
     this.clock += step
     const sampleTime = this.clock
     for (let i = 0; i < this.count; i++) {
-      const membership = this.membership[i]!
-      const school = this.schools[membership.school]!
-      const pose = this.poses[i]!
-      const traits = this.appearances[i]!
+      const membership = required(this.membership[i])
+      const school = required(this.schools[membership.school])
+      const pose = required(this.poses[i])
+      const traits = required(this.appearances[i])
       const previousX = pose.x,
         previousZ = pose.z
       sampleSchoolFish(school, membership.member, sampleTime, pose)
-      const swimming = this.swimming[i]!
+      const swimming = required(this.swimming[i])
       const routeX = pose.x,
         routeZ = pose.z
       const routeVx =
@@ -406,8 +407,8 @@ if (diffuseColor.a < 0.001) discard;`,
             if (
               cell < 0 ||
               !this.bed.water[cell] ||
-              this.bed.depth[cell]! < MIN_DEPTH ||
-              this.bed.obstacle[cell]! >= WATER_LEVEL - 0.65
+              required(this.bed.depth[cell]) < MIN_DEPTH ||
+              required(this.bed.obstacle[cell]) >= WATER_LEVEL - 0.65
             )
               safe = false
           }
@@ -436,15 +437,15 @@ if (diffuseColor.a < 0.001) discard;`,
         0.7 * traits.scale,
       )
       this.transform.updateMatrix()
-      const mesh = this.meshes[i % 3]!
+      const mesh = required(this.meshes[i % 3])
       const instance = Math.floor(i / 3)
       mesh.setMatrixAt(instance, this.transform.matrix)
-      const animation = mesh.geometry.getAttribute('aFishPhase') as InstancedBufferAttribute
+      const animation = mesh.geometry.getAttribute('aFishPhase')
       animation.setX(instance, swimming.phase)
-      const motion = mesh.geometry.getAttribute('aFishMotion') as InstancedBufferAttribute
+      const motion = mesh.geometry.getAttribute('aFishMotion')
       motion.setXYZ(instance, effort, swimming.turn, (this.mobile ? 0.34 : 0.32) / 0.7)
       // Each shoal approaches, cruises and dives away on its own cadence.
-      const alpha = mesh.geometry.getAttribute('aFishVisibility') as InstancedBufferAttribute
+      const alpha = mesh.geometry.getAttribute('aFishVisibility')
       alpha.setX(instance, visibility)
     }
     for (const mesh of this.meshes) {

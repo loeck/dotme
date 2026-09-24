@@ -1,3 +1,4 @@
+import { required } from './invariant'
 export type GpsPosition = Readonly<{ latitude: number; longitude: number }>
 export const PARIS: GpsPosition = { latitude: 48.8566, longitude: 2.3522 }
 export const MIN_TIME_SCALE = 1
@@ -16,8 +17,8 @@ export function sceneParams(search: string) {
   let position = PARIS
   if (/^[+-]?\d+(?:\.\d+)?\s*,\s*[+-]?\d+(?:\.\d+)?$/.test(rawGps)) {
     const [latitude, longitude] = rawGps.split(',').map(Number)
-    if (Math.abs(latitude!) <= 90 && Math.abs(longitude!) <= 180)
-      position = { latitude: latitude!, longitude: longitude! }
+    if (Math.abs(required(latitude)) <= 90 && Math.abs(required(longitude)) <= 180)
+      position = { latitude: required(latitude), longitude: required(longitude) }
   }
   const rawTime = params.get('startTime') ?? ''
   const startTime = /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(rawTime) ? rawTime : undefined
@@ -35,7 +36,7 @@ export function cleanSceneUrl(url: URL) {
     ['time', 'startTime'],
   ] as const) {
     if (!url.searchParams.has(key) && url.searchParams.has(oldKey))
-      url.searchParams.set(key, url.searchParams.get(oldKey)!)
+      url.searchParams.set(key, required(url.searchParams.get(oldKey)))
   }
   const obsolete = [...url.searchParams.keys()].filter((key) => !KEYS.has(key))
   for (const key of obsolete) url.searchParams.delete(key)

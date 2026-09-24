@@ -1,5 +1,22 @@
-import { Vector3 } from 'three'
-import type { PerspectiveCamera } from 'three'
+import {
+  asin,
+  atan,
+  clamp,
+  exp,
+  float,
+  fract,
+  fwidth,
+  length,
+  max,
+  mix,
+  sin,
+  smoothstep,
+  vec2,
+  vec3,
+} from 'three/tsl'
+import type { Node } from 'three/webgpu'
+import { Vector3 } from 'three/webgpu'
+import type { PerspectiveCamera } from 'three/webgpu'
 
 function starRandom(seed: number) {
   let state = seed >>> 0
@@ -72,47 +89,84 @@ export class ShootingStars {
   }
 }
 
-export const STAR_RADIANCE_GLSL = `
-uniform float uStarTime;
-uniform vec3 uMeteorStart;
-uniform vec3 uMeteorEnd;
-uniform float uMeteorAge;
-vec3 starHash(vec2 p) {
-  vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973) + uSeed);
-  q += dot(q, q.yxz + 33.33);
-  return fract((q.xxy + q.yzz) * q.zyx);
+export interface StarUniforms {
+  uSeed: Node<'float'>
+  uSunDirection: Node<'vec3'>
+  uStarTime: Node<'float'>
+  uMeteorStart: Node<'vec3'>
+  uMeteorEnd: Node<'vec3'>
+  uMeteorAge: Node<'float'>
 }
-vec3 stellarRadiance(vec3 direction, float moonAngle) {
-  if (uSunDirection.y >= -${NIGHT_START}) return vec3(0.0);
-  vec2 sky = vec2(atan(direction.x, -direction.z) * 31.8309886, asin(direction.y) * 63.6619772);
-  vec2 cell = floor(sky);
-  vec3 random = starHash(cell);
-  vec2 offset = fract(sky) - (0.15 + random.xy * 0.7);
-  float brightness = pow(random.z, 7.0);
-  float visibility = smoothstep(0.0, ${NIGHT_FADE}, -uSunDirection.y - ${NIGHT_START} - (1.0 - brightness) * ${FAINT_DELAY});
-  float radius = mix(0.010, 0.032, brightness);
-  float variance = radius * radius;
-  float pixelVariance = dot(fwidth(sky), fwidth(sky)) / 12.0;
-  float filtered = variance + pixelVariance;
-  float point = exp(-dot(offset, offset) / (2.0 * filtered)) * variance / filtered;
-  float twinkle = 1.0 + 0.055 * sin(uStarTime * (0.42 + random.y * 0.45) + random.x * 61.0);
-  float horizonFade = smoothstep(0.025, 0.2, direction.y);
-  float lunarFade = mix(0.15, 1.0, smoothstep(0.02, 0.3, moonAngle));
-  vec3 radiance = mix(vec3(0.65, 0.78, 1.0), vec3(1.0, 0.88, 0.7), random.x)
-    * point * (0.008 + brightness * 0.22) * visibility * twinkle * horizonFade * lunarFade;
-  if (uMeteorAge >= 0.0 && uMeteorAge < 1.15) {
-    float progress = clamp(uMeteorAge / 0.85, 0.0, 1.0);
-    vec3 head = normalize(mix(uMeteorStart, uMeteorEnd, progress));
-    vec3 tail = normalize(mix(uMeteorStart, uMeteorEnd, max(0.0, progress - 0.19)));
-    vec3 segment = head - tail;
-    float along = clamp(dot(direction - tail, segment) / max(dot(segment, segment), 0.000001), 0.0, 1.0);
-    float distance = length(direction - normalize(tail + segment * along));
-    float width = max(length(fwidth(direction)) * 0.55, 0.00035);
-    float line = exp(-distance * distance / (width * width)) * (0.00035 / width);
-    float life = smoothstep(0.0, 0.08, uMeteorAge) * (1.0 - smoothstep(0.65, 1.15, uMeteorAge));
-    radiance += vec3(0.68, 0.8, 1.0) * line * along * life * 0.7 * horizonFade
-      * smoothstep(0.0, ${NIGHT_FADE}, -uSunDirection.y - ${NIGHT_START});
-  }
-  return radiance;
+function normalizeStarVector(value: Node<'vec3'>) {
+  return value.div(max(length(value), 0.000001))
 }
-`
+
+export function stellarRadiance(
+  direction: Node<'vec3'>,
+  moonAngle: Node<'float'>,
+  u: StarUniforms,
+) {
+  const sky = vec2(
+    atan(direction.x, direction.z.negate()).mul(31.8309886),
+    asin(clamp(direction.y, -1, 1)).mul(63.6619772),
+  )
+  const cell = sky.floor()
+  const q0 = fract(
+    vec3(cell.x, cell.y, cell.x)
+      .mul(vec3(0.1031, 0.103, 0.0973))
+      .add(u.uSeed),
+  )
+  const q = q0.add(q0.dot(q0.yxz.add(33.33)))
+  const random = fract(q.xxy.add(q.yzz).mul(q.zyx))
+  const offset = fract(sky).sub(random.xy.mul(0.7).add(0.15))
+  const brightness = random.z.pow(7)
+  const visibility = smoothstep(
+    0,
+    NIGHT_FADE,
+    u.uSunDirection.y.negate().sub(NIGHT_START).sub(brightness.oneMinus().mul(FAINT_DELAY)),
+  )
+  const variance = mix(0.01, 0.032, brightness).pow(2)
+  const filtered = variance.add(fwidth(sky).dot(fwidth(sky)).div(12))
+  const point = exp(offset.dot(offset).negate().div(filtered.mul(2)))
+    .mul(variance)
+    .div(filtered)
+  const twinkle = sin(u.uStarTime.mul(random.y.mul(0.45).add(0.42)).add(random.x.mul(61)))
+    .mul(0.055)
+    .add(1)
+  const horizon = smoothstep(0.025, 0.2, direction.y)
+  const lunar = mix(0.15, 1, smoothstep(0.02, 0.3, moonAngle))
+  const radiance = mix(vec3(0.65, 0.78, 1), vec3(1, 0.88, 0.7), random.x)
+    .mul(point)
+    .mul(brightness.mul(0.22).add(0.008))
+    .mul(visibility)
+    .mul(twinkle)
+    .mul(horizon)
+    .mul(lunar)
+  const progress = clamp(u.uMeteorAge.div(0.85), 0, 1)
+  const head = normalizeStarVector(mix(u.uMeteorStart, u.uMeteorEnd, progress))
+  const tail = normalizeStarVector(mix(u.uMeteorStart, u.uMeteorEnd, max(0, progress.sub(0.19))))
+  const segment = head.sub(tail)
+  const along = clamp(
+    direction
+      .sub(tail)
+      .dot(segment)
+      .div(max(segment.dot(segment), 0.000001)),
+    0,
+    1,
+  )
+  const distance = length(direction.sub(normalizeStarVector(tail.add(segment.mul(along)))))
+  const width = max(length(fwidth(direction)).mul(0.55), 0.00035)
+  const line = exp(distance.pow(2).negate().div(width.pow(2))).mul(float(0.00035).div(width))
+  const life = smoothstep(0, 0.08, u.uMeteorAge).mul(
+    smoothstep(0.65, 1.15, u.uMeteorAge).oneMinus(),
+  )
+  return radiance.add(
+    vec3(0.68, 0.8, 1)
+      .mul(line)
+      .mul(along)
+      .mul(life)
+      .mul(0.7)
+      .mul(horizon)
+      .mul(smoothstep(0, NIGHT_FADE, u.uSunDirection.y.negate().sub(NIGHT_START))),
+  )
+}

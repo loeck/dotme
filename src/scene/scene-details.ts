@@ -1,11 +1,14 @@
-import { Mesh, MeshStandardMaterial } from 'three'
-import type { IUniform, Object3D, Scene, Vector3 } from 'three'
+import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
+import type { Camera, Object3D, Scene, Vector3, WebGPURenderer } from 'three/webgpu'
 
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
 import { LakeFish } from './lake-fish'
 import { LakeSplashes } from './lake-splashes'
+import type { LakeWaterMaterial } from './lake-water'
+import { LakeWaterfall } from './lake-waterfall'
+import { ResourceScope } from './resource-scope'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
 import type { WindState } from './wind'
@@ -31,33 +34,59 @@ export function updateDetailEnvironment(
 
 /** Owns the optional detail layer; the engine retains the clock, wind, picking and light passes. */
 export class SceneDetails {
+  private readonly resources = new ResourceScope()
+  private disposed = false
   private readonly caustics: LakeCaustics
   private readonly fish: LakeFish
   private readonly splashes: LakeSplashes
   private readonly fireflies: LakeFireflies
-  private readonly wetness = new ShoreWetness()
+  private readonly waterfall: LakeWaterfall | undefined
+  private waterImpact: LakeSplashes['onReturn']
+  private effectTime = 0
+  private readonly wetness = this.resources.own(new ShoreWetness())
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
+
+  private readonly reducedMotion: boolean
 
   constructor(
     scene: Scene,
-    world: Pick<VoxelWorld, 'seed' | 'lakeBed'>,
+    world: Pick<VoxelWorld, 'seed' | 'lakeBed' | 'waterfall'>,
     mobile: boolean,
-    private readonly reducedMotion: boolean,
+    reducedMotion: boolean,
     environment: Partial<DetailEnvironment> = {},
   ) {
+    this.reducedMotion = reducedMotion
     this.environment = updateDetailEnvironment(this.environment, environment)
     if (reducedMotion) this.wetness.setWetness(this.environment.rainIntensity)
-    this.caustics = new LakeCaustics(reducedMotion)
-    this.fish = new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion)
-    this.fireflies = new LakeFireflies(scene, world.lakeBed, world.seed, mobile)
-    this.splashes = new LakeSplashes(scene, world.lakeBed, world.seed, mobile)
+    try {
+      this.caustics = this.resources.own(new LakeCaustics(reducedMotion))
+      this.fish = this.resources.own(
+        new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion),
+      )
+      this.fireflies = this.resources.own(
+        new LakeFireflies(scene, world.lakeBed, world.seed, mobile),
+      )
+      this.splashes = this.resources.own(new LakeSplashes(scene, world.lakeBed, world.seed, mobile))
+      if (world.waterfall) {
+        this.waterfall = this.resources.own(
+          new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),
+        )
+        this.waterfall.onImpact = (x, z, radius, velocity, energy) => {
+          this.splashes.impacts.add(x, z, this.effectTime, energy)
+          this.waterImpact?.(x, z, radius, velocity)
+        }
+      }
+    } catch (error) {
+      this.resources.dispose()
+      throw error
+    }
   }
 
   /** Called after global cloud hooks so every material retains all its effects. */
-  attachMaterials(terrain: Object3D, submerged: readonly MeshStandardMaterial[]) {
-    const materials = new Set<MeshStandardMaterial>()
+  attachMaterials(terrain: Object3D, submerged: readonly MeshStandardNodeMaterial[]) {
+    const materials = new Set<MeshStandardNodeMaterial>()
     terrain.traverse((object) => {
-      if (object instanceof Mesh && object.material instanceof MeshStandardMaterial)
+      if (object instanceof Mesh && object.material instanceof MeshStandardNodeMaterial)
         materials.add(object.material)
     })
     for (const material of materials) this.wetness.applyTo(material)
@@ -68,9 +97,12 @@ export class SceneDetails {
     return this.splashes.impacts.slopes
   }
 
-  setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: Record<string, IUniform>) {
+  setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: LakeWaterMaterial['uniforms']) {
+    this.waterImpact = handler
     this.splashes.impacts.setWaterSurface(uniforms)
-    this.splashes.onReturn = handler
+    this.waterfall?.setWaterSurface(uniforms)
+    if (handler) this.splashes.onReturn = handler
+    else delete this.splashes.onReturn
   }
 
   setEnvironment(environment: Partial<DetailEnvironment>) {
@@ -89,7 +121,9 @@ export class SceneDetails {
     intro: number,
     pointerLightStrength = 1,
   ) {
+    if (this.disposed) return
     const { daylight, rainIntensity } = this.environment
+    this.effectTime = time
     this.caustics.update(
       time,
       wind,
@@ -98,6 +132,7 @@ export class SceneDetails {
       pointerLightStrength,
     )
     this.fish.update(time, dt, waterPointer, scenePointer)
+    this.waterfall?.update(time, daylight, intro)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
     this.fireflies.update(time, wind, {
@@ -108,11 +143,42 @@ export class SceneDetails {
     })
   }
 
+  /** Include intermittent effects in the existing scene/camera/target compilation pass. */
+  compileAsync(compile: () => Promise<void>): Promise<void> {
+    const compileMaterials = () => (this.waterfall ? this.waterfall.compile(compile) : compile())
+    if (this.reducedMotion) return compileMaterials()
+    const visible = this.fireflies.mesh.visible
+    try {
+      this.fireflies.mesh.visible = this.fireflies.mesh.geometry.instanceCount > 0
+      return this.splashes.compileAsync(compileMaterials)
+    } finally {
+      this.fireflies.mesh.visible = visible
+    }
+  }
+
+  async prepareFluid(renderer: WebGPURenderer, camera: Camera) {
+    await this.waterfall?.prepareFluid(renderer, camera)
+  }
+
+  /** Warm the renderer's nested reflection pass after its asynchronous graph compilation. */
+  warmup(render: () => void) {
+    if (this.reducedMotion) {
+      render()
+      return
+    }
+    const visible = this.fireflies.mesh.visible
+    try {
+      this.fireflies.mesh.visible = this.fireflies.mesh.geometry.instanceCount > 0
+      this.splashes.warmup(render)
+    } finally {
+      this.fireflies.mesh.visible = visible
+    }
+  }
+
   dispose() {
-    this.caustics.dispose()
-    this.fish.dispose()
-    this.splashes.dispose()
-    this.fireflies.dispose()
-    this.wetness.dispose()
+    if (this.disposed) return
+    this.disposed = true
+    this.waterImpact = undefined
+    this.resources.dispose()
   }
 }

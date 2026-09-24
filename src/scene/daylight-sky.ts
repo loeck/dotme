@@ -1,29 +1,40 @@
-/** Atmospheric portion adapted from Three.js r186 Sky (MIT, three.js authors).
- * Preetham coefficients and optical air mass; no projected 2D cloud layer.
- * Radiance stays linear until the final lens pass applies tone mapping.
- */
-export const DAYLIGHT_SKY_GLSL = `
-uniform vec3 uSunDirection;
-uniform vec3 uSunColor;
-uniform float uSunIntensity;
-uniform float uDaylight;
-uniform float uShowSun;
-uniform vec3 uHaze;
-float opticalAirMass(float elevation) {
-  float zenith = acos(clamp(elevation, 0.0, 1.0));
-  return 1.0 / (cos(zenith) + 0.15 * pow(93.885 - degrees(zenith), -1.253));
+import { acos, clamp, cos, exp, float, mix, pow, smoothstep, vec3 } from 'three/tsl'
+/** Preetham coefficients adapted from Three.js Sky (MIT, three.js authors). */
+import type { Node } from 'three/webgpu'
+
+function airMass(elevation: Node<'float'>) {
+  const zenith = acos(clamp(elevation, 0, 1))
+  return float(1).div(
+    cos(zenith).add(pow(float(93.885).sub(zenith.mul(180 / Math.PI)), -1.253).mul(0.15)),
+  )
 }
-vec3 daylightSky(vec3 ray) {
-  vec3 betaR = vec3(5.804543e-6, 1.356291e-5, 3.026590e-5);
-  vec3 betaM = vec3(1.839992e14, 2.779802e14, 4.079048e14) * 0.434 * 4e-18 * 0.005;
-  vec3 extinction = exp(-(betaR * 8400.0 + betaM * 1250.0) * opticalAirMass(ray.y));
-  float cosine = dot(ray, uSunDirection);
-  float rayleigh = 0.0596831 * (1.0 + cosine * cosine);
-  float mie = 0.0795775 * 0.36 / pow(1.64 - 1.6 * cosine, 1.5);
-  vec3 solarTransmission = exp(-(betaR * 8400.0 + betaM * 1250.0) * opticalAirMass(uSunDirection.y));
-  vec3 scattered = 14.0 * ((betaR * rayleigh + betaM * mie) / (betaR + betaM))
-    * (1.0 - extinction) * mix(vec3(1.0), solarTransmission, 0.7);
-  float disc = smoothstep(0.99994, 0.99996, cosine) * uShowSun;
-  return scattered + disc * uSunColor * uSunIntensity * 12.0;
+
+export function daylightSky(
+  ray: Node<'vec3'>,
+  sun: Node<'vec3'>,
+  color: Node<'color'>,
+  intensity: Node<'float'>,
+  showSun: Node<'float'>,
+) {
+  const betaR = vec3(5.804543e-6, 1.356291e-5, 3.02659e-5)
+  const betaM = vec3(1.839992e14, 2.779802e14, 4.079048e14).mul(Math.LOG10E * 4e-18 * 0.005)
+  const extinction = exp(betaR.mul(8400).add(betaM.mul(1250)).mul(airMass(ray.y)).negate())
+  const cosine = ray.dot(sun)
+  const rayleigh = cosine.mul(cosine).add(1).mul(0.0596831)
+  const mie = float(0.0795775 * 0.36).div(pow(float(1.64).sub(cosine.mul(1.6)), 1.5))
+  const transmission = exp(betaR.mul(8400).add(betaM.mul(1250)).mul(airMass(sun.y)).negate())
+  return betaR
+    .mul(rayleigh)
+    .add(betaM.mul(mie))
+    .div(betaR.add(betaM))
+    .mul(14)
+    .mul(extinction.oneMinus())
+    .mul(mix(vec3(1), transmission, 0.7))
+    .add(
+      color.rgb
+        .mul(smoothstep(0.99994, 0.99996, cosine))
+        .mul(showSun)
+        .mul(intensity)
+        .mul(12),
+    )
 }
-`

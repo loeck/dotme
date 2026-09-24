@@ -94,11 +94,15 @@ const UNITS = {
   is_day: '',
 } as const
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value)
+}
+
 function object(value: unknown, field: string): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+  if (!isRecord(value)) {
     throw new TypeError(`Invalid weather data: ${field}`)
   }
-  return value as Record<string, unknown>
+  return value
 }
 
 function number(
@@ -175,9 +179,11 @@ function parseWeatherSnapshot(value: unknown): WeatherSnapshot {
 }
 
 export class WeatherHttpError extends Error {
-  constructor(readonly status: number) {
+  readonly status: number
+  constructor(status: number) {
     super(`Open-Meteo request failed (HTTP ${status})`)
     this.name = 'WeatherHttpError'
+    this.status = status
   }
 }
 

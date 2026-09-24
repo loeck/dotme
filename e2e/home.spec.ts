@@ -1,159 +1,59 @@
 import { expect, test } from '@playwright/test'
 
-import { mockParisWeather, mockSceneWeather } from './weather-fixture'
+import { deferred } from './deferred'
+import { mockParisWeather } from './weather-fixture'
 
 test.beforeEach(async ({ page }) => {
   await mockParisWeather(page)
 })
 
-test('renders the profile and interactive scene', async ({ page }) => {
-  const consoleErrors: string[] = []
-  const weatherRequests: string[] = []
-  page.on('request', (request) => {
-    if (request.url().includes('open-meteo')) weatherRequests.push(request.url())
-  })
-  page.on('pageerror', (error) => consoleErrors.push(error.message))
-  page.on('console', (message) => {
-    if (message.type() === 'error' || /WebGL/.test(message.text()))
-      consoleErrors.push(message.text())
-  })
-
-  await page.goto('/')
-
-  await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-  await expect(page.getByRole('link', { name: /GitHub/ })).toHaveAttribute(
-    'href',
-    'https://github.com/loeck',
-  )
-  const canvas = page.locator('canvas[data-water-mode]')
-  await expect(canvas).toBeVisible()
-  // Canvas creation precedes shader compilation and the first reflected frame.
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  const bounds = await canvas.boundingBox()
-  if (!bounds) throw new Error('Missing landscape bounds')
-  await page.mouse.move(bounds.width * 0.4, bounds.height * 0.78)
-  await page.mouse.down()
-  await page.mouse.move(bounds.width * 0.6, bounds.height * 0.82, { steps: 8 })
-  await page.mouse.up()
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  )
-  await expect(page.getByRole('button', { name: 'About this landscape' })).toBeVisible()
-  expect(consoleErrors).toEqual([])
-  expect(weatherRequests).toHaveLength(1)
-})
-
-test('renders and resizes the lit scene with reduced motion', async ({ page }) => {
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  page.on('console', (message) => {
-    if (message.type() === 'error' || /WebGL/.test(message.text())) errors.push(message.text())
-  })
-  await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?seed=42')
-  const canvas = page.locator('canvas[data-water-mode]')
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  const previousWidth = await canvas.getAttribute('width')
-  const viewport = page.viewportSize()!
-  await page.setViewportSize({ width: viewport.width - 40, height: viewport.height - 40 })
-  await expect(canvas).not.toHaveAttribute('width', previousWidth!)
-  await page.evaluate(
-    () =>
-      new Promise<void>((resolve) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
-      ),
-  )
-  expect(errors).toEqual([])
-})
-
-test('keeps the profile available with JavaScript disabled', async ({ browser }, testInfo) => {
-  const context = await browser.newContext({
-    javaScriptEnabled: false,
-    viewport: testInfo.project.use.viewport,
-    isMobile: testInfo.project.use.isMobile,
-    hasTouch: testInfo.project.use.hasTouch,
-  })
-  const page = await context.newPage()
-  await page.goto('/')
-
-  await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-  await expect(page.locator('main')).toHaveCSS('background-color', 'rgb(8, 10, 13)')
-  await expect(page.locator('canvas[data-water-mode]')).toHaveCount(0)
-  await context.close()
-})
-
-for (const rain of ['off', 'light', 'moderate', 'heavy']) {
-  test(`renders ${rain} rain without shader errors`, async ({ page }, testInfo) => {
-    const errors: string[] = []
-    page.on('pageerror', (error) => errors.push(error.message))
-    page.on('console', (message) => {
-      if (message.type() === 'error' || /WebGL/.test(message.text())) errors.push(message.text())
-    })
-    await mockSceneWeather(
-      page,
-      rain === 'off' ? 'clear' : 'cloudy',
-      { off: 0, light: 0.25, moderate: 0.55, heavy: 1 }[rain],
-    )
-    await page.goto('/?seed=42')
-    const canvas = page.locator('canvas[data-water-mode]')
-    await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-    // Let the intro settle and impacts cover a full lifecycle before sampling.
-    await page.waitForTimeout(3500)
-    const timings = await page.evaluate(
-      () =>
-        new Promise<number[]>((resolve) => {
-          const samples: number[] = []
-          let previous = performance.now()
-          const sample = (now: number) => {
-            samples.push(now - previous)
-            previous = now
-            if (samples.length < 60) requestAnimationFrame(sample)
-            else resolve(samples.slice(5).toSorted((a, b) => a - b))
-          }
-          requestAnimationFrame(sample)
-        }),
-    )
-    testInfo.annotations.push({
-      type: 'frame-time',
-      description: `${rain}: median ${timings[Math.floor(timings.length / 2)]!.toFixed(1)} ms; p95 ${timings[Math.floor(timings.length * 0.95)]!.toFixed(1)} ms`,
-    })
-    await testInfo.attach(`rain-${rain}`, {
-      body: await page.screenshot(),
-      contentType: 'image/png',
-    })
-    expect(errors).toEqual([])
-  })
-}
-test('serves profile links and SEO directly in HTML', async ({ page, request }) => {
+test('keeps profile links and SEO available without JavaScript', async ({
+  browser,
+  request,
+}, info) => {
   const response = await request.get('/')
   const html = await response.text()
   expect(response.status()).toBe(200)
   expect(html).toContain('Hi, I’m Loëck.')
   expect(html).not.toMatch(/react|tanstack|nitro/i)
-  await page.goto('/')
-  await expect(page).toHaveTitle('Loëck | Building some stuff in Paris')
-  await expect(page.locator('html')).toHaveAttribute('lang', 'en')
-  await expect(page.locator('meta[name="description"]')).toHaveAttribute(
-    'content',
-    'Loëck builds some stuff in Paris.',
-  )
-  await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://loeck.me/')
-  await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
-    'content',
-    'https://loeck.me/',
-  )
-  await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
-    'content',
-    'Loëck | Building some stuff in Paris',
-  )
-  await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary')
-  await expect(page.getByRole('link', { name: /LinkedIn/ })).toHaveAttribute(
-    'href',
-    'https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550',
-  )
+  const context = await browser.newContext({
+    javaScriptEnabled: false,
+    viewport: info.project.use.viewport ?? null,
+  })
+  try {
+    const page = await context.newPage()
+    await page.goto('/')
+    await expect(page).toHaveTitle('Loëck | Building some stuff in Paris')
+    await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
+    await expect(page.locator('html')).toHaveAttribute('lang', 'en')
+    await expect(page.locator('main')).toHaveCSS('background-color', 'rgb(8, 10, 13)')
+    await expect(page.getByRole('link', { name: /GitHub/ })).toHaveAttribute(
+      'href',
+      'https://github.com/loeck',
+    )
+    await expect(page.getByRole('link', { name: /LinkedIn/ })).toHaveAttribute(
+      'href',
+      'https://linkedin.com/in/lo%C3%ABck-v%C3%A9zien-19a0a550',
+    )
+    await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://loeck.me/')
+    await expect(page.locator('meta[name="description"]')).toHaveAttribute(
+      'content',
+      'Loëck builds some stuff in Paris.',
+    )
+    await expect(page.locator('meta[property="og:url"]')).toHaveAttribute(
+      'content',
+      'https://loeck.me/',
+    )
+    await expect(page.locator('meta[property="og:title"]')).toHaveAttribute(
+      'content',
+      'Loëck | Building some stuff in Paris',
+    )
+    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary')
+    await expect(page.locator('canvas')).toHaveCount(1)
+    await expect(page.locator('#scene-canvas')).not.toHaveAttribute('data-loader-rendered')
+  } finally {
+    await context.close()
+  }
 })
 
 test('unknown paths return the static 404 with a home link', async ({ page }) => {
@@ -163,84 +63,71 @@ test('unknown paths return the static 404 with a home link', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Nothing here.' })).toBeVisible()
   await expect(page.locator('meta[name="robots"]')).toHaveAttribute('content', 'noindex')
   await expect(page.locator('script')).toHaveCount(0)
-  await page.getByRole('link', { name: 'Return home' }).click()
-  await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
+  await expect(page.getByRole('link', { name: 'Return home' })).toHaveAttribute('href', '/')
 })
 
-test('without WebGL the profile and pointer remain usable after weather preload', async ({
+test('unavailable graphics leave keyboard profile access and do not request the landscape', async ({
   page,
 }) => {
-  const weatherRequests: string[] = []
   const errors: string[] = []
-  page.on('request', (request) => {
-    if (request.url().includes('open-meteo')) weatherRequests.push(request.url())
-  })
+  const landscapeRequests: string[] = []
   page.on('pageerror', (error) => errors.push(error.message))
-  await page.addInitScript(() => {
-    const original = HTMLCanvasElement.prototype.getContext
-    HTMLCanvasElement.prototype.getContext = function (...args: Parameters<typeof original>) {
-      if (String(args[0]).includes('webgl')) return null
-      return original.apply(this, args)
-    } as typeof original
+  page.on('request', (request) => {
+    if (/\/landscape-.*\.js/.test(request.url())) landscapeRequests.push(request.url())
   })
-  await page.goto('/')
-  // Wait for the lazy engine request to finish, including the rejected WebGL initialization.
-  await page.waitForLoadState('networkidle')
-  await expect(page.locator('#landscape')).toHaveCSS('opacity', '0')
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'gpu', { value: undefined, configurable: true })
+    HTMLCanvasElement.prototype.getContext = () => null
+  })
+  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'failed')
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-  await page.getByRole('link', { name: /GitHub/ }).focus()
-  await expect(page.getByRole('link', { name: /GitHub/ })).toBeFocused()
-  await page.mouse.move(200, 300)
-  if (test.info().project.name === 'chromium') {
-    await expect(page.locator('main')).toHaveCSS('cursor', 'none')
-    await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'none')
-  }
-  expect(weatherRequests).toHaveLength(1)
+  await expect(page.locator('#scene-canvas')).toBeHidden()
+  const github = page.getByRole('link', { name: /GitHub/ })
+  await github.focus()
+  await expect(github).toBeFocused()
+  expect(landscapeRequests).toEqual([])
   expect(errors).toEqual([])
 })
 
-test('page lifecycle disposes and restores the scene once', async ({ page }) => {
+test('page lifecycle restores one scene on the same canvas and seed', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  await page.goto('/?startTime=00:00')
-  const canvas = page.locator('canvas[data-water-mode]')
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
-  const seed = await canvas.getAttribute('data-seed')
+  await page.goto('/?seed=42&startTime=00:00')
+  const canvas = page.locator('#scene-canvas')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  await canvas.evaluate((element) => element.setAttribute('data-original-canvas', 'true'))
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
   )
-  await expect(canvas).toHaveCount(0)
+  await expect(canvas).toHaveCount(1)
   await page.evaluate(() => {
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
   })
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
   await expect(canvas).toHaveCount(1)
-  await expect(canvas).toHaveAttribute('data-seed', seed!)
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
+  await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
+  await expect(canvas).toHaveAttribute('data-seed', '42')
 })
 
-test('leaving during a lazy import does not create a disposed scene', async ({ page }) => {
-  let release!: () => void
-  const pending = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  await page.route('**/assets/VoxelLandscapeEngine-*.js', async (route) => {
-    await pending
+test('cancels a pending landscape import and can restore after it resolves', async ({ page }) => {
+  const barrier = deferred()
+  await page.route('**/assets/landscape-*.js', async (route) => {
+    await barrier.promise
     await route.continue()
   })
-  const requested = page.waitForRequest('**/assets/VoxelLandscapeEngine-*.js')
-  await page.goto('/', { waitUntil: 'domcontentloaded' })
+  const requested = page.waitForRequest('**/assets/landscape-*.js')
+  await page.goto('/?seed=42', { waitUntil: 'domcontentloaded' })
   await requested
-  await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
   )
-  release()
+  barrier.resolve()
   await page.waitForLoadState('networkidle')
-  const canvas = page.locator('canvas[data-water-mode]')
-  await expect(canvas).toHaveCount(0)
+  await expect(page.locator('#scene-canvas')).not.toHaveAttribute('data-scene-rendered', 'true')
   await page.evaluate(() =>
     window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
   )
-  await expect(canvas).toHaveCount(1)
-  await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  await expect(page.locator('canvas')).toHaveCount(1)
 })
