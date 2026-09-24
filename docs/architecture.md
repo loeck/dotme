@@ -20,6 +20,10 @@ water geometry, the half-float depth/shore atlas and the simulation mask. It tra
 typed buffers; the render thread wraps those buffers in GPU resources without repeating
 array generation or bounds scans. Audio has its own asynchronous resource lifetime.
 
+Shadow batches carry their transforms as instanced vertex attributes, sharing shader
+programs across batch sizes. Environment materials are compiled once with all meshes
+included; the six cubemap views reuse those programs with normal culling restored.
+
 Diagnostics consume public renderer counters through a minimal interface. CPU submission
 costs are distinct from GPU execution time. Unavailable GPU timings remain null. Snapshot
 consumers never need private renderer or engine fields.

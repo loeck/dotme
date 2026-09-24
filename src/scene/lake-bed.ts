@@ -58,9 +58,12 @@ export function createLakeBed(
         for (let x = sx0; x <= sx1; x++) {
           const dx = Math.abs(LAKE_BOUNDS.minX + (x + 0.5) * shoreCell - voxel.x) - half
           const dz = Math.abs(LAKE_BOUNDS.minZ + (z + 0.5) * shoreCell - voxel.z) - half
+          const i = z * shoreResolution + x
+          // A rectangle's signed distance is at least max(dx, dz). A closer
+          // footprint already stored here makes the square root unnecessary.
+          if (required(shore[i]) <= Math.max(dx, dz)) continue
           const signed =
             Math.hypot(Math.max(dx, 0), Math.max(dz, 0)) + Math.min(Math.max(dx, dz), 0)
-          const i = z * shoreResolution + x
           shore[i] = Math.min(required(shore[i]), signed)
         }
     }

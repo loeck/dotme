@@ -1,6 +1,6 @@
 import { deepStrictEqual } from 'node:assert'
 
-import { describe, expect, it } from 'vitest'
+import { beforeAll, describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
 import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
@@ -69,6 +69,18 @@ function rightIslands(bed: LakeBed, mobile: boolean) {
 }
 
 describe('voxel lake world', () => {
+  // Each shared fixture has its own default hook deadline. Comparisons below
+  // need two worlds, but no single setup step should generate both at once.
+  for (const { seed, mobile } of [
+    { seed: 9182, mobile: false },
+    { seed: 12, mobile: false },
+    { seed: 12, mobile: true },
+  ]) {
+    beforeAll(() => {
+      worldFor(seed, mobile)
+    })
+  }
+
   it('is deterministic and keeps desktop within an instancing budget', () => {
     const first = worldFor(9182, false)
     const second = createVoxelWorld(9182, false)

@@ -1,4 +1,4 @@
-import { exp, shadow, uniform, uv, vec4 } from 'three/tsl'
+import { attribute, exp, mat4, positionGeometry, shadow, uniform, uv, vec4 } from 'three/tsl'
 import {
   AdditiveBlending,
   AmbientLight,
@@ -16,7 +16,10 @@ import {
   FogExp2,
   Group,
   HalfFloatType,
+  InstancedBufferGeometry,
+  InstancedInterleavedBuffer,
   InstancedMesh,
+  InterleavedBufferAttribute,
   Mesh,
   MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
@@ -43,6 +46,7 @@ import type { AmbientEnvironment } from '../audio/environment'
 import { waterfallSound } from '../audio/environment'
 import { sceneParams } from '../scene-params'
 import { installCompilationScheduler } from './compilation-scheduler'
+import { compileWithoutCulling } from './compile-scene'
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -713,21 +717,38 @@ export class VoxelLandscapeEngine {
   private buildShadowCasters(terrain: PreparedWorld['terrain']) {
     const box = new BoxGeometry(1, 1, 1)
     const material = new MeshBasicNodeMaterial()
+    // Vertex attributes share one shader across every batch. Per-mesh matrix
+    // buffers otherwise generate unique WGSL names and hundreds of pipelines.
+    material.positionNode = mat4(
+      attribute('shadowMatrix0', 'vec4'),
+      attribute('shadowMatrix1', 'vec4'),
+      attribute('shadowMatrix2', 'vec4'),
+      attribute('shadowMatrix3', 'vec4'),
+    ).mul(vec4(positionGeometry, 1)).xyz
     this.geometries.push(this.resources.own(box))
     this.materials.push(this.resources.own(material))
     for (const [index, matrices] of terrain.shadowMatrices.entries()) {
-      const mesh = new InstancedMesh(box, material, matrices.length / 16)
+      const geometry = this.resources.own(new InstancedBufferGeometry())
+      geometry.setIndex(box.getIndex())
+      for (const [name, buffer] of Object.entries(box.attributes))
+        geometry.setAttribute(name, buffer)
+      const transforms = new InstancedInterleavedBuffer(matrices, 16)
+      for (let column = 0; column < 4; column++)
+        geometry.setAttribute(
+          `shadowMatrix${column}`,
+          new InterleavedBufferAttribute(transforms, 4, column * 4),
+        )
+      geometry.instanceCount = matrices.length / 16
+      const mesh = new Mesh(geometry, material)
       mesh.castShadow = true
       mesh.layers.set(5)
-      mesh.instanceMatrix.array = matrices
-      mesh.instanceMatrix.needsUpdate = true
       const bounds = terrain.shadowBounds[index]
       if (!bounds) throw new Error('Missing prepared shadow bounds')
-      mesh.boundingBox = new Box3(
+      geometry.boundingBox = new Box3(
         new Vector3().fromArray(bounds.min),
         new Vector3().fromArray(bounds.max),
       )
-      mesh.boundingSphere = new Sphere(new Vector3().fromArray(bounds.center), bounds.radius)
+      geometry.boundingSphere = new Sphere(new Vector3().fromArray(bounds.center), bounds.radius)
       mesh.updateMatrixWorld(true)
       mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
       this.shadowGroup.add(mesh)
@@ -1077,11 +1098,14 @@ export class VoxelLandscapeEngine {
     this.environmentCamera.updateMatrixWorld()
     this.water.visible = false
     try {
-      for (const [face, camera] of this.environmentCamera.children.entries()) {
-        if (!(camera instanceof Camera)) continue
-        await this.compileView(camera, this.environmentTarget, this.scene, face)
-        await preparationFrame(signal)
-      }
+      const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
+      if (!cubeCamera) throw new Error('Missing environment cube camera')
+      // All six faces use the same lighting, layers and attachment formats. Include
+      // off-axis meshes once instead of compiling their cached variants on every face.
+      await compileWithoutCulling(this.scene, () =>
+        this.compileView(cubeCamera, this.environmentTarget),
+      )
+      await preparationFrame(signal)
       // The material used by the public shadow node is shared with the actual shadow pass.
       for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
         const map = light.shadow.map
