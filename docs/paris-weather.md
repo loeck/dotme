@@ -1,10 +1,10 @@
 # Paris weather access
 
 `src/weather/paris.ts` exports `fetchParisWeather({ signal? }): Promise<ParisWeather>` and the pure
-`interpretWmoCode(code)` function. The page does not import this module, make weather requests,
-display weather, or change the landscape based on weather.
+`interpretWmoCode(code)` function. The page preloads a Paris snapshot while loading the engine,
+before creating its first frame. `src/weather/scene.ts` maps the response into scene settings.
 
-A future integration can explicitly request a snapshot:
+Consumers can also explicitly request a snapshot:
 
 ```ts
 import { fetchParisWeather } from './weather/paris'
@@ -42,7 +42,27 @@ Missing, non-finite, out-of-range or incorrectly typed required values and unexp
 `TypeError`. HTTP failures throw `WeatherHttpError` with a numeric `status`; network and JSON errors
 propagate. The entire fetch and body read have a 10-second deadline (`TimeoutError`). Caller
 cancellation preserves the signal's reason (normally `AbortError`). Timers/listeners are removed on
-every outcome. There are no retries, polling, cache or automatic calls.
+every outcome. The page wraps this helper in a shorter **3-second deadline**, configured by
+`WEATHER_PRELOAD_TIMEOUT_MS` in `src/weather/scene.ts`. That deadline also covers downloading the
+weather module. Timeout, HTTP, network and parsing failures select a seeded random preset and abort
+the request. Late responses cannot replace the chosen preset. Page disposal aborts the preload;
+it does not trigger the random fallback. Completed snapshots survive reduced-motion restarts and
+bfcache restores for the same page. There is no polling or persistent cache.
+
+Cloud cover selects clear (<20%), partly cloudy (<55%), cloudy (<85%) or overcast. Rain implies at
+least a cloudy sky; fog, snow and thunderstorm codes use overcast. Liquid precipitation is converted
+from its reported interval to mm/hour, then mapped to the artistic rain intensity (0.12–1, saturated
+at 8 mm/hour). WMO rain/drizzle codes supply an intensity when reported amounts are zero. Snow-only
+conditions do not create rain. Snowflakes, lightning and weather-driven fog are not implemented.
+
+Wind bearing and speed drive the rain and shared atmospheric/water wind model. Rain wind is capped
+at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
+procedural gust strength. The local-time solar clock is unchanged.
+
+Explicit `weather` or `rain` query parameters select the existing manual preview and skip the API.
+`windX` / `windZ` can override the rain wind. `?loader=loop` loads neither weather nor the landscape.
+The information button opens a dialog describing the scene and its libraries, including weather
+attribution when live API data is used.
 
 The free endpoint is for **non-commercial use**. When integrating the data, provide visible credit
 and a link to [Open-Meteo](https://open-meteo.com/), acknowledge its

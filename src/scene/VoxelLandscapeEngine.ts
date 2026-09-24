@@ -40,6 +40,7 @@ import { CursorGlow } from './cursor-glow'
 import { DepthFocus } from './depth-focus'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import { FISH_LAYER } from './lake-fish'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { sampleLighting } from './lighting'
@@ -60,10 +61,13 @@ import { VolumetricLight } from './volumetric-light'
 import { firstVoxelHit } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelLamp, VoxelMaterial } from './voxel-world'
+import { sampleWaterOptics } from './water-optics'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry, swellHeight } from './water-surface'
 import { WEATHER, parseWeather } from './weather'
+import type { WeatherPreset } from './weather'
 import { WindModel, createWindUniforms, updateWindUniforms } from './wind'
+import type { WindOptions } from './wind'
 
 export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
@@ -77,6 +81,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   diagnostics?: boolean
   prepared?: PreparedWorld
   rain?: RainState
+  weather?: WeatherPreset
+  wind?: WindOptions
 }>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
@@ -216,7 +222,7 @@ export class VoxelLandscapeEngine {
       : window.innerWidth < 768
     const params = new URLSearchParams(window.location.search)
     this.solarClock = new SolarClock(parseInitialTime(params.get('time')), options.reducedMotion)
-    this.weather = parseWeather(params.get('weather'))
+    this.weather = options.weather ?? parseWeather(params.get('weather'))
     this.showSun = params.get('sun') !== 'hidden'
     this.renderer = new WebGLRenderer({
       antialias: false,
@@ -259,6 +265,7 @@ export class VoxelLandscapeEngine {
     this.renderer.toneMapping = ReinhardToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
     this.renderer.domElement.dataset.seed = String((options.seed ?? 0) >>> 0)
+    this.renderer.domElement.dataset.weather = this.weather
     this.renderer.domElement.dataset.generatorVersion = 'voxel-landscape-v1'
     this.container.append(this.renderer.domElement)
     this.scene.fog = new FogExp2(0x14202a, 0.009)
@@ -282,7 +289,7 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.moon, this.moon.target)
 
     const prepared = options.prepared ?? prepareWorld((options.seed ?? 0) >>> 0, this.mobile)
-    this.wind = new WindModel((options.seed ?? 0) >>> 0)
+    this.wind = new WindModel((options.seed ?? 0) >>> 0, options.wind)
     this.clouds = new VolumetricClouds(
       this.renderer,
       (options.seed ?? 0) >>> 0,
@@ -310,6 +317,7 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.voxelGroup, this.shadowGroup)
     this.buildWorld(prepared)
     this.simulation = new WaterSimulation(this.renderer, this.bed, this.mobile, this.wind)
+    this.camera.layers.enable(FISH_LAYER)
     this.submerged = new SubmergedScene(this.scene, this.bed, this.simulation.available)
     this.scene.traverse((object) => {
       if ('isLight' in object) object.layers.enable(1)
@@ -872,6 +880,9 @@ export class VoxelLandscapeEngine {
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
     const wind = this.wind.sample(this.elapsed)
     updateWindUniforms(this.windUniforms, wind)
+    const optics = sampleWaterOptics(this.rain.simulation.state.intensity, wind.speed)
+    uniforms.uWaterClarity!.value = optics.clarity
+    uniforms.uWaterAgitation!.value = optics.agitation
     // Airborne colonies follow the cursor's projected proximity. Terrain picking
     // jumps between bank heights and distant water and cannot drive their motion.
     let fireflyPointer = null

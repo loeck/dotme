@@ -1,5 +1,7 @@
 import { initLandscape } from './components/landscape'
 import { initSceneCursor } from './components/scene-cursor'
+import { initSceneInfo } from './components/scene-info'
+import { initSceneLoader } from './components/scene-loader'
 
 let cleanup: (() => void) | undefined
 
@@ -7,11 +9,18 @@ function start() {
   if (cleanup) return
   const landscape = document.querySelector<HTMLDivElement>('#landscape')
   const cursor = document.querySelector<HTMLDivElement>('.scene-cursor')
-  const stopLandscape = landscape ? initLandscape(landscape) : undefined
+  const loopLoader = new URLSearchParams(window.location.search).get('loader') === 'loop'
+  const loader = initSceneLoader(loopLoader)
+  const stopLandscape =
+    !loopLoader && landscape ? initLandscape(landscape, loader.reveal) : undefined
+  if (!loopLoader && !landscape) loader.reveal()
   const stopCursor = cursor ? initSceneCursor(cursor) : undefined
+  const stopInfo = !loopLoader ? initSceneInfo() : undefined
   cleanup = () => {
+    stopInfo?.()
     stopCursor?.()
     stopLandscape?.()
+    loader.dispose()
   }
 }
 

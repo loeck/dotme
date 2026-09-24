@@ -14,11 +14,33 @@
     <link rel="canonical" href="https://loeck.me/" />
     <link rel="icon" href="/favicon.ico" />
     <link rel="stylesheet" href="/src/styles.css" />
+    <script>
+      document.documentElement.dataset.sceneLoading = 'loading'
+      // Also recover if the entry module itself cannot be downloaded.
+      window.setTimeout(() => {
+        if (document.documentElement.dataset.sceneLoading !== 'loading') return
+        delete document.documentElement.dataset.sceneLoading
+        const main = document.querySelector('main')
+        if (main) {
+          main.inert = false
+          main.removeAttribute('aria-busy')
+        }
+      }, 22000)
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body
     class="m-0 min-h-full min-w-[280px] overflow-x-hidden bg-[#080a0d] font-mono text-sm font-normal leading-6 text-[#e4e8ed] antialiased"
   >
+    <div class="scene-loader" role="status" aria-live="polite" aria-label="Loading the scenery">
+      <div class="scene-loader__content">
+        <div class="scene-loader__visual" aria-hidden="true">
+          <canvas width="144" height="80"></canvas>
+          <div class="scene-loader__fallback"><i></i><i></i><i></i><i></i><i></i></div>
+        </div>
+        <p class="scene-loader__title">Building a quiet little world.</p>
+      </div>
+    </div>
     <main class="relative isolate min-h-svh overflow-hidden bg-[#080a0d]">
       <div class="pointer-events-none absolute inset-0 z-0 overflow-hidden" aria-hidden="true">
         <div
@@ -30,8 +52,6 @@
         class="profile-panel relative z-10 w-full max-w-[52rem] px-[max(1.5rem,5vw)] pt-[max(2.5rem,7.8vh)] pb-8 max-sm:max-w-[30rem] max-sm:pr-14 max-sm:pt-[max(2rem,env(safe-area-inset-top))] max-sm:pl-[max(1.25rem,env(safe-area-inset-left))]"
         aria-labelledby="profile-title"
       >
-        <p class="m-0 text-[0.8rem] tracking-[0.025em] text-[var(--profile-muted)]">//loeck.me</p>
-        <div class="h-10" aria-hidden="true"></div>
         <h1
           id="profile-title"
           class="mt-0 mb-2 text-[clamp(1.2rem,1.58vw,1.42rem)] leading-[1.35] font-normal tracking-[-0.025em] text-[var(--profile-primary)]"
@@ -89,14 +109,72 @@
           </a>
         </nav>
       </header>
-      <div class="scene-cursor" aria-hidden="true">
-        <div class="scene-cursor__halo"></div>
-        <canvas class="scene-cursor__smoke"></canvas>
-        <div class="scene-cursor__ring">
-          <div class="scene-cursor__glint"></div>
-        </div>
-        <div class="scene-cursor__core"></div>
-      </div>
+      <button
+        class="scene-info-trigger"
+        type="button"
+        aria-label="About this landscape"
+        aria-haspopup="dialog"
+        aria-controls="scene-info"
+        hidden
+      >
+        <svg
+          viewBox="0 0 24 24"
+          width="17"
+          height="17"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="1.4"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="8.5" />
+          <path d="M12 11v6" />
+          <circle cx="12" cy="7.5" r=".7" fill="currentColor" stroke="none" />
+        </svg>
+      </button>
     </main>
+    <dialog id="scene-info" class="scene-info-dialog" aria-labelledby="scene-info-title">
+      <form method="dialog" class="scene-info-close-form">
+        <button class="scene-info-close" aria-label="Close" autofocus>×</button>
+      </form>
+      <p class="scene-info-eyebrow">BEHIND THE SCENE</p>
+      <h2 id="scene-info-title">A quiet little world.</h2>
+      <p>
+        A landscape made of tiny cubes, generated anew each time you visit. Light follows your local
+        time, and the water responds to your pointer.
+      </p>
+      <h3>Made with</h3>
+      <p>
+        <a href="https://threejs.org/" target="_blank" rel="noreferrer">Three.js</a> and WebGL for
+        the landscape, water and atmosphere. A tiny, independent WebGL canvas brings the loading
+        cubes to life.
+      </p>
+      <p>
+        <a href="https://vite.dev/" target="_blank" rel="noreferrer">Vite</a>,
+        <a href="https://www.typescriptlang.org/" target="_blank" rel="noreferrer">TypeScript</a>
+        and <a href="https://tailwindcss.com/" target="_blank" rel="noreferrer">Tailwind CSS</a> for
+        the site.
+      </p>
+      <h3>A little of Paris</h3>
+      <p>
+        When available, Paris weather shapes the clouds, rain and wind. Otherwise, the landscape
+        picks a random mood.
+      </p>
+      <p data-weather-credit hidden>
+        Weather adapted from
+        <a href="https://open-meteo.com/" target="_blank" rel="noreferrer">Open-Meteo</a> data,
+        under
+        <a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noreferrer"
+          >CC BY 4.0</a
+        >. Conditions are interpreted for this miniature world.
+      </p>
+    </dialog>
+    <div class="scene-cursor" popover="manual" aria-hidden="true">
+      <div class="scene-cursor__halo"></div>
+      <canvas class="scene-cursor__smoke"></canvas>
+      <div class="scene-cursor__ring">
+        <div class="scene-cursor__glint"></div>
+      </div>
+      <div class="scene-cursor__core"></div>
+    </div>
   </body>
 </html>

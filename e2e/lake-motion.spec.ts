@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+import { mockParisWeather } from './weather-fixture'
+
+test.beforeEach(async ({ page }) => {
+  await mockParisWeather(page)
+})
+
 // Keep a playable sequence: still captures alone cannot validate moving water.
 test.use({ video: 'on' })
 

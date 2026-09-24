@@ -1,8 +1,11 @@
 import type { createCursorSmoke } from '../scene/cursor-smoke'
 
 export function initSceneCursor(element: HTMLDivElement): () => void {
-  const host = element.closest('main')
+  const host = document.querySelector('main')
   if (!host) return () => {}
+  const root = document.documentElement
+  const dialog = document.querySelector<HTMLDialogElement>('.scene-info-dialog')
+  const supportsPopover = typeof element.showPopover === 'function'
   const smokeCanvas = element.querySelector('canvas')
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)')
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
@@ -53,12 +56,22 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
     element.dataset.visible = 'false'
     element.dataset.pressed = 'false'
     delete host.dataset.cursorActive
+    delete root.dataset.cursorActive
     cancelAnimationFrame(frame)
     frame = 0
     tiltX = tiltY = targetX = targetY = 0
     element.style.setProperty('--cursor-tilt-x', '0deg')
     element.style.setProperty('--cursor-tilt-y', '0deg')
   }
+  // Native dialogs occupy the top layer. Reinsert our non-interactive popover
+  // after one opens, so the same cursor stays above the dialog and its backdrop.
+  const raise = () => {
+    if (!supportsPopover || !visible) return
+    if (element.matches(':popover-open')) element.hidePopover()
+    element.showPopover()
+  }
+  const dialogObserver = new MutationObserver(raise)
+  if (dialog) dialogObserver.observe(dialog, { attributes: true, attributeFilter: ['open'] })
   const loadSmoke = async (canvas: HTMLCanvasElement) => {
     try {
       // Keep Three.js out of the initial UI bundle and off touch-only devices.
@@ -70,8 +83,18 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
       // The ring remains usable when WebGL is unavailable.
     }
   }
+  const startSmoke = () => {
+    if (visible && !smokeAttempted && smokeCanvas && !root.dataset.sceneLoading) {
+      smokeAttempted = true
+      void loadSmoke(smokeCanvas)
+    }
+  }
+  // A pointer already resting on the loader should gain its smoke as soon as
+  // loading ends, without needing a second movement or loading Three.js early.
+  const loadingObserver = new MutationObserver(startSmoke)
+  loadingObserver.observe(root, { attributes: true, attributeFilter: ['data-scene-loading'] })
   const move = (event: PointerEvent) => {
-    if (!finePointer.matches || event.pointerType !== 'mouse') {
+    if (!supportsPopover || !finePointer.matches || event.pointerType !== 'mouse') {
       hide()
       return
     }
@@ -100,12 +123,11 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
     previousY = event.clientY
     previousTime = event.timeStamp
     visible = true
+    if (!element.matches(':popover-open')) element.showPopover()
     element.dataset.visible = 'true'
     host.dataset.cursorActive = 'true'
-    if (!smokeAttempted && smokeCanvas) {
-      smokeAttempted = true
-      void loadSmoke(smokeCanvas)
-    }
+    root.dataset.cursorActive = 'true'
+    startSmoke()
     resume()
   }
   const press = (event: PointerEvent) => {
@@ -125,7 +147,10 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
   reducedMotion.addEventListener('change', hide, { signal })
   return () => {
     lifetime.abort()
+    dialogObserver.disconnect()
+    loadingObserver.disconnect()
     hide()
+    if (supportsPopover && element.matches(':popover-open')) element.hidePopover()
     smoke?.dispose()
     // Disposal loses the WebGL context; a restored page needs a fresh canvas.
     if (smoke && smokeCanvas) smokeCanvas.replaceWith(smokeCanvas.cloneNode())

@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+import { mockParisWeather } from './weather-fixture'
+
+test.beforeEach(async ({ page }) => {
+  await mockParisWeather(page)
+})
+
 function trackSmokeFrames() {
   const draw = WebGL2RenderingContext.prototype.drawElements
   WebGL2RenderingContext.prototype.drawElements = function (...args: Parameters<typeof draw>) {
@@ -45,9 +51,9 @@ test('renders the profile and interactive scene', async ({ page }) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
       ),
   )
-  await expect(page.getByRole('button')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'About this landscape' })).toBeVisible()
   expect(consoleErrors).toEqual([])
-  expect(weatherRequests).toEqual([])
+  expect(weatherRequests).toHaveLength(1)
 })
 
 test('renders and resizes the lit scene with reduced motion', async ({ page }) => {
@@ -246,7 +252,7 @@ test('unknown paths return the static 404 with a home link', async ({ page }) =>
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
 })
 
-test('without WebGL the profile and pointer remain usable; no weather is requested', async ({
+test('without WebGL the profile and pointer remain usable after weather preload', async ({
   page,
 }) => {
   const weatherRequests: string[] = []
@@ -280,7 +286,7 @@ test('without WebGL the profile and pointer remain usable; no weather is request
     await expect(page.locator('main')).not.toHaveAttribute('data-cursor-active')
     await expect(page.getByRole('link', { name: /GitHub/ })).not.toHaveCSS('cursor', 'none')
   }
-  expect(weatherRequests).toEqual([])
+  expect(weatherRequests).toHaveLength(1)
   expect(errors).toEqual([])
 })
 

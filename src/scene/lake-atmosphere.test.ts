@@ -1,11 +1,10 @@
-import { Color, PerspectiveCamera, Scene, Vector3 } from 'three'
+import { PerspectiveCamera, Scene, Vector3 } from 'three'
 import { describe, expect, it, vi } from 'vitest'
 
-import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
+import { LAKE_BOUNDS } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
-import { LakeMist } from './lake-mist'
 import { WindModel } from './wind'
 
 function lakeBed(shores = true): LakeBed {
@@ -61,41 +60,12 @@ function hoverAt(
 }
 
 describe('lake atmosphere', () => {
-  it('places deterministic mist on actual shallow water within a mobile instance budget', () => {
-    const bed = lakeBed()
-    const scene = new Scene()
-    const first = new LakeMist(scene, bed, 91, false)
-    const repeated = new LakeMist(scene, bed, 91, false)
-    const mobile = new LakeMist(scene, bed, 91, true)
-    const centers = first.mesh.geometry.getAttribute('aCenter')
-    const shapes = first.mesh.geometry.getAttribute('aShape')
-    expect(centers.array).toEqual(repeated.mesh.geometry.getAttribute('aCenter').array)
-    expect(first.mesh.geometry.instanceCount).toBeGreaterThan(0)
-    expect(first.mesh.geometry.instanceCount).toBeLessThanOrEqual(18)
-    expect(mobile.mesh.geometry.instanceCount).toBeLessThanOrEqual(8)
-    expect(mobile.mesh.geometry.instanceCount).toBeLessThan(first.mesh.geometry.instanceCount)
-    for (let i = 0; i < centers.count; i++) {
-      const index = lakeIndex(bed, centers.getX(i), centers.getZ(i))
-      expect(bed.water[index]).toBe(255)
-      expect(bed.depth[index]).toBeLessThan(3.2)
-      // The water can clip the foot instead of leaving a levitating gap.
-      expect(centers.getY(i) - shapes.getY(i) / 2).toBeLessThan(WATER_LEVEL)
-      expect(centers.getY(i) + shapes.getY(i) / 2).toBeLessThan(WATER_LEVEL + 0.4)
-    }
-    for (const effect of [first, repeated, mobile]) effect.dispose()
-  })
-
-  it('does not invent colonies or wisps without eligible lake shores', () => {
-    const scene = new Scene()
-    const wind = new WindModel(0).sample(0)
-    const mist = new LakeMist(scene, lakeBed(false), 0, false)
-    const flies = new LakeFireflies(scene, lakeBed(false), 0, false)
-    for (const effect of [mist, flies]) {
-      effect.update(0, wind)
-      expect(effect.mesh.geometry.instanceCount).toBe(0)
-      expect(effect.mesh.visible).toBe(false)
-      effect.dispose()
-    }
+  it('does not invent colonies without eligible lake shores', () => {
+    const flies = new LakeFireflies(new Scene(), lakeBed(false), 0, false)
+    flies.update(0, new WindModel(0).sample(0))
+    expect(flies.mesh.geometry.instanceCount).toBe(0)
+    expect(flies.mesh.visible).toBe(false)
+    flies.dispose()
   })
 
   it('keeps fireflies seeded and grouped while hiding them in daylight', () => {
@@ -198,12 +168,7 @@ describe('lake atmosphere', () => {
   it('freezes motion and repulsion for reduced motion but still updates lighting', () => {
     const scene = new Scene()
     const wind = new WindModel(0)
-    const mist = new LakeMist(scene, lakeBed(), 0, false)
     const flies = new LakeFireflies(scene, lakeBed(), 0, false)
-    mist.update(20, wind.sample(20), { reducedMotion: true, daylight: 0 })
-    const nightColor = (mist.mesh.material.uniforms.uColor!.value as Color).clone()
-    mist.update(40, wind.sample(40), { reducedMotion: true, daylight: 1 })
-    expect(mist.mesh.material.uniforms.uColor!.value).not.toEqual(nightColor)
     flies.update(20, wind.sample(20), { reducedMotion: true })
     const frozen = firstFly(flies)
     flies.update(40, wind.sample(40), {
@@ -211,32 +176,22 @@ describe('lake atmosphere', () => {
       pointer: hoverAt(flies, hoverCamera(flies), 0),
       nightFactor: 0.4,
     })
-    for (const effect of [mist, flies]) {
-      expect(effect.mesh.material.uniforms.uTime!.value).toBe(0)
-    }
-    expect(mist.mesh.material.uniforms.uDrift!.value.toArray()).toEqual([0, 0])
+    expect(flies.mesh.material.uniforms.uTime!.value).toBe(0)
     expect(firstFly(flies)).toEqual(frozen)
     expect(flies.mesh.material.uniforms.uIntensity!.value).toBe(0.4)
-    mist.dispose()
     flies.dispose()
   })
 
-  it('releases GPU resources and removes both objects from the scene', () => {
+  it('releases GPU resources and removes fireflies from the scene', () => {
     const scene = new Scene()
-    const mist = new LakeMist(scene, lakeBed(), 0, false)
     const flies = new LakeFireflies(scene, lakeBed(), 0, false)
-    const textureDispose = vi.fn<() => void>()
-    mist.mesh.material.uniforms.uWater!.value.addEventListener('dispose', textureDispose)
-    for (const effect of [mist, flies]) {
-      const geometryDispose = vi.fn<() => void>(),
-        materialDispose = vi.fn<() => void>()
-      effect.mesh.geometry.addEventListener('dispose', geometryDispose)
-      effect.mesh.material.addEventListener('dispose', materialDispose)
-      effect.dispose()
-      expect(geometryDispose).toHaveBeenCalledOnce()
-      expect(materialDispose).toHaveBeenCalledOnce()
-    }
-    expect(textureDispose).toHaveBeenCalledOnce()
+    const geometryDispose = vi.fn<() => void>()
+    const materialDispose = vi.fn<() => void>()
+    flies.mesh.geometry.addEventListener('dispose', geometryDispose)
+    flies.mesh.material.addEventListener('dispose', materialDispose)
+    flies.dispose()
+    expect(geometryDispose).toHaveBeenCalledOnce()
+    expect(materialDispose).toHaveBeenCalledOnce()
     expect(scene.children).toHaveLength(0)
   })
 })

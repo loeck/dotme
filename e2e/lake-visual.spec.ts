@@ -1,5 +1,11 @@
 import { expect, test } from '@playwright/test'
 
+import { mockParisWeather } from './weather-fixture'
+
+test.beforeEach(async ({ page }) => {
+  await mockParisWeather(page)
+})
+
 test('lake visual and frame timing sample', async ({ page }, testInfo) => {
   test.setTimeout(180_000)
   const errors: string[] = []

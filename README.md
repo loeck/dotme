@@ -5,6 +5,17 @@ icons and SEO metadata are in the HTML and work without JavaScript. The procedur
 loads through a dynamic import. Each visit gets a fresh landscape seed.
 Add `?seed=42` to the URL to reproduce one composition.
 
+A full-screen voxel loader covers the initial scene preparation. Five cubes render in a tiny,
+independent WebGL canvas at 30 Hz, using an OffscreenCanvas worker when available. It requires no
+Three.js import, textures or shadow passes. The first completed scene frame reveals the landscape
+and profile together through a 600 ms fade, then releases the loader's graphics resources and worker.
+The cubes assemble from the center into a balanced small landscape (three below, two centered above),
+hold for a second, then return to their line in a 5.2-second loop. Both resting shapes share the same
+visual center. Reduced motion shows the assembled shape and skips the fade.
+Initialization failures or a 20-second
+timeout release the profile; without JavaScript the static profile is immediately available.
+Use `?loader=loop` to preview the loader continuously, without loading the landscape or cursor.
+
 ## Requirements
 
 - Node.js 24.21.0
@@ -86,21 +97,37 @@ Vercel serves `404.html` for unknown paths; development and preview use the same
 Other static hosts should also be configured to serve that page with a 404 status.
 
 See [bundle measurements](docs/bundle-size.md) for the initial and total JavaScript comparison, and
-[Paris weather access](docs/paris-weather.md) for the optional, on-demand Open-Meteo module. Weather
-is not called or displayed by the site.
+[Paris weather access](docs/paris-weather.md) for the Open-Meteo preload. Paris conditions set the
+clouds, rain and wind before the first frame. A 3-second deadline or API failure selects a stable,
+random weather preset for the visit. The small information button opens the creation notes and credits.
 
 See [atmosphere notes](docs/atmosphere.md) for the shared wind, volumetric cloud rendering,
 quality profiles and before/after performance measurements.
 
-The lake also includes subtle caustics, low drifting mist, underwater fish
+The lake also includes subtle caustics, small voxel fish shoals
 and reactive amber fireflies. Bank materials retain
 moisture when supplied with rain intensity. See [living lake details](docs/scene-details.md)
 for rendering budgets, the rain/daylight integration API, reduced-motion behavior
 and validation.
 
+Small voxel fish travel in up to three compact shoals (up to 10 fish on mobile, 18 on desktop).
+Their vertices are refracted analytically and composited on the water with depth-tested
+bank occlusion, avoiding fragmented silhouettes from the bed texture. Shoals fade while
+receding between passages; reduced motion keeps one quiet, static group. The submerged
+bed retains wave-driven caustics. Local mist billboards are removed to prevent long
+horizontal ribbons; distant volumetric haze remains. Rain reduces underwater clarity
+and adds a warmer scattering tint, while shared wind and rain roughen the surface.
+Cloud cover changes lighting without automatically making the water muddy. This is an
+artistic response to the weather, not a measurement of water quality.
+Compare `?seed=0&time=12:00&weather=clear&rain=off` with the same URL using `rain=heavy`.
+
+References: [GPU Gems: water caustics](https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-2-rendering-water-caustics),
+[GPU Gems: refraction](https://developer.nvidia.com/gpugems/gpugems2/part-ii-shading-lighting-and-shadows/chapter-19-generic-refraction-simulation),
+and [USGS: turbidity](https://www.usgs.gov/water-science-school/science/turbidity-and-water).
+
 ## Rain
 
-`RainEffect` is independent of the future weather system. Use
+`RainEffect` receives the initial Paris weather state during loading. Use
 `engine.setRainState({ intensity: 0.55, wind: { x: 2, z: 0.5 } })` to replace its state.
 Intensity is clamped to 0–1; horizontal wind is in world metres per second, bounded to ±20.
 One world unit is treated as one metre. Non-finite values fall back to the defaults above.

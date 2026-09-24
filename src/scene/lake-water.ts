@@ -63,6 +63,8 @@ uniform sampler2D uEnvironment;
 uniform samplerCube uEnvironment;
 #endif
 uniform vec3 uWaterScatter;
+uniform float uWaterClarity;
+uniform float uWaterAgitation;
 varying vec3 vWorldPosition;
 varying vec4 vMirrorCoord;
 ${WATER_LIGHTING_GLSL}
@@ -109,7 +111,7 @@ void main() {
   float ndv = clamp(dot(normal, view), 0.0, 1.0);
   float fresnel = 0.02037 + 0.97963 * pow(1.0 - ndv, 5.0);
   float reveal = exp(-dot(p - uPointer.xy, p - uPointer.xy) / 2.8) * uPointer.z;
-  float baseRoughness = mix(0.065, 0.025, reveal);
+  float baseRoughness = mix(mix(0.035, 0.085, uWaterAgitation), 0.025, reveal);
   float roughness = sqrt(baseRoughness * baseRoughness + min(0.04, rainField.z));
   // Project a displaced reflection ray back onto the planar capture. The
   // offset scales with reflected depth and view angle, not a fixed UV wobble.
@@ -167,22 +169,23 @@ void main() {
   float path = min(40.0, length(candidate - vWorldPosition));
   // Clear near-shore water lets the shallow relief and shoals read without
   // turning the distant, deep lake transparent. Hover opens a gentle window.
-  float nearShallow = (1.0 - smoothstep(2.0, 4.5, depth))
-    * (1.0 - smoothstep(20.0, 42.0, length(cameraPosition.xz - p)));
-  float clarity = max(nearShallow, reveal);
-  vec3 absorption = mix(vec3(0.85, 0.42, 0.27), vec3(0.26, 0.12, 0.085), clarity);
+  float nearShallow = (1.0 - smoothstep(2.8, 6.0, depth))
+    * (1.0 - smoothstep(24.0, 48.0, length(cameraPosition.xz - p)));
+  float clarity = max(nearShallow * uWaterClarity, reveal);
+  vec3 absorption = mix(vec3(0.72, 0.36, 0.22), vec3(0.14, 0.065, 0.045), clarity);
   vec3 transmission = exp(-absorption * path);
   // Broad diagonal taps erased silhouettes smaller than a metre in the atlas.
-  vec2 bedBlur = uBedTexel * mix(1.1, 0.25, clarity);
+  vec2 bedBlur = uBedTexel * mix(1.1, 0.18, clarity);
   vec3 bed = texture2D(uBedColor, refractUv).rgb * 0.4;
   bed += texture2D(uBedColor, clamp(refractUv + bedBlur, 0.0, 1.0)).rgb * 0.3;
   bed += texture2D(uBedColor, clamp(refractUv - bedBlur, 0.0, 1.0)).rgb * 0.3;
   // Cloud cover also shades the moonlit scattering inside the water.
   float cloudVisibility = cloudShadow(vWorldPosition);
-  vec3 scatter = uWaterScatter * mix(0.25, 1.0, cloudVisibility);
+  vec3 scatter = uWaterScatter * mix(0.25, 1.0, cloudVisibility)
+    * mix(vec3(1.18, 1.12, 0.92), vec3(0.8, 1.08, 1.12), uWaterClarity);
   vec3 transmitted = mix(scatter, bed * transmission + scatter * (1.0 - transmission), valid);
   // Preserve the readable shallow-water window under the smoother sky reflection.
-  float shallowFresnel = mix(fresnel, min(fresnel, 0.32), nearShallow);
+  float shallowFresnel = mix(fresnel, min(fresnel, mix(0.42, 0.2, uWaterClarity)), nearShallow);
   float reflectedFraction = mix(shallowFresnel, min(shallowFresnel, 0.16), reveal * 0.85);
   vec3 color = mix(transmitted, reflection, reflectedFraction);
 
@@ -245,6 +248,8 @@ export function createLakeReflector(
           uPointer: { value: new Vector3() },
           ...createCursorGlowUniforms(),
           uWaterScatter: { value: new Color().setRGB(0.0022, 0.0043, 0.0065) },
+          uWaterClarity: { value: 1 },
+          uWaterAgitation: { value: 0.2 },
           uEnvironment: { value: null },
         },
       ]),

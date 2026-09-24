@@ -1,11 +1,10 @@
-import { Color, Mesh, MeshStandardMaterial } from 'three'
+import { Mesh, MeshStandardMaterial } from 'three'
 import type { Object3D, Scene, Vector3 } from 'three'
 
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
 import { LakeFish } from './lake-fish'
-import { LakeMist } from './lake-mist'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
 import type { WindState } from './wind'
@@ -33,12 +32,8 @@ export function updateDetailEnvironment(
 export class SceneDetails {
   private readonly caustics: LakeCaustics
   private readonly fish: LakeFish
-  private readonly mist: LakeMist
   private readonly fireflies: LakeFireflies
   private readonly wetness = new ShoreWetness()
-  private readonly lightColor = new Color()
-  private readonly nightColor = new Color(0x9db8ce)
-  private readonly dayColor = new Color(0xffe4bb)
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
 
   constructor(
@@ -52,7 +47,6 @@ export class SceneDetails {
     if (reducedMotion) this.wetness.setWetness(this.environment.rainIntensity)
     this.caustics = new LakeCaustics(reducedMotion)
     this.fish = new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion)
-    this.mist = new LakeMist(scene, world.lakeBed, world.seed, mobile)
     this.fireflies = new LakeFireflies(scene, world.lakeBed, world.seed, mobile)
   }
 
@@ -84,21 +78,14 @@ export class SceneDetails {
     cursorLightStrength = 1,
   ) {
     const { daylight, rainIntensity } = this.environment
-    this.lightColor.copy(this.nightColor).lerp(this.dayColor, daylight)
     this.caustics.update(
       time,
       wind,
       (0.24 * moonIntensity * (1 - daylight) + daylight) * intro,
       cursorLightStrength > 0 ? waterPointer : null,
     )
-    this.fish.update(time, dt, waterPointer, scenePointer)
+    this.fish.update(time, dt, waterPointer, scenePointer, wind, rainIntensity)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
-    this.mist.update(time, wind, {
-      reducedMotion: this.reducedMotion,
-      daylight,
-      lightColor: this.lightColor,
-      intensity: intro * (1 - rainIntensity * 0.35),
-    })
     this.fireflies.update(time, wind, {
       reducedMotion: this.reducedMotion,
       nightFactor: 1 - daylight,
@@ -110,7 +97,6 @@ export class SceneDetails {
   dispose() {
     this.caustics.dispose()
     this.fish.dispose()
-    this.mist.dispose()
     this.fireflies.dispose()
     this.wetness.dispose()
   }

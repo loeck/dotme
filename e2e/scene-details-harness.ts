@@ -54,10 +54,14 @@ export function status() {
   // Diagnostics stay in this test-only harness, outside the site's public API.
   const state = engine as unknown as {
     elapsed: number
+    water: {
+      material: {
+        uniforms: { uWaterClarity: { value: number }; uWaterAgitation: { value: number } }
+      }
+    }
     details?: {
       fish: { count: number }
       fireflies: { mesh: { geometry: { instanceCount: number } } }
-      mist: { mesh: { geometry: { instanceCount: number } } }
       wetness: { wetness: number }
       environment: DetailEnvironment
     }
@@ -65,9 +69,10 @@ export function status() {
   }
   return {
     time: state.elapsed,
+    clarity: state.water.material.uniforms.uWaterClarity.value,
+    agitation: state.water.material.uniforms.uWaterAgitation.value,
     fish: state.details?.fish.count ?? 0,
     fireflies: state.details?.fireflies.mesh.geometry.instanceCount ?? 0,
-    mist: state.details?.mist.mesh.geometry.instanceCount ?? 0,
     wetness: state.details?.wetness.wetness ?? 0,
     environment: state.details?.environment,
     memory: { ...state.renderer.info.memory },

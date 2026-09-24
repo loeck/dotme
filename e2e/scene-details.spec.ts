@@ -88,11 +88,9 @@ test('details render with shared shadows, respond to rain, resize and dispose', 
   const initial = await page.evaluate(async () => (await import('/details-harness.js')).status())
   expect(initial.fish).toBeGreaterThan(0)
   expect(initial.fireflies).toBeGreaterThan(0)
-  expect(initial.mist).toBeGreaterThan(0)
   const mobile = page.viewportSize()!.width < 768
-  expect(initial.fish).toBeLessThanOrEqual(mobile ? 6 : 12)
+  expect(initial.fish).toBe(mobile ? 10 : 18)
   expect(initial.fireflies).toBeLessThanOrEqual(mobile ? 18 : 48)
-  expect(initial.mist).toBeLessThanOrEqual(mobile ? 8 : 18)
   expect(initial.wetness).toBe(0)
   await page.screenshot({ path: info.outputPath('night-details.png') })
   await page.evaluate(async () =>
@@ -185,6 +183,41 @@ test('reduced motion stays still and optional layer can be disabled', async ({ p
   expect((await page.locator('canvas').screenshot()).equals(enhanced)).toBe(false)
   await page.evaluate(async () => (await import('/details-harness.js')).stop())
   expect(errors).toEqual([])
+})
+
+test('rain changes underwater visibility while fish remain readable in calm daylight', async ({
+  page,
+}, info) => {
+  await page.goto('/details-test?time=12:00&weather=clear')
+  await page.evaluate(async () => (await import('/details-harness.js')).start(0, true, true, 0))
+  const calm = await page.evaluate(async () => (await import('/details-harness.js')).status())
+  const visible = await page.locator('canvas').screenshot({ scale: 'css' })
+  await page.evaluate(async () => (await import('/details-harness.js')).fishProbe(false))
+  const hidden = await page.locator('canvas').screenshot({ scale: 'css' })
+  const pixels = await visibleDifference(page, visible, hidden)
+  expect(pixels, 'Fish should be readable without hover in calm daylight').toBeGreaterThan(
+    info.project.name === 'mobile' ? 80 : 180,
+  )
+  await page.evaluate(async () => {
+    const scene = await import('/details-harness.js')
+    scene.fishProbe(true)
+    scene.rain(1)
+    scene.resize()
+  })
+  await expect
+    .poll(async () =>
+      page.evaluate(async () => (await import('/details-harness.js')).status().clarity),
+    )
+    .toBeLessThan(calm.clarity)
+  const storm = await page.evaluate(async () => (await import('/details-harness.js')).status())
+  expect(storm.clarity).toBeLessThan(calm.clarity)
+  expect(storm.agitation).toBeGreaterThan(calm.agitation)
+  const rainy = await page.locator('canvas').screenshot({ scale: 'css' })
+  expect(await visibleDifference(page, visible, rainy)).toBeGreaterThan(500)
+  await info.attach('calm-water', { body: visible, contentType: 'image/png' })
+  await info.attach('rainy-water', { body: rainy, contentType: 'image/png' })
+  await info.attach('daylight-fish-pixels', { body: String(pixels), contentType: 'text/plain' })
+  await page.evaluate(async () => (await import('/details-harness.js')).stop())
 })
 
 test('details follow solar and rain inputs while preserving explicit overrides', async ({

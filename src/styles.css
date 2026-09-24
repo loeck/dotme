@@ -1,16 +1,262 @@
 @import 'tailwindcss';
 
-@media (hover: hover) and (pointer: fine) {
-  main,
-  main a {
-    cursor:
-      url('/light-cursor.svg') 20 20,
-      crosshair;
-  }
+.scene-loader {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  place-items: center;
+  padding: max(24px, env(safe-area-inset-top)) 20px max(24px, env(safe-area-inset-bottom));
+  background: #080a0d;
+  opacity: 1;
+  transition: opacity 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
 
-  main[data-cursor-active='true'],
-  main[data-cursor-active='true'] a {
-    cursor: none;
+html[data-scene-loading] .scene-loader {
+  display: grid;
+}
+
+html[data-scene-loading='loading'] .profile-panel,
+html[data-scene-loading='loop'] .profile-panel {
+  visibility: hidden;
+}
+
+html[data-scene-loading='revealing'] .scene-loader {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The single opaque overlay reveals both the scene and the profile together. */
+html[data-scene-loading] #landscape {
+  transition: none;
+}
+
+.scene-loader__content {
+  width: min(100%, 360px);
+  text-align: center;
+  /* Optical centering accounts for the transparent space above the small cubes. */
+  transform: translateY(-16px);
+}
+
+.scene-loader__visual {
+  position: relative;
+  width: min(100%, 144px);
+  aspect-ratio: 288 / 160;
+  margin: 0 auto;
+}
+
+.scene-loader canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.scene-loader__title {
+  margin: 0;
+  color: #d5dce3;
+  font-size: 0.75rem;
+  line-height: 1.6;
+}
+
+.scene-info-trigger {
+  position: absolute;
+  z-index: 10;
+  bottom: max(0.5rem, env(safe-area-inset-bottom));
+  right: max(0.75rem, env(safe-area-inset-right));
+  width: 44px;
+  height: 44px;
+  padding: 13px;
+  border: 0;
+  background: transparent;
+  color: var(--profile-muted);
+  opacity: 0.65;
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.scene-info-trigger:hover,
+.scene-info-trigger:focus-visible {
+  opacity: 1;
+}
+.scene-info-trigger:active {
+  transform: scale(0.95);
+}
+.scene-info-trigger:focus-visible {
+  outline: 1px solid currentColor;
+  outline-offset: -6px;
+  border-radius: 50%;
+}
+
+.scene-info-dialog {
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100svh - 40px);
+  margin: auto;
+  padding: 32px;
+  border: 1px solid #28313a;
+  border-radius: 16px;
+  background: #0d1116;
+  color: #cbd1d7;
+  box-shadow: 0 24px 80px #0006;
+  font-size: 0.75rem;
+  line-height: 1.8;
+  overflow: auto;
+}
+
+.scene-info-dialog::backdrop {
+  background: #030609aa;
+  backdrop-filter: blur(3px);
+}
+.scene-info-dialog[open] {
+  animation: scene-info-in 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.scene-info-dialog p {
+  margin: 0 0 16px;
+}
+.scene-info-dialog p:last-child {
+  margin-bottom: 0;
+}
+.scene-info-dialog h2 {
+  margin: 0 24px 20px 0;
+  font-size: 1.125rem;
+  font-weight: 400;
+  color: #e4e8ed;
+  letter-spacing: -0.025em;
+}
+.scene-info-dialog h3 {
+  margin: 24px 0 8px;
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: #e4e8ed;
+}
+.scene-info-eyebrow {
+  font-size: 0.6875rem;
+  letter-spacing: 0.09em;
+  color: #9cabb8;
+}
+.scene-info-dialog a {
+  color: inherit;
+  text-underline-offset: 3px;
+  text-decoration: underline;
+}
+.scene-info-close-form {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+}
+.scene-info-close {
+  width: 44px;
+  height: 44px;
+  background: transparent;
+  border: 0;
+  color: #cbd1d7;
+  font-size: 22px;
+}
+.scene-info-close:hover {
+  color: #fff;
+}
+.scene-info-close:active {
+  transform: scale(0.95);
+}
+@keyframes scene-info-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scene-info-dialog[open] {
+    animation: none;
+  }
+  .scene-info-trigger {
+    transition: none;
+  }
+}
+
+.scene-loader__fallback {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.scene-loader__fallback i {
+  width: 8px;
+  height: 8px;
+  background: #a3b9c8;
+  transform: rotate(-30deg) skewX(30deg) scaleY(0.86);
+  animation: loader-pulse 1400ms ease-in-out infinite;
+}
+
+.scene-loader__fallback i:nth-child(2) {
+  animation-delay: -1120ms;
+}
+.scene-loader__fallback i:nth-child(3) {
+  animation-delay: -840ms;
+}
+.scene-loader__fallback i:nth-child(4) {
+  animation-delay: -560ms;
+}
+.scene-loader__fallback i:nth-child(5) {
+  animation-delay: -280ms;
+}
+.scene-loader[data-rendered='true'] .scene-loader__fallback {
+  display: none;
+}
+
+@keyframes loader-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scene-loader {
+    transition: none;
+  }
+  .scene-loader__fallback i {
+    animation: none;
+  }
+}
+
+:root {
+  --scene-native-cursor: url('/light-cursor.svg') 20 20, none;
+  --scene-cursor-filter: none;
+}
+
+:root:has(main[data-scene-tone='light']) {
+  --scene-native-cursor: url('/dark-cursor.svg') 20 20, none;
+  --scene-cursor-filter: brightness(0.2) saturate(0.6);
+}
+
+:root:has(.scene-info-dialog[open]),
+:root[data-scene-loading] {
+  --scene-native-cursor: url('/light-cursor.svg') 20 20, none;
+  --scene-cursor-filter: none;
+}
+
+:root[data-cursor-active='true'] {
+  --scene-native-cursor: none !important;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  /* Cover controls, SVG children, text selection and the modal backdrop too. */
+  html,
+  html *,
+  html *::before,
+  html *::after,
+  dialog::backdrop {
+    cursor: var(--scene-native-cursor) !important;
   }
 }
 
@@ -18,12 +264,25 @@
   position: fixed;
   top: 0;
   left: 0;
+  right: auto;
+  bottom: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: visible;
+  background: transparent;
   z-index: 50;
   width: 40px;
   height: 40px;
   pointer-events: none;
   opacity: 0;
   --cursor-scale: 1;
+  filter: var(--scene-cursor-filter);
+}
+
+.scene-cursor::backdrop {
+  background: transparent;
+  pointer-events: none;
 }
 
 .scene-cursor[data-visible='true'] {
@@ -148,14 +407,16 @@
 }
 
 /* Follow the shared scene illumination without adding a veil over the sky. */
-.profile-panel {
+.profile-panel,
+.scene-info-trigger {
   --profile-primary: #e4e8ed;
   --profile-muted: #cbd1d7;
   --profile-icon: #d5dce3;
   --profile-divider: #a0aab4;
   --profile-focus: #b9dfff;
 }
-main[data-scene-tone='light'] .profile-panel {
+main[data-scene-tone='light'] .profile-panel,
+main[data-scene-tone='light'] .scene-info-trigger {
   --profile-primary: #17232d;
   --profile-muted: #2e3d49;
   --profile-icon: #263641;

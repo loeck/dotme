@@ -1,45 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { fetchParisWeather, interpretWmoCode, WeatherHttpError } from './paris'
-
-const fixture = () => ({
-  timezone: 'Europe/Paris',
-  utc_offset_seconds: 7200,
-  current_units: {
-    time: 'unixtime',
-    interval: 'seconds',
-    temperature_2m: '°C',
-    apparent_temperature: '°C',
-    relative_humidity_2m: '%',
-    visibility: 'm',
-    wind_speed_10m: 'm/s',
-    wind_gusts_10m: 'm/s',
-    wind_direction_10m: '°',
-    cloud_cover: '%',
-    rain: 'mm',
-    showers: 'mm',
-    snowfall: 'cm',
-    weather_code: 'wmo code',
-    is_day: '',
-  },
-  current: {
-    time: 1790150400,
-    interval: 900,
-    temperature_2m: 19.3,
-    apparent_temperature: 18.2,
-    relative_humidity_2m: 61,
-    visibility: 24140,
-    wind_speed_10m: 3.2,
-    wind_gusts_10m: 6.5,
-    wind_direction_10m: 245,
-    cloud_cover: 0,
-    rain: 0,
-    showers: 0,
-    snowfall: 0,
-    weather_code: 0,
-    is_day: 1,
-  },
-})
+import { parisWeatherFixture as fixture } from './paris.fixture'
 
 const fetchMock = vi.fn<typeof fetch>()
 const respond = (data: unknown = fixture()) =>

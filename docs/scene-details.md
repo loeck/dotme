@@ -7,26 +7,35 @@ disposal are handled by `VoxelLandscapeEngine`.
 
 ## Appearance and budgets
 
-| Effect    | Implementation                                                                                                  | Desktop / mobile budget                      |
-| --------- | --------------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
-| Caustics  | Filtered moving light folds on submerged ground; modulates existing illumination, preserving shadows            | Material hook, no extra draw or sampler      |
-| Low mist  | Thin, depth-tested sheets meet the water surface; water mask clips land and wind advects the noise              | Up to 18 / 8 sheets, one instanced batch     |
-| Wet banks | Upward faces darken and become smoother during rain; moisture remains after rain stops                          | Material hook, no extra draw or sampler      |
-| Fish      | Distinct carp, roach and perch bodies, vertical tails, curved fins, natural markings and individual proportions | Up to 12 / 6 fish, three submerged batches   |
-| Fireflies | Amber shoreline colonies pulse and smoothly retreat from the pointer; daylight and rain reduce visibility       | Up to 48 / 18 particles, one instanced batch |
+| Effect    | Implementation                                                                                            | Desktop / mobile budget                      |
+| --------- | --------------------------------------------------------------------------------------------------------- | -------------------------------------------- |
+| Caustics  | Filtered moving light folds on submerged ground; modulates existing illumination, preserving shadows      | Material hook, no extra draw or sampler      |
+| Wet banks | Upward faces darken and become smoother during rain; moisture remains after rain stops                    | Material hook, no extra draw or sampler      |
+| Fish      | Small stepped voxel bodies, vertical tails, muted silver flanks; coherent shoal travel                    | Up to 18 / 10 fish, three instanced batches  |
+| Fireflies | Amber shoreline colonies pulse and smoothly retreat from the pointer; daylight and rain reduce visibility | Up to 48 / 18 particles, one instanced batch |
 
-Placement can produce fewer instances when a seed lacks suitable space. Fish
-are confined to fully checked water patches. Their depth follows the bed so
-the existing refracted-bottom capture can resolve them. They remain in layer 1;
-they are not rendered above the water or in its planar reflection.
+Placement can produce fewer instances when a seed lacks suitable space. Each shoal's
+whole route is validated against water, depth and terrain clearance, including its
+formation and bounded pointer avoidance. Desktop has three groups of 4, 6 and 8;
+mobile has up to two groups of 4 and 6. Seeded ordering and subtle body-size differences
+vary their appearance. Synchronized, staggered passage windows keep only one group
+clearly visible at a time, with quiet intervals as they recede into the water.
+Routes now require at least 1.65 units of water depth. Individual cruise depths vary
+from about 1.4 to 1.8 units, with clearance above the highest nearby bed relief.
 
-The 56-metre near-lake capture uses the existing 1024/512 resolution; it concentrates
-the underwater texel density without allocating a larger target. Its edges fade
-out in the water shader. The capture looks down at 45 degrees to preserve fish
-flanks and vertical tail fins through the refracted view. Shallow foreground water has lower absorption and
-narrower texture filtering; hovering reduces the reflected fraction locally so
-fish can be discovered through the surface. The distant deep water keeps its
-original absorption and reflection response.
+Fish vertices use an analytic Snell projection into the water surface on camera layer 3.
+Only the primary camera includes this layer. Alpha combines depth, rain clarity,
+surface Fresnel and passage visibility; warm color channels attenuate faster underwater.
+The surface remains visible through each silhouette, with wave normals modulating
+transmission. Bank depth testing remains enabled, but fish never write depth.
+This is a stylized optical composite, not full volumetric refraction. It preserves small
+silhouettes without reconstructing them from the coarse submerged depth/color atlas.
+The bed uses the existing 1024/512 oblique capture. Rain reduces underwater clarity;
+wind and rain roughen the surface. Clouds change lighting, not water quality.
+
+Local mist billboards are no longer instantiated: their elongated silhouettes produced
+horizontal bands even after softening their contact with the lake. Distant volumetric
+atmosphere and haze remain part of the main renderer.
 
 Planar reflection ray offsets are bounded to 2–8 metres to avoid stretching bank
 texels into long bars at grazing angles. The reflection target uses mipmaps and
@@ -37,21 +46,11 @@ in world space rather than alternating between grid vertices. The separate
 decorative stone batch is removed: its dark sides looked like floating patches
 in the oblique capture. The continuous lake-bed relief remains.
 
-Fish anatomy and pigmentation follow the
-[FAO common carp description](https://www.fao.org/fishery/docs/CDrom/aquaculture/I1129m/file/en/en_commoncarp.htm)
-and [Wildlife Trusts freshwater fish references](https://www.wildlifetrusts.org/wildlife-explorer/freshwater-fish).
-Separate profiles distinguish the bronze carp, silver roach and striped olive
-perch. Caudal fins are vertical, pectoral fins lateral, with individual seeded
-size and cadence variations. Rearward undulation follows the principle in the original
-[WebGL Aquarium shader](https://github.com/WebGLSamples/WebGLSamples.github.io/blob/master/aquarium/aquarium.html#L186-L237).
-
-Locomotion uses continuous steering with bounded acceleration and turn speed,
-individual propulsion/glide cycles, separation and early turns within checked
-water patches. These are animation rules inspired by
-[Reynolds' steering behaviors](https://www.red3d.com/cwr/steer/gdc99/), not a biological simulation.
-Pointer proximity uses an 85-CSS-pixel radius around each fish's apparent
-refracted surface position. Escape builds progressively, retains momentum and
-decays after pointer exit; velocity and effort drive the tail and banking.
+Fish geometry uses stepped boxes with vertical forked tails and lateral fins, muted
+silver tops and darker flanks. Seeded proportions and tail phases vary by individual.
+The shared route, delayed turns and loose formation produce coherent travel, without
+claiming a full biological or boids simulation. Pointer proximity uses the apparent
+refracted surface position and a bounded, smoothed offset before the group reforms.
 
 Fireflies use a 70-CSS-pixel proximity radius projected through the main camera.
 Each particle has a bounded critically damped response, preserving velocity on
@@ -59,15 +58,11 @@ entry, exit and reversal. Terrain picking no longer drives this interaction,
 preventing jumps when the pointer crosses a bank or the horizon. The resulting
 world positions are reused by every reflection camera.
 
-Mist sheets start below the water plane, allowing depth testing to attach their
-visible foot to the surface. Their total height is 0.25–0.45 metres, with a soft,
-irregular upper fringe; only that fringe moves vertically.
-
 Caustics use the analytic curvature of five short waves from the surface's
 shared spectrum, including their phases, envelopes and wind response. Their
 convergence gain remains a stylized approximation, not photon tracing or a
 solution derived from the fluid solver. There is no independent drifting noise
-field. Mist uses local sheets rather than volumetric integration. Wetness uses
+field. Wetness uses
 surface orientation and elevation, not a rain-occlusion simulation or puddles.
 Fireflies do not add point lights.
 
@@ -91,7 +86,7 @@ Inputs without an explicit override follow the live rain and solar state.
 `SceneDetails` reuses the shared wind and is created before the global cloud/cursor
 material traversal. Its material hooks are attached after that traversal, and its
 state updates before environment/reflection/submerged captures. Cloud material
-hooks compose with fish deformation. Cursor-driven caustic illumination is limited
+hooks apply to the submerged bed. Cursor-driven caustic illumination is limited
 to dark scenes; fish keep their independent pointer response.
 The details import neither React nor the weather API, so the static-site
 migration does not require replacing these modules.

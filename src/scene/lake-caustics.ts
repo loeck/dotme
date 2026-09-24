@@ -74,7 +74,7 @@ float lakeCausticLight(vec3 world) {
   float cursorFocus = 1.0 + 0.12 * exp(-distanceToPointer * 0.6) * uCausticPointer.z;
   // Approximate refracted-ray convergence. Its gain is deliberately stylized,
   // but every fold follows a real crest instead of sliding as a second layer.
-  curvature *= min(depth, 2.5) * 1.8 * cursorFocus;
+  curvature *= min(depth, 2.5) * 2.8 * cursorFocus;
   float jacobian = (1.0 + curvature.x) * (1.0 + curvature.z) - curvature.y * curvature.y;
   float convergence = clamp(1.0 / max(0.35, jacobian) - 1.0, 0.0, 1.0);
   float width = max(fwidth(convergence) * 1.5, 0.025);
@@ -153,7 +153,7 @@ export class LakeCaustics {
     this.uniforms.uTime.value = this.reducedMotion ? 0 : time
     // Irradiance itself already fades at night; preserve some pattern contrast
     // around lamps/cursor instead of applying the same linear attenuation twice.
-    this.uniforms.uCausticStrength.value = 0.35 * Math.sqrt(Math.max(0, Math.min(1, lightStrength)))
+    this.uniforms.uCausticStrength.value = 0.85 * Math.sqrt(Math.max(0, Math.min(1, lightStrength)))
     if (!this.reducedMotion || !this.initializedWind) {
       updateWindUniforms(this.uniforms, wind)
       this.initializedWind = true

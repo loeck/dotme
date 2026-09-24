@@ -51,7 +51,7 @@ of the fragment field. There are no breaking waves, spray or volumetric splashes
 
 A deterministic chamfer distance from the rendered banks creates shallow shelves, seeded
 relief and a maximum 7.5 m depth. Submerged stones follow that field. The bottom and existing
-scene lights render through camera layer 1 into a top-down color/depth target (1024² desktop,
+scene lights render through camera layer 1 into an oblique color/depth target (1024² desktop,
 512² mobile). Linear half-float color preserves the dark gradients. A half-float depth field
 provides world-space bathymetry for refraction; it requires no float render-target support.
 The bed is excluded from the primary and reflection cameras (layer 0).
@@ -59,13 +59,18 @@ The bed is excluded from the primary and reflection cameras (layer 0).
 Pass order is simulation → light/shadow update → environment capture/filter → submerged color/depth → planar reflection (the Reflector's
 before-render callback) → main color/depth → depth of field. The bed camera inverse reconstructs
 bottom positions. Snell refraction uses n=1.333; four fixed-point iterations against the
-bathymetry estimate the submerged intersection. Projection into the top-down bed pass supplies
+bathymetry estimate the bed intersection. Small fish use a separate analytic Snell
+projection with depth-tested alpha composition, avoiding depth-atlas reconstruction
+artifacts. They do not appear in the bed, environment or reflection captures.
+Projection into the oblique submerged pass supplies
 color and resolved depth, without the disocclusion bands of a grazing camera capture. Schlick Fresnel uses F0=0.02037. Beer–Lambert RGB absorption coefficients are
-(0.85, 0.42, 0.27) m⁻¹. Reflection, transmission, scattering and lamp specular terms compose
+(0.72, 0.36, 0.22) m⁻¹ in deep/turbid water, blending toward (0.14, 0.065, 0.045)
+in clear shallows. Rain controls clarity; shared wind and rain control surface roughness.
+Reflection, transmission, scattering and lamp specular terms compose
 in linear space before the final display conversion. Lamps use the simulated normal and
 existing world-space light positions/intensities. There is no cursor light or emissive crest.
 
-Hover gently reduces optical roughness from 0.065 to 0.025 and reduces transmission blur
+Hover gently reduces weather-driven optical roughness (0.035–0.085) to 0.025 and reduces transmission blur
 inside a Gaussian footprint. This is a deliberate interaction concession, not a physical
 change to water depth. Absorption and grazing-angle Fresnel remain in force, so the deep
 lake cannot become transparent. Refraction uses a height-field intersection and a projected bed capture; it is single-interface
