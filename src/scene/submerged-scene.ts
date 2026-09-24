@@ -54,7 +54,7 @@ export class SubmergedScene {
   private readonly group = new Group()
   private readonly geometry: BufferGeometry
   private readonly material = new MeshStandardNodeMaterial({
-    color: 0xb4b59e,
+    color: 0xf0e6cc,
     roughness: 0.96,
     vertexColors: true,
     fog: false,

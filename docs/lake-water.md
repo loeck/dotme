@@ -11,6 +11,13 @@ refraction, caustics and direct light. Textures retain explicit color-space, dep
 orientation handling across passes. Rain and pointer interactions remain independent inputs.
 
 Wind waves use crossing directions and shorter transverse packets at small wavelengths.
+Shading-only capillary ripples follow the wind and fade with the pixel footprint; they sharpen
+glints and break up reflections without changing the shared height field. Clear water keeps
+strong red absorption over pale sand for a turquoise tint, reflectance near the camera is
+capped lower so the bed stays visible, and light reaching the bed is
+attenuated by depth on the way down as well as up. At night the bed takes a dim blue moonlit
+tint that fades with depth, so only the shallows stay visible over navy water, and moonlight
+caustics and a smoother surface keep the bed pattern and moon glitter crisp.
 The same field drives CPU motion, surface normals and caustics. Reflection filtering follows
 the water roughness without an additional blur floor; the environment probe uses 256-pixel
 faces on desktop and 128-pixel faces on mobile.

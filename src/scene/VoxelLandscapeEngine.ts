@@ -48,6 +48,8 @@ import { sceneParams } from '../scene-params'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { compileWithoutCulling } from './compile-scene'
 import { DepthFocus } from './depth-focus'
+import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
+import { DeviceTilt } from './device-tilt'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
@@ -163,6 +165,9 @@ export class VoxelLandscapeEngine {
   private readonly pointerClient = new Vector2(-1, -1)
   private readonly detailPointerNdc = new Vector2()
   private readonly target = new Vector2(0, 0)
+  private readonly tilt = new DeviceTilt()
+  private lampShadowCursor = 0
+  private moonShadowAt = -Infinity
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
   private readonly objects: Object3D[] = []
   private readonly materials: Array<{ dispose: () => void }> = []
@@ -228,6 +233,7 @@ export class VoxelLandscapeEngine {
   private width = 1
   private height = 1
   private mobile = false
+  private lowPower = false
 
   static async create(options: VoxelLandscapeEngineOptions, signal: AbortSignal) {
     const prepared =
@@ -323,6 +329,7 @@ export class VoxelLandscapeEngine {
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
       : window.innerWidth < 768
+    this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
     this.solarClock = new SolarClock(
       parseInitialTime(params.startTime ?? null),
@@ -341,7 +348,7 @@ export class VoxelLandscapeEngine {
     this.renderer.shadowMap.type = PCFShadowMap
     // Update once per animation frame; all reflection cameras reuse these shadows.
     this.environmentTarget = this.resources.own(
-      new CubeRenderTarget(this.mobile ? 128 : 256, {
+      new CubeRenderTarget(this.lowPower ? 64 : 256, {
         type: HalfFloatType,
       }),
     )
@@ -349,7 +356,7 @@ export class VoxelLandscapeEngine {
     this.environmentTarget.texture.name = 'Live landscape environment'
     this.environmentCamera = new CubeCamera(0.1, 500, this.environmentTarget)
     this.environmentCamera.position.set(0, 3, -18)
-    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.mobile))
+    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower))
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ReinhardToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
@@ -365,7 +372,7 @@ export class VoxelLandscapeEngine {
     this.moon.shadow.autoUpdate = false
     this.resources.own(this.moon.shadow)
     this.moon.shadow.camera.layers.set(5)
-    this.moon.shadow.mapSize.setScalar(this.mobile ? 1024 : 2048)
+    this.moon.shadow.mapSize.setScalar(this.lowPower ? 1024 : 2048)
     Object.assign(this.moon.shadow.camera, {
       left: -260,
       right: 260,
@@ -389,13 +396,14 @@ export class VoxelLandscapeEngine {
         (time) => sampleLighting(this.solarClock.seconds(time), 0, this.weather),
         this.weather,
         prepared.noise,
+        this.lowPower,
       ),
     )
     this.clouds.shadows.applyToLight(this.moon)
     this.atmosphere = this.resources.own(
       new VolumetricLight(
         this.renderer,
-        this.mobile,
+        this.lowPower,
         this.clouds.shadows.uniforms,
         WEATHER[this.weather].extinction,
       ),
@@ -455,7 +463,7 @@ export class VoxelLandscapeEngine {
     )
     const reflectedCamera = this.water.getReflectionCamera(this.camera)
     this.water.getRenderTarget(reflectedCamera).texture.anisotropy = Math.min(
-      this.mobile ? 4 : 8,
+      this.lowPower ? 4 : 8,
       this.renderer.getMaxAnisotropy(),
     )
     this.skyMaterial.uniforms.uReflectionCapture.onObjectUpdate(({ camera }) =>
@@ -490,7 +498,7 @@ export class VoxelLandscapeEngine {
     this.rain = this.resources.own(
       new RainEffect(
         prepared.terrain.index,
-        this.mobile,
+        this.lowPower,
         (options.seed ?? 0) >>> 0,
         this.lampLights.map(({ light }) => light),
         this.moon,
@@ -522,6 +530,7 @@ export class VoxelLandscapeEngine {
     window.addEventListener('blur', this.onActivityChange)
     window.addEventListener('focus', this.onActivityChange)
     document.addEventListener('visibilitychange', this.onActivityChange)
+    if (this.lowPower && !this.reducedMotion) this.tilt.start()
     this.lastFrameAt = performance.now()
   }
 
@@ -604,6 +613,8 @@ export class VoxelLandscapeEngine {
         blending: AdditiveBlending,
         depthWrite: false,
         side: DoubleSide,
+        // Fog would mix the opaque additive quad toward the fog colour and light up its square.
+        fog: false,
       })
       const p = uv().sub(0.5).mul(2)
       const r = p.dot(p)
@@ -696,6 +707,7 @@ export class VoxelLandscapeEngine {
       this.solarClock.timeScale,
     )
     this.reducedMotion = value
+    if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
     this.cancelFrame()
     this.requestFrame()
@@ -760,7 +772,7 @@ export class VoxelLandscapeEngine {
     light.shadow.autoUpdate = false
     this.resources.own(light.shadow)
     light.shadow.camera.layers.set(5)
-    light.shadow.mapSize.setScalar(this.mobile ? 256 : 512)
+    light.shadow.mapSize.setScalar(this.lowPower ? 256 : 512)
     light.shadow.camera.near = 0.08
     light.shadow.camera.far = light.distance || 30
     light.shadow.bias = -0.001
@@ -1005,7 +1017,7 @@ export class VoxelLandscapeEngine {
     this.frame = 0
     if (this.disposed || document.hidden) return
     // Leave a little room for rAF timestamp jitter at the display's nominal frequency.
-    const interval = 1000 / (this.focused ? 60 : 12)
+    const interval = 1000 / (this.focused ? (this.lowPower ? LOW_POWER_FPS : 60) : 12)
     if (!this.reducedMotion && now < this.nextFrameAt - 0.5) {
       this.requestFrame()
       return
@@ -1151,7 +1163,7 @@ export class VoxelLandscapeEngine {
   private updateEnvironment(now: number, atmosphereTime: number) {
     // Reuse broad indirect lighting; planar water reflections stay per-frame.
     // Intro, still renders and clock discontinuities always refresh the probe.
-    const interval = 1000 / (this.focused ? 15 : 3)
+    const interval = 1000 / (this.focused ? (this.lowPower ? 4 : 15) : 3)
     if (
       now - this.environmentAt < interval &&
       atmosphereTime >= this.environmentTime &&
@@ -1193,6 +1205,24 @@ export class VoxelLandscapeEngine {
     this.environmentTime = atmosphereTime
   }
 
+  /** Static casters: low-power devices refresh the slow sun and one moving lamp per frame. */
+  private updateShadows(now: number) {
+    const throttle = this.lowPower && this.intro === 1 && !this.reducedMotion
+    if (!throttle || now - this.moonShadowAt >= 250) {
+      this.moon.shadow.needsUpdate = true
+      this.moonShadowAt = now
+    }
+    if (this.nightLightFade === 0) return
+    if (!throttle) {
+      for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
+      return
+    }
+    if (!this.lampLights.length) return
+    this.lampShadowCursor = (this.lampShadowCursor + 1) % this.lampLights.length
+    const lamp = this.lampLights[this.lampShadowCursor]
+    if (lamp) lamp.light.shadow.needsUpdate = true
+  }
+
   private applyLighting(light: LightingState) {
     this.moon.position.copy(light.direction).multiplyScalar(320).add(this.moon.target.position)
     this.moon.intensity = light.intensity
@@ -1231,8 +1261,10 @@ export class VoxelLandscapeEngine {
     }
 
     const parallax = this.reducedMotion ? 0 : 1 - Math.exp(-dt * 2.8)
+    if (this.tilt.active) this.target.x = this.tilt.value
     this.pointer.lerp(this.target, parallax)
-    const idleDrift = this.reducedMotion ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
+    const idleDrift =
+      this.reducedMotion || this.tilt.active ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
     this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
     this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
@@ -1266,6 +1298,7 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
+    uniforms.uNight.value = 1 - light.daylight
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
@@ -1420,9 +1453,7 @@ export class VoxelLandscapeEngine {
     this.measure('rain-slopes', () =>
       this.rain.renderSlopes(this.renderer, this.camera, this.elapsed),
     )
-    this.moon.shadow.needsUpdate = true
-    if (this.nightLightFade > 0)
-      for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
+    this.updateShadows(now)
     this.updateEnvironment(now, atmosphereTime)
     this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene, this.camera))
     this.depthFocus.render(
@@ -1455,9 +1486,7 @@ export class VoxelLandscapeEngine {
     this.height = Math.max(1, bounds.height)
     this.camera.aspect = this.width / this.height
     this.camera.updateProjectionMatrix()
-    this.renderer.setPixelRatio(
-      Math.min(window.devicePixelRatio || 1, this.width < 768 ? 1.5 : 1.75),
-    )
+    this.renderer.setPixelRatio(maxPixelRatio(this.lowPower))
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
     this.rain.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
@@ -1470,7 +1499,7 @@ export class VoxelLandscapeEngine {
     )
     this.atmosphere.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.sceneContrast.invalidate()
-    this.submerged.resize(this.mobile, this.drawingBufferSize.x, this.drawingBufferSize.y)
+    this.submerged.resize(this.lowPower, this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.water.material.uniforms.uBedTexel.value.copy(this.submerged.bedTexel)
     this.resizeReflection()
     if (this.reducedMotion && this.rendered) this.requestFrame()
@@ -1478,8 +1507,8 @@ export class VoxelLandscapeEngine {
 
   private resizeReflection() {
     const rain = this.rain.group.visible
-    const scale = this.mobile ? (rain ? 0.55 : 0.4) : rain ? 0.75 : 0.46
-    const detailed = rain && !this.mobile
+    const scale = this.lowPower ? (rain ? 0.5 : 0.36) : rain ? 0.75 : 0.46
+    const detailed = rain && !this.lowPower
     const reflectionScale = Math.min(
       scale,
       (detailed ? 1536 : 768) / this.drawingBufferSize.x,
@@ -1505,6 +1534,7 @@ export class VoxelLandscapeEngine {
     this.disposed = true
     this.cancelFrame()
     this.removeListeners()
+    this.tilt.dispose()
     for (const object of this.objects) {
       object.removeFromParent()
       if (object instanceof InstancedMesh) object.dispose()

@@ -22,7 +22,7 @@ import { Vector3 } from 'three/webgpu'
 import type { MeshStandardNodeMaterial } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
-import { createWindNodes, WAVE_SPECTRUM } from './water-surface'
+import { createWindNodes, WAVE_SPECTRUM, windRotate } from './water-surface'
 import { updateWindUniforms } from './wind'
 import type { WindState } from './wind'
 type WaterPointer = Readonly<{ x: number; z: number }>
@@ -50,10 +50,7 @@ export class LakeCaustics {
       for (const w of WAVE_SPECTRUM.filter(
         (wave) => wave.wavelength <= 5.1 && wave.wavelength >= 1.07,
       )) {
-        const k = vec2(
-          u.uWindRotation.x.mul(w.kx).sub(u.uWindRotation.y.mul(w.kz)),
-          u.uWindRotation.y.mul(w.kx).add(u.uWindRotation.x.mul(w.kz)),
-        )
+        const k = windRotate(u, w.kx, w.kz)
         const spatial = p.dot(k),
           crossK = vec2(k.y.negate(), k.x).mul(w.crossScale)
         const crossPhase = p

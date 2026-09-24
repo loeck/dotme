@@ -137,11 +137,12 @@ export class VolumetricClouds {
     lighting: (time: number) => LightingState = (time) => sampleLighting(0, time),
     weather: WeatherPreset = 'partly-cloudy',
     noiseData?: Uint8Array,
+    lowPower = mobile,
   ) {
     this.renderer = renderer
     this.wind = wind
     this.lighting = lighting
-    this.profile = mobile ? CLOUD_PROFILES.mobile : CLOUD_PROFILES.desktop
+    this.profile = lowPower ? CLOUD_PROFILES.mobile : CLOUD_PROFILES.desktop
     this.noise = createCloudNoise(seed, 32, noiseData)
     this.targets = [0, 1, 2].map(
       () =>

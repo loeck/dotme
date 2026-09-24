@@ -1,14 +1,12 @@
 import { expect, test } from '@playwright/test'
 import type { Page } from '@playwright/test'
 
+import { availableBackend } from './graphics-support'
 import { mockSceneWeather } from './weather-fixture'
 
 async function requireSceneOrStaticMobileProfile(page: Page) {
-  const supported = await page.evaluate(async () => {
-    if (!navigator.gpu) return false
-    return Boolean(await navigator.gpu.requestAdapter().catch(() => null))
-  })
-  if (test.info().project.name === 'mobile' && !supported) {
+  const backend = await page.evaluate(availableBackend)
+  if (test.info().project.name === 'mobile' && !backend) {
     await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'failed')
     await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
     await expect(page.locator('#scene-canvas')).toBeHidden()
@@ -17,9 +15,11 @@ async function requireSceneOrStaticMobileProfile(page: Page) {
     await expect(github).toBeFocused()
     return false
   }
-  expect(supported, 'Rendering journeys require a WebGPU adapter').toBe(true)
+  if (test.info().project.name === 'mobile')
+    expect(backend, 'Rendering journeys require WebGPU or WebGL 2').not.toBeNull()
+  else expect(backend, 'Rendering journeys require a WebGPU adapter').toBe('webgpu')
   await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-backend', 'webgpu')
+  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-backend', backend ?? '')
   return true
 }
 

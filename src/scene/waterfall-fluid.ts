@@ -9,7 +9,6 @@ import {
   texture,
   uniform,
   uv,
-  varying,
   vec2,
   vec3,
   vec4,
@@ -26,6 +25,7 @@ import {
 } from 'three/webgpu'
 import type { Camera, Node } from 'three/webgpu'
 
+import { fragmentDepth, screenLinearVarying } from './backend-nodes'
 import type { LakeWaterMaterial } from './lake-water'
 import type { VoxelWaterfall } from './voxel-world'
 import { fieldUvNode, windFieldNode } from './water-surface'
@@ -72,16 +72,21 @@ export class WaterfallFluid {
     const depth = texture(this.pass.depthTexture)
     const thickness = texture(this.pass.thicknessTexture)
     const vertexUV = vec2(uv().x, uv().y.oneMinus())
-    // Raster interpolation must remain linear in screen space as the grid's
-    // vertices move to different distances from the camera.
-    const point = varying(vertexUV, 'waterfallScreenUV').setInterpolation('linear')
     const reconstruct = (coord: Node<'vec2'>) => {
       const sampled = depth.sample(coord).r
       const distance = sampled.greaterThan(0).select(sampled, this.fallbackDepth)
       const ray = this.projectionInverse.mul(vec4(coord.mul(vec2(2, -2)).add(vec2(-1, 1)), 0, 1))
       return ray.xyz.mul(distance.negate().div(ray.z))
     }
-    this.material.positionNode = this.localFromView.mul(vec4(reconstruct(vertexUV), 1)).xyz
+    const vertexView = reconstruct(vertexUV)
+    this.material.positionNode = this.localFromView.mul(vec4(vertexView, 1)).xyz
+    // Raster interpolation must remain linear in screen space as the grid's
+    // vertices move to different distances from the camera.
+    const point = screenLinearVarying(
+      vertexUV,
+      cameraProjectionMatrix.mul(vec4(vertexView, 1)).w,
+      'waterfallScreenUV',
+    )
     const viewPosition = reconstruct(point)
     const data = thickness.sample(point)
     // Overlapping parcel kernels integrate a density estimate. Keep the water
@@ -118,7 +123,7 @@ export class WaterfallFluid {
     // Fragment depth prevents a grid cell from bridging over a thin foreground
     // ledge. Use the active projection, including a reflector's oblique plane.
     const projected = cameraProjectionMatrix.mul(vec4(viewPosition, 1))
-    this.material.depthNode = projected.z.div(projected.w)
+    this.material.depthNode = fragmentDepth(projected.z.div(projected.w))
     this.mesh = new Mesh(
       new PlaneGeometry(2, 2, mobile ? 80 : 128, mobile ? 80 : 128),
       this.material,
