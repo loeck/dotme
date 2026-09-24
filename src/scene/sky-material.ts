@@ -22,6 +22,7 @@ const fragmentShader = `
 uniform float uTime;
 ${CLOUD_SAMPLING_GLSL}
 uniform float uSeed;
+uniform float uReflectionCapture;
 uniform float uMobile;
 uniform vec3 uMoonDirection;
 uniform float uMoonIntensity;
@@ -149,7 +150,8 @@ void main() {
   float mist = lowMist * (0.12 + mistNoise * 0.16 + mistDetail * 0.055 + valleyPool * 0.22);
   color = mix(color, vec3(0.023, 0.033, 0.044), mist);
 
-  gl_FragColor = vec4(color, 1.0);
+  // The reflection target reuses alpha as local scenery coverage.
+  gl_FragColor = vec4(color * (1.0 - uReflectionCapture), 1.0 - uReflectionCapture);
   #include <tonemapping_fragment>
   #include <colorspace_fragment>
 }
@@ -166,6 +168,7 @@ export function createSkyMaterial(
     fragmentShader,
     uniforms: {
       uTime: { value: 0 },
+      uReflectionCapture: { value: 0 },
       ...clouds.uniforms,
       uMoonDirection: { value: moon.offset.normalize() },
       uMoonIntensity: { value: moon.intensity },

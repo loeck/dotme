@@ -41,6 +41,8 @@ import type { LakeBed } from './lake-bed'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { sampleMoonLight } from './moon-light'
+import { SceneDetails } from './scene-details'
+import type { DetailEnvironment } from './scene-details'
 import { createSkyMaterial } from './sky-material'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
@@ -56,6 +58,9 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onFirstFrame: () => void
   reducedMotion?: boolean
   seed?: number
+  /** Disable only the optional detail layer for controlled visual/performance comparisons. */
+  sceneDetails?: boolean
+  detailEnvironment?: Partial<DetailEnvironment>
 }>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
@@ -108,6 +113,7 @@ export class VoxelLandscapeEngine {
   private readonly cursorGlow = new CursorGlow()
   private readonly pointer = new Vector2(0, 0)
   private readonly pointerClient = new Vector2(-1, -1)
+  private readonly detailPointerNdc = new Vector2()
   private readonly target = new Vector2(0, 0)
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
   private readonly objects: Object3D[] = []
@@ -134,6 +140,7 @@ export class VoxelLandscapeEngine {
   private readonly simulation: WaterSimulation
   private readonly submerged: SubmergedScene
   private bed!: LakeBed
+  private details: SceneDetails | undefined
   private pointerActive = false
   private pointerType = 'mouse'
   private pointerHeight = 0
@@ -240,8 +247,22 @@ export class VoxelLandscapeEngine {
     for (const material of cloudReceivers) this.clouds.shadows.applyTo(material)
     // Add local cursor irradiance after cloud attenuation of the sky fill.
     this.cursorGlow.attachSurfaces(this.scene)
+    this.details?.attachMaterials(this.voxelGroup, this.submerged.surfaceMaterials)
     const waterGeometry = createWaterGeometry(this.mobile)
-    this.water = createLakeReflector(waterGeometry, this.mobile)
+    this.water = createLakeReflector(waterGeometry, this.mobile, this.simulation.available)
+    const captureReflection = this.water.onBeforeRender
+    this.water.onBeforeRender = (...args) => {
+      this.skyMaterial.uniforms.uReflectionCapture!.value = 1
+      try {
+        captureReflection.apply(this.water, args)
+      } finally {
+        this.skyMaterial.uniforms.uReflectionCapture!.value = 0
+      }
+    }
+    this.water.getRenderTarget().texture.anisotropy = Math.min(
+      this.mobile ? 4 : 8,
+      this.renderer.capabilities.getMaxAnisotropy(),
+    )
     const uniforms = this.water.material.uniforms
     Object.assign(
       uniforms,
@@ -422,6 +443,22 @@ export class VoxelLandscapeEngine {
     this.objects.push(moteMesh)
     this.geometries.push(moteGeometry)
     this.materials.push(moteMaterial)
+    if (this.options.sceneDetails !== false)
+      this.details = new SceneDetails(
+        this.scene,
+        world,
+        this.mobile,
+        this.options.reducedMotion ?? false,
+        this.options.detailEnvironment,
+      )
+  }
+
+  /** Feed the shared rain/solar state into the details; safe before or after the first frame. */
+  setDetailEnvironment(environment: Partial<DetailEnvironment>) {
+    if (this.disposed) return
+    this.details?.setEnvironment(environment)
+    if (this.options.reducedMotion && this.frame === 0)
+      this.frame = requestAnimationFrame(this.render)
   }
 
   private configurePointShadow(light: PointLight) {
@@ -695,7 +732,37 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMoonIntensity!.value = moon.intensity
     uniforms.uBedInverseViewProjection!.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection!.value.copy(this.submerged.viewProjection)
-    updateWindUniforms(this.windUniforms, this.wind.sample(this.elapsed))
+    const wind = this.wind.sample(this.elapsed)
+    updateWindUniforms(this.windUniforms, wind)
+    // Airborne colonies follow the cursor's projected proximity. Terrain picking
+    // jumps between bank heights and distant water and cannot drive their motion.
+    let fireflyPointer = null
+    if (
+      this.pointerActive &&
+      document.elementFromPoint(this.pointerClient.x, this.pointerClient.y) ===
+        this.renderer.domElement
+    ) {
+      const bounds = this.renderer.domElement.getBoundingClientRect()
+      this.detailPointerNdc.set(
+        ((this.pointerClient.x - bounds.left) / bounds.width) * 2 - 1,
+        1 - ((this.pointerClient.y - bounds.top) / bounds.height) * 2,
+      )
+      fireflyPointer = {
+        ndc: this.detailPointerNdc,
+        camera: this.camera,
+        width: bounds.width,
+        height: bounds.height,
+      }
+    }
+    this.details?.update(
+      this.elapsed,
+      dt,
+      wind,
+      waterPoint,
+      fireflyPointer,
+      moon.intensity,
+      this.intro,
+    )
     this.clouds.update(this.elapsed)
     this.skyMaterial.uniforms.uTime!.value = this.elapsed
     this.water.material.uniforms.uTime!.value = this.elapsed
@@ -771,7 +838,8 @@ export class VoxelLandscapeEngine {
       )
       this.scene.environment = this.filteredEnvironment.texture
     }
-    this.water.material.uniforms.uEnvironment!.value = this.environmentTarget.texture
+    this.water.material.uniforms.uEnvironment!.value =
+      this.filteredEnvironment?.texture ?? this.environmentTarget.texture
     this.submerged.render(this.renderer, this.scene)
     this.depthFocus.render(this.renderer, this.scene, this.camera)
     if (!this.rendered) {
@@ -836,6 +904,7 @@ export class VoxelLandscapeEngine {
       if (object instanceof InstancedMesh) object.dispose()
     }
     this.scene.environment = null
+    this.details?.dispose()
     this.clouds.dispose()
     this.environmentTarget.dispose()
     this.filteredEnvironment?.dispose()

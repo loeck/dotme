@@ -1,5 +1,4 @@
 import {
-  BoxGeometry,
   Color,
   DataTexture,
   DataUtils,
@@ -8,10 +7,8 @@ import {
   RedFormat,
   DepthTexture,
   Group,
-  InstancedMesh,
   Mesh,
   MeshStandardMaterial,
-  Object3D,
   OrthographicCamera,
   Matrix4,
   PlaneGeometry,
@@ -26,6 +23,11 @@ import type { LakeBed } from './lake-bed'
 
 /** Layer 1 contains only the lit bed. The main and mirror cameras use layer 0. */
 export class SubmergedScene {
+  /** Material hooks are installed by the engine after shared light/shadow hooks. */
+  get surfaceMaterials(): readonly MeshStandardMaterial[] {
+    return [this.material]
+  }
+
   readonly target = new WebGLRenderTarget(1, 1, {
     depthTexture: new DepthTexture(1, 1, UnsignedIntType),
     stencilBuffer: false,
@@ -34,23 +36,24 @@ export class SubmergedScene {
   readonly shoreField: DataTexture
   readonly viewProjection = new Matrix4()
   readonly inverseViewProjection = new Matrix4()
-  private readonly camera = new OrthographicCamera(-80, 80, 80, -80, 0.1, 80)
+  // Spend the existing capture pixels on the visible near lake. The full 160m
+  // simulation domain made fish narrower than two texels even on desktop.
+  private readonly camera = new OrthographicCamera(-28, 28, 28, -28, 0.1, 80)
   private readonly group = new Group()
   private readonly geometry: PlaneGeometry
-  private readonly box = new BoxGeometry(1, 1, 1)
   private readonly material = new MeshStandardMaterial({
     color: 0x718080,
     roughness: 0.96,
     vertexColors: true,
   })
-  private readonly stoneMaterial = new MeshStandardMaterial({ color: 0x59636a, roughness: 0.9 })
 
   constructor(scene: Scene, bed: LakeBed, floatColor: boolean) {
-    // A top-down capture sees the bed beneath a refracted ray even where the
-    // grazing main camera would hide it behind another submerged ridge.
-    this.camera.position.set(0, 30, -32)
-    this.camera.up.set(0, 0, -1)
-    this.camera.lookAt(0, 0, -32)
+    // A steep oblique capture approximates the refracted viewing direction.
+    // Unlike a zenith view, it preserves fish flanks and vertical caudal fins;
+    // unlike the grazing main camera, it can still see the shallow lake bed.
+    this.camera.position.set(0, 30, 16)
+    this.camera.up.set(0, 1, 0)
+    this.camera.lookAt(0, 0, -14)
     this.camera.layers.set(1)
     this.camera.updateMatrixWorld()
     this.viewProjection.multiplyMatrices(
@@ -83,7 +86,14 @@ export class SubmergedScene {
         WATER_LEVEL - Math.max(0.04, bed.depth[i]!),
         LAKE_BOUNDS.minZ + ((z + 0.5) * LAKE_BOUNDS.size) / n,
       )
-      const shade = 0.65 + 0.25 * Math.sin(x * 1.7 + z * 2.9) ** 2
+      // Low-frequency world-space variation stays independent of grid
+      // resolution; alternating vertex colors formed a visible striped mesh.
+      const worldX = positions.getX(i),
+        worldZ = positions.getZ(i)
+      const shade =
+        0.76 +
+        0.055 * Math.sin(worldX * 0.71 + Math.sin(worldZ * 0.43)) +
+        0.035 * Math.sin(worldZ * 0.93 - worldX * 0.37)
       colors.set([shade, shade * 0.93, shade * 0.81], i * 3)
     }
     // Rows grow toward positive world z, keeping the triangles upward-facing.
@@ -91,17 +101,7 @@ export class SubmergedScene {
     this.geometry.setAttribute('color', new Float32BufferAttribute(colors, 3))
     const floor = new Mesh(this.geometry, this.material)
     floor.receiveShadow = true
-    const stones = new InstancedMesh(this.box, this.stoneMaterial, bed.stones.length)
-    stones.receiveShadow = true
-    const transform = new Object3D()
-    bed.stones.forEach((stone, i) => {
-      transform.position.set(stone.x, stone.y, stone.z)
-      transform.scale.set(stone.size, stone.size * 0.65, stone.size)
-      transform.rotation.y = i * 2.399
-      transform.updateMatrix()
-      stones.setMatrixAt(i, transform.matrix)
-    })
-    this.group.add(floor, stones)
+    this.group.add(floor)
     this.group.traverse((object) => object.layers.set(1))
     scene.add(this.group)
   }
@@ -128,16 +128,11 @@ export class SubmergedScene {
   }
 
   dispose() {
-    this.group.traverse((object) => {
-      if (object instanceof InstancedMesh) object.dispose()
-    })
     this.group.removeFromParent()
     this.target.dispose()
     this.depthField.dispose()
     this.shoreField.dispose()
     this.geometry.dispose()
-    this.box.dispose()
     this.material.dispose()
-    this.stoneMaterial.dispose()
   }
 }

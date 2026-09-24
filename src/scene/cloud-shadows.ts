@@ -125,7 +125,10 @@ export class CloudShadows {
 
   /** Shade moonlight and approximate local sky visibility; preserve lamps and emission. */
   applyTo(material: MeshStandardMaterial) {
-    material.onBeforeCompile = (shader) => {
+    const previousCompile = material.onBeforeCompile
+    const previousCacheKey = material.customProgramCacheKey()
+    material.onBeforeCompile = (shader, renderer) => {
+      previousCompile.call(material, shader, renderer)
       Object.assign(shader.uniforms, this.uniforms)
       shader.vertexShader =
         'varying vec3 vCloudWorldPosition;\n' +
@@ -167,7 +170,7 @@ export class CloudShadows {
           #include <lights_fragment_end>`,
           )
     }
-    material.customProgramCacheKey = () => 'moon-cloud-shadow-v1'
+    material.customProgramCacheKey = () => `${previousCacheKey}:moon-cloud-shadow-v1`
     material.needsUpdate = true
   }
 

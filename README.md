@@ -73,3 +73,9 @@ as the project root; framework detection and SSR functions are configured by `ve
 
 See [atmosphere notes](docs/atmosphere.md) for the shared wind, volumetric cloud rendering,
 quality profiles and before/after performance measurements.
+
+The lake also includes subtle caustics, low drifting mist, underwater fish
+and reactive amber fireflies. Bank materials retain
+moisture when supplied with rain intensity. See [living lake details](docs/scene-details.md)
+for rendering budgets, the rain/daylight integration API, reduced-motion behavior
+and validation.
