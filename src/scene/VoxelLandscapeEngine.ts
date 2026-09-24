@@ -614,6 +614,8 @@ export class VoxelLandscapeEngine {
         blending: AdditiveBlending,
         depthWrite: false,
         side: DoubleSide,
+        // Fog would mix the opaque additive quad toward the fog colour and light up its square.
+        fog: false,
       })
       const p = uv().sub(0.5).mul(2)
       const r = p.dot(p)
