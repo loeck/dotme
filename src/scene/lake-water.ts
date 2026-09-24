@@ -4,6 +4,7 @@ import {
   ShaderMaterial,
   Vector2,
   Vector3,
+  Vector4,
   UniformsLib,
   UniformsUtils,
 } from 'three'
@@ -40,12 +41,15 @@ const fragmentShader = `
 #include <lights_pars_begin>
 #include <shadowmap_pars_fragment>
 ${WATER_FIELD_GLSL}
+uniform sampler2D uRainSlopeMap;
+uniform vec2 uRainResolution;
+uniform float uRainSlopesEnabled;
 uniform sampler2D tDiffuse;
 uniform mat4 textureMatrix;
 uniform sampler2D uBedColor;
 uniform sampler2D uBedDepth;
 uniform sampler2D uBedHeight;
-uniform sampler2D uShore;
+uniform vec4 uBedFieldLayout;
 uniform mat4 uBedInverseViewProjection;
 uniform mat4 uBedViewProjection;
 uniform vec2 uBedTexel;
@@ -67,6 +71,18 @@ vec3 bottomAt(vec2 uv) {
   vec4 view = uBedInverseViewProjection * vec4(uv * 2.0 - 1.0, texture2D(uBedDepth, uv).r * 2.0 - 1.0, 1.0);
   return view.xyz / view.w;
 }
+// Clamp inside each atlas region so bilinear filtering never crosses its border.
+float bedDepthAt(vec2 uv) {
+  vec2 halfTexel = uBedFieldLayout.zw * 0.5;
+  return texture2D(uBedHeight, clamp(uv * uBedFieldLayout.xy,
+    halfTexel, uBedFieldLayout.xy - halfTexel)).r;
+}
+float shoreDistanceAt(vec2 uv) {
+  vec2 start = vec2(0.0, uBedFieldLayout.y);
+  vec2 halfTexel = uBedFieldLayout.zw * 0.5;
+  vec2 coord = start + uv * vec2(1.0, 1.0 - start.y);
+  return texture2D(uBedHeight, clamp(coord, start + halfTexel, vec2(1.0) - halfTexel)).r;
+}
 void main() {
   vec2 p = vWorldPosition.xz;
   float footprint = max(length(dFdx(p)), length(dFdy(p)));
@@ -74,13 +90,15 @@ void main() {
   vec2 rippleSlope = vec2(interactionHeight(p + vec2(e,0.0)) - interactionHeight(p - vec2(e,0.0)),
     interactionHeight(p + vec2(0.0,e)) - interactionHeight(p - vec2(0.0,e))) / (2.0 * e);
   vec4 wind = windField(p, footprint);
-  vec2 slope = wind.yz + rippleSlope;
+  vec3 rainField = texture2D(uRainSlopeMap, gl_FragCoord.xy / uRainResolution).rgb * uRainSlopesEnabled;
+  vec2 slope = wind.yz + rippleSlope + rainField.xy;
   vec3 normal = normalize(vec3(-slope.x, 1.0, -slope.y));
   vec3 view = normalize(cameraPosition - vWorldPosition);
   float ndv = clamp(dot(normal, view), 0.0, 1.0);
   float fresnel = 0.02037 + 0.97963 * pow(1.0 - ndv, 5.0);
   float reveal = exp(-dot(p - uPointer.xy, p - uPointer.xy) / 2.8) * uPointer.z;
-  float roughness = mix(0.065, 0.025, reveal);
+  float baseRoughness = mix(0.065, 0.025, reveal);
+  float roughness = sqrt(baseRoughness * baseRoughness + min(0.04, rainField.z));
   // Project a displaced reflection ray back onto the planar capture. The
   // offset scales with reflected depth and view angle, not a fixed UV wobble.
   vec3 reflectedRay = reflect(-view, normal);
@@ -104,11 +122,11 @@ void main() {
   vec3 refracted = refract(-view, normal, 1.0 / 1.333);
   // Intersect the world-space bed first. A screen-space depth alone can jump
   // between occluding ridges and draw vertical bands across the near lake.
-  float depth = texture2D(uBedHeight, clamp(fieldUv(p), 0.0, 1.0)).r;
+  float depth = bedDepthAt(fieldUv(p));
   vec3 candidate = vWorldPosition;
   for (int i = 0; i < 4; i++) {
     candidate = vWorldPosition + refracted * min(18.0, max(0.02, depth + vWorldPosition.y + 0.035) / max(0.25, -refracted.y));
-    depth = texture2D(uBedHeight, clamp(fieldUv(candidate.xz), 0.0, 1.0)).r;
+    depth = bedDepthAt(fieldUv(candidate.xz));
   }
   vec4 projected = uBedViewProjection * vec4(candidate, 1.0);
   vec2 refractUv = clamp(projected.xy / projected.w * 0.5 + 0.5, uBedTexel, 1.0 - uBedTexel);
@@ -130,7 +148,7 @@ void main() {
 
   // A narrow, broken foam line follows the real rock footprint and rises
   // with the arriving crest. No permanent white outline or emissive foam.
-  float shore = texture2D(uShore, clamp(fieldUv(p), 0.0, 1.0)).r;
+  float shore = shoreDistanceAt(fieldUv(p));
   float contact = 1.0 - smoothstep(0.04, 0.38 + min(0.2, footprint), max(0.0, shore));
   vec2 state = texture2D(uState, clamp(fieldUv(p), 0.0, 1.0)).rg;
   float arrival = smoothstep(-0.016, 0.032, wind.x + state.x)
@@ -168,12 +186,15 @@ export function createLakeReflector(geometry: PlaneGeometry, mobile: boolean): L
           uTime: { value: 0 },
           ...createWindUniforms(),
           uCell: { value: 0.16 },
+          uRainSlopeMap: { value: null },
+          uRainResolution: { value: new Vector2(1, 1) },
+          uRainSlopesEnabled: { value: 0 },
           uState: { value: null },
           uMask: { value: null },
           uBedColor: { value: null },
           uBedDepth: { value: null },
           uBedHeight: { value: null },
-          uShore: { value: null },
+          uBedFieldLayout: { value: new Vector4(0.5, 1 / 3, 1, 1) },
           uBedInverseViewProjection: { value: new Matrix4() },
           uBedViewProjection: { value: new Matrix4() },
           uBedTexel: { value: new Vector2(1, 1) },

@@ -156,3 +156,41 @@ test('cursor smoke starts after lazy loading and pauses when hidden or motion is
   expect(await frames()).toBe(still)
   await expect(cursor.locator('.scene-cursor__halo')).toHaveCSS('animation-name', 'none')
 })
+
+for (const rain of ['off', 'light', 'moderate', 'heavy']) {
+  test(`renders ${rain} rain without shader errors`, async ({ page }, testInfo) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    page.on('console', (message) => {
+      if (message.type() === 'error' || /WebGL/.test(message.text())) errors.push(message.text())
+    })
+    await page.goto(`/?seed=42&rain=${rain}&windX=-3&windZ=1`)
+    const canvas = page.locator('canvas[data-water-mode]')
+    await expect(canvas.locator('..')).toHaveCSS('opacity', '1', { timeout: 30_000 })
+    // Let the intro settle and impacts cover a full lifecycle before sampling.
+    await page.waitForTimeout(3500)
+    const timings = await page.evaluate(
+      () =>
+        new Promise<number[]>((resolve) => {
+          const samples: number[] = []
+          let previous = performance.now()
+          const sample = (now: number) => {
+            samples.push(now - previous)
+            previous = now
+            if (samples.length < 60) requestAnimationFrame(sample)
+            else resolve(samples.slice(5).toSorted((a, b) => a - b))
+          }
+          requestAnimationFrame(sample)
+        }),
+    )
+    testInfo.annotations.push({
+      type: 'frame-time',
+      description: `${rain}: median ${timings[Math.floor(timings.length / 2)]!.toFixed(1)} ms; p95 ${timings[Math.floor(timings.length * 0.95)]!.toFixed(1)} ms`,
+    })
+    await testInfo.attach(`rain-${rain}`, {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    })
+    expect(errors).toEqual([])
+  })
+}

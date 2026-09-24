@@ -1,6 +1,7 @@
 import { createClientOnlyFn } from '@tanstack/react-start'
 import { useEffect, useRef, useState } from 'react'
 
+import { queryRainState } from '../scene/rain-simulation'
 import type { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
 
 const loadEngine = createClientOnlyFn(async () => {
@@ -73,6 +74,7 @@ export function Landscape() {
           },
           reducedMotion: reducedMotion.matches,
           seed: seed.current,
+          rain: queryRainState(window.location.search),
         })
         engine.current = instance
         resizeObserver = new ResizeObserver(instance.resize)
