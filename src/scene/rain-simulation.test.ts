@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import { createPhysicsWorld, loadPhysics } from './physics-world'
+import type { PhysicsWorld } from './physics-world'
 import {
   DEFAULT_RAIN,
   IMPACT_LIFETIME,
   RAIN_STEP,
-  RainCollider,
   RainSimulation,
   WATER_Y,
 } from './rain-simulation'
+import type { SegmentTrace } from './rain-simulation'
 import { createVoxelIndex } from './voxel-spatial'
+import type { Voxel } from './voxel-world'
 
-const empty = () => new RainCollider([])
+const empty = (): SegmentTrace => () => Infinity
+const shelter = async (voxels: Voxel[]): Promise<PhysicsWorld> =>
+  createPhysicsWorld(await loadPhysics(), createVoxelIndex(voxels))
 const wavySurface = (x: number, z: number, time: number) =>
   WATER_Y + 0.11 * Math.sin(x * 2.3 + z * 1.1 + time * 3.7 + 0.8)
 const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
@@ -21,17 +26,6 @@ const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
 }
 
 describe('rain collision and impact lifecycle', () => {
-  it('intercepts a fast diagonal segment at the first voxel, including thin roofs', () => {
-    const collider = new RainCollider([
-      { x: 0, y: 2, z: 0, size: 0.1, color: 0 },
-      { x: 0, y: 1, z: 0, size: 0.1, color: 0 },
-    ])
-    expect(collider.trace({ x: 0, y: 3, z: 0 }, { x: 0, y: -2, z: 0 })).toBeCloseTo(0.19)
-    expect(collider.trace({ x: -1, y: 3, z: 0 }, { x: 1, y: 1, z: 0 })).toBeCloseTo(0.475)
-    expect(collider.trace({ x: 0, y: 2, z: 0 }, { x: 2, y: 2, z: 0 })).toBe(0)
-    expect(collider.trace({ x: 1, y: 3, z: 0 }, { x: 1, y: -2, z: 0 })).toBe(Infinity)
-  })
-
   it('removes a drop and creates one impact at the interpolated water crossing', () => {
     const simulation = new RainSimulation(empty(), true, 42)
     simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.001 })
@@ -48,24 +42,27 @@ describe('rain collision and impact lifecycle', () => {
     expect(simulation.impacts.filter((impact) => Number.isFinite(impact.born))).toHaveLength(1)
   })
 
-  it('lets voxels shelter the lake and ignores submerged obstacles', () => {
-    for (const y of [0, -3]) {
-      const simulation = new RainSimulation(
-        new RainCollider([{ x: 0, y, z: 0, size: 0.01, color: 0 }]),
-        true,
-        4,
-      )
-      simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.001, wind: { x: 0, z: 0 } })
-      const drop = dropAt(simulation, 0.02)
-      drop.vx = 0
-      drop.vz = 0
-      drop.vy = -10
-      simulation.update(RAIN_STEP)
-      expect(drop.alive).toBe(false)
-      expect(simulation.impacts.filter((impact) => Number.isFinite(impact.born))).toHaveLength(
-        y === 0 ? 0 : 1,
-      )
-    }
+  it('lets voxels shelter the lake while deep solids keep the water contact', async () => {
+    await Promise.all(
+      [0, -3].map(async (y) => {
+        const physics = await shelter([{ x: 0, y, z: 0, size: 0.01, color: 0 }])
+        try {
+          const simulation = new RainSimulation((a, b) => physics.trace(a, b), true, 4)
+          simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.001, wind: { x: 0, z: 0 } })
+          const drop = dropAt(simulation, 0.02)
+          drop.vx = 0
+          drop.vz = 0
+          drop.vy = -10
+          simulation.update(RAIN_STEP)
+          expect(drop.alive).toBe(false)
+          expect(simulation.impacts.filter((impact) => Number.isFinite(impact.born))).toHaveLength(
+            y === 0 ? 0 : 1,
+          )
+        } finally {
+          physics.dispose()
+        }
+      }),
+    )
   })
 
   it('stops immediately and clears impact history when disabled', () => {
@@ -181,29 +178,33 @@ describe('rain contacts on moving water', () => {
     for (const impact of results.slice(1)) expect(impact).toEqual(results[0])
   })
 
-  it('resolves the first water or solid contact, including rocks exposed by a trough', () => {
-    for (const indexed of [false, true]) {
-      for (const fixture of [
-        { water: 0.12, block: 0.04, start: 0.16, impacts: 1 },
-        { water: -0.15, block: -0.07, start: 0, impacts: 0 },
-        { water: 0.12, block: 0.16, start: 0.2, impacts: 0 },
-      ]) {
-        const voxels = [{ x: 0, y: fixture.block, z: 0, size: 0.04, color: 0 }]
-        const collider = new RainCollider(indexed ? createVoxelIndex(voxels) : voxels)
-        const simulation = new RainSimulation(collider, true, 42)
-        simulation.setRainState({ intensity: 0.00001, wind: { x: 0, z: 0 } })
-        simulation.setWaterSurface(() => fixture.water)
-        const drop = dropAt(simulation, fixture.start)
-        Object.assign(drop, { vx: 0, vz: 0, vy: -24 })
-        simulation.update(RAIN_STEP)
-        expect(drop.alive).toBe(false)
-        const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
-        expect(impacts).toHaveLength(fixture.impacts)
-        expect(impacts.map((impact) => impact.y)).toEqual(
-          Array.from({ length: fixture.impacts }, () => fixture.water),
-        )
-      }
-    }
+  it('resolves the first water or solid contact, including rocks exposed by a trough', async () => {
+    const fixtures = [
+      { water: 0.12, block: 0.04, start: 0.16, impacts: 1 },
+      { water: -0.15, block: -0.07, start: 0, impacts: 0 },
+      { water: 0.12, block: 0.16, start: 0.2, impacts: 0 },
+    ]
+    await Promise.all(
+      fixtures.map(async (fixture) => {
+        const physics = await shelter([{ x: 0, y: fixture.block, z: 0, size: 0.04, color: 0 }])
+        try {
+          const simulation = new RainSimulation((a, b) => physics.trace(a, b), true, 42)
+          simulation.setRainState({ intensity: 0.00001, wind: { x: 0, z: 0 } })
+          simulation.setWaterSurface(() => fixture.water)
+          const drop = dropAt(simulation, fixture.start)
+          Object.assign(drop, { vx: 0, vz: 0, vy: -24 })
+          simulation.update(RAIN_STEP)
+          expect(drop.alive).toBe(false)
+          const impacts = simulation.impacts.filter((impact) => Number.isFinite(impact.born))
+          expect(impacts).toHaveLength(fixture.impacts)
+          expect(impacts.map((impact) => impact.y)).toEqual(
+            Array.from({ length: fixture.impacts }, () => fixture.water),
+          )
+        } finally {
+          physics.dispose()
+        }
+      }),
+    )
   })
 
   it('skips spectrum samples above the lake and restores flat-water behavior when detached', () => {
@@ -235,52 +236,4 @@ describe('rain contacts on moving water', () => {
     expect(alive.every((drop) => drop.y > 0.18)).toBe(true)
     expect(simulation.impacts.every((impact) => !Number.isFinite(impact.born))).toBe(true)
   })
-})
-
-describe('rain collisions against the transferred terrain index', () => {
-  it('matches voxel buckets for inside starts, misses, submerged solids and oblique segments', () => {
-    const voxels = [
-      { x: 0, y: 2, z: 0, size: 0.125, color: 0 },
-      { x: 0, y: 1, z: 0, size: 0.5, color: 0 },
-      { x: 0, y: -3, z: 0, size: 0.5, color: 0 },
-    ]
-    const reference = new RainCollider(voxels)
-    const indexed = new RainCollider(createVoxelIndex(voxels))
-    for (let i = 0; i < 300; i++) {
-      const a = { x: Math.sin(i) * 0.3, y: i % 3 === 0 ? 1 : 3, z: Math.cos(i) * 0.2 }
-      const b = { x: Math.cos(i) * 0.5, y: -4, z: Math.sin(i) * 0.5 }
-      expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
-    }
-    expect(indexed.trace({ x: 0, y: -2, z: 0 }, { x: 0, y: -4, z: 0 })).toBe(Infinity)
-    expect(indexed.trace({ x: 0, y: 1, z: 0 }, { x: 0, y: 1, z: 0 })).toBe(0)
-    expect(indexed.trace({ x: 5, y: 3, z: 0 }, { x: 5, y: -4, z: 0 })).toBe(Infinity)
-  })
-})
-
-it('conservative columns never discard cell-boundary, empty-column or long-segment hits', () => {
-  const voxels = Array.from({ length: 64 }, (_, i) => ({
-    x: ((i % 8) - 4) * 2,
-    y: i % 5,
-    z: (Math.floor(i / 8) - 4) * 2,
-    size: i % 3 === 0 ? 0.125 : 1,
-    color: 0,
-  }))
-  const reference = new RainCollider(voxels)
-  const indexed = new RainCollider(createVoxelIndex(voxels))
-  for (let i = 0; i < 2000; i++) {
-    const a = { x: Math.sin(i * 7) * 12, y: (i % 8) - 1, z: Math.cos(i * 3) * 12 }
-    const b = { x: Math.cos(i * 5) * 12, y: -2, z: Math.sin(i * 11) * 12 }
-    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
-  }
-  for (const voxel of voxels) {
-    const a = { x: voxel.x, y: 20, z: voxel.z },
-      b = { ...a, y: -2 }
-    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
-    a.x += voxel.size / 2
-    b.x = a.x
-    expect(indexed.trace(a, b)).toBe(reference.trace(a, b))
-  }
-  expect(
-    new RainCollider(createVoxelIndex([])).trace({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 }),
-  ).toBe(Infinity)
 })

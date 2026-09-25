@@ -1,7 +1,4 @@
 import { required } from '../invariant'
-import { firstVoxelHit } from './voxel-spatial'
-import type { VoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
 
 export type RainState = Readonly<{ intensity: number; wind: Readonly<{ x: number; z: number }> }>
 export const DEFAULT_RAIN: RainState = { intensity: 0.55, wind: { x: 2, z: 0.5 } }
@@ -10,7 +7,6 @@ export const WATER_Y = -0.035
 export const IMPACT_LIFETIME = 1.1
 // Conservative bounds for the lake's small wind-driven displacement. Avoid
 // evaluating its spectrum while drops are still metres above the surface.
-const WATER_MIN_Y = -0.5
 const WATER_MAX_Y = 0.5
 export type RainSurfaceSampler = (x: number, z: number, time: number) => number
 const bounded = (n: number, fallback: number, min: number, max: number) =>
@@ -26,8 +22,9 @@ export function normalizeRainState(state: RainState): RainState {
   }
 }
 
-type Point = { x: number; y: number; z: number }
-export type RainDrop = Point & {
+export type RainPoint = { x: number; y: number; z: number }
+export type SegmentTrace = (a: RainPoint, b: RainPoint) => number
+export type RainDrop = RainPoint & {
   vx: number
   vy: number
   vz: number
@@ -35,109 +32,13 @@ export type RainDrop = Point & {
   seed: number
   alive: boolean
 }
-export type RainImpact = Point & {
+export type RainImpact = RainPoint & {
   vx: number
   vy: number
   vz: number
   size: number
   seed: number
   born: number
-}
-
-/** Exact segment/slab intersection, including starts inside a voxel. */
-function voxelHit(a: Point, b: Point, voxel: Voxel): number {
-  let enter = 0
-  let exit = 1
-  for (const axis of ['x', 'y', 'z'] as const) {
-    const delta = b[axis] - a[axis]
-    const low = voxel[axis] - voxel.size / 2
-    const high = voxel[axis] + voxel.size / 2
-    if (Math.abs(delta) < 1e-12) {
-      if (a[axis] < low || a[axis] > high) return Infinity
-    } else {
-      const t0 = (low - a[axis]) / delta
-      const t1 = (high - a[axis]) / delta
-      enter = Math.max(enter, Math.min(t0, t1))
-      exit = Math.min(exit, Math.max(t0, t1))
-      if (enter > exit) return Infinity
-    }
-  }
-  return enter
-}
-
-// 2 m spatial buckets keep per-drop collision work local, including tree canopies.
-const cell = (n: number) => Math.floor(n / 2)
-const key = (x: number, y: number, z: number) => (x + 512) * 1048576 + (y + 512) * 1024 + z + 512
-export class RainCollider {
-  private readonly cells = new Map<number, Voxel[]>()
-
-  private readonly index?: VoxelIndex
-  private readonly origin = [0, 0, 0]
-  private readonly direction = [0, 0, 0]
-  private readonly aboveWater = (id: number) =>
-    required(required(this.index).boxes[id * 6 + 4]) >= WATER_MIN_Y
-
-  constructor(voxels: readonly Voxel[] | VoxelIndex) {
-    if ('boxes' in voxels) {
-      this.index = voxels
-      return
-    }
-    for (const voxel of voxels) {
-      const half = voxel.size / 2
-      if (voxel.y + half < WATER_MIN_Y) continue
-      for (let x = cell(voxel.x - half); x <= cell(voxel.x + half); x++) {
-        for (let y = cell(voxel.y - half); y <= cell(voxel.y + half); y++) {
-          for (let z = cell(voxel.z - half); z <= cell(voxel.z + half); z++) {
-            const id = key(x, y, z)
-            const bucket = this.cells.get(id)
-            if (bucket) bucket.push(voxel)
-            else this.cells.set(id, [voxel])
-          }
-        }
-      }
-    }
-  }
-
-  /** Returns the first solid hit fraction, or Infinity. Water is checked separately. */
-  trace(a: Point, b: Point): number {
-    if (this.index) {
-      const index = this.index
-      const columns = index.columns
-      const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) / 2) - columns.x)
-      const z0 = Math.max(0, Math.floor(Math.min(a.z, b.z) / 2) - columns.z)
-      const x1 = Math.min(columns.width - 1, Math.floor(Math.max(a.x, b.x) / 2) - columns.x)
-      const z1 = Math.min(columns.height - 1, Math.floor(Math.max(a.z, b.z) / 2) - columns.z)
-      const low = Math.min(a.y, b.y)
-      let candidate = false
-      for (let z = z0; z <= z1 && !candidate; z++)
-        for (let x = x0; x <= x1; x++)
-          if (low <= required(columns.tops[z * columns.width + x])) {
-            candidate = true
-            break
-          }
-      if (!candidate) return Infinity
-      this.origin[0] = a.x
-      this.origin[1] = a.y
-      this.origin[2] = a.z
-      this.direction[0] = b.x - a.x
-      this.direction[1] = b.y - a.y
-      this.direction[2] = b.z - a.z
-      return (
-        firstVoxelHit(index, this.origin, this.direction, 1, true, this.aboveWater)?.distance ??
-        Infinity
-      )
-    }
-    let nearest = Infinity
-    for (let x = cell(Math.min(a.x, b.x)); x <= cell(Math.max(a.x, b.x)); x++) {
-      for (let y = cell(Math.min(a.y, b.y)); y <= cell(Math.max(a.y, b.y)); y++) {
-        for (let z = cell(Math.min(a.z, b.z)); z <= cell(Math.max(a.z, b.z)); z++) {
-          const bucket = this.cells.get(key(x, y, z))
-          if (bucket) for (const voxel of bucket) nearest = Math.min(nearest, voxelHit(a, b, voxel))
-        }
-      }
-    }
-    return nearest
-  }
 }
 
 /** World-space metres and seconds. Fixed steps decouple emission and wind from display FPS. */
@@ -152,13 +53,13 @@ export class RainSimulation {
   private impactCursor = 0
   private randomState: number
   private waterSurface: RainSurfaceSampler | undefined
-  private readonly previous: Point = { x: 0, y: 0, z: 0 }
+  private readonly previous: RainPoint = { x: 0, y: 0, z: 0 }
   readonly rate: number
 
-  readonly collider: RainCollider
+  private readonly trace: SegmentTrace
 
-  constructor(collider: RainCollider, mobile: boolean, seed: number) {
-    this.collider = collider
+  constructor(trace: SegmentTrace, mobile: boolean, seed: number) {
+    this.trace = trace
     this.randomState = (seed ^ 0x9e3779b9) >>> 0
     this.rate = mobile ? 1400 : 4200
     this.drops = Array.from({ length: mobile ? 4000 : 12000 }, () => ({
@@ -209,7 +110,7 @@ export class RainSimulation {
     return this.waterSurface?.(x, z, time) ?? WATER_Y
   }
 
-  private waterHit(a: Point, b: Point) {
+  private waterHit(a: RainPoint, b: RainPoint) {
     if (Math.min(a.y, b.y) > WATER_MAX_Y) return Infinity
     if (!this.waterSurface) {
       if (a.y <= WATER_Y) return 0
@@ -280,7 +181,7 @@ export class RainSimulation {
       drop.y += drop.vy * age
       drop.z += drop.vz * age
       drop.alive =
-        this.collider.trace(this.previous, drop) === Infinity &&
+        this.trace(this.previous, drop) === Infinity &&
         (drop.y > WATER_MAX_Y || drop.y > this.waterHeight(drop.x, drop.z, this.time))
     }
     this.cursor = count % this.drops.length
@@ -324,7 +225,7 @@ export class RainSimulation {
       drop.x += drop.vx * RAIN_STEP
       drop.y += drop.vy * RAIN_STEP
       drop.z += drop.vz * RAIN_STEP
-      const solid = this.collider.trace(this.previous, drop)
+      const solid = this.trace(this.previous, drop)
       const water = this.waterHit(this.previous, drop)
       if (solid <= 1 && solid <= water) drop.alive = false
       else if (water <= 1) {

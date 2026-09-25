@@ -24,6 +24,7 @@
     "e2e:extended": "playwright test --config playwright.extended.config.ts"
   },
   "dependencies": {
+    "@dimforge/rapier3d-compat": "0.20.0",
     "three": "0.186.0"
   },
   "devDependencies": {

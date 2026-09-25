@@ -16,7 +16,8 @@ Node materials and TSL passes render through WebGPU. Without a working WebGPU ad
 device, the same renderer is created with its WebGL 2 backend, and the same TSL graph is
 compiled to GLSL; the page releases its static profile only when WebGL 2 is unavailable too.
 Device or context loss ends the graphics session and releases the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
-state. The world worker prepares terrain, shadow bounds, lake-bed geometry and normals,
+state. Rapier owns collision queries and stepped rigid-body dynamics over merged terrain
+colliders; analytic GPU flows and the wave solver stay custom. The world worker prepares terrain, shadow bounds, lake-bed geometry and normals,
 water geometry, the half-float depth/shore atlas and the simulation mask. It transfers
 typed buffers; the render thread wraps those buffers in GPU resources without repeating
 array generation or bounds scans. Audio has its own asynchronous resource lifetime.

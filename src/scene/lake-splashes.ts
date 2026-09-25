@@ -1,3 +1,4 @@
+import type { RigidBody, Vector } from '@dimforge/rapier3d-compat'
 import {
   attribute,
   uv,
@@ -20,7 +21,7 @@ import {
   faceDirection,
   positionLocal,
 } from 'three/tsl'
-import type { Node, NodeBuilder } from 'three/webgpu'
+import type { BufferAttribute, InterleavedBufferAttribute, Node, NodeBuilder } from 'three/webgpu'
 import {
   DynamicDrawUsage,
   DoubleSide,
@@ -37,6 +38,7 @@ import type { Scene } from 'three/webgpu'
 import { required } from '../invariant'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import type { PhysicsWorld } from './physics-world'
 import { SplashImpacts } from './splash-impacts'
 import { createSplashProfile } from './splash-profile'
 import type { SplashProfile } from './splash-profile'
@@ -66,49 +68,43 @@ class SheetMaterial extends MeshStandardNodeMaterial {
 }
 
 type Contact = { x: number; z: number; nx: number; nz: number; armed: boolean; next: number }
-type Drop = {
+
+const SPLASH_STEP = 1 / 60
+const MAX_SPLASH_STEPS = 4
+const DROP_LIFE = 1.6
+const DROP_RADIUS = 0.02
+const DROP_MASS = 1000 * (4 / 3) * Math.PI * DROP_RADIUS ** 3
+const PARKED_Y = -100
+const SETTLE_STEPS = 21
+/** Droplets hit terrain but neither each other nor fish; statics keep the default groups. */
+const DROPLET_GROUPS = (0x0002 << 16) | 0xfffb
+
+type PendingDrop = {
   x: number
   y: number
   z: number
   vx: number
   vy: number
   vz: number
+  size: number
+  drag: number
+  windX: number
+  windZ: number
+  release: number
+}
+const RING_SAMPLES = 3
+type Drop = {
+  body: RigidBody
   born: number
   size: number
-  life: number
-  lastAge: number
-  drag?: number
-  windX?: number
-  windZ?: number
-}
-
-/** Closed-form air drag keeps collision timing independent of the render step. */
-function sampleDrop(drop: Drop, age: number, position: Vector3, velocity?: Vector3) {
-  const drag = drop.drag ?? 0
-  if (drag < 0.0001) {
-    position.set(
-      drop.x + drop.vx * age,
-      drop.y + drop.vy * age - 4.905 * age * age,
-      drop.z + drop.vz * age,
-    )
-    velocity?.set(drop.vx, drop.vy - 9.81 * age, drop.vz)
-    return
-  }
-  const decay = Math.exp(-drag * age),
-    travel = -Math.expm1(-drag * age) / drag
-  const wx = drop.windX ?? 0,
-    wz = drop.windZ ?? 0,
-    terminal = 9.81 / drag
-  position.set(
-    drop.x + wx * age + (drop.vx - wx) * travel,
-    drop.y + (drop.vy + terminal) * travel - terminal * age,
-    drop.z + wz * age + (drop.vz - wz) * travel,
-  )
-  velocity?.set(
-    wx + (drop.vx - wx) * decay,
-    (drop.vy + terminal) * decay - terminal,
-    wz + (drop.vz - wz) * decay,
-  )
+  drag: number
+  windX: number
+  windZ: number
+  slowSteps: number
+  /** Last step-grid samples, x/y/z/t quads; refinement brackets stay frame-rate independent. */
+  ring: Float64Array
+  ringCount: number
+  active: boolean
 }
 type Sheet = {
   x: number
@@ -127,11 +123,18 @@ export class LakeSplashes {
   readonly impacts: SplashImpacts
   readonly contacts: Contact[] = []
   readonly capacity: number
-  private readonly drops: Array<Drop | null>
+  private readonly drops: Drop[]
+  private readonly pending: PendingDrop[] = []
   private readonly transform = new Object3D()
   private readonly up = new Vector3(0, 1, 0)
   private readonly velocity = new Vector3()
   private readonly dropPosition = new Vector3()
+  private readonly positionTarget: Vector = { x: 0, y: 0, z: 0 }
+  private readonly velocityTarget: Vector = { x: 0, y: 0, z: 0 }
+  private readonly forceTarget: Vector = { x: 0, y: 0, z: 0 }
+  private stepTime = 0
+  private accumulator = 0
+  private lastTime: number | null = null
   private readonly sheetsState: Array<Sheet | null> = Array.from({ length: 24 }, () => null)
   private sheetCursor = 0
   onReturn?: (x: number, z: number, radius: number, velocity: number) => void
@@ -144,12 +147,40 @@ export class LakeSplashes {
   active = 0
 
   private readonly bed: LakeBed
-  constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean) {
+  private readonly physics: PhysicsWorld
+  constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean, physics: PhysicsWorld) {
     this.bed = bed
+    this.physics = physics
     this.state = (seed ^ 0x591a7e) >>> 0
     this.impacts = new SplashImpacts(scene, mobile)
     this.capacity = mobile ? 144 : 320
-    this.drops = Array.from({ length: this.capacity }, () => null)
+    const { ColliderDesc, RigidBodyDesc } = physics.rapier
+    physics.world.timestep = SPLASH_STEP
+    this.drops = Array.from({ length: this.capacity }, () => {
+      const body = physics.world.createRigidBody(
+        RigidBodyDesc.dynamic().setTranslation(0, PARKED_Y, 0).setCanSleep(false).setEnabled(false),
+      )
+      physics.world.createCollider(
+        ColliderDesc.ball(DROP_RADIUS)
+          .setDensity(1000)
+          .setRestitution(0.45)
+          .setFriction(0.4)
+          .setCollisionGroups(DROPLET_GROUPS),
+        body,
+      )
+      return {
+        body,
+        born: 0,
+        size: 0,
+        drag: 0,
+        windX: 0,
+        windZ: 0,
+        slowSteps: 0,
+        ring: new Float64Array(RING_SAMPLES * 4),
+        ringCount: 0,
+        active: false,
+      }
+    })
     this.shoreResolution = Math.sqrt(bed.shore.length)
     this.shoreCell = LAKE_BOUNDS.size / this.shoreResolution
     const candidates: Array<Contact & { order: number }> = []
@@ -348,8 +379,169 @@ export class LakeSplashes {
     return { x: px, z: pz }
   }
 
+  private release(spawn: PendingDrop) {
+    const drop = required(this.drops[this.cursor])
+    this.cursor = (this.cursor + 1) % this.capacity
+    if (drop.active) this.kill(drop)
+    drop.body.setEnabled(true)
+    drop.body.setTranslation({ x: spawn.x, y: spawn.y, z: spawn.z }, true)
+    drop.body.setLinvel({ x: spawn.vx, y: spawn.vy, z: spawn.vz }, true)
+    drop.born = this.stepTime
+    drop.size = spawn.size
+    drop.drag = spawn.drag
+    drop.windX = spawn.windX
+    drop.windZ = spawn.windZ
+    drop.slowSteps = 0
+    drop.ring.set([spawn.x, spawn.y, spawn.z, this.stepTime], 0)
+    drop.ringCount = 1
+    drop.active = true
+  }
+
+  private releaseDue() {
+    for (let i = this.pending.length - 1; i >= 0; i--) {
+      const spawn = required(this.pending[i])
+      if (spawn.release > this.stepTime) continue
+      this.pending.splice(i, 1)
+      this.release(spawn)
+    }
+  }
+
+  private applyWind() {
+    for (const drop of this.drops) {
+      if (!drop.active) continue
+      const velocity = drop.body.linvel(this.velocityTarget)
+      const speed = Math.hypot(velocity.x, velocity.y, velocity.z)
+      drop.slowSteps = speed < 0.12 ? drop.slowSteps + 1 : 0
+      const pull = DROP_MASS * drop.drag
+      this.forceTarget.x = pull * (drop.windX - velocity.x)
+      this.forceTarget.y = pull * -velocity.y
+      this.forceTarget.z = pull * (drop.windZ - velocity.z)
+      drop.body.resetForces(false)
+      drop.body.addForce(this.forceTarget, false)
+    }
+  }
+
+  private kill(drop: Drop) {
+    drop.active = false
+    drop.body.setEnabled(false)
+  }
+
+  private recordStep(drop: Drop) {
+    const position = drop.body.translation(this.positionTarget)
+    if (drop.ringCount >= RING_SAMPLES) drop.ring.copyWithin(0, 4)
+    else drop.ringCount++
+    drop.ring.set([position.x, position.y, position.z, this.stepTime], (drop.ringCount - 1) * 4)
+  }
+
+  private ringSample(drop: Drop, slot: number) {
+    const base = slot * 4
+    return {
+      x: required(drop.ring[base]),
+      y: required(drop.ring[base + 1]),
+      z: required(drop.ring[base + 2]),
+      t: required(drop.ring[base + 3]),
+    }
+  }
+
+  private ringGap(drop: Drop, slot: number, wind: WindState) {
+    const sample = this.ringSample(drop, slot)
+    return sample.y - WATER_LEVEL - sampleWindField(sample.x, sample.z, sample.t, wind, 0.08)[0]
+  }
+
+  /** Frame detection at wall time, refined on the step-grid bracket for frame-rate independence. */
+  private land(
+    drop: Drop,
+    x: number,
+    y: number,
+    z: number,
+    speed: number,
+    time: number,
+    wind: WindState,
+  ) {
+    let from = drop.ringCount - 1
+    while (from >= 0 && this.ringGap(drop, from, wind) <= 0) from--
+    // A grid-to-grid crossing refines identically at every frame rate. Past the
+    // last step the body did not move, so the wave-rise fallback shares its endpoints.
+    const start = this.ringSample(drop, Math.max(0, from))
+    const end =
+      from < 0 || from + 1 >= drop.ringCount
+        ? { x, y, z, t: time }
+        : this.ringSample(drop, from + 1)
+    let low = 0,
+      high = 1,
+      hitX = end.x,
+      hitZ = end.z
+    for (let iteration = 0; iteration < 7; iteration++) {
+      const mid = (low + high) * 0.5
+      const sampleX = start.x + (end.x - start.x) * mid
+      const sampleY = start.y + (end.y - start.y) * mid
+      const sampleZ = start.z + (end.z - start.z) * mid
+      const gap =
+        sampleY -
+        WATER_LEVEL -
+        sampleWindField(sampleX, sampleZ, start.t + (end.t - start.t) * mid, wind, 0.08)[0]
+      if (gap > 0) low = mid
+      else {
+        high = mid
+        hitX = sampleX
+        hitZ = sampleZ
+      }
+    }
+    if (this.shoreAt(hitX, hitZ) > 0) {
+      const energy = Math.min(1, Math.max(0.08, ((drop.size / 0.045) ** 2 * speed) / 3))
+      this.impacts.add(hitX, hitZ, time, energy)
+      this.onReturn?.(hitX, hitZ, 0.15 + energy * 0.2, -(0.012 + energy * 0.05))
+    }
+    this.kill(drop)
+  }
+
+  private updateDrop(
+    drop: Drop,
+    index: number,
+    time: number,
+    wind: WindState,
+    opacity: BufferAttribute | InterleavedBufferAttribute,
+  ) {
+    if (drop.active) {
+      const position = drop.body.translation(this.positionTarget)
+      const velocity = drop.body.linvel(this.velocityTarget)
+      const surface = WATER_LEVEL + sampleWindField(position.x, position.z, time, wind, 0.08)[0]
+      if (velocity.y < 0 && position.y <= surface)
+        this.land(drop, position.x, position.y, position.z, -velocity.y, time, wind)
+      else {
+        const age = this.stepTime - drop.born
+        const settled =
+          !Number.isFinite(position.x + position.y + position.z) ||
+          age > DROP_LIFE ||
+          position.y < WATER_LEVEL - 1.5 ||
+          drop.slowSteps > SETTLE_STEPS
+        if (settled) this.kill(drop)
+        else {
+          this.active++
+          const speed = Math.hypot(velocity.x, velocity.y, velocity.z)
+          this.dropPosition.set(position.x, position.y, position.z)
+          this.velocity.set(velocity.x, velocity.y, velocity.z)
+          this.transform.position.copy(this.dropPosition)
+          this.transform.quaternion.setFromUnitVectors(this.up, this.velocity.normalize())
+          this.transform.scale.set(drop.size * 0.7, drop.size * (1 + speed * 0.22), drop.size * 0.7)
+          opacity.setX(
+            index,
+            Math.min(1, age / 0.035) * Math.min(1, (DROP_LIFE - age) / 0.12) * 0.85,
+          )
+          return
+        }
+      }
+    }
+    this.transform.scale.setScalar(0)
+    opacity.setX(index, 0)
+  }
+
   update(time: number, wind: WindState, reducedMotion = false, intro = 1) {
     if (reducedMotion) {
+      for (const drop of this.drops) if (drop.active) this.kill(drop)
+      this.pending.length = 0
+      this.accumulator = 0
+      this.lastTime = time
       this.mesh.visible = false
       this.sheets.visible = false
       this.impacts.update(time, true)
@@ -427,7 +619,7 @@ export class LakeSplashes {
           const size = fine
             ? 0.004 + this.random() * 0.007
             : 0.01 + this.random() ** 2 * (0.013 + energy * 0.019)
-          this.drops[this.cursor] = {
+          this.pending.push({
             x: source.x + contact.nx * (0.015 + this.random() * 0.07),
             y:
               WATER_LEVEL +
@@ -440,78 +632,35 @@ export class LakeSplashes {
             vx: contact.nx * outward - contact.nz * side + wind.direction[0] * wind.speed * 0.025,
             vz: contact.nz * outward + contact.nx * side + wind.direction[1] * wind.speed * 0.025,
             vy: lift,
-            born: time + delay,
             size,
             drag: fine ? 4 + this.random() * 5 : 0.3 + this.random() * 0.9,
             windX: wind.direction[0] * wind.speed * 0.1,
             windZ: wind.direction[1] * wind.speed * 0.1,
-            life: 1.6,
-            lastAge: 0,
-          }
-          this.cursor = (this.cursor + 1) % this.capacity
+            release: time + delay,
+          })
         }
+      }
+    }
+    if (this.lastTime === null) this.stepTime = time
+    const frameDelta = this.lastTime === null ? 0 : Math.max(0, Math.min(0.1, time - this.lastTime))
+    this.lastTime = time
+    this.accumulator = Math.min(this.accumulator + frameDelta, SPLASH_STEP * MAX_SPLASH_STEPS)
+    const steps = Math.min(MAX_SPLASH_STEPS, Math.floor((this.accumulator + 1e-9) / SPLASH_STEP))
+    this.accumulator = Math.max(0, this.accumulator - steps * SPLASH_STEP)
+    for (let step = 0; step < steps; step++) {
+      this.releaseDue()
+      this.applyWind()
+      this.physics.world.step()
+      this.stepTime += SPLASH_STEP
+      for (const drop of this.drops) {
+        if (drop.active) this.recordStep(drop)
       }
     }
     const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
     this.transform.quaternion.identity()
     this.active = 0
     for (let i = 0; i < this.capacity; i++) {
-      const drop = this.drops[i]
-      if (!drop || time < drop.born) {
-        this.transform.scale.setScalar(0)
-        opacity.setX(i, 0)
-      } else {
-        const age = time - drop.born
-        sampleDrop(drop, age, this.dropPosition, this.velocity)
-        const { x, y, z } = this.dropPosition
-        const descending = this.velocity.y < 0
-        const surface = WATER_LEVEL + sampleWindField(x, z, time, wind, 0.08)[0]
-        const landed = descending && y <= surface
-        if (age < 0 || age > drop.life || landed || this.shoreAt(x, z) < -0.04) {
-          if (landed && age <= drop.life) {
-            // Solve the contact within this frame, rather than placing the
-            // ripple at the next frame's already-submerged particle position.
-            let low = drop.lastAge,
-              high = age
-            for (let iteration = 0; iteration < 7; iteration++) {
-              const mid = (low + high) * 0.5
-              sampleDrop(drop, mid, this.dropPosition)
-              const gap =
-                this.dropPosition.y -
-                WATER_LEVEL -
-                sampleWindField(
-                  this.dropPosition.x,
-                  this.dropPosition.z,
-                  drop.born + mid,
-                  wind,
-                  0.08,
-                )[0]
-              if (gap > 0) low = mid
-              else high = mid
-            }
-            sampleDrop(drop, high, this.dropPosition, this.velocity)
-            const hitX = this.dropPosition.x,
-              hitZ = this.dropPosition.z
-            if (this.shoreAt(hitX, hitZ) > 0) {
-              const speed = Math.max(0, -this.velocity.y)
-              const energy = Math.min(1, Math.max(0.08, ((drop.size / 0.045) ** 2 * speed) / 3))
-              this.impacts.add(hitX, hitZ, drop.born + high, energy)
-              this.onReturn?.(hitX, hitZ, 0.15 + energy * 0.2, -(0.012 + energy * 0.05))
-            }
-          }
-          this.drops[i] = null
-          this.transform.scale.setScalar(0)
-          opacity.setX(i, 0)
-        } else {
-          drop.lastAge = age
-          this.active++
-          this.transform.position.set(x, y, z)
-          const speed = this.velocity.length()
-          this.transform.quaternion.setFromUnitVectors(this.up, this.velocity.normalize())
-          this.transform.scale.set(drop.size * 0.7, drop.size * (1 + speed * 0.22), drop.size * 0.7)
-          opacity.setX(i, Math.min(1, age / 0.035) * Math.min(1, (drop.life - age) / 0.12) * 0.85)
-        }
-      }
+      this.updateDrop(required(this.drops[i]), i, time, wind, opacity)
       this.transform.updateMatrix()
       this.mesh.setMatrixAt(i, this.transform.matrix)
     }
@@ -585,6 +734,9 @@ export class LakeSplashes {
   }
 
   dispose() {
+    for (const drop of this.drops) this.physics.world.removeRigidBody(drop.body)
+    this.drops.length = 0
+    this.pending.length = 0
     this.mesh.removeFromParent()
     this.mesh.geometry.dispose()
     this.mesh.material.dispose()

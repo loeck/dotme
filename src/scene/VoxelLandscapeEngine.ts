@@ -57,6 +57,8 @@ import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import { fadeNightLight, sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
+import { createPhysicsWorld, loadPhysics } from './physics-world'
+import type { PhysicsWorld } from './physics-world'
 import { PointerLight } from './pointer-light'
 import { prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
@@ -75,8 +77,6 @@ import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
-import { firstVoxelHit } from './voxel-spatial'
-import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
@@ -194,7 +194,7 @@ export class VoxelLandscapeEngine {
   private readonly bed: LakeBed
   private details: SceneDetails | undefined
   private detailEnvironment: Partial<DetailEnvironment> = {}
-  private readonly voxelIndex: VoxelIndex
+  private readonly physics: PhysicsWorld
   private pointerBounds: DOMRect | null = null
   private pointerActive = false
   private pointerType = 'mouse'
@@ -235,6 +235,7 @@ export class VoxelLandscapeEngine {
   private lowPower = false
 
   static async create(options: VoxelLandscapeEngineOptions, signal: AbortSignal) {
+    const physicsModule = loadPhysics()
     const prepared =
       options.prepared ??
       (await prepareWorldAsync((options.seed ?? 0) >>> 0, window.innerWidth < 768, signal))
@@ -251,7 +252,9 @@ export class VoxelLandscapeEngine {
       // Let the loader present between CPU preparation and material compilation.
       await preparationFrame(signal)
       signal.throwIfAborted()
-      engine = new VoxelLandscapeEngine({ ...options, prepared }, resources)
+      const physics = createPhysicsWorld(await physicsModule, prepared.terrain.index)
+      signal.throwIfAborted()
+      engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
       const initialLight = sampleLighting(engine.solarClock.initialSeconds, 0, engine.weather)
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
@@ -309,17 +312,17 @@ export class VoxelLandscapeEngine {
   private readonly resources: ResourceScope
 
   private constructor(
-    options: VoxelLandscapeEngineOptions & { prepared: PreparedWorld },
+    options: VoxelLandscapeEngineOptions & { prepared: PreparedWorld; physics: PhysicsWorld },
     resources: ResourceScope,
   ) {
     this.resources = resources
-    const { prepared, ...configuration } = options
+    const { prepared, physics, ...configuration } = options
     this.options = configuration
+    this.physics = this.resources.own(physics)
     this.reducedMotion = options.reducedMotion ?? false
     this.bed = options.prepared.world.lakeBed
     this.waterfall =
       options.sceneDetails === false ? undefined : (options.prepared.world.waterfall ?? undefined)
-    this.voxelIndex = options.prepared.terrain.index
     this.detailEnvironment = { ...options.detailEnvironment }
     this.container = options.container
     this.sceneContrast = this.resources.own(
@@ -502,7 +505,7 @@ export class VoxelLandscapeEngine {
 
     this.rain = this.resources.own(
       new RainEffect(
-        prepared.terrain.index,
+        (a, b) => this.physics.trace(a, b),
         this.lowPower,
         (options.seed ?? 0) >>> 0,
         this.lampLights.map(({ light }) => light),
@@ -689,6 +692,7 @@ export class VoxelLandscapeEngine {
           world,
           this.mobile,
           this.reducedMotion ?? false,
+          this.physics,
           this.options.detailEnvironment,
         ),
       )
@@ -829,9 +833,9 @@ export class VoxelLandscapeEngine {
     let contact = null
     if (nightStrength > 0 && pointerOnScene && this.pointerType === 'mouse' && this.focused) {
       const ray = this.raycaster.ray
-      const solid = firstVoxelHit(this.voxelIndex, ray.origin.toArray(), ray.direction.toArray())
-      if (solid && (!waterPoint || solid.distance < ray.origin.distanceTo(waterPoint)))
-        contact = ray.at(solid.distance, this.lightHit)
+      const solid = this.physics.castDistance(ray.origin, ray.direction, 130)
+      if (solid !== null && (!waterPoint || solid < ray.origin.distanceTo(waterPoint)))
+        contact = ray.at(solid, this.lightHit)
       else contact = waterPoint
     }
     this.pointerLight.update(

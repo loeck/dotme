@@ -10,6 +10,7 @@ import { LakeSand } from './lake-sand'
 import { LakeSplashes } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
 import { LakeWaterfall } from './lake-waterfall'
+import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
@@ -61,6 +62,7 @@ export class SceneDetails {
     world: Pick<VoxelWorld, 'seed' | 'lakeBed' | 'waterfall'>,
     mobile: boolean,
     reducedMotion: boolean,
+    physics: PhysicsWorld,
     environment: Partial<DetailEnvironment> = {},
   ) {
     this.reducedMotion = reducedMotion
@@ -69,11 +71,13 @@ export class SceneDetails {
     this.caustics = this.resources.own(new LakeCaustics(reducedMotion))
     this.sand = this.resources.own(new LakeSand(world.seed))
     this.fish = this.resources.own(
-      new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion),
+      new LakeFish(scene, world.lakeBed, world.seed, mobile, physics, reducedMotion),
     )
     this.ray = this.resources.own(new LakeRay(scene, world.lakeBed, world.seed, reducedMotion))
     this.fireflies = this.resources.own(new LakeFireflies(scene, world.lakeBed, world.seed, mobile))
-    this.splashes = this.resources.own(new LakeSplashes(scene, world.lakeBed, world.seed, mobile))
+    this.splashes = this.resources.own(
+      new LakeSplashes(scene, world.lakeBed, world.seed, mobile, physics),
+    )
     if (world.waterfall) {
       this.waterfall = this.resources.own(
         new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),

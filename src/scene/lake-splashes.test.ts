@@ -4,15 +4,22 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createLakeBed, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
+import { createPhysicsWorld, loadPhysics } from './physics-world'
+import { createVoxelIndex } from './voxel-spatial'
+import type { Voxel } from './voxel-world'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 
-const bed = createLakeBed([{ x: 0, y: 0.5, z: 0, size: 4, color: 0 }], 42, true)
+const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const bed = createLakeBed([block], 42, true)
 const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
-const replay = (seed: number) => {
-  const splashes = new LakeSplashes(new Scene(), bed, seed, true)
+const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+
+const replay = async (seed: number) => {
+  const physics = await physicsFor()
+  const splashes = new LakeSplashes(new Scene(), bed, seed, true, physics)
   const shapes = new Map<number, number[]>()
   const returns: number[][] = []
   splashes.onReturn = (...event) => returns.push(event)
@@ -35,12 +42,14 @@ const replay = (seed: number) => {
     }
   }
   splashes.dispose()
+  physics.dispose()
   return { shapes: [...shapes.values()], returns }
 }
 
 describe('wave impacts', () => {
   it('restores inactive batches before asynchronous compilation settles, including failure', async () => {
-    const splashes = new LakeSplashes(new Scene(), bed, 42, true)
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
     const meshes = [splashes.mesh, splashes.sheets, splashes.impacts.mesh, splashes.impacts.slopes]
     const before = meshes.map((mesh) => ({ visible: mesh.visible, count: mesh.count }))
     const matrixVersions = meshes.map((mesh) => mesh.instanceMatrix.version)
@@ -74,22 +83,24 @@ describe('wave impacts', () => {
       expect(meshes.map((mesh) => ({ visible: mesh.visible, count: mesh.count }))).toEqual(before)
     } finally {
       splashes.dispose()
+      physics.dispose()
     }
   })
 
-  it('varies successive rendered shapes and replays the same wind and seed deterministically', () => {
-    const first = replay(42)
+  it('varies successive rendered shapes and replays the same wind and seed deterministically', async () => {
+    const first = await replay(42)
     expect(first.shapes.length).toBeGreaterThan(3)
     // Every rendered shape dimension varies, including breakup and duration.
     for (let dimension = 0; dimension < 6; dimension++)
       expect(new Set(first.shapes.map((shape) => shape[dimension])).size).toBeGreaterThan(3)
     expect(first.returns.length).toBeGreaterThan(0)
-    expect(replay(42)).toEqual(first)
-    expect(replay(43)).not.toEqual(first)
+    expect(await replay(42)).toEqual(first)
+    expect(await replay(43)).not.toEqual(first)
   })
 
-  it('emits nothing without wind, during reduced motion, or without an obstacle', () => {
-    const splashes = new LakeSplashes(new Scene(), bed, 42, true)
+  it('emits nothing without wind, during reduced motion, or without an obstacle', async () => {
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
     expect(splashes.contacts.length).toBeGreaterThan(0)
     for (let frame = 0; frame < 600; frame++) splashes.update(frame / 30, calm.sample(frame / 30))
     expect(splashes.emitted).toBe(0)
@@ -99,15 +110,17 @@ describe('wave impacts', () => {
     expect(splashes.mesh.visible).toBe(false)
     expect(splashes.sheets.visible).toBe(false)
     splashes.dispose()
-    const empty = new LakeSplashes(new Scene(), createLakeBed([], 42, true), 42, true)
+    const empty = new LakeSplashes(new Scene(), createLakeBed([], 42, true), 42, true, physics)
     expect(empty.contacts).toHaveLength(0)
     for (let frame = 0; frame < 600; frame++) empty.update(frame / 30, windy.sample(frame / 30))
     expect(empty.emitted).toBe(0)
     empty.dispose()
+    physics.dispose()
   })
 
-  it('spreads a rendered impact across the wet face', () => {
-    const splashes = new LakeSplashes(new Scene(), bed, 42, true)
+  it('spreads a rendered impact across the wet face', async () => {
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
     const positions: Vector3[] = [],
       matrix = new Matrix4(),
       scale = new Vector3()
@@ -135,11 +148,13 @@ describe('wave impacts', () => {
     expect(Math.max(spanX, spanZ)).toBeGreaterThan(0.15)
     expect(positions.every((p) => Math.max(Math.abs(p.x), Math.abs(p.z)) > 1.94)).toBe(true)
     splashes.dispose()
+    physics.dispose()
   })
 
-  it('breaks intermittent windward crests into airborne drops and returns ripples to water', () => {
+  it('breaks intermittent windward crests into airborne drops and returns ripples to water', async () => {
     const scene = new Scene()
-    const splashes = new LakeSplashes(scene, bed, 42, true)
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
     const returns: number[][] = []
     splashes.onReturn = (...impact) => returns.push(impact)
     const matrix = new Matrix4(),
@@ -187,6 +202,7 @@ describe('wave impacts', () => {
       ),
     ).toBe(true)
     splashes.dispose()
+    physics.dispose()
     expect(scene.children).toHaveLength(0)
   })
 })
@@ -218,27 +234,33 @@ it('combines clustered landing waves and clears both the crown and normal contri
   expect(scene.children).toHaveLength(0)
 })
 
-it('keeps wind-dragged landing positions stable across frame rates', () => {
-  const landings: number[][][] = []
-  for (const hz of [30, 60, 120]) {
-    const splashes = new LakeSplashes(new Scene(), bed, 42, true)
-    let born = 0
-    for (let frame = 0; frame < 600 && !splashes.emitted; frame++) {
-      born = frame / 60
-      splashes.update(born, windy.sample(born))
-    }
-    const events: number[][] = []
-    splashes.onReturn = (...event) => events.push(event)
-    for (let frame = 1; frame < hz * 3; frame++) {
-      const time = born + frame / hz
-      splashes.update(time, windy.sample(time), false, 0)
-    }
-    expect(events.length).toBeGreaterThan(5)
-    expect(splashes.impacts.landed).toBe(events.length)
-    expect(splashes.impacts.active).toBe(0)
-    landings.push(events.toSorted((a, b) => required(a[1]) - required(b[1])))
-    splashes.dispose()
-  }
+it('keeps wind-dragged landing positions stable across frame rates', async () => {
+  const landings = await Promise.all(
+    [30, 60, 120].map(async (hz) => {
+      const physics = await physicsFor()
+      const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
+      try {
+        let born = 0
+        for (let frame = 0; frame < 600 && !splashes.emitted; frame++) {
+          born = frame / 60
+          splashes.update(born, windy.sample(born))
+        }
+        const events: number[][] = []
+        splashes.onReturn = (...event) => events.push(event)
+        for (let frame = 1; frame < hz * 3; frame++) {
+          const time = born + frame / hz
+          splashes.update(time, windy.sample(time), false, 0)
+        }
+        expect(events.length).toBeGreaterThan(5)
+        expect(splashes.impacts.landed).toBe(events.length)
+        expect(splashes.impacts.active).toBe(0)
+        return events.toSorted((a, b) => required(a[1]) - required(b[1]))
+      } finally {
+        splashes.dispose()
+        physics.dispose()
+      }
+    }),
+  )
   const reference = required(landings[0])
   for (const events of landings.slice(1)) {
     expect(events).toHaveLength(reference.length)

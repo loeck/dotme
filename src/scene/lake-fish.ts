@@ -1,3 +1,9 @@
+import type {
+  Collider,
+  KinematicCharacterController,
+  RigidBody,
+  Vector,
+} from '@dimforge/rapier3d-compat'
 import {
   Fn,
   attribute,
@@ -33,6 +39,7 @@ import type { FishSchool } from './fish-school'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import type { FireflyPointer } from './lake-fireflies'
+import type { PhysicsWorld } from './physics-world'
 
 export type { FishSpecies } from './fish-anatomy'
 
@@ -52,6 +59,17 @@ export type FishAppearance = Readonly<{
 const HABITAT_RADIUS = 0.85
 const BODY_MARGIN = 0.8
 const MIN_DEPTH = 1.65
+/** Matches the validated 0.5 body envelope; thin enough to clear the bed cruise. */
+const FISH_RADIUS = 0.5
+const FISH_HALF_HEIGHT = 0.1
+const FISH_SKIN = 0.05
+const FISH_GROUPS = (0x0004 << 16) | 0xfff9
+const PARKED_FISH_Y = -100
+type FishRig = {
+  body: RigidBody
+  collider: Collider
+  controller: KinematicCharacterController
+}
 
 /** Match the captured bed's cell-centered relief without snapping between cells. */
 export function bedDepth(bed: LakeBed, x: number, z: number) {
@@ -216,11 +234,22 @@ export class LakeFish {
   private readonly bed: LakeBed
   private readonly mobile: boolean
   private readonly reducedMotion: boolean
+  private readonly physics: PhysicsWorld
+  private readonly rigs: FishRig[] = []
+  private readonly movementTarget: Vector = { x: 0, y: 0, z: 0 }
 
-  constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean, reducedMotion = false) {
+  constructor(
+    scene: Scene,
+    bed: LakeBed,
+    seed: number,
+    mobile: boolean,
+    physics: PhysicsWorld,
+    reducedMotion = false,
+  ) {
     this.bed = bed
     this.mobile = mobile
     this.reducedMotion = reducedMotion
+    this.physics = physics
     this.habitats = createFishHabitats(bed, seed, 16, mobile)
     this.schools = createFishSchools(bed, this.habitats, seed, mobile ? 3 : 4)
     const sizes = mobile ? [6, 4, 5] : [8, 5, 7, 6]
@@ -231,6 +260,20 @@ export class LakeFish {
       Array.from({ length: size }, (_, member) => ({ school, member })),
     )
     this.count = this.membership.length
+    const { ColliderDesc, RigidBodyDesc } = physics.rapier
+    for (let i = 0; i < this.count; i++) {
+      const body = physics.world.createRigidBody(
+        RigidBodyDesc.kinematicPositionBased().setTranslation(0, PARKED_FISH_Y, 0),
+      )
+      const collider = physics.world.createCollider(
+        ColliderDesc.cylinder(FISH_HALF_HEIGHT, FISH_RADIUS).setCollisionGroups(FISH_GROUPS),
+        body,
+      )
+      const controller = physics.world.createCharacterController(FISH_SKIN)
+      controller.setSlideEnabled(true)
+      controller.setApplyImpulsesToDynamicBodies(false)
+      this.rigs.push({ body, collider, controller })
+    }
     // Muted silver backs read as little moving silhouettes, not golden patches.
     const silver = new Color(0x526d76)
     for (const geometry of this.geometries) {
@@ -399,21 +442,17 @@ export class LakeFish {
         swimming.speed += Math.max(-step * 1.8, Math.min(step * 1.4, speed - swimming.speed))
         const x = previousX + Math.sin(swimming.heading) * swimming.speed * step
         const z = previousZ + Math.cos(swimming.heading) * swimming.speed * step
-        // Check the whole turning silhouette before accepting the forward step.
-        let safe = true
-        for (const dx of [-0.7, 0, 0.7])
-          for (const dz of [-0.7, 0, 0.7]) {
-            const cell = lakeIndex(this.bed, x + dx, z + dz)
-            if (
-              cell < 0 ||
-              !this.bed.water[cell] ||
-              required(this.bed.depth[cell]) < MIN_DEPTH ||
-              required(this.bed.obstacle[cell]) >= WATER_LEVEL - 0.65
-            )
-              safe = false
-          }
-        pose.x = safe ? x : previousX
-        pose.z = safe ? z : previousZ
+        // Slide along terrain instead of stopping at it.
+        const rig = required(this.rigs[i])
+        rig.controller.computeColliderMovement(
+          rig.collider,
+          { x: x - previousX, y: 0, z: z - previousZ },
+          undefined,
+          FISH_GROUPS,
+        )
+        const moved = rig.controller.computedMovement(this.movementTarget)
+        pose.x = previousX + moved.x
+        pose.z = previousZ + moved.z
       } else {
         pose.x = previousX
         pose.z = previousZ
@@ -429,6 +468,7 @@ export class LakeFish {
       swimming.phase +=
         step * (5.5 + Math.min(1, swimming.speed) * 3.0) * traits.rate * (0.75 + propulsion * 0.25)
       pose.heading = swimming.heading
+      required(this.rigs[i]).body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, false)
       this.transform.position.set(pose.x, pose.y, pose.z)
       this.transform.rotation.set(0, pose.heading, -swimming.turn * 0.1)
       this.transform.scale.set(
@@ -457,6 +497,12 @@ export class LakeFish {
   }
 
   dispose() {
+    for (const rig of this.rigs) {
+      this.physics.world.removeCharacterController(rig.controller)
+      rig.controller.free()
+      this.physics.world.removeRigidBody(rig.body)
+    }
+    this.rigs.length = 0
     this.mesh.removeFromParent()
     for (const mesh of this.meshes) mesh.dispose()
     for (const geometry of this.geometries) geometry.dispose()

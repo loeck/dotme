@@ -11,7 +11,7 @@ import { WindModel } from './wind'
 
 function fixture(size: number) {
   const rain = new RainEffect(
-    [],
+    () => Infinity,
     true,
     42,
     [],

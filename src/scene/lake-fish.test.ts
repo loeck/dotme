@@ -15,20 +15,29 @@ import { apparentFishSurface } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { createFishHabitats, LakeFish } from './lake-fish'
+import { createPhysicsWorld, loadPhysics } from './physics-world'
+import { createVoxelIndex } from './voxel-spatial'
+import type { VoxelIndex } from './voxel-spatial'
 import { createVoxelWorld } from './voxel-world'
 
 // Worlds are immutable inputs; retain only the lake data needed by these tests.
-const beds = new Map<string, LakeBed>()
+const worlds = new Map<string, { bed: LakeBed; index: VoxelIndex }>()
 const cases = [false, true].flatMap((mobile) => [0, 12, 42, 9182].map((seed) => ({ mobile, seed })))
-function lakeBed(seed: number, mobile: boolean) {
+function lakeData(seed: number, mobile: boolean) {
   const key = `${seed}:${mobile}`
-  let bed = beds.get(key)
-  if (!bed) {
-    bed = createVoxelWorld(seed, mobile).lakeBed
-    beds.set(key, bed)
+  let entry = worlds.get(key)
+  if (!entry) {
+    const world = createVoxelWorld(seed, mobile)
+    entry = { bed: world.lakeBed, index: createVoxelIndex(world.voxels) }
+    worlds.set(key, entry)
   }
-  return bed
+  return entry
 }
+function lakeBed(seed: number, mobile: boolean) {
+  return lakeData(seed, mobile).bed
+}
+const physicsFor = async (seed: number, mobile: boolean) =>
+  createPhysicsWorld(await loadPhysics(), lakeData(seed, mobile).index)
 
 /** Height of the actual two-triangle cell used by SubmergedScene's mesh. */
 function bottomHeight(bed: LakeBed, x: number, z: number) {
@@ -52,12 +61,13 @@ function bottomHeight(bed: LakeBed, x: number, z: number) {
 describe('submerged fish', () => {
   it.each(cases)(
     'keeps actual shoals submerged and clear of terrain for a full passage (mobile=$mobile, seed=$seed)',
-    ({ mobile, seed }) => {
+    async ({ mobile, seed }) => {
       const matrix = new Matrix4()
       const position = new Vector3()
       const bed = lakeBed(seed, mobile)
-      const fish = new LakeFish(new Scene(), bed, seed, mobile)
-      const repeat = new LakeFish(new Scene(), bed, seed, mobile)
+      const physics = await physicsFor(seed, mobile)
+      const fish = new LakeFish(new Scene(), bed, seed, mobile, physics)
+      const repeat = new LakeFish(new Scene(), bed, seed, mobile, physics)
       expect(fish.schools).toEqual(repeat.schools)
       expect(fish.schoolSizes).toEqual(repeat.schoolSizes)
       expect(fish.count).toBeGreaterThan(0)
@@ -97,19 +107,21 @@ describe('submerged fish', () => {
       expect(visibleCounts.size).toBeGreaterThan(2)
       expect(Math.max(...visibleCounts)).toBeGreaterThan(Math.max(...fish.schoolSizes))
       fish.dispose()
+      physics.dispose()
     },
   )
 
   it.each(cases)(
     'keeps the opening shoal inside the refracted camera projection (mobile=$mobile, seed=$seed)',
-    ({ mobile, seed }) => {
+    async ({ mobile, seed }) => {
       const matrix = new Matrix4()
       const position = new Vector3()
       const camera = new PerspectiveCamera(54, mobile ? 390 / 844 : 1280 / 720, 0.05, 500)
       camera.position.set(0, 2.3, 16)
       camera.lookAt(0, mobile ? 2.3 : 7.3, -25)
       camera.updateMatrixWorld()
-      const fish = new LakeFish(new Scene(), lakeBed(seed, mobile), seed, mobile)
+      const physics = await physicsFor(seed, mobile)
+      const fish = new LakeFish(new Scene(), lakeBed(seed, mobile), seed, mobile, physics)
       for (let i = 0; i < required(fish.schoolSizes[0]); i++) {
         required(fish.meshes[i % 3]).getMatrixAt(Math.floor(i / 3), matrix)
         position.setFromMatrixPosition(matrix)
@@ -119,13 +131,15 @@ describe('submerged fish', () => {
         expect(position.y).toBeLessThan(0)
       }
       fish.dispose()
+      physics.dispose()
     },
   )
 
-  it('reacts smoothly, uses its own optical layer and disposes its batch', () => {
+  it('reacts smoothly, uses its own optical layer and disposes its batch', async () => {
     const scene = new Scene()
     const bed = lakeBed(12, true)
-    const fish = new LakeFish(scene, bed, 12, true)
+    const physics = await physicsFor(12, true)
+    const fish = new LakeFish(scene, bed, 12, true, physics)
     expect(fish.count).toBe(15)
     expect(fish.schoolSizes).toEqual([6, 4, 5])
     expect(fish.mesh.layers.mask).toBe(8)
@@ -159,11 +173,13 @@ describe('submerged fish', () => {
     expect(after.y - 0.29).toBeGreaterThan(WATER_LEVEL - required(bed.depth[index]))
     expect(after.y + 0.29).toBeLessThan(WATER_LEVEL)
     fish.dispose()
+    physics.dispose()
     expect(scene.children).toHaveLength(0)
   })
 
-  it('keeps a tapered silhouette with a genuinely forked vertical tail', () => {
-    const fish = new LakeFish(new Scene(), lakeBed(42, true), 42, true)
+  it('keeps a tapered silhouette with a genuinely forked vertical tail', async () => {
+    const physics = await physicsFor(42, true)
+    const fish = new LakeFish(new Scene(), lakeBed(42, true), 42, true, physics)
     const material = new MeshBasicMaterial({ side: DoubleSide })
     const silhouette = new Mesh(fish.mesh.geometry, material)
     const ray = new Raycaster(new Vector3(2, 0, -0.76), new Vector3(-1, 0, 0), 0, 4)
@@ -175,13 +191,15 @@ describe('submerged fish', () => {
     expect(fish.mesh.geometry.getAttribute('position').count).toBeLessThan(500)
     material.dispose()
     fish.dispose()
+    physics.dispose()
   })
 
-  it('fades pointer avoidance to zero at the screen-space hover boundary', () => {
+  it('fades pointer avoidance to zero at the screen-space hover boundary', async () => {
     const bed = lakeBed(12, true)
-    const baseline = new LakeFish(new Scene(), bed, 12, true)
-    const boundary = new LakeFish(new Scene(), bed, 12, true)
-    const hovered = new LakeFish(new Scene(), bed, 12, true)
+    const physics = await physicsFor(12, true)
+    const baseline = new LakeFish(new Scene(), bed, 12, true, physics)
+    const boundary = new LakeFish(new Scene(), bed, 12, true, physics)
+    const hovered = new LakeFish(new Scene(), bed, 12, true, physics)
     const matrix = new Matrix4()
     const position = new Vector3()
     const displaced = new Vector3()
@@ -207,12 +225,14 @@ describe('submerged fish', () => {
     expect(displaced.distanceTo(position)).toBeGreaterThan(0.05)
     expect(displaced.distanceTo(position)).toBeLessThan(0.65)
     for (const fish of [baseline, boundary, hovered]) fish.dispose()
+    physics.dispose()
   })
 
-  it('contains three distinct anatomical profiles with deterministic individual sizes', () => {
+  it('contains three distinct anatomical profiles with deterministic individual sizes', async () => {
     const bed = lakeBed(42, true)
-    const fish = new LakeFish(new Scene(), bed, 42, true)
-    const repeat = new LakeFish(new Scene(), bed, 42, true)
+    const physics = await physicsFor(42, true)
+    const fish = new LakeFish(new Scene(), bed, 42, true, physics)
+    const repeat = new LakeFish(new Scene(), bed, 42, true, physics)
     expect(fish.appearances).toEqual(repeat.appearances)
     expect(new Set(fish.appearances.map((appearance) => appearance.species)).size).toBe(3)
     expect(new Set(fish.appearances.map((appearance) => appearance.scale)).size).toBe(fish.count)
@@ -224,12 +244,14 @@ describe('submerged fish', () => {
     }
     fish.dispose()
     repeat.dispose()
+    physics.dispose()
   })
 
-  it('freezes motion and pointer reactions for reduced motion', () => {
+  it('freezes motion and pointer reactions for reduced motion', async () => {
     const scene = new Scene()
     const bed = lakeBed(12, true)
-    const fish = new LakeFish(scene, bed, 12, true, true)
+    const physics = await physicsFor(12, true)
+    const fish = new LakeFish(scene, bed, 12, true, physics, true)
     const initial = fish.meshes.map((mesh) => Array.from(mesh.instanceMatrix.array))
     const initialMotion = fish.meshes.map((mesh) =>
       Array.from(mesh.geometry.getAttribute('aFishPhase').array),
@@ -240,11 +262,13 @@ describe('submerged fish', () => {
       fish.meshes.map((mesh) => Array.from(mesh.geometry.getAttribute('aFishPhase').array)),
     ).toEqual(initialMotion)
     fish.dispose()
+    physics.dispose()
   })
 
-  it('advances compact shoals through water with continuous tail phases', () => {
+  it('advances compact shoals through water with continuous tail phases', async () => {
     const bed = lakeBed(42, true)
-    const fish = new LakeFish(new Scene(), bed, 42, true)
+    const physics = await physicsFor(42, true)
+    const fish = new LakeFish(new Scene(), bed, 42, true, physics)
     expect(fish.count).toBeGreaterThan(0)
     const previousPhases = fish.appearances.map((_, i) =>
       required(fish.meshes[i % 3])
@@ -272,14 +296,17 @@ describe('submerged fish', () => {
     expect(minPhaseStep).toBeGreaterThan(0)
     expect(maxPhaseStep).toBeLessThan(0.9)
     fish.dispose()
+    physics.dispose()
   })
 
-  it('omits shoals when there is no safe water', () => {
+  it('omits shoals when there is no safe water', async () => {
     const bed = lakeBed(12, true)
     const dry = { ...bed, water: new Uint8Array(bed.water.length) }
     expect(createFishHabitats(dry, 12, 3)).toEqual([])
-    const fish = new LakeFish(new Scene(), dry, 12, true)
+    const physics = await physicsFor(12, true)
+    const fish = new LakeFish(new Scene(), dry, 12, true, physics)
     expect(fish.count).toBe(0)
     fish.dispose()
+    physics.dispose()
   })
 })

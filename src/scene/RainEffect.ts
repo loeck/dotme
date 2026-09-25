@@ -36,10 +36,8 @@ import {
   RAIN_SPRAY_LIFETIME,
 } from './rain-shaders'
 import type { RainSurface } from './rain-shaders'
-import { IMPACT_LIFETIME, RainCollider, RainSimulation, WATER_Y } from './rain-simulation'
-import type { RainImpact, RainState } from './rain-simulation'
-import type { VoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
+import { IMPACT_LIFETIME, RainSimulation, WATER_Y } from './rain-simulation'
+import type { RainImpact, RainState, SegmentTrace } from './rain-simulation'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
 
@@ -110,7 +108,7 @@ export class RainEffect {
   private readonly reducedMotion: boolean
 
   constructor(
-    voxels: readonly Voxel[] | VoxelIndex,
+    trace: SegmentTrace,
     mobile: boolean,
     seed: number,
     lamps: readonly PointLight[],
@@ -122,7 +120,7 @@ export class RainEffect {
     this.lamps = lamps
     this.moon = moon
     this.reducedMotion = reducedMotion
-    this.simulation = new RainSimulation(new RainCollider(voxels), mobile, seed)
+    this.simulation = new RainSimulation(trace, mobile, seed)
     this.splashLimit = mobile ? 48 : 128
     this.drops = instancedPlane(this.simulation.drops.length, 'aDrop', 'aVelocity')
     this.contactAges = new InstancedBufferAttribute(
