@@ -51,7 +51,7 @@ export class WaterfallFluid {
     forceSinglePass: true,
   })
   readonly mesh: Mesh<PlaneGeometry, MeshPhysicalNodeMaterial>
-  private readonly particles
+  readonly particles: ReturnType<typeof createWaterfallParticles>
   private readonly pass: WaterfallFluidPass
   private readonly projectionInverse = uniform(new Matrix4())
   private readonly localFromView = uniform(new Matrix4())
@@ -65,9 +65,9 @@ export class WaterfallFluid {
   private prepared = false
   private disposed = false
 
-  constructor(fall: VoxelWaterfall, mobile: boolean, time: Node<'float'>, opacity: Node<'float'>) {
+  constructor(fall: VoxelWaterfall, mobile: boolean, opacity: Node<'float'>) {
     this.fall = fall
-    this.particles = createWaterfallParticles(fall, mobile, time)
+    this.particles = createWaterfallParticles(fall, mobile)
     this.pass = new WaterfallFluidPass(this.particles, mobile)
     const depth = texture(this.pass.depthTexture)
     const thickness = texture(this.pass.thicknessTexture)

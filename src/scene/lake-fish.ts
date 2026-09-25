@@ -32,8 +32,8 @@ import type { Scene, NodeBuilder } from 'three/webgpu'
 import { required } from '../invariant'
 import { createFishGeometry, fishRigNode } from './fish-anatomy'
 import type { FishSpecies } from './fish-anatomy'
-import { sampleFishPointer } from './fish-pointer'
-import type { FishPointerTarget } from './fish-pointer'
+import { baitSteering, sampleFishPointer } from './fish-pointer'
+import type { FishBait, FishPointerTarget } from './fish-pointer'
 import { createFishSchools, sampleSchoolFish, schoolVisibility } from './fish-school'
 import type { FishSchool } from './fish-school'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
@@ -64,6 +64,8 @@ const FISH_RADIUS = 0.5
 const FISH_HALF_HEIGHT = 0.1
 const FISH_SKIN = 0.05
 const FISH_GROUPS = (0x0004 << 16) | 0xfff9
+/** Steering queries ignore the curtain bodies and cursor blocker as well as droplets. */
+const FISH_QUERY_GROUPS = (0x0004 << 16) | 0xffe1
 const PARKED_FISH_Y = -100
 type FishRig = {
   body: RigidBody
@@ -368,6 +370,7 @@ export class LakeFish {
     dt: number,
     pointer: WaterPointer | null = null,
     scenePointer: FireflyPointer | null = null,
+    bait: FishBait | null = null,
   ) {
     const step = this.reducedMotion || !Number.isFinite(dt) ? 0 : Math.max(0, Math.min(0.1, dt))
     this.clock += step
@@ -419,14 +422,26 @@ export class LakeFish {
       }
       swimming.alert +=
         (alarm - swimming.alert) * (1 - Math.exp(-step * (alarm > swimming.alert ? 5 : 1.2)))
+      const meal =
+        !this.reducedMotion && bait && bait.strength > 0 && swimming.initialized
+          ? baitSteering(previousX, previousZ, bait)
+          : null
       if (!swimming.initialized) {
         swimming.heading = pose.heading
         swimming.initialized = true
       } else if (step > 0) {
         // Steer actual forward velocity, not an offset added to the whole fish.
         // Route attraction reforms the shoal after the brief escape acceleration.
-        const vx = routeVx + (routeX - previousX) * 2.2 + awayX * swimming.alert * 1.3
-        const vz = routeVz + (routeZ - previousZ) * 2.2 + awayZ * swimming.alert * 1.3
+        const vx =
+          routeVx +
+          (routeX - previousX) * 2.2 +
+          awayX * swimming.alert * 1.3 +
+          (meal ? meal.x * meal.pull * 1.6 : 0)
+        const vz =
+          routeVz +
+          (routeZ - previousZ) * 2.2 +
+          awayZ * swimming.alert * 1.3 +
+          (meal ? meal.z * meal.pull * 1.6 : 0)
         const desired = Math.atan2(vx, vz)
         const turn = Math.atan2(
           Math.sin(desired - swimming.heading),
@@ -448,7 +463,7 @@ export class LakeFish {
           rig.collider,
           { x: x - previousX, y: 0, z: z - previousZ },
           undefined,
-          FISH_GROUPS,
+          FISH_QUERY_GROUPS,
         )
         const moved = rig.controller.computedMovement(this.movementTarget)
         pose.x = previousX + moved.x

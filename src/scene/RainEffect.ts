@@ -37,7 +37,7 @@ import {
 } from './rain-shaders'
 import type { RainSurface } from './rain-shaders'
 import { IMPACT_LIFETIME, RainSimulation, WATER_Y } from './rain-simulation'
-import type { RainImpact, RainState, SegmentTrace } from './rain-simulation'
+import type { RainImpact, RainRepulsor, RainState, SegmentTrace } from './rain-simulation'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
 
@@ -199,6 +199,10 @@ export class RainEffect {
 
   prime() {
     if (!this.reducedMotion) this.simulation.prime()
+  }
+
+  setRepulsor(repulsor: RainRepulsor | null) {
+    this.simulation.setRepulsor(repulsor)
   }
 
   resize(width: number, height: number) {

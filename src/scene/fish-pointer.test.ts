@@ -1,7 +1,7 @@
 import { PerspectiveCamera, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
-import { apparentFishSurface, sampleFishPointer } from './fish-pointer'
+import { apparentFishSurface, baitSteering, sampleFishPointer } from './fish-pointer'
 import { WATER_LEVEL } from './lake-bed'
 
 describe('visible underwater fish interaction', () => {
@@ -42,6 +42,18 @@ describe('visible underwater fish interaction', () => {
     const pointer = { ndc: { x: 0, y: 0.8 }, camera, width: 900, height: 900 }
     expect(sampleFishPointer(pose, pointer, target)).toBeNull()
     expect(sampleFishPointer({ ...pose, z: 40 }, pointer, target)).toBeNull()
+  })
+
+  it('pulls toward bait with distance falloff and a stable centered bearing', () => {
+    const toward = baitSteering(0, 0, { x: 3, z: 4, strength: 1 })
+    expect(toward.x).toBeCloseTo(0.6, 6)
+    expect(toward.z).toBeCloseTo(0.8, 6)
+    expect(toward.pull).toBe(0)
+    const near = baitSteering(0, 0, { x: 1, z: 0, strength: 0.5 })
+    expect(near.pull).toBeCloseTo((1 - 1 / 3.5) ** 2 * 0.5, 6)
+    const far = baitSteering(0, 0, { x: 10, z: 0, strength: 1 })
+    expect(far.pull).toBe(0)
+    expect(baitSteering(2, 2, { x: 2, z: 2, strength: 1 })).toEqual({ x: 0, z: 0, pull: 1 })
   })
 
   it('keeps apparent points on water and within the refracted ray cone', () => {

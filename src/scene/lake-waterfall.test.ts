@@ -1,9 +1,22 @@
-import { Scene, Mesh, BufferGeometry, BufferAttribute } from 'three/webgpu'
+import {
+  Scene,
+  Mesh,
+  BufferGeometry,
+  BufferAttribute,
+  InstancedBufferAttribute,
+} from 'three/webgpu'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
+import { createLakeBed } from './lake-bed'
+import { LakeSplashes } from './lake-splashes'
+import type { SplashJet } from './lake-splashes'
 import { LakeWaterfall } from './lake-waterfall'
-import type { VoxelWaterfall } from './voxel-world'
+import { createPhysicsWorld, loadPhysics } from './physics-world'
+import { createVoxelIndex } from './voxel-spatial'
+import type { Voxel, VoxelWaterfall } from './voxel-world'
+import { WindModel } from './wind'
+import type { WindState } from './wind'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -20,22 +33,44 @@ const fall = {
   ],
 } satisfies VoxelWaterfall
 
+const steadyWind: WindState = {
+  direction: [1, 0],
+  speed: 2,
+  displacement: [0, 0],
+  rotation: [0, 0],
+  rotationVelocity: 0,
+  response: [0, 0, 0, 0],
+}
+
+const physicsFor = async (voxels: Voxel[] = []) =>
+  createPhysicsWorld(await loadPhysics(), createVoxelIndex(voxels))
+
+const streamed = (waterfall: LakeWaterfall, name: string) => {
+  const found = waterfall.curtain.geometry.getAttribute(name)
+  if (!(found instanceof InstancedBufferAttribute)) throw new Error(`Missing ${name}`)
+  if (!(found.array instanceof Float32Array)) throw new Error(`Missing ${name} data`)
+  return found.array
+}
+
 describe('lake waterfall lifecycle', () => {
-  it('orients impacts into the lake without catching up a suspended emission clock', () => {
+  it('jets foot spray into the lake without catching up a suspended emission clock', async () => {
     const scene = new Scene()
-    const waterfall = new LakeWaterfall(scene, fall, false, false)
-    const hits: Array<{ x: number; z: number; radius: number; velocity: number }> = []
-    waterfall.onImpact = (x, z, radius, velocity) => hits.push({ x, z, radius, velocity })
-    waterfall.update(0, 1, 1)
-    waterfall.update(0.3, 1, 1)
-    waterfall.update(60, 1, 1)
-    waterfall.update(60, 1, 1)
-    expect(hits).toHaveLength(2)
-    for (const hit of hits) {
-      expect(hit.x).toBeGreaterThan(fall.x)
-      expect(Math.abs(hit.z - fall.z)).toBeLessThan(fall.width / 2)
-      expect(hit.radius).toBeGreaterThan(0)
-      expect(hit.velocity).toBeLessThan(0)
+    const physics = await physicsFor()
+    const jets: SplashJet[] = []
+    const waterfall = new LakeWaterfall(scene, fall, false, false, (jet) => jets.push(jet), physics)
+    waterfall.update(0, 1, 1, steadyWind)
+    waterfall.update(0.3, 1, 1, steadyWind)
+    // A suspended tab resumes with one capped frame of debt, never a burst.
+    waterfall.update(60, 1, 1, steadyWind)
+    waterfall.update(60, 1, 1, steadyWind)
+    expect(jets.length).toBeGreaterThan(0)
+    expect(jets.length).toBeLessThanOrEqual(2 * (48 * 0.1 + 1))
+    for (const jet of jets) {
+      expect(jet.x).toBeGreaterThan(fall.x)
+      expect(Math.abs(jet.z - fall.z)).toBeLessThan(fall.width / 2 + 0.01)
+      expect(jet.vy).toBeGreaterThan(0)
+      expect(jet.size).toBeGreaterThan(0)
+      expect(jet.release).toBeLessThanOrEqual(60)
     }
     const releases: Array<Mock<() => void>> = []
     waterfall.group.traverse((object) => {
@@ -49,21 +84,31 @@ describe('lake waterfall lifecycle', () => {
       material.addEventListener('dispose', release)
       releases.push(release)
     }
+    const emitted = jets.length
     waterfall.dispose()
     waterfall.dispose()
-    waterfall.update(120, 1, 1)
-    expect(hits).toHaveLength(2)
+    waterfall.update(120, 1, 1, steadyWind)
+    expect(jets).toHaveLength(emitted)
     expect(scene.children).toHaveLength(0)
     for (const release of releases) expect(release).toHaveBeenCalledTimes(1)
+    physics.dispose()
   })
 
-  it('keeps reduced-motion water visible without emitting impacts', () => {
+  it('keeps reduced-motion water visible without emitting spray', async () => {
     const scene = new Scene()
-    const waterfall = new LakeWaterfall(scene, fall, true, true)
-    const impact = vi.fn<() => void>()
-    waterfall.onImpact = impact
-    waterfall.update(0, 0, 1)
-    waterfall.update(60, 1, 1)
+    const physics = await physicsFor()
+    const waterfall = new LakeWaterfall(
+      scene,
+      fall,
+      true,
+      true,
+      () => {
+        throw new Error('Reduced motion must not emit spray')
+      },
+      physics,
+    )
+    waterfall.update(0, 0, 1, steadyWind)
+    waterfall.update(60, 1, 1, steadyWind)
     expect(waterfall.group.visible).toBe(true)
     expect(waterfall.group.children).toHaveLength(5)
     const basin = waterfall.group.getObjectByName('waterfall-basin')
@@ -76,7 +121,109 @@ describe('lake waterfall lifecycle', () => {
     for (let i = 0; i < positions.count; i++) {
       expect(positions.getY(i) + waterfall.group.position.y).toBeCloseTo(fall.top, 6)
     }
-    expect(impact).not.toHaveBeenCalled()
     waterfall.dispose()
+    physics.dispose()
+  })
+
+  it('lands foot jets through the shared pool and rings each return', async () => {
+    const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+    const bed = createLakeBed([block], 42, true)
+    const physics = await physicsFor([block])
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const waterfall = new LakeWaterfall(
+      scene,
+      fall,
+      false,
+      false,
+      (jet) => splashes.emit(jet),
+      physics,
+    )
+    const returns: number[][] = []
+    splashes.onReturn = (...impact) => returns.push(impact)
+    const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    for (let frame = 0; frame < 240; frame++) {
+      const time = frame / 60
+      const wind = calm.sample(time)
+      waterfall.update(time, 1, 1, wind)
+      splashes.update(time, wind)
+    }
+    expect(splashes.impacts.landed).toBeGreaterThan(10)
+    expect(returns).toHaveLength(splashes.impacts.landed)
+    for (const [x, z, radius, velocity] of returns) {
+      expect(x).toBeGreaterThan(fall.x)
+      expect(Math.abs((z ?? 0) - fall.z)).toBeLessThan(fall.width)
+      expect(radius).toBeGreaterThan(0)
+      expect(velocity).toBeLessThan(0)
+    }
+    waterfall.dispose()
+    splashes.dispose()
+    physics.dispose()
+    expect(scene.children).toHaveLength(0)
+  })
+
+  it('parts the curtain around the cursor blocker without penetrating its core', async () => {
+    const scene = new Scene()
+    const physics = await physicsFor()
+    physics.world.timestep = 1 / 60
+    const waterfall = new LakeWaterfall(scene, fall, false, false, () => {}, physics)
+    waterfall.setBlock(0, 1.5, 0.45, 1)
+    for (let frame = 0; frame < 240; frame++) {
+      const time = frame / 60
+      waterfall.update(time, 1, 1, steadyWind)
+      physics.world.step()
+      waterfall.syncCurtain()
+    }
+    const positions = streamed(waterfall, 'aBodyPosition')
+    const foams = streamed(waterfall, 'aBodyFoam')
+    let inBand = 0,
+      foamed = 0,
+      clearance = Infinity
+    const depths: number[] = []
+    for (let i = 0; i < foams.length; i++) {
+      const base = i * 3
+      const x = positions[base] ?? 0,
+        y = positions[base + 1] ?? 0,
+        z = positions[base + 2] ?? 0
+      if (Math.abs(y - 1.5) > 0.16) continue
+      inBand++
+      depths.push(z)
+      clearance = Math.min(clearance, Math.hypot(x, z - 0.69))
+      if ((foams[i] ?? 0) > 0.5) foamed++
+    }
+    expect(inBand).toBeGreaterThan(20)
+    depths.sort((a, b) => a - b)
+    // The sheet really falls through the blocker's drift line; the void is in the water.
+    expect(Math.abs((depths[Math.floor(depths.length / 2)] ?? 0) - 0.69)).toBeLessThan(0.25)
+    expect(clearance).toBeGreaterThan((0.04 + 0.41 * 0.65 + 0.035) * 0.8)
+    expect(foamed).toBeGreaterThan(0)
+    waterfall.dispose()
+    physics.dispose()
+  })
+
+  it('replays the same curtain deterministically from the seed', async () => {
+    const run = async () => {
+      const physics = await physicsFor()
+      physics.world.timestep = 1 / 60
+      const waterfall = new LakeWaterfall(scene, fall, false, false, () => {}, physics)
+      waterfall.setBlock(0.2, 1.2, 0.45, 0.8)
+      for (let frame = 0; frame < 120; frame++) {
+        const time = frame / 60
+        waterfall.update(time, 1, 1, steadyWind)
+        physics.world.step()
+        waterfall.syncCurtain()
+      }
+      const positions = Array.from(streamed(waterfall, 'aBodyPosition'))
+      const velocities = Array.from(streamed(waterfall, 'aBodyVelocity'))
+      waterfall.dispose()
+      physics.dispose()
+      return { positions, velocities }
+    }
+    const scene = new Scene()
+    const first = await run()
+    const second = await run()
+    expect(second.positions).toEqual(first.positions)
+    expect(second.velocities).toEqual(first.velocities)
+    expect(scene.children).toHaveLength(0)
   })
 })

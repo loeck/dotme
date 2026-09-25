@@ -205,6 +205,55 @@ describe('wave impacts', () => {
     physics.dispose()
     expect(scene.children).toHaveLength(0)
   })
+
+  it('flies an emitted jet ballistically and rings its water landing', async () => {
+    const scene = new Scene()
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(scene, bed, 7, true, physics)
+    const returns: number[][] = []
+    splashes.onReturn = (...impact) => returns.push(impact)
+    splashes.emit({
+      x: 8,
+      y: 1.2,
+      z: 6,
+      vx: 0.4,
+      vy: 1,
+      vz: -0.3,
+      size: 0.03,
+      drag: 0.5,
+      windX: 0,
+      windZ: 0,
+      release: 0,
+    })
+    let peak = 0
+    for (let frame = 0; frame < 180; frame++) {
+      const time = frame / 60
+      splashes.update(time, calm.sample(time))
+      if (splashes.active) {
+        const matrix = new Matrix4()
+        let top = -Infinity
+        for (let i = 0; i < splashes.capacity; i++) {
+          splashes.mesh.getMatrixAt(i, matrix)
+          const scale = new Vector3().setFromMatrixScale(matrix)
+          if (scale.lengthSq() < 0.000001) continue
+          top = Math.max(top, new Vector3().setFromMatrixPosition(matrix).y)
+        }
+        peak = Math.max(peak, top)
+      }
+    }
+    expect(peak).toBeGreaterThan(1.2)
+    expect(splashes.active).toBe(0)
+    expect(splashes.impacts.landed).toBe(1)
+    expect(returns).toHaveLength(1)
+    const [x, z, radius, velocity] = required(returns[0])
+    expect(required(x)).toBeGreaterThan(8)
+    expect(required(z)).toBeLessThan(6)
+    expect(required(radius)).toBeGreaterThan(0)
+    expect(required(velocity)).toBeLessThan(0)
+    splashes.dispose()
+    physics.dispose()
+    expect(scene.children).toHaveLength(0)
+  })
 })
 
 it('combines clustered landing waves and clears both the crown and normal contribution', async () => {

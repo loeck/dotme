@@ -1,6 +1,7 @@
 import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { Camera, Object3D, Scene, Vector3, WebGPURenderer } from 'three/webgpu'
 
+import type { FishBait } from './fish-pointer'
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
@@ -49,8 +50,6 @@ export class SceneDetails {
   private readonly splashes: LakeSplashes
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
-  private waterImpact: LakeSplashes['onReturn']
-  private effectTime = 0
   private readonly wetness = this.resources.own(new ShoreWetness())
   private readonly sand: LakeSand
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
@@ -80,12 +79,15 @@ export class SceneDetails {
     )
     if (world.waterfall) {
       this.waterfall = this.resources.own(
-        new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),
+        new LakeWaterfall(
+          scene,
+          world.waterfall,
+          mobile,
+          reducedMotion,
+          (jet) => this.splashes.emit(jet),
+          physics,
+        ),
       )
-      this.waterfall.onImpact = (x, z, radius, velocity, energy) => {
-        this.splashes.impacts.add(x, z, this.effectTime, energy)
-        this.waterImpact?.(x, z, radius, velocity)
-      }
     }
   }
 
@@ -110,11 +112,14 @@ export class SceneDetails {
   }
 
   setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: LakeWaterMaterial['uniforms']) {
-    this.waterImpact = handler
     this.splashes.impacts.setWaterSurface(uniforms)
     this.waterfall?.setWaterSurface(uniforms)
     if (handler) this.splashes.onReturn = handler
     else delete this.splashes.onReturn
+  }
+
+  setWaterfallBlock(across: number, height: number, radius: number, strength: number) {
+    this.waterfall?.setBlock(across, height, radius, strength)
   }
 
   setEnvironment(environment: Partial<DetailEnvironment>) {
@@ -132,10 +137,10 @@ export class SceneDetails {
     moonIntensity: number,
     intro: number,
     pointerLightStrength = 1,
+    bait: FishBait | null = null,
   ) {
     if (this.disposed) return
     const { daylight, rainIntensity } = this.environment
-    this.effectTime = time
     this.caustics.update(
       time,
       wind,
@@ -143,10 +148,12 @@ export class SceneDetails {
       waterPointer,
       pointerLightStrength,
     )
-    this.fish.update(time, dt, waterPointer, scenePointer)
+    this.fish.update(time, dt, waterPointer, scenePointer, bait)
     this.ray.update(time, dt)
-    this.waterfall?.update(time, daylight, intro)
+    this.waterfall?.update(time, daylight, intro, wind)
     this.splashes.update(time, wind, this.reducedMotion, intro)
+    // The curtain uploads after the shared step; frozen when reduced motion holds it.
+    if (!this.reducedMotion) this.waterfall?.syncCurtain()
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
     this.fireflies.update(time, wind, {
       reducedMotion: this.reducedMotion,
@@ -186,7 +193,6 @@ export class SceneDetails {
   dispose() {
     if (this.disposed) return
     this.disposed = true
-    this.waterImpact = undefined
     this.resources.dispose()
   }
 }

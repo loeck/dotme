@@ -228,6 +228,34 @@ describe('submerged fish', () => {
     physics.dispose()
   })
 
+  it('steers toward clicked bait while the shoal route still reforms', async () => {
+    const bed = lakeBed(12, true)
+    const physics = await physicsFor(12, true)
+    const baseline = new LakeFish(new Scene(), bed, 12, true, physics)
+    const fed = new LakeFish(new Scene(), bed, 12, true, physics)
+    const matrix = new Matrix4()
+    const position = new Vector3()
+    baseline.update(1 / 60, 1 / 60)
+    fed.update(1 / 60, 1 / 60)
+    baseline.mesh.getMatrixAt(0, matrix)
+    position.setFromMatrixPosition(matrix)
+    const bait = { x: position.x + 1.5, z: position.z, strength: 1 }
+    for (let frame = 2; frame <= 120; frame++) {
+      baseline.update(frame / 60, 1 / 60)
+      fed.update(frame / 60, 1 / 60, null, null, bait)
+    }
+    const plain = new Vector3()
+    const hungry = new Vector3()
+    baseline.mesh.getMatrixAt(0, matrix)
+    plain.setFromMatrixPosition(matrix)
+    fed.mesh.getMatrixAt(0, matrix)
+    hungry.setFromMatrixPosition(matrix)
+    const target = new Vector3(bait.x, hungry.y, bait.z)
+    expect(hungry.distanceTo(target)).toBeLessThan(plain.distanceTo(target))
+    for (const fish of [baseline, fed]) fish.dispose()
+    physics.dispose()
+  })
+
   it('contains three distinct anatomical profiles with deterministic individual sizes', async () => {
     const bed = lakeBed(42, true)
     const physics = await physicsFor(42, true)

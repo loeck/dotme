@@ -3,6 +3,7 @@ import {
   If,
   Loop,
   Continue,
+  exp,
   float,
   min,
   mix,
@@ -16,6 +17,7 @@ import {
 import type { Data3DTexture, Node } from 'three/webgpu'
 import { Color, Vector2, Vector3, Vector4 } from 'three/webgpu'
 
+import { SKY_HOLE_COUNT, SKY_HOLE_RADIUS } from './cursor-world'
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 
@@ -64,6 +66,7 @@ export function createCloudBodies(seed: number, weather: WeatherPreset = 'partly
 /** The same TSL density graph drives visible radiance and Beer–Lambert shadows. */
 export function createCloudVolume(seed: number, weather: WeatherPreset, noise: Data3DTexture) {
   const bodies = createCloudBodies(seed, weather)
+  const skyHoles = Array.from({ length: SKY_HOLE_COUNT }, () => new Vector4(0, 1, 0, 0))
   const uniforms = {
     uCloudCoverage: uniform(bodies.uCloudCoverage.value),
     uCloudDensity: uniform(bodies.uCloudDensity.value),
@@ -75,6 +78,7 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
     uCloudLightDirection: uniform(new Vector3(0, 1, 0)),
     uCloudAmbient: uniform(new Color()),
     uCloudDirect: uniform(new Color()),
+    uSkyHoles: uniformArray<'vec4'>(skyHoles, 'vec4'),
   }
   const density = (world: Node<'vec3'>, detail: boolean) =>
     Fn(() => {
@@ -127,9 +131,25 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
           if (detail) mass.subAssign(texture3D(noise, noisePoint.mul(2.7)).g.oneMinus().mul(0.12))
           total.addAssign(smoothstep(0.03, 0.5, mass).mul(envelope).mul(0.75))
         })
+        // Cursor-punched holes refill on the CPU; the light march keeps the
+        // uncut field so shadows stay stable while the visible sky opens.
+        if (detail) {
+          const holeRadius2 = float(SKY_HOLE_RADIUS).mul(SKY_HOLE_RADIUS)
+          Loop(SKY_HOLE_COUNT, ({ i }) => {
+            const hole = uniforms.uSkyHoles.element(i)
+            If(hole.w.greaterThan(0), () => {
+              const axial = world.dot(hole.xyz)
+              const radial = world.sub(hole.xyz.mul(axial))
+              const squared = radial.dot(radial)
+              If(squared.lessThan(holeRadius2.mul(9)), () => {
+                total.subAssign(exp(squared.div(holeRadius2).negate()).mul(hole.w).mul(3))
+              })
+            })
+          })
+        }
       })
-      return min(total, 1).mul(uniforms.uCloudDensity)
+      return min(total.max(0), 1).mul(uniforms.uCloudDensity)
     })()
-  return { uniforms, density }
+  return { uniforms, density, skyHoles }
 }
 export type CloudVolume = ReturnType<typeof createCloudVolume>

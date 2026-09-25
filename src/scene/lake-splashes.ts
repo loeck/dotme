@@ -92,6 +92,8 @@ type PendingDrop = {
   windZ: number
   release: number
 }
+/** Externally sourced droplet, e.g. a waterfall foot jet. Shared pool and stepper. */
+export type SplashJet = PendingDrop
 const RING_SAMPLES = 3
 type Drop = {
   body: RigidBody
@@ -153,7 +155,9 @@ export class LakeSplashes {
     this.physics = physics
     this.state = (seed ^ 0x591a7e) >>> 0
     this.impacts = new SplashImpacts(scene, mobile)
-    this.capacity = mobile ? 144 : 320
+    // The waterfall foot jets share the pool; the headroom keeps the ring
+    // cursor from evicting live shore drops.
+    this.capacity = mobile ? 192 : 448
     const { ColliderDesc, RigidBodyDesc } = physics.rapier
     physics.world.timestep = SPLASH_STEP
     this.drops = Array.from({ length: this.capacity }, () => {
@@ -534,6 +538,11 @@ export class LakeSplashes {
     }
     this.transform.scale.setScalar(0)
     opacity.setX(index, 0)
+  }
+
+  /** Queues an externally sourced droplet; its landing rings like a shore drop. */
+  emit(jet: SplashJet) {
+    this.pending.push(jet)
   }
 
   update(time: number, wind: WindState, reducedMotion = false, intro = 1) {

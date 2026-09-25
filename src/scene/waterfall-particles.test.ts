@@ -1,10 +1,9 @@
-import { uniform } from 'three/tsl'
 import { InstancedBufferAttribute } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
 import { WATER_LEVEL } from './lake-bed'
 import type { VoxelWaterfall } from './voxel-world'
-import { createWaterfallParticles } from './waterfall-particles'
+import { createWaterfallParticles, curtainParcelCount } from './waterfall-particles'
 
 const fall = {
   x: -16,
@@ -16,39 +15,36 @@ const fall = {
   basin: [],
 } satisfies VoxelWaterfall
 
+const attribute = (field: ReturnType<typeof createWaterfallParticles>, name: string) => {
+  const found = field.geometry.getAttribute(name)
+  if (!(found instanceof InstancedBufferAttribute)) throw new Error(`Missing ${name}`)
+  return found
+}
+
 describe('waterfall parcel volume', () => {
-  it('keeps the complete source volume underwater and distributes emission through time', () => {
-    const field = createWaterfallParticles(fall, false, uniform(0))
-    const origins = field.geometry.getAttribute('aWaterfallOrigin')
-    const dynamics = field.geometry.getAttribute('aWaterfallDynamics')
-    if (
-      !(origins instanceof InstancedBufferAttribute) ||
-      !(dynamics instanceof InstancedBufferAttribute)
-    )
-      throw new Error('Missing waterfall emission data')
+  it('sizes slots deterministically and streams body state every frame', () => {
+    const field = createWaterfallParticles(fall, false)
     const height = fall.top - WATER_LEVEL
-    let minPhase = 1,
-      maxPhase = 0,
-      minDepth = Infinity,
-      maxDepth = -Infinity
-    let sourceInside = true
-    for (let i = 0; i < origins.count; i++) {
-      const radius = origins.getW(i)
-      sourceInside &&=
-        origins.getY(i) + radius <= height + 1e-6 &&
-        origins.getY(i) - radius >= height - 0.2 - 1e-6 &&
-        Math.abs(origins.getX(i)) + radius <= fall.width / 2 + 1e-6 &&
-        dynamics.getW(i) > 0
-      minPhase = Math.min(minPhase, dynamics.getX(i))
-      maxPhase = Math.max(maxPhase, dynamics.getX(i))
-      minDepth = Math.min(minDepth, origins.getZ(i))
-      maxDepth = Math.max(maxDepth, origins.getZ(i))
+    expect(field.count).toBe(curtainParcelCount(false))
+    expect(field.geometry.instanceCount).toBe(field.count)
+    expect(field.sizes).toHaveLength(field.count)
+    const sizes = attribute(field, 'aBodySize')
+    expect(sizes.count).toBe(field.count)
+    expect(Array.from(sizes.array)).toEqual(Array.from(field.sizes))
+    let min = Infinity,
+      max = -Infinity
+    for (const size of field.sizes) {
+      min = Math.min(min, size)
+      max = Math.max(max, size)
     }
-    expect(sourceInside).toBe(true)
-    expect(minPhase).toBeLessThan(0.01)
-    expect(maxPhase).toBeGreaterThan(0.99)
-    expect(maxDepth - minDepth).toBeGreaterThan(0.045)
-    expect(field.geometry.instanceCount).toBe(origins.count)
+    expect(min).toBeGreaterThanOrEqual(0.035)
+    expect(max).toBeLessThanOrEqual(0.06)
+    expect(max - min).toBeGreaterThan(0.015)
+    for (const name of ['aBodyPosition', 'aBodyVelocity', 'aBodyFoam']) {
+      const stream = attribute(field, name)
+      expect(stream.count).toBe(field.count)
+      expect(stream.array.every((value) => value === 0)).toBe(true)
+    }
     expect(field.bounds.min.y).toBeLessThan(-0.2)
     expect(field.bounds.max.y).toBeGreaterThan(height)
     expect(field.geometry.boundingSphere?.radius).toBeGreaterThan(height / 2)
@@ -56,15 +52,13 @@ describe('waterfall parcel volume', () => {
   })
 
   it('uses deterministic independent parcels and reduces geometry on mobile', () => {
-    const desktop = createWaterfallParticles(fall, false, uniform(0))
-    const repeated = createWaterfallParticles(fall, false, uniform(12))
-    const different = createWaterfallParticles({ ...fall, seed: 1 }, false, uniform(0))
-    const mobile = createWaterfallParticles(fall, true, uniform(0))
-    const desktopOrigins = desktop.geometry.getAttribute('aWaterfallOrigin')
-    expect(desktopOrigins.array).toEqual(repeated.geometry.getAttribute('aWaterfallOrigin').array)
-    expect(desktopOrigins.array).not.toEqual(
-      different.geometry.getAttribute('aWaterfallOrigin').array,
-    )
+    const desktop = createWaterfallParticles(fall, false)
+    const repeated = createWaterfallParticles(fall, false)
+    const different = createWaterfallParticles({ ...fall, seed: 1 }, false)
+    const mobile = createWaterfallParticles(fall, true)
+    expect(Array.from(repeated.sizes)).toEqual(Array.from(desktop.sizes))
+    expect(Array.from(different.sizes)).not.toEqual(Array.from(desktop.sizes))
+    expect(mobile.count).toBe(curtainParcelCount(true))
     const desktopIndex = desktop.geometry.getIndex()
     const mobileIndex = mobile.geometry.getIndex()
     if (!desktopIndex || !mobileIndex) throw new Error('Missing parcel sphere topology')

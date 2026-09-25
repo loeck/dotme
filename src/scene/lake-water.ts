@@ -81,6 +81,7 @@ export class LakeWaterMaterial extends NodeMaterial {
     uBedViewProjection: uniform(new Matrix4()),
     uBedTexel: uniform(new Vector2(1, 1)),
     uPointer: uniform(new Vector3()),
+    uSplash: uniform(new Vector4(0, 0, -100, 0)),
     uWaterScatter: uniform(new Color().setRGB(0.0022, 0.0043, 0.0065)),
     uLightDirection: uniform(new Vector3(0, 1, 0)),
     uLightColor: uniform(new Color(0, 0, 0)),
@@ -237,6 +238,25 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(0.97963)
       .add(0.02037)
     const reveal = exp(p.sub(u.uPointer.xy).dot(p.sub(u.uPointer.xy)).div(-2.8)).mul(u.uPointer.z)
+    const splashAge = u.uTime.sub(u.uSplash.z)
+    const splashDistance = p.sub(u.uSplash.xy).length()
+    const splashFront = splashAge.mul(1.6)
+    const splashGate = splashAge
+      .greaterThanEqual(0)
+      .select(1, 0)
+      .mul(float(1).sub(smoothstep(1.6, 2.6, splashFront)))
+    const thinRing = (lag: number) => exp(splashDistance.sub(splashFront.sub(lag)).pow(2).mul(-28))
+    const splashRing = thinRing(0)
+      .add(thinRing(0.45).mul(0.5))
+      .mul(0.55)
+      .mul(exp(splashAge.mul(-2.2)))
+      .mul(splashGate)
+      .mul(u.uSplash.w)
+    const splashCrown = exp(splashDistance.pow(2).mul(-9))
+      .mul(exp(splashAge.mul(-5)))
+      .mul(splashGate)
+      .mul(u.uSplash.w)
+      .mul(0.7)
     const roughness = mix(
       mix(0.03, 0.09, u.uWaterAgitation).mul(mix(1, 0.7, u.uNight)),
       0.025,
@@ -418,7 +438,10 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(arrival)
       .mul(smoothstep(0.38, 0.7, lace))
       .mul(float(1).sub(smoothstep(1.2, 1.9, distance)))
-    const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam))
+    const foam = min(
+      0.97,
+      film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(splashRing).add(splashCrown),
+    )
     const sparkle = normalize(
       normal.add(
         vec3(

@@ -5,6 +5,19 @@ import type { FireflyPointer } from './lake-fireflies'
 
 type Point = Readonly<{ x: number; y: number; z: number }>
 export type FishPointerTarget = { x: number; z: number; strength: number }
+export type FishBait = Readonly<{ x: number; z: number; strength: number }>
+export type BaitSteering = Readonly<{ x: number; z: number; pull: number }>
+
+/** Unit bearing toward a clicked food drop, fading with distance. */
+export function baitSteering(fishX: number, fishZ: number, bait: FishBait): BaitSteering {
+  const dx = bait.x - fishX
+  const dz = bait.z - fishZ
+  const distance = Math.hypot(dx, dz)
+  const proximity = Math.max(0, 1 - distance / 3.5)
+  const pull = proximity * proximity * bait.strength
+  if (!(distance > 1e-3)) return { x: 0, z: 0, pull }
+  return { x: dx / distance, z: dz / distance, pull }
+}
 
 const origin = new Vector3()
 const surface = new Vector3()

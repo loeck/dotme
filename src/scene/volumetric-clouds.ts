@@ -217,6 +217,18 @@ export class VolumetricClouds {
     sphere.frustumCulled = false
     this.scene.add(sphere)
   }
+  /** Cursor-punched holes as ray direction plus strength; missing slots stay shut. */
+  setSkyHoles(holes: readonly (readonly [number, number, number, number])[]) {
+    const slots = this.volume.skyHoles
+    for (let i = 0; i < slots.length; i++) {
+      const hole = holes[i]
+      const slot = slots[i]
+      if (!slot) continue
+      if (hole) slot.set(hole[0], hole[1], hole[2], hole[3])
+      else slot.set(0, 0, 1, 0)
+    }
+  }
+
   sample(direction: Node<'vec3'>) {
     return mix(
       vec4(0, 0, 0, 1),

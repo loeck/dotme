@@ -47,9 +47,16 @@ import { waterfallSound } from '../audio/environment'
 import { sceneParams } from '../scene-params'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { compileWithoutCulling } from './compile-scene'
+import {
+  CursorTrail,
+  sampleWaterfallHit,
+  seesWorld,
+  WATERFALL_OCCLUSION_TOLERANCE,
+} from './cursor-world'
 import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
+import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
@@ -62,7 +69,7 @@ import type { PhysicsWorld } from './physics-world'
 import { PointerLight } from './pointer-light'
 import { prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
-import { DEFAULT_RAIN } from './rain-simulation'
+import { DEFAULT_RAIN, UMBRELLA_RADIUS } from './rain-simulation'
 import type { RainState } from './rain-simulation'
 import { RAIN_LAYER, RainEffect } from './RainEffect'
 import { ResourceScope } from './resource-scope'
@@ -174,7 +181,7 @@ export class VoxelLandscapeEngine {
   private readonly lampLights: Array<{
     source: VoxelLamp
     light: PointLight
-    cube: Mesh<BoxGeometry, MeshBasicNodeMaterial>
+    bulb: Mesh<SphereGeometry, MeshBasicNodeMaterial>
     glow: Mesh<PlaneGeometry, MeshBasicNodeMaterial>
     color: Color
     glowStrength: { value: number }
@@ -203,6 +210,12 @@ export class VoxelLandscapeEngine {
   private pointerBusy = false
   private pendingPointer: { x: number; y: number; time: number } | null = null
   private previousPointer: { x: number; y: number; time: number } | null = null
+  private readonly cursorTrail = new CursorTrail()
+  private readonly skyHoleFrame: [number, number, number, number][] = []
+  private readonly blockPoint = new Vector2(0, 0)
+  private blockStrength = 0
+  private readonly umbrella = { x: 0, y: 0, z: 0, radius: UMBRELLA_RADIUS }
+  private bait: { x: number; z: number; born: number } | null = null
   private readonly wind: WindModel
   private readonly windUniforms = createWindUniforms()
   private readonly clouds: VolumetricClouds
@@ -585,12 +598,12 @@ export class VoxelLandscapeEngine {
 
     this.buildShadowCasters(terrain)
 
-    const capGeometry = new BoxGeometry(0.17, 0.17, 0.17)
+    const bulbGeometry = new SphereGeometry(0.085, 6, 5)
     const glowGeometry = new PlaneGeometry(1.3, 1.3)
-    this.geometries.push(this.resources.own(capGeometry), this.resources.own(glowGeometry))
+    this.geometries.push(this.resources.own(bulbGeometry), this.resources.own(glowGeometry))
     world.lamps.forEach((lamp) => {
-      const cap = new Mesh(
-        capGeometry,
+      const bulb = new Mesh(
+        bulbGeometry,
         new MeshBasicNodeMaterial({
           color: 0xb4d9f5,
           transparent: true,
@@ -598,12 +611,14 @@ export class VoxelLandscapeEngine {
           depthWrite: false,
         }),
       )
-      cap.position.set(lamp.x, lamp.y, lamp.z)
-      this.scene.add(cap)
-      this.objects.push(cap)
-      this.materials.push(this.resources.own(cap.material))
+      // Waterfall and splashes draw at renderOrder 2; lamps must blend after them.
+      bulb.renderOrder = 3
+      bulb.position.set(lamp.x, lamp.y, lamp.z)
+      this.scene.add(bulb)
+      this.objects.push(bulb)
+      this.materials.push(this.resources.own(bulb.material))
       const light = new PointLight(0xa5d4ee, 22 * lamp.intensity, 8, 2)
-      light.position.copy(cap.position)
+      light.position.copy(bulb.position)
       this.configurePointShadow(light)
       this.scene.add(light)
       this.objects.push(light)
@@ -629,7 +644,8 @@ export class VoxelLandscapeEngine {
         1,
       )
       const glow = new Mesh(glowGeometry, glowMaterial)
-      glow.position.copy(cap.position)
+      glow.renderOrder = 3
+      glow.position.copy(bulb.position)
       glow.frustumCulled = false
       this.scene.add(glow)
       this.objects.push(glow)
@@ -637,9 +653,9 @@ export class VoxelLandscapeEngine {
       this.lampLights.push({
         source: lamp,
         light,
-        cube: cap,
+        bulb,
         glow,
-        color: cap.material.color.clone(),
+        color: bulb.material.color.clone(),
         glowStrength,
       })
     })
@@ -782,7 +798,7 @@ export class VoxelLandscapeEngine {
 
   private projectPointer(clientX: number, clientY: number): boolean {
     const canvas = this.renderer.domElement
-    if (document.elementFromPoint(clientX, clientY) !== canvas) return false
+    if (!seesWorld(document.elementFromPoint(clientX, clientY))) return false
     const bounds = this.pointerBounds ?? canvas.getBoundingClientRect()
     const x = ((clientX - bounds.left) / bounds.width) * 2 - 1
     const y = -((clientY - bounds.top) / bounds.height) * 2 + 1
@@ -845,6 +861,51 @@ export class VoxelLandscapeEngine {
       dt,
       this.reducedMotion,
     )
+  }
+
+  /** Cursor relief valves for the waterfall, clouds and rain; trails decay on their own. */
+  private updateCursorWorld(pointerOnScene: boolean, waterPoint: Vector3 | null, dt: number) {
+    const ray = this.raycaster.ray
+    let solid: number | null = null
+    const solidDistance = () => {
+      if (solid === null) {
+        solid = this.physics.castDistance(ray.origin, ray.direction, 130) ?? Infinity
+      }
+      return solid
+    }
+    let blockTarget = 0
+    if (pointerOnScene && !this.reducedMotion && this.waterfall && this.details) {
+      const hit = sampleWaterfallHit(ray.origin, ray.direction, this.waterfall, WATER_LEVEL)
+      const waterDistance = waterPoint ? ray.origin.distanceTo(waterPoint) : Infinity
+      if (
+        hit &&
+        hit.distance < waterDistance &&
+        solidDistance() > hit.distance - WATERFALL_OCCLUSION_TOLERANCE
+      ) {
+        this.blockPoint.set(hit.across, hit.height)
+        blockTarget = hit.strength * this.intro
+      }
+    }
+    const rate = this.reducedMotion ? 1 : 1 - Math.exp(-Math.max(0, dt) * 10)
+    this.blockStrength += (blockTarget - this.blockStrength) * rate
+    if (Math.abs(this.blockStrength - blockTarget) < 0.0005) this.blockStrength = blockTarget
+    this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.45, this.blockStrength)
+    if (pointerOnScene && !this.reducedMotion && !waterPoint && ray.direction.y > 0.02) {
+      if (solidDistance() === Infinity)
+        this.cursorTrail.push(ray.direction.x, ray.direction.y, ray.direction.z, this.elapsed)
+    }
+    this.skyHoleFrame.length = 0
+    for (const hole of this.cursorTrail.snapshot(this.elapsed))
+      this.skyHoleFrame.push([hole.x, hole.y, hole.z, hole.strength * this.intro])
+    this.clouds.setSkyHoles(this.skyHoleFrame)
+    if (pointerOnScene && !this.reducedMotion && this.rain.group.visible) {
+      this.umbrella.x = ray.origin.x + ray.direction.x * 14
+      this.umbrella.y = ray.origin.y + ray.direction.y * 14
+      this.umbrella.z = ray.origin.z + ray.direction.z * 14
+      this.rain.setRepulsor(this.umbrella)
+    } else {
+      this.rain.setRepulsor(null)
+    }
   }
 
   private async processPointer() {
@@ -914,7 +975,9 @@ export class VoxelLandscapeEngine {
     const point = this.hitWater(event.clientX, event.clientY)
     if (!point) return
     // Queue the contact immediately so a quick touch ending before the next frame still ripples.
-    this.simulation.addImpulse(point.x, point.z, 0.7, -0.26)
+    this.simulation.addImpulse(point.x, point.z, 0.55, -0.32)
+    this.water.material.uniforms.uSplash.value.set(point.x, point.z, this.elapsed, 1)
+    this.bait = { x: point.x, z: point.z, born: this.elapsed }
     this.dragging = true
     this.dragPointerId = event.pointerId
     this.pointerType = event.pointerType
@@ -1278,6 +1341,7 @@ export class VoxelLandscapeEngine {
       this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
     this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
+    this.updateCursorWorld(pointerOnScene, waterPoint, dt)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
@@ -1336,8 +1400,7 @@ export class VoxelLandscapeEngine {
     let fireflyPointer = null
     if (
       this.pointerActive &&
-      document.elementFromPoint(this.pointerClient.x, this.pointerClient.y) ===
-        this.renderer.domElement
+      seesWorld(document.elementFromPoint(this.pointerClient.x, this.pointerClient.y))
     ) {
       const bounds = this.pointerBounds ?? this.renderer.domElement.getBoundingClientRect()
       this.detailPointerNdc.set(
@@ -1360,6 +1423,12 @@ export class VoxelLandscapeEngine {
       daylight:
         typeof daylight === 'number' && Number.isFinite(daylight) ? daylight : light.daylight,
     })
+    let bait: FishBait | null = null
+    if (this.bait && !this.reducedMotion) {
+      const strength = Math.exp(-(this.elapsed - this.bait.born) / 6) * this.intro
+      if (strength > 0.01) bait = { x: this.bait.x, z: this.bait.z, strength }
+      else this.bait = null
+    }
     this.details?.update(
       this.elapsed,
       dt,
@@ -1369,6 +1438,7 @@ export class VoxelLandscapeEngine {
       light.moonIntensity,
       this.intro,
       light.pointerLightStrength,
+      bait,
     )
     const wake = this.details?.rayWake
     if (wake) {
@@ -1396,7 +1466,7 @@ export class VoxelLandscapeEngine {
       this.reducedMotion,
     )
     for (const [index, lamp] of this.lampLights.entries()) {
-      lamp.cube.visible = lamp.glow.visible = this.nightLightFade > 0
+      lamp.bulb.visible = lamp.glow.visible = this.nightLightFade > 0
       const source = lamp.source
       const motion = Math.sin(this.elapsed * source.speed + source.phase)
       // Long, independent quiet intervals separate soft changes tied to the bobbing.
@@ -1415,18 +1485,18 @@ export class VoxelLandscapeEngine {
       const drift = this.reducedMotion ? 0 : motion * source.amplitude * emergence
       const sway = this.reducedMotion ? 0 : source.driftRadius * emergence
       const descent = this.reducedMotion ? 0 : (source.y - source.groundY + 0.25) * (1 - emergence)
-      lamp.cube.position.set(
+      lamp.bulb.position.set(
         source.x + Math.sin(this.elapsed * source.speed * 0.73 + source.phase) * sway,
         source.y + drift - descent,
         source.z + Math.cos(this.elapsed * source.speed * 0.61 + source.phase * 1.3) * sway * 0.7,
       )
-      lamp.light.position.copy(lamp.cube.position)
-      lamp.glow.position.copy(lamp.cube.position)
+      lamp.light.position.copy(lamp.bulb.position)
+      lamp.glow.position.copy(lamp.bulb.position)
       lamp.glow.quaternion.copy(this.camera.quaternion)
       lamp.light.intensity = 22 * source.intensity * energy
       lamp.glowStrength.value = 0.58 * energy
-      lamp.cube.material.opacity = presence
-      lamp.cube.material.color.copy(lamp.color).multiplyScalar(breathing)
+      lamp.bulb.material.opacity = presence
+      lamp.bulb.material.color.copy(lamp.color).multiplyScalar(breathing)
     }
     if (this.moteMesh) {
       this.moteMesh.visible = this.nightLightFade > 0

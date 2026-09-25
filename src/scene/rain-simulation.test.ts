@@ -236,4 +236,19 @@ describe('rain contacts on moving water', () => {
     expect(alive.every((drop) => drop.y > 0.18)).toBe(true)
     expect(simulation.impacts.every((impact) => !Number.isFinite(impact.born))).toBe(true)
   })
+
+  it('pushes drops out of the cursor repulsor and leaves distant drops alone', () => {
+    const simulation = new RainSimulation(empty(), true, 42)
+    simulation.setRainState({ ...DEFAULT_RAIN, intensity: 0.00001 })
+    simulation.setRepulsor({ x: 0, y: 5, z: 0, radius: 1.4 })
+    const inside = dropAt(simulation, 5)
+    Object.assign(inside, { x: 0.2, z: 0, vx: 0, vz: 0 })
+    simulation.update(RAIN_STEP)
+    expect(Math.hypot(inside.x, inside.y - 5, inside.z)).toBeCloseTo(1.4, 2)
+    expect(inside.vx).toBeGreaterThan(0)
+    simulation.setRepulsor(null)
+    const before = { ...inside }
+    simulation.update(RAIN_STEP)
+    expect(inside.x).toBeCloseTo(before.x + before.vx * RAIN_STEP, 3)
+  })
 })

@@ -9,6 +9,29 @@ export const IMPACT_LIFETIME = 1.1
 // evaluating its spectrum while drops are still metres above the surface.
 const WATER_MAX_Y = 0.5
 export type RainSurfaceSampler = (x: number, z: number, time: number) => number
+export type RainRepulsor = Readonly<{ x: number; y: number; z: number; radius: number }>
+export const UMBRELLA_RADIUS = 1.4
+
+/** Pushes a drop out of the cursor's dry pocket, bleeding velocity outward. */
+export function deflectDrop(
+  drop: { x: number; y: number; z: number; vx: number; vz: number },
+  repulsor: RainRepulsor,
+): boolean {
+  const dx = drop.x - repulsor.x
+  const dy = drop.y - repulsor.y
+  const dz = drop.z - repulsor.z
+  const squared = dx * dx + dy * dy + dz * dz
+  if (squared >= repulsor.radius * repulsor.radius || squared <= 1e-12) return false
+  const distance = Math.sqrt(squared)
+  const push = (repulsor.radius - distance) / distance
+  drop.x += dx * push
+  drop.y += dy * push
+  drop.z += dz * push
+  const kick = (repulsor.radius - distance) * 2
+  drop.vx += (dx / distance) * kick
+  drop.vz += (dz / distance) * kick
+  return true
+}
 const bounded = (n: number, fallback: number, min: number, max: number) =>
   Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback
 
@@ -53,6 +76,7 @@ export class RainSimulation {
   private impactCursor = 0
   private randomState: number
   private waterSurface: RainSurfaceSampler | undefined
+  private repulsor: RainRepulsor | null = null
   private readonly previous: RainPoint = { x: 0, y: 0, z: 0 }
   readonly rate: number
 
@@ -99,6 +123,11 @@ export class RainSimulation {
   /** The callback returns world-space height at simulation time, in seconds. */
   setWaterSurface(sampler?: RainSurfaceSampler) {
     this.waterSurface = sampler
+  }
+
+  /** A cursor-driven dry pocket; null disables it. */
+  setRepulsor(repulsor: RainRepulsor | null) {
+    this.repulsor = repulsor
   }
 
   /** Accepted frame time, including the fraction awaiting the next fixed step. */
@@ -225,6 +254,7 @@ export class RainSimulation {
       drop.x += drop.vx * RAIN_STEP
       drop.y += drop.vy * RAIN_STEP
       drop.z += drop.vz * RAIN_STEP
+      if (this.repulsor) deflectDrop(drop, this.repulsor)
       const solid = this.trace(this.previous, drop)
       const water = this.waterHit(this.previous, drop)
       if (solid <= 1 && solid <= water) drop.alive = false
