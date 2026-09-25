@@ -99,7 +99,8 @@ test('night shadows share pipelines across terrain batches', async ({ page }, in
   const pipelines = await page.evaluate(() => window.scenePipelineCount)
   expect(pipelines).toBeGreaterThan(0)
   // Different terrain batch sizes must not create hundreds of unique shaders.
-  expect(pipelines).toBeLessThan(120)
+  // Budget covers the water-coupling programs (floaters, foam drift) on top.
+  expect(pipelines).toBeLessThan(135)
   expect(failures).toEqual([])
   await info.attach('night-shadows', { body: await page.screenshot(), contentType: 'image/png' })
 })
