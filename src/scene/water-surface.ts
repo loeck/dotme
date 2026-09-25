@@ -214,6 +214,8 @@ const RIPPLES = (
     [1.6, 0.43, 0.024, 4.4],
     [-0.2, 0.29, 0.018, 1.2],
     [2.4, 0.19, 0.013, 5.6],
+    [2.9, 0.12, 0.009, 0.3],
+    [0.9, 0.07, 0.005, 2.2],
   ] as const
 ).map(([angle, wavelength, slope, phase]) => {
   const k = (Math.PI * 2) / wavelength

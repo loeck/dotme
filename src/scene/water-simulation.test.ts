@@ -43,6 +43,21 @@ describe('lake field', () => {
     expect(lakeIndex(a, -200, 0)).toBe(-1)
   })
 
+  it('keeps dune relief bounded, positive and out of the shallows', () => {
+    const bed = createLakeBed([{ x: 0, y: 0.2, z: 0, size: 2, color: 0 }], 19, false)
+    let rippled = 0
+    for (let i = 0; i < bed.depth.length; i++) {
+      const depth = required(bed.depth[i])
+      expect(depth).toBeGreaterThanOrEqual(0)
+      expect(depth).toBeLessThanOrEqual(7.5)
+      if (required(bed.water[i]) && depth > 1.3 && depth < 3.8) rippled++
+    }
+    expect(rippled).toBeGreaterThan(0)
+    const shore = lakeIndex(bed, 2, 0)
+    expect(bed.water[shore]).toBe(255)
+    expect(required(bed.depth[shore])).toBeLessThan(0.6)
+  })
+
   it('anchors shore contact to rock faces while excluding trees and submerged stones', () => {
     const bed = createLakeBed(
       [

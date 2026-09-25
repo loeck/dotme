@@ -5,6 +5,8 @@ import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
 import { LakeFish } from './lake-fish'
+import { LakeRay } from './lake-ray'
+import { LakeSand } from './lake-sand'
 import { LakeSplashes } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
 import { LakeWaterfall } from './lake-waterfall'
@@ -38,12 +40,18 @@ export class SceneDetails {
   private disposed = false
   private readonly caustics: LakeCaustics
   private readonly fish: LakeFish
+  private readonly ray: LakeRay
+
+  get rayWake(): LakeRay['wake'] {
+    return this.ray.wake
+  }
   private readonly splashes: LakeSplashes
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
   private waterImpact: LakeSplashes['onReturn']
   private effectTime = 0
   private readonly wetness = this.resources.own(new ShoreWetness())
+  private readonly sand: LakeSand
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
 
   private readonly reducedMotion: boolean
@@ -60,9 +68,11 @@ export class SceneDetails {
     if (reducedMotion) this.wetness.setWetness(this.environment.rainIntensity)
     try {
       this.caustics = this.resources.own(new LakeCaustics(reducedMotion))
+      this.sand = this.resources.own(new LakeSand(world.seed))
       this.fish = this.resources.own(
         new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion),
       )
+      this.ray = this.resources.own(new LakeRay(scene, world.lakeBed, world.seed, reducedMotion))
       this.fireflies = this.resources.own(
         new LakeFireflies(scene, world.lakeBed, world.seed, mobile),
       )
@@ -83,7 +93,11 @@ export class SceneDetails {
   }
 
   /** Called after global cloud hooks so every material retains all its effects. */
-  attachMaterials(terrain: Object3D, submerged: readonly MeshStandardNodeMaterial[]) {
+  attachMaterials(
+    terrain: Object3D,
+    submerged: readonly MeshStandardNodeMaterial[],
+    sand: MeshStandardNodeMaterial,
+  ) {
     const materials = new Set<MeshStandardNodeMaterial>()
     terrain.traverse((object) => {
       if (object instanceof Mesh && object.material instanceof MeshStandardNodeMaterial)
@@ -91,6 +105,7 @@ export class SceneDetails {
     })
     for (const material of materials) this.wetness.applyTo(material)
     for (const material of submerged) this.caustics.applyTo(material)
+    this.sand.applyTo(sand)
   }
 
   get impactSlopes() {
@@ -132,6 +147,7 @@ export class SceneDetails {
       pointerLightStrength,
     )
     this.fish.update(time, dt, waterPointer, scenePointer)
+    this.ray.update(time, dt)
     this.waterfall?.update(time, daylight, intro)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
