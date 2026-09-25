@@ -240,18 +240,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const reveal = exp(p.sub(u.uPointer.xy).dot(p.sub(u.uPointer.xy)).div(-2.8)).mul(u.uPointer.z)
     const splashAge = u.uTime.sub(u.uSplash.z)
     const splashDistance = p.sub(u.uSplash.xy).length()
-    const splashFront = splashAge.mul(1.6)
-    const splashGate = splashAge
-      .greaterThanEqual(0)
-      .select(1, 0)
-      .mul(float(1).sub(smoothstep(1.6, 2.6, splashFront)))
-    const thinRing = (lag: number) => exp(splashDistance.sub(splashFront.sub(lag)).pow(2).mul(-28))
-    const splashRing = thinRing(0)
-      .add(thinRing(0.45).mul(0.5))
-      .mul(0.55)
-      .mul(exp(splashAge.mul(-2.2)))
-      .mul(splashGate)
-      .mul(u.uSplash.w)
+    const splashGate = splashAge.greaterThanEqual(0).select(1, 0)
     const splashCrown = exp(splashDistance.pow(2).mul(-9))
       .mul(exp(splashAge.mul(-5)))
       .mul(splashGate)
@@ -438,10 +427,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(arrival)
       .mul(smoothstep(0.38, 0.7, lace))
       .mul(float(1).sub(smoothstep(1.2, 1.9, distance)))
-    const foam = min(
-      0.97,
-      film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(splashRing).add(splashCrown),
-    )
+    const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(splashCrown))
     const sparkle = normalize(
       normal.add(
         vec3(

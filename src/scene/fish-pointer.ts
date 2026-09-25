@@ -8,6 +8,40 @@ export type FishPointerTarget = { x: number; z: number; strength: number }
 export type FishBait = Readonly<{ x: number; z: number; strength: number }>
 export type BaitSteering = Readonly<{ x: number; z: number; pull: number }>
 
+/** Cursor motion starts a disturbance; a resting cursor gradually becomes harmless. */
+export class PointerDisturbance {
+  private x = 0
+  private y = 0
+  private present = false
+  private idle = 0
+  private strength = 0
+
+  update(pointer: FireflyPointer | null, dt: number) {
+    if (!pointer) {
+      this.present = false
+      this.idle = 0
+      this.strength = 0
+      return 0
+    }
+    const x = pointer.ndc.x * pointer.width * 0.5
+    const y = pointer.ndc.y * pointer.height * 0.5
+    const travel = this.present ? Math.hypot(x - this.x, y - this.y) : 0
+    this.x = x
+    this.y = y
+    this.present = true
+    const step = Math.max(0, Math.min(0.1, dt))
+    if (travel > 0.05) {
+      this.idle = 0
+      const target = Math.min(1, 0.35 + travel / Math.max(1, step * 220))
+      this.strength += (target - this.strength) * (1 - Math.exp(-step * 12))
+    } else {
+      this.idle += step
+      if (this.idle > 0.3) this.strength *= Math.exp(-step * 1.8)
+    }
+    return this.strength
+  }
+}
+
 /** Unit bearing toward a clicked food drop, fading with distance. */
 export function baitSteering(fishX: number, fishZ: number, bait: FishBait): BaitSteering {
   const dx = bait.x - fishX

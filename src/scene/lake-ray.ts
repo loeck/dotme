@@ -30,6 +30,31 @@ export type RayCircuit = Readonly<{
   depth: number
 }>
 
+const RAY_FOOTPRINT_OFFSETS = [
+  [0, 0],
+  [1.55, 0],
+  [-1.55, 0],
+  [0, 1.55],
+  [0, -1.55],
+  [1.1, 1.1],
+  [1.1, -1.1],
+  [-1.1, 1.1],
+  [-1.1, -1.1],
+] as const
+
+/** Clearance for the whole disc, including the swept-back wingtips. */
+function rayFootprintDepth(bed: LakeBed, x: number, z: number) {
+  let depth = Infinity
+  for (const [dx, dz] of RAY_FOOTPRINT_OFFSETS) {
+    const at = lakeIndex(bed, x + dx, z + dz)
+    if (at < 0 || !bed.water[at] || required(bed.obstacle[at]) > WATER_LEVEL - 0.5) return 0
+    depth = Math.min(depth, bedDepth(bed, x + dx, z + dz))
+  }
+  return depth
+}
+
+const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
+
 export function selectRayCircuit(bed: LakeBed, seed: number): RayCircuit {
   let best: RayCircuit = { cx: 0, cz: -18, rx: 5, rz: 4, phase: 0, depth: 1.1 }
   let bestClearance = -1
@@ -82,7 +107,7 @@ export function selectRayCircuit(bed: LakeBed, seed: number): RayCircuit {
         clearance = -1
         continue
       }
-      const depth = required(bed.depth[at])
+      const depth = rayFootprintDepth(bed, x, z)
       clearance = Math.min(clearance, depth)
       if (depth >= 0.7) wet++
     }
@@ -109,7 +134,7 @@ function rayXZ(circuit: RayCircuit, time: number) {
 
 export function rayPose(circuit: RayCircuit, time: number) {
   const { x, z } = rayXZ(circuit, time)
-  return { x, y: WATER_LEVEL - circuit.depth + 0.25 * Math.sin(time * 0.5 + circuit.phase), z }
+  return { x, y: WATER_LEVEL - circuit.depth + 0.055 * Math.sin(time * 0.35 + circuit.phase), z }
 }
 
 const RAY_OUTLINE: ReadonlyArray<readonly [number, number]> = [
@@ -178,12 +203,17 @@ function buildRayDisc() {
   return geometry
 }
 
-function wingFlapNode(flapTime: Node<'float'>) {
-  const burst = float(0.55).add(float(0.45).mul(sin(flapTime.mul(0.4))))
+function wingFlapNode(flapTime: Node<'float'>, amplitude: Node<'float'>) {
+  const span = positionLocal.x.abs().div(1.42).pow(1.55)
+  const trailing = max(0, float(0.6).sub(positionLocal.z))
+  const wave = flapTime.sub(trailing.mul(2.1)).sub(positionLocal.x.abs().mul(0.3))
   return positionLocal.add(
     vec3(
       0,
-      sin(flapTime.mul(1.6)).mul(positionLocal.x.abs().div(1.34).pow(1.5)).mul(0.42).mul(burst),
+      sin(wave)
+        .mul(span)
+        .mul(float(0.72).add(trailing.mul(0.22)))
+        .mul(amplitude),
       0,
     ),
   )
@@ -210,8 +240,14 @@ export class LakeRay {
   private lastWake: { x: number; z: number; t: number } | null = null
   private readonly shadow: Mesh
   private readonly flapTime = uniform(0)
+  private readonly flapAmplitude = uniform(0.28)
+  private readonly shadowStrength = uniform(0.38)
   private readonly euler = new Euler(0, 0, 0, 'YXZ')
   private smoothY: number | null = null
+  private heading = 0
+  private speed = 0
+  private bank = 0
+  private alert = 0
   private readonly bed: LakeBed
   private readonly reducedMotion: boolean
   private readonly geometries: { dispose(): void }[] = []
@@ -257,8 +293,8 @@ export class LakeRay {
     this.topMaterial.colorNode = mix(vec3(0.05, 0.07, 0.08), vec3(0.62, 0.65, 0.6), spots).mul(
       float(1).sub(rim.mul(0.4)),
     )
-    this.topMaterial.positionNode = wingFlapNode(this.flapTime)
-    this.bellyMaterial.positionNode = wingFlapNode(this.flapTime)
+    this.topMaterial.positionNode = wingFlapNode(this.flapTime, this.flapAmplitude)
+    this.bellyMaterial.positionNode = wingFlapNode(this.flapTime, this.flapAmplitude)
     this.tailMaterial.positionNode = tailSwayNode(this.flapTime)
     const top = new Mesh(disc, this.topMaterial)
     this.disc = top
@@ -280,7 +316,7 @@ export class LakeRay {
     this.shadowMaterial.colorNode = vec3(0)
     this.shadowMaterial.opacityNode = float(1)
       .sub(smoothstep(0.18, 0.5, uv().sub(0.5).length()))
-      .mul(0.38)
+      .mul(this.shadowStrength)
     this.shadow = new Mesh(shadowGeometry, this.shadowMaterial)
     this.shadow.scale.set(1.3, 1, 1)
     this.shadow.layers.set(1)
@@ -289,43 +325,121 @@ export class LakeRay {
     this.update(0)
   }
 
-  update(time: number, dt = 1 / 60) {
+  update(
+    time: number,
+    dt = 1 / 60,
+    pointer: Readonly<{ x: number; z: number }> | null = null,
+    pointerActivity = 1,
+  ) {
     const t = this.reducedMotion ? 0 : time
-    const now = rayPose(this.circuit, t)
-    const ahead = rayPose(this.circuit, t + 0.5)
-    const behind = rayPose(this.circuit, t - 0.5)
-    const yaw = Math.atan2(ahead.x - behind.x, ahead.z - behind.z)
-    const climb = Math.max(-0.4, Math.min(0.4, ahead.y - behind.y))
-    const at = lakeIndex(this.bed, now.x, now.z)
-    const wet = at >= 0 && required(this.bed.water[at]) !== 0
-    const depth = wet ? bedDepth(this.bed, now.x, now.z) : 0
-    this.group.visible = wet && required(this.bed.depth[at]) >= 0.8
+    const step = this.reducedMotion ? 0 : Math.max(0, Math.min(2, dt))
+    const guide = rayPose(this.circuit, t)
+    const ahead = rayPose(this.circuit, t + 0.35)
+    const behind = rayPose(this.circuit, t - 0.35)
+    const tangentX = ahead.x - behind.x
+    const tangentZ = ahead.z - behind.z
+    const tangentLength = Math.max(0.001, Math.hypot(tangentX, tangentZ))
+    if (this.smoothY === null) {
+      this.group.position.set(guide.x, guide.y, guide.z)
+      this.heading = Math.atan2(tangentX, tangentZ)
+      this.speed = tangentLength / 0.7
+    }
+    const x = this.group.position.x
+    const z = this.group.position.z
+    const separation = pointer ? Math.hypot(x - pointer.x, z - pointer.z) : Infinity
+    const proximity = Math.max(0, 1 - separation / 5.5)
+    const alarm = pointerActivity * proximity * proximity
+    this.alert += (alarm - this.alert) * (1 - Math.exp(-step * (alarm > this.alert ? 3 : 1.2)))
+
+    const substeps = Math.max(1, Math.ceil(step / 0.1))
+    const h = step / substeps
+    let turnRate = 0
+    for (let i = 0; i < substeps; i++) {
+      const sampleTime = t - step + (i + 1) * h
+      const waypoint = rayPose(this.circuit, sampleTime)
+      const forward = rayPose(this.circuit, sampleTime + 0.35)
+      const backward = rayPose(this.circuit, sampleTime - 0.35)
+      const pathX = forward.x - backward.x
+      const pathZ = forward.z - backward.z
+      let vx = pathX / 0.7 + (waypoint.x - this.group.position.x) * 0.65
+      let vz = pathZ / 0.7 + (waypoint.z - this.group.position.z) * 0.65
+      if (pointer) {
+        const dx = this.group.position.x - pointer.x
+        const dz = this.group.position.z - pointer.z
+        const distance = Math.hypot(dx, dz)
+        if (distance > 0.01) {
+          vx += (dx / distance) * this.alert * 1.25
+          vz += (dz / distance) * this.alert * 1.25
+        }
+      }
+      const desired = Math.atan2(vx, vz)
+      const turn = Math.atan2(Math.sin(desired - this.heading), Math.cos(desired - this.heading))
+      const amount = clamp(turn * (1 - Math.exp(-h * 2.4)), -h * 1.15, h * 1.15)
+      this.heading += amount
+      turnRate = h > 0 ? amount / h : 0
+      const targetSpeed =
+        Math.min(1.25, Math.hypot(vx, vz)) * (0.45 + 0.55 * Math.max(0, Math.cos(turn)))
+      this.speed += clamp(targetSpeed - this.speed, -h * 0.75, h * 0.6)
+      const nextX = this.group.position.x + Math.sin(this.heading) * this.speed * h
+      const nextZ = this.group.position.z + Math.cos(this.heading) * this.speed * h
+      if (rayFootprintDepth(this.bed, nextX, nextZ) >= 1.2)
+        this.group.position.set(nextX, this.group.position.y, nextZ)
+    }
+    const depth = rayFootprintDepth(this.bed, this.group.position.x, this.group.position.z)
+    this.group.visible = depth >= 1.2
+    const margin = Math.min(0.72, depth * 0.5)
     const target = this.group.visible
-      ? Math.max(Math.min(now.y, WATER_LEVEL - 0.7), WATER_LEVEL - depth + 0.35)
-      : now.y
-    const blend = this.smoothY === null ? 1 : 1 - Math.exp(-Math.max(0, dt) * 4)
-    const current = this.smoothY ?? target
-    this.smoothY = current + (target - current) * blend
-    this.group.position.set(now.x, this.smoothY, now.z)
-    this.group.quaternion.setFromEuler(
-      this.euler.set(-climb * 0.5 + 0.12 * Math.sin(t * 0.9), yaw, 0.12),
+      ? clamp(guide.y, WATER_LEVEL - depth + margin, WATER_LEVEL - margin)
+      : guide.y
+    const blend = this.smoothY === null ? 1 : 1 - Math.exp(-step * 3)
+    const nextY = (this.smoothY ?? target) + (target - (this.smoothY ?? target)) * blend
+    this.smoothY = this.group.visible
+      ? clamp(nextY, WATER_LEVEL - depth + margin, WATER_LEVEL - margin)
+      : nextY
+    this.group.position.y = this.smoothY
+    this.bank += (clamp(-turnRate * 0.12, -0.12, 0.12) - this.bank) * (1 - Math.exp(-step * 2.5))
+    const climb = clamp(ahead.y - behind.y, -0.1, 0.1)
+    this.group.quaternion.setFromEuler(this.euler.set(-climb * 0.35, this.heading, this.bank))
+    this.flapTime.value += step * (3.1 + this.speed * 1.3 + this.alert * 1.3)
+    const available = Math.min(
+      WATER_LEVEL - this.group.position.y,
+      this.group.position.y - (WATER_LEVEL - depth),
     )
-    this.flapTime.value = t
+    const amplitude = clamp(
+      0.17 + this.speed * 0.07 + this.alert * 0.1,
+      0.08,
+      Math.min(0.35, (available - 0.28) / 1.2),
+    )
+    this.flapAmplitude.value += (amplitude - this.flapAmplitude.value) * (1 - Math.exp(-step * 3))
+    this.flapAmplitude.value = Math.min(this.flapAmplitude.value, amplitude)
+
     const previous = this.lastWake
-    this.lastWake = { x: now.x, z: now.z, t }
+    this.lastWake = { x: this.group.position.x, z: this.group.position.z, t }
     const raw =
       previous && t > previous.t
-        ? Math.hypot(now.x - previous.x, now.z - previous.z) / (t - previous.t)
+        ? Math.hypot(this.group.position.x - previous.x, this.group.position.z - previous.z) /
+          (t - previous.t)
         : 0
-    const targetSpeed = this.group.visible ? Math.min(3, raw) : 0
-    this.wake.speed += (targetSpeed - this.wake.speed) * (1 - Math.exp(-Math.max(0, dt) * 3))
-    this.wake.x = now.x
-    this.wake.z = now.z
-    this.wake.hx = Math.sin(yaw)
-    this.wake.hz = Math.cos(yaw)
+    const targetWake = this.group.visible ? Math.min(3, raw) : 0
+    this.wake.speed += (targetWake - this.wake.speed) * (1 - Math.exp(-step * 3))
+    this.wake.x = this.group.position.x
+    this.wake.z = this.group.position.z
+    this.wake.hx = Math.sin(this.heading)
+    this.wake.hz = Math.cos(this.heading)
     this.shadow.visible = this.group.visible
     if (!this.group.visible) return
-    this.shadow.position.set(now.x, WATER_LEVEL - depth + 0.05, now.z)
+    const floor = WATER_LEVEL - bedDepth(this.bed, this.group.position.x, this.group.position.z)
+    const height = Math.max(0, this.group.position.y - floor)
+    const follow = 1 - Math.exp(-step * 2.5)
+    if (!previous)
+      this.shadow.position.set(this.group.position.x, floor + 0.05, this.group.position.z)
+    this.shadow.position.x += (this.group.position.x - this.shadow.position.x) * follow
+    this.shadow.position.z += (this.group.position.z - this.shadow.position.z) * follow
+    this.shadow.position.y =
+      WATER_LEVEL - bedDepth(this.bed, this.shadow.position.x, this.shadow.position.z) + 0.05
+    const spread = 1 + height * 0.12
+    this.shadow.scale.set(1.3 * spread, 1, spread)
+    this.shadowStrength.value = 0.38 / (1 + height * 0.55)
   }
 
   dispose() {
