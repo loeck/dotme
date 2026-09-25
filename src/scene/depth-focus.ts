@@ -20,7 +20,6 @@ import { DepthTexture, HalfFloatType, RenderTarget, UnsignedIntType, Vector2 } f
 import type { DirectionalLight, Node, PerspectiveCamera, Scene, WebGPURenderer } from 'three/webgpu'
 
 import { FullscreenPass } from './fullscreen-pass'
-import type { RenderDiagnostics } from './render-diagnostics'
 import type { VolumetricLight } from './volumetric-light'
 
 /** Scene radiance and depth remain linear until the final output transform. */
@@ -100,21 +99,18 @@ export class DepthFocus {
     camera: PerspectiveCamera,
     atmosphere?: VolumetricLight,
     light?: DirectionalLight,
-    diagnostics?: RenderDiagnostics,
   ) {
     this.cameraRange.value.set(camera.near, camera.far)
     const previous = renderer.getRenderTarget()
     try {
       renderer.setRenderTarget(this.target)
-      if (diagnostics) diagnostics.measure('main', () => renderer.render(scene, camera))
-      else renderer.render(scene, camera)
+      renderer.render(scene, camera)
       this.color.value =
         atmosphere && light
           ? atmosphere.render(renderer, this.target, camera, light)
           : this.target.texture
       renderer.setRenderTarget(previous)
-      if (diagnostics) diagnostics.measure('depth-focus', () => this.pipeline.render())
-      else this.pipeline.render()
+      this.pipeline.render()
     } finally {
       renderer.setRenderTarget(previous)
     }

@@ -58,27 +58,20 @@ export class SceneDetails {
     this.reducedMotion = reducedMotion
     this.environment = updateDetailEnvironment(this.environment, environment)
     if (reducedMotion) this.wetness.setWetness(this.environment.rainIntensity)
-    try {
-      this.caustics = this.resources.own(new LakeCaustics(reducedMotion))
-      this.fish = this.resources.own(
-        new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion),
+    this.caustics = this.resources.own(new LakeCaustics(reducedMotion))
+    this.fish = this.resources.own(
+      new LakeFish(scene, world.lakeBed, world.seed, mobile, reducedMotion),
+    )
+    this.fireflies = this.resources.own(new LakeFireflies(scene, world.lakeBed, world.seed, mobile))
+    this.splashes = this.resources.own(new LakeSplashes(scene, world.lakeBed, world.seed, mobile))
+    if (world.waterfall) {
+      this.waterfall = this.resources.own(
+        new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),
       )
-      this.fireflies = this.resources.own(
-        new LakeFireflies(scene, world.lakeBed, world.seed, mobile),
-      )
-      this.splashes = this.resources.own(new LakeSplashes(scene, world.lakeBed, world.seed, mobile))
-      if (world.waterfall) {
-        this.waterfall = this.resources.own(
-          new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),
-        )
-        this.waterfall.onImpact = (x, z, radius, velocity, energy) => {
-          this.splashes.impacts.add(x, z, this.effectTime, energy)
-          this.waterImpact?.(x, z, radius, velocity)
-        }
+      this.waterfall.onImpact = (x, z, radius, velocity, energy) => {
+        this.splashes.impacts.add(x, z, this.effectTime, energy)
+        this.waterImpact?.(x, z, radius, velocity)
       }
-    } catch (error) {
-      this.resources.dispose()
-      throw error
     }
   }
 
@@ -143,17 +136,21 @@ export class SceneDetails {
     })
   }
 
+  private withFirefliesVisible<T>(action: () => T): T {
+    const visible = this.fireflies.mesh.visible
+    try {
+      this.fireflies.mesh.visible = this.fireflies.mesh.geometry.instanceCount > 0
+      return action()
+    } finally {
+      this.fireflies.mesh.visible = visible
+    }
+  }
+
   /** Include intermittent effects in the existing scene/camera/target compilation pass. */
   compileAsync(compile: () => Promise<void>): Promise<void> {
     const compileMaterials = () => (this.waterfall ? this.waterfall.compile(compile) : compile())
     if (this.reducedMotion) return compileMaterials()
-    const visible = this.fireflies.mesh.visible
-    try {
-      this.fireflies.mesh.visible = this.fireflies.mesh.geometry.instanceCount > 0
-      return this.splashes.compileAsync(compileMaterials)
-    } finally {
-      this.fireflies.mesh.visible = visible
-    }
+    return this.withFirefliesVisible(() => this.splashes.compileAsync(compileMaterials))
   }
 
   async prepareFluid(renderer: WebGPURenderer, camera: Camera) {
@@ -162,17 +159,8 @@ export class SceneDetails {
 
   /** Warm the renderer's nested reflection pass after its asynchronous graph compilation. */
   warmup(render: () => void) {
-    if (this.reducedMotion) {
-      render()
-      return
-    }
-    const visible = this.fireflies.mesh.visible
-    try {
-      this.fireflies.mesh.visible = this.fireflies.mesh.geometry.instanceCount > 0
-      this.splashes.warmup(render)
-    } finally {
-      this.fireflies.mesh.visible = visible
-    }
+    if (this.reducedMotion) return render()
+    this.withFirefliesVisible(() => this.splashes.warmup(render))
   }
 
   dispose() {

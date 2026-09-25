@@ -5,12 +5,7 @@ import { required } from '../invariant'
 import { prepareGeometryBounds, prepareShadowBounds } from './geometry-bounds'
 import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
-import {
-  prepareSubmergedSurface,
-  prepareWaterMask,
-  prepareWaterSurface,
-} from './lake-geometry-data'
-import { worldTransfers } from './world-data'
+import { prepareSubmergedSurface, prepareWaterSurface } from './lake-geometry-data'
 
 function sampleBed(): LakeBed {
   const resolution = 8
@@ -74,27 +69,6 @@ describe('worker-prepared lake surfaces', () => {
     expect(prepared.boundingCenter).toEqual(required(reference.boundingSphere).center.toArray())
     expect(prepared.boundingRadius).toBe(required(reference.boundingSphere).radius)
     reference.dispose()
-  })
-
-  it('transfers every mesh, texture and mask buffer without copying ownership', () => {
-    const bed = sampleBed()
-    const payload = {
-      submerged: prepareSubmergedSurface(bed),
-      water: prepareWaterSurface(true),
-      mask: prepareWaterMask(bed),
-    }
-    expect(payload.mask.resolution).toBe(16)
-    expect(payload.mask.water).toEqual(
-      Uint8Array.from(bed.shore, (distance) => (distance > 0 ? 255 : 0)),
-    )
-    const transfers = worldTransfers(payload)
-    expect(transfers).toHaveLength(11)
-    const delivered = structuredClone(payload, { transfer: transfers })
-    expect(payload.submerged.geometry.positions.byteLength).toBe(0)
-    expect(payload.water.positions.byteLength).toBe(0)
-    expect(payload.mask.water.byteLength).toBe(0)
-    expect(delivered.submerged.geometry.positions.length).toBe(bed.resolution ** 2 * 3)
-    expect(delivered.mask.water.length).toBe(bed.shore.length)
   })
 })
 

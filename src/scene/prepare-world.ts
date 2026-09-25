@@ -1,6 +1,5 @@
 import { prepareWorld } from './world-data'
 import type { PreparedWorld } from './world-data'
-export { prepareWorld } from './world-data'
 export type { PreparedWorld } from './world-data'
 
 export function prepareWorldAsync(
