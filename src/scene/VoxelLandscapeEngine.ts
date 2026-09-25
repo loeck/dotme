@@ -1019,8 +1019,6 @@ export class VoxelLandscapeEngine {
     }
     const point = this.hitWater(event.clientX, event.clientY)
     if (!point) return
-    // Queue the contact immediately so a quick touch ending before the next frame still ripples.
-    this.simulation.addImpulse(point.x, point.z, 0.55, -0.32)
     this.water.material.uniforms.uSplash.value.set(point.x, point.z, this.elapsed, 1)
     this.bait = { x: point.x, z: point.z, born: this.elapsed }
     this.details?.pointerBurst(point.x, point.z, 0.55, this.elapsed, this.wind.sample(this.elapsed))
