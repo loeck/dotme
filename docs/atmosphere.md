@@ -1,6 +1,8 @@
 # Atmosphere
 
 The artistic solar clock supplies sunlight, moonlight, sky color and local-light intensity.
+Its orbit runs from the live weather's sunrise to its sunset (06:00–18:00 without live data),
+starting at the weather location's local snapshot time unless `startTime` overrides it.
 Clock speed affects the solar cycle only. Wind, rain, water and wildlife retain their own
 physical time steps. Reduced motion freezes the initial atmosphere while allowing resize
 and visibility refreshes.

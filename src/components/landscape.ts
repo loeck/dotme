@@ -82,6 +82,8 @@ export async function initLandscape(
         weather: snapshot.weather,
         wind: snapshot.wind,
         rain: snapshot.rain,
+        solar: snapshot.solar,
+        nowSeconds: snapshot.nowSeconds,
       },
       signal,
     )

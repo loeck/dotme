@@ -71,7 +71,8 @@ import { SceneDetails } from './scene-details'
 import type { DetailEnvironment } from './scene-details'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
-import { SolarClock, parseInitialTime } from './solar-clock'
+import { DEFAULT_SOLAR, SolarClock, parseInitialTime } from './solar-clock'
+import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
@@ -104,6 +105,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   rain?: RainState
   weather?: WeatherPreset
   wind?: WindOptions
+  solar?: SolarEndpoints
+  nowSeconds?: number
 }>
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
@@ -147,6 +150,7 @@ export class VoxelLandscapeEngine {
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
   private solarClock: SolarClock
+  private readonly solar: SolarEndpoints
   private reducedMotion: boolean
   private nightLightFade = 0
   private readonly weather
@@ -255,7 +259,12 @@ export class VoxelLandscapeEngine {
       const physics = createPhysicsWorld(await physicsModule, prepared.terrain.index)
       signal.throwIfAborted()
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
-      const initialLight = sampleLighting(engine.solarClock.initialSeconds, 0, engine.weather)
+      const initialLight = sampleLighting(
+        engine.solarClock.initialSeconds,
+        0,
+        engine.weather,
+        engine.solar,
+      )
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
       await engine.clouds.compileAsync()
@@ -335,8 +344,11 @@ export class VoxelLandscapeEngine {
       : window.innerWidth < 768
     this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
+    this.solar = options.solar ?? DEFAULT_SOLAR
     this.solarClock = new SolarClock(
-      parseInitialTime(params.startTime ?? null),
+      params.startTime
+        ? parseInitialTime(params.startTime)
+        : (options.nowSeconds ?? parseInitialTime(null)),
       options.reducedMotion,
       performance.now(),
       params.timeScale,
@@ -394,7 +406,7 @@ export class VoxelLandscapeEngine {
         (options.seed ?? 0) >>> 0,
         this.mobile,
         this.wind,
-        (time) => sampleLighting(this.solarClock.seconds(time), 0, this.weather),
+        (time) => sampleLighting(this.solarClock.seconds(time), 0, this.weather, this.solar),
         this.weather,
         prepared.noise,
         this.lowPower,
@@ -1250,7 +1262,12 @@ export class VoxelLandscapeEngine {
     this.intro = this.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
     const atmosphereTime = this.solarClock.elapsed(now)
-    const light = sampleLighting(this.solarClock.seconds(atmosphereTime), 0, this.weather)
+    const light = sampleLighting(
+      this.solarClock.seconds(atmosphereTime),
+      0,
+      this.weather,
+      this.solar,
+    )
     const lightingHost = this.container.closest('main')
     if (lightingHost) {
       const enabled = String(light.localLightStrength > 0)

@@ -18,6 +18,16 @@ export const parisWeatherFixture = () => ({
     weather_code: 'wmo code',
     is_day: '',
   },
+  daily_units: {
+    time: 'unixtime',
+    sunrise: 'unixtime',
+    sunset: 'unixtime',
+  },
+  daily: {
+    time: [1790114400],
+    sunrise: [1790142120],
+    sunset: [1790185440],
+  },
   current: {
     time: 1790150400,
     interval: 900,

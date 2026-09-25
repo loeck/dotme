@@ -29,6 +29,8 @@ Current conditions come from weather models at 15-minute resolution. `intervalSe
 the API's aggregation interval. `rainMm`, `showersMm`, and `snowfallCm` are accumulated amounts over
 that preceding interval, **not instantaneous rates**. Wind speed and gusts are in m/s, wind direction
 in degrees, cloud cover and humidity in percent, temperatures in °C, and visibility in meters.
+Today's `daily` sunrise and sunset arrive as Unix seconds in the same response
+(`forecast_days=1`); they anchor the artistic day/night orbit to the real sun.
 See the [Open-Meteo API documentation](https://open-meteo.com/en/docs).
 
 `condition.kind` describes the WMO family; `weatherCode` preserves the original code, including
@@ -60,10 +62,13 @@ conditions do not create rain. Snowflakes, lightning and weather-driven fog are 
 
 Wind bearing and speed drive the rain and shared atmospheric/water wind model. Rain wind is capped
 at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
-procedural gust strength. The local-time solar clock is unchanged.
+procedural gust strength. Sunrise, sunset and the snapshot time are converted to location-local
+seconds past midnight and seed the solar clock and its orbit. Polar days without a sunrise
+before sunset keep live weather with the default 06:00–18:00 orbit.
 
 Only `seed`, `coordinates=latitude,longitude`, `startTime=HH:MM` and `timeScale=1..100` are public query parameters.
-The time changes the artistic day/night clock, independently of the live weather snapshot.
+`startTime` overrides the snapshot-seeded clock; without it the scene starts at the weather
+location's local time rather than the visitor's.
 The information button opens a dialog describing the scene and its libraries, including weather
 attribution when live API data is used.
 

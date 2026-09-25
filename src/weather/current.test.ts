@@ -94,6 +94,8 @@ describe('fetchWeather', () => {
       latitude: '48.8566',
       longitude: '2.3522',
       timezone: 'auto',
+      daily: 'sunrise,sunset',
+      forecast_days: '1',
       wind_speed_unit: 'ms',
       precipitation_unit: 'mm',
       temperature_unit: 'celsius',
@@ -106,6 +108,8 @@ describe('fetchWeather', () => {
     )
     expect(weather).toMatchObject({
       timestampUnixSeconds: 1790150400,
+      sunriseUnixSeconds: 1790142120,
+      sunsetUnixSeconds: 1790185440,
       intervalSeconds: 900,
       utcOffsetSeconds: 7200,
       timezone: 'Europe/Paris',
@@ -211,6 +215,12 @@ describe('fetchWeather', () => {
     { ...fixture(), utc_offset_seconds: null },
     { ...fixture(), current_units: {} },
     { ...fixture(), current_units: { ...fixture().current_units, wind_speed_10m: 'km/h' } },
+    { ...fixture(), daily: undefined },
+    { ...fixture(), daily_units: undefined },
+    { ...fixture(), daily_units: { ...fixture().daily_units, sunrise: 'iso8601' } },
+    { ...fixture(), daily: { ...fixture().daily, sunrise: [] } },
+    { ...fixture(), daily: { ...fixture().daily, sunset: [1790185440.5] } },
+    { ...fixture(), daily: { ...fixture().daily, sunrise: ['1790142120'] } },
   ])('rejects malformed data/metadata %#', async (data) => {
     respond(data)
     await expect(fetchWeather()).rejects.toThrow(TypeError)

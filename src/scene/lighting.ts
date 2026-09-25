@@ -9,7 +9,8 @@ import {
 } from './atmosphere'
 import { EARTH, luminance, transmittance } from './atmosphere-physics'
 import type { Rgb } from './atmosphere-physics'
-import { wrapDay } from './solar-clock'
+import { DEFAULT_SOLAR, wrapDay } from './solar-clock'
+import type { SolarEndpoints } from './solar-clock'
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 
@@ -40,13 +41,21 @@ const skyLight = (c: Rgb, scale: number) => {
     .multiplyScalar(scale)
 }
 
-/** Artistic 06:00–18:00 orbit. Directions always point FROM the scene TO the light. */
+/** Artistic orbit between sunrise and sunset. Directions always point FROM the scene TO the light. */
 export function sampleLighting(
   initialSeconds: number,
   elapsed = 0,
   weather: WeatherPreset = 'partly-cloudy',
+  solar: SolarEndpoints = DEFAULT_SOLAR,
 ) {
-  const angle = ((wrapDay(initialSeconds + elapsed) / 3600 - 6) / 12) * Math.PI
+  const span = solar.sunset - solar.sunrise
+  const endpoints = span > 0 && span < 86_400 ? solar : DEFAULT_SOLAR
+  const now = wrapDay(initialSeconds + elapsed)
+  const dayLength = endpoints.sunset - endpoints.sunrise
+  const angle =
+    now >= endpoints.sunrise && now < endpoints.sunset
+      ? ((now - endpoints.sunrise) / dayLength) * Math.PI
+      : Math.PI + (wrapDay(now - endpoints.sunset) / (86_400 - dayLength)) * Math.PI
   // The rising bearing crosses the open valley, so the morning disc can enter
   // the camera before climbing out of view. The two orbit axes are orthogonal.
   const bearing = 0.36
