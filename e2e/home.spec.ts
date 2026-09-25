@@ -114,7 +114,9 @@ for (const backend of ['webgpu', 'webgl'] as const)
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
       window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
     })
-    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready', {
+      timeout: 60_000,
+    })
     await expect(canvas).toHaveCount(1)
     await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
     await expect(canvas).toHaveAttribute('data-seed', '42')

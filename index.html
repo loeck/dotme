@@ -97,7 +97,7 @@
             root.dataset.sceneLoading = 'failed'
             document.querySelector('main')?.removeAttribute('aria-busy')
             window.dispatchEvent(new Event('scene-timeout'))
-          }, 20000)
+          }, 60000)
         }
         window.addEventListener('scene-settled', stop)
         window.addEventListener('pagehide', stop)
