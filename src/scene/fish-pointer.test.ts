@@ -1,10 +1,33 @@
 import { PerspectiveCamera, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
-import { apparentFishSurface, baitSteering, sampleFishPointer } from './fish-pointer'
+import {
+  PointerDisturbance,
+  apparentFishSurface,
+  baitSteering,
+  sampleFishPointer,
+} from './fish-pointer'
 import { WATER_LEVEL } from './lake-bed'
 
 describe('visible underwater fish interaction', () => {
+  it('responds to cursor travel, settles during a hover, and resets on exit', () => {
+    const camera = new PerspectiveCamera()
+    const pointer = { ndc: { x: 0, y: 0 }, camera, width: 1000, height: 800 }
+    const disturbance = new PointerDisturbance()
+    expect(disturbance.update(pointer, 1 / 60)).toBe(0)
+    pointer.ndc.x = 0.08
+    const approaching = disturbance.update(pointer, 1 / 60)
+    expect(approaching).toBeGreaterThan(0)
+    for (let i = 0; i < 180; i++) disturbance.update(pointer, 1 / 60)
+    expect(disturbance.update(pointer, 1 / 60)).toBeLessThan(approaching * 0.1)
+    pointer.ndc.x = 0.16
+    expect(disturbance.update(pointer, 1 / 60)).toBeGreaterThan(0)
+    expect(disturbance.update(null, 1 / 60)).toBe(0)
+    expect(disturbance.update(pointer, 1 / 60)).toBe(0)
+    pointer.ndc.x += 0.0002
+    expect(disturbance.update(pointer, 1 / 60)).toBeGreaterThan(0)
+  })
+
   it('selects the apparent fish at different depths and distances with the same screen radius', () => {
     const camera = new PerspectiveCamera(54, 1440 / 900, 0.05, 500)
     camera.position.set(0, 2.3, 16)

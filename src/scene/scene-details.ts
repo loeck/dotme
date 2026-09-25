@@ -2,6 +2,7 @@ import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { Camera, Object3D, Scene, Vector3, WebGPURenderer } from 'three/webgpu'
 
 import type { FishBait } from './fish-pointer'
+import { PointerDisturbance } from './fish-pointer'
 import { FloatingBodies } from './floating-bodies'
 import { FoamDrift } from './foam-drift'
 import { LakeCaustics } from './lake-caustics'
@@ -45,6 +46,7 @@ export class SceneDetails {
   private readonly caustics: LakeCaustics
   private readonly fish: LakeFish
   private readonly ray: LakeRay
+  private readonly pointerDisturbance = new PointerDisturbance()
 
   get rayWake(): LakeRay['wake'] {
     return this.ray.wake
@@ -163,8 +165,11 @@ export class SceneDetails {
       waterPointer,
       pointerLightStrength,
     )
-    this.fish.update(time, dt, waterPointer, scenePointer, bait)
-    this.ray.update(time, dt)
+    const pointerActivity = this.reducedMotion
+      ? 0
+      : this.pointerDisturbance.update(scenePointer, dt)
+    this.fish.update(time, dt, waterPointer, scenePointer, bait, pointerActivity)
+    this.ray.update(time, dt, waterPointer, pointerActivity)
     this.waterfall?.update(time, daylight, intro, wind)
     this.floating.update(time, wind, this.reducedMotion)
     this.foam.update(time, wind, this.reducedMotion)

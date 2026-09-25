@@ -43,6 +43,17 @@ describe('gliding ray', () => {
         expect(bed.water[at]).toBe(255)
         expect(WATER_LEVEL - pose.y).toBeLessThan(bedDepth(bed, pose.x, pose.z) - 0.2)
         expect(pose.y).toBeLessThan(WATER_LEVEL - 0.3)
+        for (let sample = 0; sample < 16; sample++) {
+          const angle = ((sample + 0.5) / 16) * Math.PI * 2
+          const radius = rayOutlineRadius(angle) * 0.95
+          const localX = Math.sin(angle) * radius
+          const localZ = Math.cos(angle) * radius
+          const wingX = pose.x + localX * ray.wake.hz + localZ * ray.wake.hx
+          const wingZ = pose.z - localX * ray.wake.hx + localZ * ray.wake.hz
+          const wingAt = lakeIndex(bed, wingX, wingZ)
+          expect(bed.water[wingAt]).toBe(255)
+          expect(pose.y - (WATER_LEVEL - bedDepth(bed, wingX, wingZ))).toBeGreaterThan(0.2)
+        }
       }
       expect(visible).toBeGreaterThan(100)
       for (const pose of hidden) {
@@ -86,6 +97,59 @@ describe('gliding ray', () => {
     expect(frozen.wake.speed).toBe(0)
     swimming.dispose()
     frozen.dispose()
+  })
+
+  it('bends away from a moving disturbance and returns to its safe circuit', () => {
+    const bed = lakeBed(12, true)
+    const plain = new LakeRay(new Scene(), bed, 12)
+    const wary = new LakeRay(new Scene(), bed, 12)
+    const origin = wary.group.position.clone()
+    const pointer = { x: origin.x + 0.8, z: origin.z + 0.6 }
+    let largestStep = 0
+    let previous = wary.group.position.clone()
+    for (let frame = 1; frame <= 240; frame++) {
+      const time = frame / 60
+      plain.update(time, 1 / 60)
+      wary.update(time, 1 / 60, frame < 180 ? pointer : null, frame < 180 ? 1 : 0)
+      largestStep = Math.max(largestStep, wary.group.position.distanceTo(previous))
+      previous = wary.group.position.clone()
+      if (frame % 12 !== 0) continue
+      const pose = wary.group.position
+      for (const [dx, dz] of [
+        [0, 0],
+        [1.55, 0],
+        [-1.55, 0],
+        [0, 1.55],
+        [0, -1.55],
+      ] as const) {
+        const at = lakeIndex(bed, pose.x + dx, pose.z + dz)
+        expect(bed.water[at]).toBe(255)
+        expect(pose.y - (WATER_LEVEL - bedDepth(bed, pose.x + dx, pose.z + dz))).toBeGreaterThan(
+          0.2,
+        )
+      }
+      expect(pose.y).toBeLessThan(WATER_LEVEL - 0.3)
+    }
+    expect(largestStep).toBeLessThan(0.08)
+    expect(wary.group.position.distanceTo(plain.group.position)).toBeGreaterThan(0.1)
+    for (let frame = 241; frame <= 1800; frame++) {
+      plain.update(frame / 60, 1 / 60)
+      wary.update(frame / 60, 1 / 60)
+    }
+    expect(wary.group.position.distanceTo(plain.group.position)).toBeLessThan(0.5)
+    plain.dispose()
+    wary.dispose()
+  })
+
+  it('keeps the same course at different frame cadences', () => {
+    const bed = lakeBed(42, false)
+    const fast = new LakeRay(new Scene(), bed, 42)
+    const slow = new LakeRay(new Scene(), bed, 42)
+    for (let frame = 1; frame <= 600; frame++) fast.update(frame / 60, 1 / 60)
+    for (let frame = 1; frame <= 300; frame++) slow.update(frame / 30, 1 / 30)
+    expect(fast.group.position.distanceTo(slow.group.position)).toBeLessThan(0.15)
+    fast.dispose()
+    slow.dispose()
   })
 
   it('keeps a smooth symmetric outline with swept-back wingtips', () => {

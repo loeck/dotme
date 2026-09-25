@@ -231,6 +231,7 @@ export class LakeFish {
     routeZ: number
     alert: number
   }> = []
+  private readonly previousAlerts: Float32Array
   private readonly pointerTarget: FishPointerTarget = { x: 0, z: 0, strength: 0 }
 
   private readonly bed: LakeBed
@@ -334,6 +335,7 @@ export class LakeFish {
       routeZ: 0,
       alert: 0,
     }))
+    this.previousAlerts = new Float32Array(this.count)
     this.attachMotionShader()
     this.update(0, 0)
     for (const mesh of this.meshes) {
@@ -371,10 +373,12 @@ export class LakeFish {
     pointer: WaterPointer | null = null,
     scenePointer: FireflyPointer | null = null,
     bait: FishBait | null = null,
+    pointerActivity = 1,
   ) {
     const step = this.reducedMotion || !Number.isFinite(dt) ? 0 : Math.max(0, Math.min(0.1, dt))
     this.clock += step
     const sampleTime = this.clock
+    for (let i = 0; i < this.count; i++) this.previousAlerts[i] = required(this.swimming[i]).alert
     for (let i = 0; i < this.count; i++) {
       const membership = required(this.membership[i])
       const school = required(this.schools[membership.school])
@@ -411,7 +415,8 @@ export class LakeFish {
           dz = previousZ - threat.z
         const distance = Math.hypot(dx, dz)
         const proximity = Math.max(0, 1 - distance / 2)
-        alarm = proximity * proximity * (threat.strength ?? 1)
+        alarm =
+          proximity * proximity * (threat.strength ?? 1) * (scenePointer ? pointerActivity : 1)
         // A centered pointer still has an escape bearing, chosen per fish.
         const bearing =
           distance > 0.05
@@ -420,12 +425,29 @@ export class LakeFish {
         awayX = Math.sin(bearing)
         awayZ = Math.cos(bearing)
       }
+      // A nearby fish reacts one frame later, so the escape travels through the shoal.
+      for (let neighborIndex = i - 1; neighborIndex <= i + 1; neighborIndex += 2) {
+        const neighborMember = this.membership[neighborIndex]
+        if (!neighborMember || neighborMember.school !== membership.school) continue
+        const neighbor = required(this.poses[neighborIndex])
+        const dx = previousX - neighbor.x
+        const dz = previousZ - neighbor.z
+        if (Math.hypot(dx, dz) > 2) continue
+        const neighborAlarm = required(this.previousAlerts[neighborIndex]) * 0.52
+        if (neighborAlarm <= alarm) continue
+        const bearing = Math.atan2(dx, dz)
+        awayX = Math.sin(bearing)
+        awayZ = Math.cos(bearing)
+        alarm = neighborAlarm
+      }
       swimming.alert +=
         (alarm - swimming.alert) * (1 - Math.exp(-step * (alarm > swimming.alert ? 5 : 1.2)))
       const meal =
         !this.reducedMotion && bait && bait.strength > 0 && swimming.initialized
           ? baitSteering(previousX, previousZ, bait)
           : null
+      let acceleration = 0
+      const stroke = 0.5 + 0.5 * Math.sin(sampleTime * (3.8 + traits.rate) + traits.phase)
       if (!swimming.initialized) {
         swimming.heading = pose.heading
         swimming.initialized = true
@@ -453,8 +475,10 @@ export class LakeFish {
         swimming.turn += (Math.max(-1, Math.min(1, turn * 2)) - swimming.turn) * response
         // Turn first; accelerating sideways would recreate the original sliding.
         const alignment = 0.25 + 0.75 * Math.max(0, Math.cos(turn))
-        const speed = Math.min(1.8, Math.hypot(vx, vz)) * alignment
-        swimming.speed += Math.max(-step * 1.8, Math.min(step * 1.4, speed - swimming.speed))
+        const speed = Math.min(1.8, Math.hypot(vx, vz)) * alignment * (0.76 + 0.24 * stroke)
+        const oldSpeed = swimming.speed
+        swimming.speed += Math.max(-step * 1.8, Math.min(step * 1.5, speed - swimming.speed))
+        acceleration = Math.max(0, (swimming.speed - oldSpeed) / step)
         const x = previousX + Math.sin(swimming.heading) * swimming.speed * step
         const z = previousZ + Math.cos(swimming.heading) * swimming.speed * step
         // Slide along terrain instead of stopping at it.
@@ -478,10 +502,13 @@ export class LakeFish {
         ? Number(membership.school === 0)
         : schoolVisibility(school, sampleTime)
       pose.y = swimmingHeight(this.bed, pose.x, pose.z, sampleTime, traits.phase, visibility)
-      const propulsion = 0.75 + 0.25 * Math.sin(sampleTime * 1.1 + traits.phase)
-      const effort = Math.min(1.25, 0.8 + swimming.speed * 0.35 + swimming.alert * 0.3) * propulsion
+      const effort = Math.min(
+        1.35,
+        (0.35 + stroke * 0.75) *
+          (0.72 + swimming.speed * 0.35 + swimming.alert * 0.42 + acceleration * 0.2),
+      )
       swimming.phase +=
-        step * (5.5 + Math.min(1, swimming.speed) * 3.0) * traits.rate * (0.75 + propulsion * 0.25)
+        step * (4.2 + Math.min(1, swimming.speed) * 2.5) * traits.rate * (0.8 + stroke * 0.25)
       pose.heading = swimming.heading
       required(this.rigs[i]).body.setTranslation({ x: pose.x, y: pose.y, z: pose.z }, false)
       this.transform.position.set(pose.x, pose.y, pose.z)
