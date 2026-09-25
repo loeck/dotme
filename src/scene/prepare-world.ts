@@ -9,8 +9,15 @@ export function prepareWorldAsync(
 ): Promise<PreparedWorld> {
   if (signal.aborted)
     return Promise.reject(new DOMException('World preparation cancelled', 'AbortError'))
+  performance.clearMarks('worldprep-start')
+  performance.clearMarks('worldprep-ready')
+  performance.mark('worldprep-start')
   // Synchronous fallback is limited to platforms without Worker support.
-  if (typeof Worker === 'undefined') return Promise.resolve(prepareWorld(seed, mobile))
+  if (typeof Worker === 'undefined') {
+    const world = prepareWorld(seed, mobile)
+    performance.mark('worldprep-ready')
+    return Promise.resolve(world)
+  }
   return new Promise((resolve, reject) => {
     const worker = new Worker(new URL('./world.worker.ts', import.meta.url), { type: 'module' })
     const cleanup = () => {
@@ -24,6 +31,7 @@ export function prepareWorldAsync(
     signal.addEventListener('abort', abort, { once: true })
     worker.addEventListener('message', (event: MessageEvent<PreparedWorld>) => {
       cleanup()
+      performance.mark('worldprep-ready')
       resolve(event.data)
     })
     worker.addEventListener('error', (event) => {

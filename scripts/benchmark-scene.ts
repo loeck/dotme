@@ -8,6 +8,7 @@ import { preview } from 'vite'
 
 import { chromiumLaunchOptions } from '../e2e/browser-options.ts'
 import { availableBackend } from '../e2e/graphics-support.ts'
+import type { SceneGpuInfo } from '../src/scene/diagnostics.ts'
 import { parisWeatherFixture } from '../src/weather/paris.fixture.ts'
 
 type LoadingMetrics = {
@@ -25,6 +26,7 @@ declare global {
 
 const seconds = Number(process.env.BENCH_SECONDS ?? 30)
 const repeats = Number(process.env.BENCH_REPEATS ?? 3)
+const cold = process.env.BENCH_COLD === '1'
 if (!Number.isFinite(seconds) || seconds <= 0 || !Number.isInteger(repeats) || repeats < 1)
   throw new Error('BENCH_SECONDS must be positive and BENCH_REPEATS a positive integer')
 const output = resolve(process.env.BENCH_OUTPUT ?? 'artifacts/performance')
@@ -36,16 +38,23 @@ const baseURL = process.env.BENCH_URL ?? server?.resolvedUrls?.local[0]
 if (!baseURL) throw new Error('No preview URL available; build the site first')
 const quantile = (values: readonly number[], q: number) =>
   values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) * q)] ?? 0
+type GpuSnapshot = SceneGpuInfo | null
 const runs: {
   profile: string
   scenario: string
   repeat: number
   backend: string | null
+  fallbackAdapter: string | null
   frames: number
   medianMs: number
   p95Ms: number
   loaderMs: number
   readyMs: number
+  physicsMs: number | null
+  worldPrepMs: number | null
+  compileStages: Array<{ stage: string; ms: number | null }>
+  gpuAfterWarmup: GpuSnapshot
+  gpuSteady: GpuSnapshot
   maxLoadingFrameGapMs: number
   loadingLongTaskCount: number | null
   maxLoadingLongTaskMs: number | null
@@ -161,6 +170,39 @@ try {
           }
           await page.locator('html[data-scene-loading="ready"]').waitFor({ state: 'attached' })
           const readyMs = performance.now() - started
+          const gpuAfterWarmup = await page.evaluate(() => window.sceneGpuInfo?.() ?? null)
+          const loadTimings = await page.evaluate(() => {
+            const physicsStart = performance.getEntriesByName('physics-start')[0]?.startTime ?? null
+            const physicsReady = performance.getEntriesByName('physics-ready')[0]?.startTime ?? null
+            const worldStart = performance.getEntriesByName('worldprep-start')[0]?.startTime ?? null
+            const worldReady = performance.getEntriesByName('worldprep-ready')[0]?.startTime ?? null
+            const presented =
+              performance.getEntriesByName('landscape-presented')[0]?.startTime ?? null
+            const stages: Array<{ stage: string; ms: number | null }> = []
+            const prefix = 'compile:'
+            let previous: PerformanceEntry | null = null
+            for (const entry of performance.getEntriesByType('mark')) {
+              if (!entry.name.startsWith(prefix)) continue
+              if (previous)
+                stages.push({
+                  stage: previous.name.substring(prefix.length),
+                  ms: entry.startTime - previous.startTime,
+                })
+              previous = entry
+            }
+            if (previous)
+              stages.push({
+                stage: previous.name.substring(prefix.length),
+                ms: presented === null ? null : presented - previous.startTime,
+              })
+            return {
+              physicsMs:
+                physicsStart === null || physicsReady === null ? null : physicsReady - physicsStart,
+              worldPrepMs:
+                worldStart === null || worldReady === null ? null : worldReady - worldStart,
+              stages,
+            }
+          })
           const intervals = await page.evaluate(
             (duration) =>
               new Promise<number[]>((resolveSamples) => {
@@ -177,7 +219,10 @@ try {
               }),
             seconds,
           )
-          const backend = await page.locator('canvas[data-backend]').getAttribute('data-backend')
+          const canvas = page.locator('canvas[data-backend]')
+          const backend = await canvas.getAttribute('data-backend')
+          const fallbackAdapter = await canvas.getAttribute('data-fallback-adapter')
+          const gpuSteady = await page.evaluate(() => window.sceneGpuInfo?.() ?? null)
           await page.screenshot({ path: resolve(output, `${profile}-${scenario}-${repeat}.png`) })
           const loadingTasks = await page.evaluate(() => window.sceneLoadingMetrics)
           if (!loadingTasks) throw new Error('Loading metrics were lost')
@@ -188,11 +233,17 @@ try {
             scenario,
             repeat,
             backend,
+            fallbackAdapter,
             frames: intervals.length,
             medianMs: quantile(intervals, 0.5),
             p95Ms: quantile(intervals, 0.95),
             loaderMs,
             readyMs,
+            physicsMs: loadTimings.physicsMs,
+            worldPrepMs: loadTimings.worldPrepMs,
+            compileStages: loadTimings.stages,
+            gpuAfterWarmup,
+            gpuSteady,
             maxLoadingFrameGapMs: loading.maxLoadingFrameGapMs,
             loadingLongTaskCount: loadingTasks.loadingLongTaskCount,
             maxLoadingLongTaskMs: loadingTasks.maxLoadingLongTaskMs,
@@ -215,6 +266,7 @@ try {
         seconds,
         repeats,
         adapter: process.env.WEBGPU_ADAPTER ?? 'native',
+        cold,
         runs,
         loadingRuns,
         unsupportedProfiles: [...unsupportedProfiles],

@@ -27,6 +27,24 @@ export function lakeIndex(bed: LakeBed, x: number, z: number) {
   return Math.floor(v * bed.resolution) * bed.resolution + Math.floor(u * bed.resolution)
 }
 
+/** Bilinear signed distance to terrain footprints; positive over open water. */
+export function sampleShore(bed: LakeBed, x: number, z: number) {
+  const n = Math.round(Math.sqrt(bed.shore.length))
+  const cell = LAKE_BOUNDS.size / n
+  const u = (x - LAKE_BOUNDS.minX) / cell - 0.5
+  const v = (z - LAKE_BOUNDS.minZ) / cell - 0.5
+  const col = Math.max(0, Math.min(n - 2, Math.floor(u))),
+    row = Math.max(0, Math.min(n - 2, Math.floor(v)))
+  const fx = Math.max(0, Math.min(1, u - col)),
+    fz = Math.max(0, Math.min(1, v - row))
+  const i = row * n + col,
+    field = bed.shore
+  return (
+    (required(field[i]) * (1 - fx) + required(field[i + 1]) * fx) * (1 - fz) +
+    (required(field[i + n]) * (1 - fx) + required(field[i + n + 1]) * fx) * fz
+  )
+}
+
 /** Rasterize actual voxel footprints, then connect submerged relief to those shores. */
 export function createLakeBed(
   voxels: readonly Voxel[],

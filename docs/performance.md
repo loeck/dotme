@@ -47,7 +47,12 @@ retained in its JSON report. The report records the requested Chromium adapter;
 SwiftShader measurements describe CPU software rendering, not hardware GPU performance.
 
 Set `BENCH_PROFILES=desktop` or `mobile`, `BENCH_OUTPUT` to change the output directory,
-or `BENCH_URL` to sample an already running build. Compare reports generated on the same
+or `BENCH_URL` to sample an already running build. Set `BENCH_COLD=1` to disable the
+Dawn blob cache so every Chromium repeat measures cold pipeline compilation; without
+it, repeat 0 is cold and later repeats in the same browser profile are warm. The flag
+has no effect on WebKit. Later repeats may still improve through profile-level caches
+the flag does not clear, such as compiled JavaScript and driver pipeline caches.
+Compare reports generated on the same
 machine, browser version, viewport, device scale and workload. Avoid simultaneous GPU
 clients. Browser timing includes scheduling and presentation; it is not GPU execution
 time. Mobile emulation does not establish performance on a physical phone.

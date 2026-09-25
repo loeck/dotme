@@ -41,6 +41,21 @@ describe('scene weather mapping', () => {
     expect(mapped.wind.meanSpeed).toBe(5)
     expect(mapped.source).toBe('live')
   })
+  it('maps sunrise, sunset and snapshot time to location-local solar seconds', async () => {
+    respond()
+    const mapped = weatherForScene(await fetchWeather())
+    expect(mapped.solar).toEqual({ sunrise: 27_720, sunset: 71_040 })
+    expect(mapped.nowSeconds).toBe(36_000)
+  })
+  it('keeps live weather with a default orbit when the sun never sets or rises', async () => {
+    const data = parisWeatherFixture()
+    data.daily.sunrise = [1790185440]
+    data.daily.sunset = [1790142120]
+    respond(data)
+    const mapped = weatherForScene(await fetchWeather())
+    expect(mapped.source).toBe('live')
+    expect(mapped.solar).toEqual({ sunrise: 21_600, sunset: 64_800 })
+  })
   it('does not turn snow or a dry thunderstorm into liquid rain', async () => {
     for (const weather_code of [71, 95]) {
       const data = parisWeatherFixture()
@@ -59,6 +74,9 @@ describe('scene weather mapping', () => {
       const weather = randomSceneWeather(seed * 10007)
       expect(weather).toEqual(randomSceneWeather(seed * 10007))
       expect(weather.source).toBe('random')
+      expect(weather.solar).toEqual({ sunrise: 21_600, sunset: 64_800 })
+      expect(weather.nowSeconds).toBeGreaterThanOrEqual(0)
+      expect(weather.nowSeconds).toBeLessThan(86_400)
       expect(weather.rain.intensity === 0 || ['cloudy', 'overcast'].includes(weather.weather)).toBe(
         true,
       )

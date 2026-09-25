@@ -2,6 +2,14 @@ import { required } from '../invariant'
 const DAY = 86400
 export const wrapDay = (seconds: number) => ((seconds % DAY) + DAY) % DAY
 
+/** Day/night orbit endpoints as seconds past local midnight. */
+export interface SolarEndpoints {
+  sunrise: number
+  sunset: number
+}
+
+export const DEFAULT_SOLAR: SolarEndpoints = { sunrise: 21_600, sunset: 64_800 }
+
 export function parseInitialTime(value: string | null, local = new Date()): number {
   if (value && /^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) {
     const [hours, minutes] = value.split(':').map(Number)

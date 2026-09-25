@@ -1,6 +1,8 @@
 import { required } from '../invariant'
 import type { GpsPosition } from '../scene-params'
 import type { RainState } from '../scene/rain-simulation'
+import { DEFAULT_SOLAR, parseInitialTime } from '../scene/solar-clock'
+import type { SolarEndpoints } from '../scene/solar-clock'
 import type { WeatherPreset } from '../scene/weather'
 import type { WindOptions } from '../scene/wind'
 import type { WeatherSnapshot } from './current'
@@ -11,6 +13,9 @@ export type SceneWeather = Readonly<{
   weather: WeatherPreset
   rain: RainState
   wind: WindOptions
+  solar: SolarEndpoints
+  /** Location-local seconds past midnight at the snapshot time. */
+  nowSeconds: number
   source: 'live' | 'random'
 }>
 
@@ -46,8 +51,24 @@ export function weatherForScene(snapshot: WeatherSnapshot): SceneWeather {
   // Meteorological bearings describe where wind comes from. Scene +z is south.
   const direction = (snapshot.windDirectionDegrees * Math.PI) / 180
   const speed = Math.min(20, snapshot.windSpeedMs)
+  const clock = new Intl.DateTimeFormat('en', {
+    timeZone: snapshot.timezone,
+    hourCycle: 'h23',
+    hour: 'numeric',
+    minute: 'numeric',
+    second: 'numeric',
+  })
+  const secondsOfDay = (timestampUnixSeconds: number) => {
+    const parts = clock.formatToParts(new Date(timestampUnixSeconds * 1000))
+    const value = (type: string) => Number(required(parts.find((part) => part.type === type)).value)
+    return value('hour') * 3600 + value('minute') * 60 + value('second')
+  }
+  const sunrise = secondsOfDay(snapshot.sunriseUnixSeconds)
+  const sunset = secondsOfDay(snapshot.sunsetUnixSeconds)
   return {
     weather,
+    solar: sunset > sunrise ? { sunrise, sunset } : DEFAULT_SOLAR,
+    nowSeconds: secondsOfDay(snapshot.timestampUnixSeconds),
     rain: { intensity, wind: { x: -Math.sin(direction) * speed, z: Math.cos(direction) * speed } },
     wind: {
       bearing: Math.atan2(Math.cos(direction), -Math.sin(direction)),
@@ -81,6 +102,8 @@ export function randomSceneWeather(seed: number): SceneWeather {
   const speed = 1 + random() * 4
   return {
     weather,
+    solar: DEFAULT_SOLAR,
+    nowSeconds: parseInitialTime(null),
     rain: { intensity, wind: { x: Math.cos(angle) * speed, z: Math.sin(angle) * speed } },
     wind: { bearing: angle, meanSpeed: speed },
     source: 'random',

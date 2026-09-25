@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 import { required } from '../src/invariant'
 import { parisWeatherFixture } from '../src/weather/paris.fixture'
 import { deferred } from './deferred'
+import { mockParisWeather } from './weather-fixture'
 
 test('preloads Paris weather and keeps credits inside the information dialog', async ({ page }) => {
   const data = parisWeatherFixture()
@@ -100,4 +101,25 @@ test('GPS selects the weather location while time independently selects night', 
   expect(weatherRequest.searchParams.get('latitude')).toBe('1.3521')
   expect(weatherRequest.searchParams.get('longitude')).toBe('103.8198')
   await expect(page.locator('main')).toHaveAttribute('data-local-lights', 'true')
+})
+
+test('keeps daylight at 18:26 when the live sunset is later', async ({ page }) => {
+  await mockParisWeather(
+    page,
+    {
+      time: Date.UTC(2026, 8, 25, 16, 26) / 1000,
+      weather_code: 0,
+      cloud_cover: 0,
+      is_day: 1,
+    },
+    {
+      time: [Date.UTC(2026, 8, 24, 22, 0) / 1000],
+      sunrise: [Date.UTC(2026, 8, 25, 4, 42) / 1000],
+      sunset: [Date.UTC(2026, 8, 25, 17, 44) / 1000],
+    },
+  )
+  await page.goto('/?seed=42')
+  await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'live')
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
+  await expect(page.locator('main')).toHaveAttribute('data-local-lights', 'false')
 })

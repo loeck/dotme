@@ -2,7 +2,7 @@ import { Matrix4, Scene, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
-import { createLakeBed, WATER_LEVEL } from './lake-bed'
+import { createLakeBed, lakeIndex, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
@@ -253,6 +253,97 @@ describe('wave impacts', () => {
     splashes.dispose()
     physics.dispose()
     expect(scene.children).toHaveLength(0)
+  })
+})
+
+describe('pointer bursts', () => {
+  it('emits a radial burst with drops, crown and water returns, deterministically', async () => {
+    expect(bed.water[required(lakeIndex(bed, 5, -5))]).not.toBe(0)
+    const run = async () => {
+      const physics = await physicsFor()
+      const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
+      try {
+        const returns: number[][] = []
+        splashes.onReturn = (...event) => returns.push(event)
+        splashes.spawnBurst(5, -5, 0.55, 0, calm.sample(0))
+        expect(splashes.emitted).toBe(1)
+        let activeFrames = 0
+        let crowned = false
+        for (let frame = 0; frame < 240; frame++) {
+          const time = frame / 60
+          splashes.update(time, calm.sample(time))
+          if (splashes.active) activeFrames++
+          if (splashes.impacts.active > 0) crowned = true
+        }
+        expect(activeFrames).toBeGreaterThan(5)
+        expect(crowned).toBe(true)
+        expect(splashes.impacts.landed).toBeGreaterThan(0)
+        expect(returns.length).toBeGreaterThan(0)
+        expect(
+          returns.every(
+            ([x, z, radius, velocity]) =>
+              Math.hypot(required(x) - 5, required(z) + 5) < 2 &&
+              required(radius) > 0 &&
+              required(velocity) < 0,
+          ),
+        ).toBe(true)
+        return returns
+      } finally {
+        splashes.dispose()
+        physics.dispose()
+      }
+    }
+    const first = await run()
+    expect(await run()).toEqual(first)
+  })
+
+  it('ignores bursts on land or without energy', async () => {
+    expect(bed.water[required(lakeIndex(bed, 0, 0))]).toBe(0)
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
+    try {
+      splashes.spawnBurst(0, 0, 0.9, 0, calm.sample(0))
+      splashes.spawnBurst(5, -5, 0, 0, calm.sample(0))
+      splashes.spawnBurst(5, -5, Number.NaN, 0, calm.sample(0))
+      for (let frame = 0; frame < 120; frame++) splashes.update(frame / 60, calm.sample(frame / 60))
+      expect(splashes.emitted).toBe(0)
+      expect(splashes.active).toBe(0)
+      expect(splashes.impacts.landed).toBe(0)
+    } finally {
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
+  it('leaves settled splash buffers untouched on idle frames', async () => {
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
+    try {
+      for (let frame = 0; frame < 120; frame++) splashes.update(frame / 60, calm.sample(frame / 60))
+      expect(splashes.active).toBe(0)
+      expect(splashes.mesh.visible).toBe(false)
+      const versions = [
+        splashes.mesh.instanceMatrix.version,
+        splashes.sheets.instanceMatrix.version,
+        splashes.impacts.mesh.instanceMatrix.version,
+        splashes.impacts.slopes.instanceMatrix.version,
+      ]
+      for (let frame = 120; frame < 180; frame++)
+        splashes.update(frame / 60, calm.sample(frame / 60))
+      expect(splashes.active).toBe(0)
+      expect(splashes.mesh.visible).toBe(false)
+      expect(splashes.sheets.visible).toBe(false)
+      expect(splashes.impacts.slopes.visible).toBe(false)
+      expect([
+        splashes.mesh.instanceMatrix.version,
+        splashes.sheets.instanceMatrix.version,
+        splashes.impacts.mesh.instanceMatrix.version,
+        splashes.impacts.slopes.instanceMatrix.version,
+      ]).toEqual(versions)
+    } finally {
+      splashes.dispose()
+      physics.dispose()
+    }
   })
 })
 

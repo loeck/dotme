@@ -70,6 +70,39 @@ describe('solar lighting and light-space projection', () => {
     expect(sampleLighting(0).sunIntensity).toBe(0)
     expect(sampleLighting(0).moonIntensity).toBeGreaterThan(1)
   })
+  it('keeps late-September sun up at 18:26 instead of forcing night at 18:00', () => {
+    const paris = { sunrise: 27_720, sunset: 71_040 }
+    const evening = sampleLighting(18 * 3600 + 26 * 60, 0, 'clear', paris)
+    expect(evening.sunDirection.y).toBeGreaterThan(0)
+    expect(evening.daylight).toBeGreaterThan(0)
+    expect(evening.localLightStrength).toBe(0)
+    expect(sampleLighting(18 * 3600 + 26 * 60).sunDirection.y).toBeLessThan(0)
+    expect(sampleLighting(27_720, 0, 'clear', paris).sunDirection.y).toBeCloseTo(0)
+    expect(sampleLighting(71_040, 0, 'clear', paris).sunDirection.y).toBeCloseTo(0)
+    expect(sampleLighting(0, 0, 'clear', paris).sunIntensity).toBe(0)
+  })
+  it('stays continuous through custom sunrise, sunset and midnight', () => {
+    const solar = { sunrise: 27_720, sunset: 71_040 }
+    for (const boundary of [0, 27_720, 71_040, 86400]) {
+      const before = sampleLighting(boundary, -0.001, 'clear', solar)
+      const after = sampleLighting(boundary, 0.001, 'clear', solar)
+      expect(before.sunDirection.distanceTo(after.sunDirection)).toBeLessThan(0.00001)
+      expect(Math.abs(before.sunIntensity - after.sunIntensity)).toBeLessThan(0.00001)
+      expect(before.localLightStrength).toBeCloseTo(after.localLightStrength, 3)
+    }
+  })
+  it('falls back to 06:00–18:00 for degenerate solar endpoints', () => {
+    for (const solar of [
+      { sunrise: 64_800, sunset: 21_600 },
+      { sunrise: 0, sunset: 0 },
+      { sunrise: 0, sunset: 86_400 },
+    ]) {
+      expect(sampleLighting(12 * 3600, 0, 'clear', solar).sunDirection.y).toBeCloseTo(
+        sampleLighting(12 * 3600).sunDirection.y,
+      )
+      expect(sampleLighting(0, 0, 'clear', solar).sunIntensity).toBe(0)
+    }
+  })
   it('is continuous through sunrise, sunset and midnight without non-finite projections', () => {
     for (const boundary of [0, 6 * 3600, 18 * 3600, 86400]) {
       const before = sampleLighting(boundary, -0.001)

@@ -38,6 +38,12 @@ flow. Catch-up is bounded to prevent an unresponsive frame from creating an unst
 World generation and interaction sampling remain on the CPU; scene composition and water
 passes use node materials.
 
+Rapier couples rigid bodies to the surface without stepping the wave field itself. Shore
+splashes and pointer bursts fly droplets as dynamic bodies whose landings return impulses
+to the field; a buoy and drifting leaves ride buoyancy sampled from the analytic wind
+field and report wake impulses while moving; foam flecks advect on the CPU with wind and
+slope currents and collapse against the shore distance field.
+
 Unit tests cover equations, fixed-step behavior, impulse bounds, shore handling and wind.
 `pnpm e2e:gpu` requires a genuine WebGPU adapter. Use the production benchmark to
 inspect seeded water at rest, during interaction and in rain; compare like-for-like captures.

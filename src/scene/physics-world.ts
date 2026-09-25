@@ -9,8 +9,12 @@ let loading: Promise<RapierModule> | undefined
 
 async function load(): Promise<RapierModule> {
   try {
+    performance.clearMarks('physics-start')
+    performance.clearMarks('physics-ready')
+    performance.mark('physics-start')
     const rapier = await import('@dimforge/rapier3d-compat')
     await rapier.init()
+    performance.mark('physics-ready')
     return rapier
   } catch (error) {
     loading = undefined

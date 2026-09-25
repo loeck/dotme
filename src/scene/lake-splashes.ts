@@ -36,7 +36,7 @@ import {
 import type { Scene } from 'three/webgpu'
 
 import { required } from '../invariant'
-import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
+import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import type { PhysicsWorld } from './physics-world'
 import { SplashImpacts } from './splash-impacts'
@@ -147,6 +147,8 @@ export class LakeSplashes {
   private readonly shoreCell: number
   emitted = 0
   active = 0
+  private dropsSettled = false
+  private sheetsSettled = false
 
   private readonly bed: LakeBed
   private readonly physics: PhysicsWorld
@@ -350,19 +352,7 @@ export class LakeSplashes {
   }
 
   private shoreAt(x: number, z: number) {
-    const n = this.shoreResolution
-    const u = (x - LAKE_BOUNDS.minX) / this.shoreCell - 0.5
-    const v = (z - LAKE_BOUNDS.minZ) / this.shoreCell - 0.5
-    const col = Math.max(0, Math.min(n - 2, Math.floor(u))),
-      row = Math.max(0, Math.min(n - 2, Math.floor(v)))
-    const fx = Math.max(0, Math.min(1, u - col)),
-      fz = Math.max(0, Math.min(1, v - row))
-    const i = row * n + col,
-      field = this.bed.shore
-    return (
-      (required(field[i]) * (1 - fx) + required(field[i + 1]) * fx) * (1 - fz) +
-      (required(field[i + n]) * (1 - fx) + required(field[i + n + 1]) * fx) * fz
-    )
+    return sampleShore(this.bed, x, z)
   }
 
   private shoreOrigin(contact: Contact, offset: number) {
@@ -381,6 +371,25 @@ export class LakeSplashes {
     )
       return null
     return { x: px, z: pz }
+  }
+
+  private sampleDrop(profile: SplashProfile, strength: number, index: number) {
+    const jet = required(
+      profile.jets[
+        index < profile.jets.length ? index : Math.floor(this.random() * profile.jets.length)
+      ],
+    )
+    const fine = this.random() < 0.32
+    return {
+      jet,
+      speed: (0.25 + strength * 0.65) * profile.reach * jet.speed * (0.6 + this.random() * 0.8),
+      lift: (0.55 + strength * 1.65) * profile.lift * jet.lift * (0.55 + this.random() * 0.9),
+      delay: jet.delay + (index / profile.count) * profile.emission,
+      size: fine
+        ? 0.004 + this.random() * 0.007
+        : 0.01 + this.random() ** 2 * (0.013 + strength * 0.019),
+      drag: fine ? 4 + this.random() * 5 : 0.3 + this.random() * 0.9,
+    }
   }
 
   private release(spawn: PendingDrop) {
@@ -545,6 +554,47 @@ export class LakeSplashes {
     this.pending.push(jet)
   }
 
+  private readonly preStepHooks = new Set<(stepTime: number) => void>()
+
+  /** Register per-step forces on the shared world; this loop remains its only stepper. */
+  addPreStep(hook: (stepTime: number) => void) {
+    this.preStepHooks.add(hook)
+    return () => {
+      this.preStepHooks.delete(hook)
+    }
+  }
+
+  /** Radial open-water burst for pointer impacts; wall sheets stay with the shore branch. */
+  spawnBurst(x: number, z: number, energy: number, time: number, wind: WindState) {
+    const strength = Math.max(0, Math.min(1, energy))
+    if (!(strength > 0)) return
+    const index = lakeIndex(this.bed, x, z)
+    if (index < 0 || !this.bed.water[index]) return
+    const profile = createSplashProfile(() => this.random(), strength)
+    this.emitted++
+    this.impacts.add(x, z, time, strength)
+    const surface = WATER_LEVEL + sampleWindField(x, z, time, wind, 0.08)[0]
+    const { count } = profile
+    for (let i = 0; i < count; i++) {
+      const drop = this.sampleDrop(profile, strength, i)
+      const angle = (i / count) * Math.PI * 2 + (this.random() - 0.5) * 0.7
+      const spread = 0.02 + this.random() * 0.06
+      this.pending.push({
+        x: x + Math.cos(angle) * spread,
+        y: surface + 0.015 + this.random() * (0.02 + strength * 0.06),
+        z: z + Math.sin(angle) * spread,
+        vx: Math.cos(angle) * drop.speed + wind.direction[0] * wind.speed * 0.025,
+        vz: Math.sin(angle) * drop.speed + wind.direction[1] * wind.speed * 0.025,
+        vy: drop.lift,
+        size: drop.size,
+        drag: drop.drag,
+        windX: wind.direction[0] * wind.speed * 0.1,
+        windZ: wind.direction[1] * wind.speed * 0.1,
+        release: time + drop.delay,
+      })
+    }
+  }
+
   update(time: number, wind: WindState, reducedMotion = false, intro = 1) {
     if (reducedMotion) {
       for (const drop of this.drops) if (drop.active) this.kill(drop)
@@ -609,43 +659,30 @@ export class LakeSplashes {
         }
         this.sheetCursor = (this.sheetCursor + 1) % this.sheetsState.length
         for (let i = 0; i < count; i++) {
-          const jet = required(
-            profile.jets[
-              i < profile.jets.length ? i : Math.floor(this.random() * profile.jets.length)
-            ],
-          )
-          const angle = jet.angle + (this.random() - 0.5) * 0.1
-          const fine = this.random() < 0.32
+          const drop = this.sampleDrop(profile, energy, i)
+          const angle = drop.jet.angle + (this.random() - 0.5) * 0.1
           const source =
             this.shoreOrigin(patch, ((i + this.random()) / count - 0.5) * profile.width) ?? origin
-          const speed =
-            (0.25 + energy * 0.65) * profile.reach * jet.speed * (0.6 + this.random() * 0.8)
-          const side = Math.sin(angle) * speed
-          const outward = Math.cos(angle) * speed
-          const lift =
-            (0.55 + energy * 1.65) * profile.lift * jet.lift * (0.55 + this.random() * 0.9)
-          const delay = jet.delay + (i / count) * profile.emission
-          const size = fine
-            ? 0.004 + this.random() * 0.007
-            : 0.01 + this.random() ** 2 * (0.013 + energy * 0.019)
+          const side = Math.sin(angle) * drop.speed
+          const outward = Math.cos(angle) * drop.speed
           this.pending.push({
             x: source.x + contact.nx * (0.015 + this.random() * 0.07),
             y:
               WATER_LEVEL +
               Math.max(
                 0.015,
-                sampleWindField(source.x, source.z, time + delay, wind, 0.08)[0] + 0.015,
+                sampleWindField(source.x, source.z, time + drop.delay, wind, 0.08)[0] + 0.015,
               ) +
               this.random() * (0.025 + energy * 0.09),
             z: source.z + contact.nz * (0.015 + this.random() * 0.07),
             vx: contact.nx * outward - contact.nz * side + wind.direction[0] * wind.speed * 0.025,
             vz: contact.nz * outward + contact.nx * side + wind.direction[1] * wind.speed * 0.025,
-            vy: lift,
-            size,
-            drag: fine ? 4 + this.random() * 5 : 0.3 + this.random() * 0.9,
+            vy: drop.lift,
+            size: drop.size,
+            drag: drop.drag,
             windX: wind.direction[0] * wind.speed * 0.1,
             windZ: wind.direction[1] * wind.speed * 0.1,
-            release: time + delay,
+            release: time + drop.delay,
           })
         }
       }
@@ -658,6 +695,7 @@ export class LakeSplashes {
     this.accumulator = Math.max(0, this.accumulator - steps * SPLASH_STEP)
     for (let step = 0; step < steps; step++) {
       this.releaseDue()
+      for (const hook of this.preStepHooks) hook(this.stepTime)
       this.applyWind()
       this.physics.world.step()
       this.stepTime += SPLASH_STEP
@@ -665,49 +703,59 @@ export class LakeSplashes {
         if (drop.active) this.recordStep(drop)
       }
     }
-    const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
-    this.transform.quaternion.identity()
     this.active = 0
-    for (let i = 0; i < this.capacity; i++) {
-      this.updateDrop(required(this.drops[i]), i, time, wind, opacity)
-      this.transform.updateMatrix()
-      this.mesh.setMatrixAt(i, this.transform.matrix)
-    }
-    this.mesh.instanceMatrix.needsUpdate = true
-    opacity.needsUpdate = true
-    this.mesh.visible = this.active > 0
-    const sheetData = this.sheets.geometry.getAttribute('aSheet')
-    const shapeData = this.sheets.geometry.getAttribute('aSheetShape')
-    const timingData = this.sheets.geometry.getAttribute('aSheetTiming')
-    let activeSheets = 0
-    for (let i = 0; i < this.sheetsState.length; i++) {
-      const sheet = this.sheetsState[i]
-      const age = sheet ? time - sheet.born : 1
-      if (!sheet || age < 0 || age > sheet.profile.lifetime) {
-        this.sheetsState[i] = null
-        this.transform.scale.setScalar(0)
-        sheetData.setXYZ(i, 0, 0, 0)
-        timingData.setXYZ(i, 1, 0.3, 0)
-      } else {
-        activeSheets++
-        this.transform.position.set(sheet.x, sheet.y, sheet.z)
-        this.transform.rotation.set(0, sheet.heading, 0)
-        this.transform.scale.setScalar(1)
-        sheetData.setXYZ(i, age, sheet.energy, sheet.profile.seed)
-        shapeData.setXYZW(
-          i,
-          sheet.profile.fan,
-          sheet.profile.lift,
-          sheet.profile.reach,
-          sheet.profile.lean,
-        )
-        timingData.setXYZ(i, sheet.profile.lifetime, sheet.profile.tear, sheet.profile.width)
+    // Landing detection runs inside the presentation loop, so an idle frame can
+    // only skip it once zeroed buffers were already uploaded and the mesh hidden.
+    const dropsLive = this.drops.some((drop) => drop.active)
+    if (dropsLive || !this.dropsSettled) {
+      const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
+      this.transform.quaternion.identity()
+      for (let i = 0; i < this.capacity; i++) {
+        this.updateDrop(required(this.drops[i]), i, time, wind, opacity)
+        this.transform.updateMatrix()
+        this.mesh.setMatrixAt(i, this.transform.matrix)
       }
-      this.transform.updateMatrix()
-      this.sheets.setMatrixAt(i, this.transform.matrix)
+      this.mesh.instanceMatrix.needsUpdate = true
+      opacity.needsUpdate = true
+      this.dropsSettled = this.active === 0
     }
-    this.sheets.instanceMatrix.needsUpdate = true
-    sheetData.needsUpdate = shapeData.needsUpdate = timingData.needsUpdate = true
+    this.mesh.visible = this.active > 0
+    let activeSheets = 0
+    const sheetsLive = this.sheetsState.some((sheet) => sheet !== null)
+    if (sheetsLive || !this.sheetsSettled) {
+      const sheetData = this.sheets.geometry.getAttribute('aSheet')
+      const shapeData = this.sheets.geometry.getAttribute('aSheetShape')
+      const timingData = this.sheets.geometry.getAttribute('aSheetTiming')
+      for (let i = 0; i < this.sheetsState.length; i++) {
+        const sheet = this.sheetsState[i]
+        const age = sheet ? time - sheet.born : 1
+        if (!sheet || age < 0 || age > sheet.profile.lifetime) {
+          this.sheetsState[i] = null
+          this.transform.scale.setScalar(0)
+          sheetData.setXYZ(i, 0, 0, 0)
+          timingData.setXYZ(i, 1, 0.3, 0)
+        } else {
+          activeSheets++
+          this.transform.position.set(sheet.x, sheet.y, sheet.z)
+          this.transform.rotation.set(0, sheet.heading, 0)
+          this.transform.scale.setScalar(1)
+          sheetData.setXYZ(i, age, sheet.energy, sheet.profile.seed)
+          shapeData.setXYZW(
+            i,
+            sheet.profile.fan,
+            sheet.profile.lift,
+            sheet.profile.reach,
+            sheet.profile.lean,
+          )
+          timingData.setXYZ(i, sheet.profile.lifetime, sheet.profile.tear, sheet.profile.width)
+        }
+        this.transform.updateMatrix()
+        this.sheets.setMatrixAt(i, this.transform.matrix)
+      }
+      this.sheets.instanceMatrix.needsUpdate = true
+      sheetData.needsUpdate = shapeData.needsUpdate = timingData.needsUpdate = true
+      this.sheetsSettled = activeSheets === 0
+    }
     this.sheets.visible = activeSheets > 0
     this.impacts.update(time)
   }
@@ -743,6 +791,7 @@ export class LakeSplashes {
   }
 
   dispose() {
+    this.preStepHooks.clear()
     for (const drop of this.drops) this.physics.world.removeRigidBody(drop.body)
     this.drops.length = 0
     this.pending.length = 0
