@@ -265,6 +265,37 @@ describe('pointer bursts', () => {
       physics.dispose()
     }
   })
+
+  it('leaves settled splash buffers untouched on idle frames', async () => {
+    const physics = await physicsFor()
+    const splashes = new LakeSplashes(new Scene(), bed, 42, true, physics)
+    try {
+      for (let frame = 0; frame < 120; frame++) splashes.update(frame / 60, calm.sample(frame / 60))
+      expect(splashes.active).toBe(0)
+      expect(splashes.mesh.visible).toBe(false)
+      const versions = [
+        splashes.mesh.instanceMatrix.version,
+        splashes.sheets.instanceMatrix.version,
+        splashes.impacts.mesh.instanceMatrix.version,
+        splashes.impacts.slopes.instanceMatrix.version,
+      ]
+      for (let frame = 120; frame < 180; frame++)
+        splashes.update(frame / 60, calm.sample(frame / 60))
+      expect(splashes.active).toBe(0)
+      expect(splashes.mesh.visible).toBe(false)
+      expect(splashes.sheets.visible).toBe(false)
+      expect(splashes.impacts.slopes.visible).toBe(false)
+      expect([
+        splashes.mesh.instanceMatrix.version,
+        splashes.sheets.instanceMatrix.version,
+        splashes.impacts.mesh.instanceMatrix.version,
+        splashes.impacts.slopes.instanceMatrix.version,
+      ]).toEqual(versions)
+    } finally {
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
 })
 
 it('combines clustered landing waves and clears both the crown and normal contribution', async () => {

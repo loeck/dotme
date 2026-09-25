@@ -44,7 +44,7 @@ export class GpuRuntime {
 
   static async create(canvas: HTMLCanvasElement, signal: AbortSignal) {
     signal.throwIfAborted()
-    const device = await requestDevice(signal)
+    const { device, fallback } = await requestDevice(signal)
     let context: WebGL2RenderingContext | undefined
     if (!device) {
       await restoreWebGLContext(canvas, signal)
@@ -64,6 +64,7 @@ export class GpuRuntime {
       if (!(expected in runtime.renderer.backend)) throw new Error('Graphics initialization failed')
       if (!device) retainWebGLContext(canvas)
       canvas.dataset.backend = runtime.backend
+      canvas.dataset.fallbackAdapter = String(fallback)
       return runtime
     } catch (error) {
       await runtime.dispose()
@@ -105,9 +106,11 @@ export class GpuRuntime {
 
 /** A WebGPU device, or undefined when the browser can only offer WebGL 2. */
 async function requestDevice(signal: AbortSignal) {
-  const adapter = await navigator.gpu?.requestAdapter().catch(() => null)
+  const adapter = await navigator.gpu
+    ?.requestAdapter({ powerPreference: 'high-performance' })
+    .catch(() => null)
   signal.throwIfAborted()
-  if (!adapter) return undefined
+  if (!adapter) return { device: undefined, fallback: false }
   const requiredFeatures: GPUFeatureName[] = adapter.features.has('float32-filterable')
     ? ['float32-filterable']
     : []
@@ -116,7 +119,12 @@ async function requestDevice(signal: AbortSignal) {
     device?.destroy()
     signal.throwIfAborted()
   }
-  return device
+  return { device, fallback: isFallbackAdapter(adapter) }
+}
+
+/** Absent from older WebGPU declarations; a missing flag means a real adapter. */
+function isFallbackAdapter(adapter: object) {
+  return 'isFallbackAdapter' in adapter && adapter.isFallbackAdapter === true
 }
 
 /** Three's WebGL backend dereferences a null context instead of reporting it. */

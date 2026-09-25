@@ -145,6 +145,8 @@ export class LakeSplashes {
   private readonly shoreCell: number
   emitted = 0
   active = 0
+  private dropsSettled = false
+  private sheetsSettled = false
 
   private readonly bed: LakeBed
   private readonly physics: PhysicsWorld
@@ -692,49 +694,59 @@ export class LakeSplashes {
         if (drop.active) this.recordStep(drop)
       }
     }
-    const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
-    this.transform.quaternion.identity()
     this.active = 0
-    for (let i = 0; i < this.capacity; i++) {
-      this.updateDrop(required(this.drops[i]), i, time, wind, opacity)
-      this.transform.updateMatrix()
-      this.mesh.setMatrixAt(i, this.transform.matrix)
-    }
-    this.mesh.instanceMatrix.needsUpdate = true
-    opacity.needsUpdate = true
-    this.mesh.visible = this.active > 0
-    const sheetData = this.sheets.geometry.getAttribute('aSheet')
-    const shapeData = this.sheets.geometry.getAttribute('aSheetShape')
-    const timingData = this.sheets.geometry.getAttribute('aSheetTiming')
-    let activeSheets = 0
-    for (let i = 0; i < this.sheetsState.length; i++) {
-      const sheet = this.sheetsState[i]
-      const age = sheet ? time - sheet.born : 1
-      if (!sheet || age < 0 || age > sheet.profile.lifetime) {
-        this.sheetsState[i] = null
-        this.transform.scale.setScalar(0)
-        sheetData.setXYZ(i, 0, 0, 0)
-        timingData.setXYZ(i, 1, 0.3, 0)
-      } else {
-        activeSheets++
-        this.transform.position.set(sheet.x, sheet.y, sheet.z)
-        this.transform.rotation.set(0, sheet.heading, 0)
-        this.transform.scale.setScalar(1)
-        sheetData.setXYZ(i, age, sheet.energy, sheet.profile.seed)
-        shapeData.setXYZW(
-          i,
-          sheet.profile.fan,
-          sheet.profile.lift,
-          sheet.profile.reach,
-          sheet.profile.lean,
-        )
-        timingData.setXYZ(i, sheet.profile.lifetime, sheet.profile.tear, sheet.profile.width)
+    // Landing detection runs inside the presentation loop, so an idle frame can
+    // only skip it once zeroed buffers were already uploaded and the mesh hidden.
+    const dropsLive = this.drops.some((drop) => drop.active)
+    if (dropsLive || !this.dropsSettled) {
+      const opacity = this.mesh.geometry.getAttribute('aSplashOpacity')
+      this.transform.quaternion.identity()
+      for (let i = 0; i < this.capacity; i++) {
+        this.updateDrop(required(this.drops[i]), i, time, wind, opacity)
+        this.transform.updateMatrix()
+        this.mesh.setMatrixAt(i, this.transform.matrix)
       }
-      this.transform.updateMatrix()
-      this.sheets.setMatrixAt(i, this.transform.matrix)
+      this.mesh.instanceMatrix.needsUpdate = true
+      opacity.needsUpdate = true
+      this.dropsSettled = this.active === 0
     }
-    this.sheets.instanceMatrix.needsUpdate = true
-    sheetData.needsUpdate = shapeData.needsUpdate = timingData.needsUpdate = true
+    this.mesh.visible = this.active > 0
+    let activeSheets = 0
+    const sheetsLive = this.sheetsState.some((sheet) => sheet !== null)
+    if (sheetsLive || !this.sheetsSettled) {
+      const sheetData = this.sheets.geometry.getAttribute('aSheet')
+      const shapeData = this.sheets.geometry.getAttribute('aSheetShape')
+      const timingData = this.sheets.geometry.getAttribute('aSheetTiming')
+      for (let i = 0; i < this.sheetsState.length; i++) {
+        const sheet = this.sheetsState[i]
+        const age = sheet ? time - sheet.born : 1
+        if (!sheet || age < 0 || age > sheet.profile.lifetime) {
+          this.sheetsState[i] = null
+          this.transform.scale.setScalar(0)
+          sheetData.setXYZ(i, 0, 0, 0)
+          timingData.setXYZ(i, 1, 0.3, 0)
+        } else {
+          activeSheets++
+          this.transform.position.set(sheet.x, sheet.y, sheet.z)
+          this.transform.rotation.set(0, sheet.heading, 0)
+          this.transform.scale.setScalar(1)
+          sheetData.setXYZ(i, age, sheet.energy, sheet.profile.seed)
+          shapeData.setXYZW(
+            i,
+            sheet.profile.fan,
+            sheet.profile.lift,
+            sheet.profile.reach,
+            sheet.profile.lean,
+          )
+          timingData.setXYZ(i, sheet.profile.lifetime, sheet.profile.tear, sheet.profile.width)
+        }
+        this.transform.updateMatrix()
+        this.sheets.setMatrixAt(i, this.transform.matrix)
+      }
+      this.sheets.instanceMatrix.needsUpdate = true
+      sheetData.needsUpdate = shapeData.needsUpdate = timingData.needsUpdate = true
+      this.sheetsSettled = activeSheets === 0
+    }
     this.sheets.visible = activeSheets > 0
     this.impacts.update(time)
   }

@@ -1,6 +1,7 @@
 import type { WebGPURenderer } from 'three/webgpu'
 
 import { cleanSceneUrl, sceneParams } from '../scene-params'
+import { loadPhysics } from '../scene/physics-world'
 import { prepareWorldAsync } from '../scene/prepare-world'
 import { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
 import { preloadSceneWeather } from '../weather/scene'
@@ -25,6 +26,9 @@ export async function initLandscape(
   const params = sceneParams(location.search)
   const seed = seeds.get(host) ?? params.seed ?? crypto.getRandomValues(new Uint32Array(1))[0] ?? 0
   seeds.set(host, seed)
+  // The engine reuses this cached promise; starting it here overlaps the
+  // deferred physics download and instantiation with world preparation.
+  void loadPhysics()
   const [prepared, snapshot] = await Promise.all([
     prepareWorldAsync(seed, innerWidth < 768, signal),
     weatherSnapshots.get(host) ?? preloadSceneWeather({ seed, position: params.position, signal }),

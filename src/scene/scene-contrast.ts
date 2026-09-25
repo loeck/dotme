@@ -234,9 +234,9 @@ export class SceneContrast {
     return true
   }
 
-  render(renderer: WebGPURenderer, sceneTexture: Texture) {
+  render(renderer: WebGPURenderer, sceneTexture: Texture, canvasBounds: DOMRect | null) {
     if (!this.host || this.disposed) return
-    const bounds = renderer.domElement.getBoundingClientRect()
+    const bounds = canvasBounds ?? renderer.domElement.getBoundingClientRect()
     const dpr = renderer.getPixelRatio()
     if (this.width !== bounds.width || this.height !== bounds.height || this.dpr !== dpr) {
       this.width = bounds.width
@@ -261,8 +261,9 @@ export class SceneContrast {
       renderer.toneMapping = toneMapping
       renderer.outputColorSpace = outputColorSpace
     }
-    this.host.dataset.uiMask = 'gpu'
-    document.documentElement.dataset.uiMask = 'gpu'
+    if (this.host.dataset.uiMask !== 'gpu') this.host.dataset.uiMask = 'gpu'
+    if (document.documentElement.dataset.uiMask !== 'gpu')
+      document.documentElement.dataset.uiMask = 'gpu'
   }
 
   invalidate() {

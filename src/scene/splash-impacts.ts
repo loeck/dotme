@@ -61,6 +61,7 @@ export class SplashImpacts {
   private readonly pool: Array<Impact | null>
   private readonly transform = new Object3D()
   private cursor = 0
+  private settled = false
   landed = 0
   active = 0
 
@@ -255,10 +256,19 @@ export class SplashImpacts {
   }
 
   update(time: number, reducedMotion = false) {
-    const crownData = this.mesh.geometry.getAttribute('aLanding')
-    const slopeData = this.slopes.geometry.getAttribute('aLanding')
+    const live = !reducedMotion && this.pool.some((impact) => impact !== null)
     this.active = 0
     let crowns = 0
+    if (!live && this.settled) {
+      if (reducedMotion) this.pool.fill(null)
+      this.mesh.count = 0
+      this.slopes.count = 0
+      this.mesh.visible = false
+      this.slopes.visible = false
+      return
+    }
+    const crownData = this.mesh.geometry.getAttribute('aLanding')
+    const slopeData = this.slopes.geometry.getAttribute('aLanding')
     for (let i = 0; i < this.pool.length; i++) {
       const impact = this.pool[i]
       const age = impact ? time - impact.born : LIFETIME
@@ -281,6 +291,7 @@ export class SplashImpacts {
     this.slopes.count = this.active
     this.mesh.visible = crowns > 0
     this.slopes.visible = this.active > 0
+    this.settled = crowns === 0 && this.active === 0
   }
 
   dispose() {
