@@ -53,25 +53,35 @@ const streamed = (waterfall: LakeWaterfall, name: string) => {
 }
 
 describe('lake waterfall lifecycle', () => {
-  it('jets foot spray into the lake without catching up a suspended emission clock', async () => {
+  it('emits only when falling parcels reach the lake, without a suspended-time burst', async () => {
     const scene = new Scene()
     const physics = await physicsFor()
-    const jets: SplashJet[] = []
-    const waterfall = new LakeWaterfall(scene, fall, false, false, (jet) => jets.push(jet), physics)
+    let impacts = 0
+    const waterfall = new LakeWaterfall(
+      scene,
+      fall,
+      false,
+      false,
+      () => {},
+      physics,
+      () => impacts++,
+    )
     waterfall.update(0, 1, 1, steadyWind)
     waterfall.update(0.3, 1, 1, steadyWind)
-    // A suspended tab resumes with one capped frame of debt, never a burst.
-    waterfall.update(60, 1, 1, steadyWind)
-    waterfall.update(60, 1, 1, steadyWind)
-    expect(jets.length).toBeGreaterThan(0)
-    expect(jets.length).toBeLessThanOrEqual(2 * (48 * 0.1 + 1))
-    for (const jet of jets) {
-      expect(jet.x).toBeGreaterThan(fall.x)
-      expect(Math.abs(jet.z - fall.z)).toBeLessThan(fall.width / 2 + 0.01)
-      expect(jet.vy).toBeGreaterThan(0)
-      expect(jet.size).toBeGreaterThan(0)
-      expect(jet.release).toBeLessThanOrEqual(60)
+    expect(impacts).toBe(0)
+    physics.world.timestep = 1 / 60
+    for (let frame = 1; frame <= 90; frame++) {
+      waterfall.update(frame / 60, 1, 1, steadyWind)
+      physics.world.step()
+      waterfall.syncCurtain()
     }
+    expect(impacts).toBeGreaterThan(0)
+    const beforePause = impacts
+    waterfall.update(60, 1, 1, steadyWind)
+    waterfall.syncCurtain()
+    waterfall.update(60, 1, 1, steadyWind)
+    waterfall.syncCurtain()
+    expect(impacts).toBe(beforePause)
     const releases: Array<Mock<() => void>> = []
     waterfall.group.traverse((object) => {
       if (!(object instanceof Mesh) || !(object.geometry instanceof BufferGeometry)) return
@@ -84,11 +94,11 @@ describe('lake waterfall lifecycle', () => {
       material.addEventListener('dispose', release)
       releases.push(release)
     }
-    const emitted = jets.length
+    const emitted = impacts
     waterfall.dispose()
     waterfall.dispose()
     waterfall.update(120, 1, 1, steadyWind)
-    expect(jets).toHaveLength(emitted)
+    expect(impacts).toBe(emitted)
     expect(scene.children).toHaveLength(0)
     for (const release of releases) expect(release).toHaveBeenCalledTimes(1)
     physics.dispose()
@@ -106,11 +116,13 @@ describe('lake waterfall lifecycle', () => {
         throw new Error('Reduced motion must not emit spray')
       },
       physics,
+      () => {
+        throw new Error('Reduced motion must not emit impacts')
+      },
     )
     waterfall.update(0, 0, 1, steadyWind)
     waterfall.update(60, 1, 1, steadyWind)
     expect(waterfall.group.visible).toBe(true)
-    expect(waterfall.group.children).toHaveLength(5)
     const basin = waterfall.group.getObjectByName('waterfall-basin')
     expect(basin).toBeInstanceOf(Mesh)
     if (!(basin instanceof Mesh) || !(basin.geometry instanceof BufferGeometry))
@@ -118,9 +130,22 @@ describe('lake waterfall lifecycle', () => {
     waterfall.group.updateMatrixWorld(true)
     const positions: unknown = basin.geometry.getAttribute('position')
     if (!(positions instanceof BufferAttribute)) throw new Error('Missing basin positions')
+    let lipVertices = 0
     for (let i = 0; i < positions.count; i++) {
-      expect(positions.getY(i) + waterfall.group.position.y).toBeCloseTo(fall.top, 6)
+      const y = positions.getY(i) + waterfall.group.position.y
+      expect(y).toBeLessThanOrEqual(fall.top + 1e-6)
+      expect(y).toBeGreaterThanOrEqual(fall.top - 0.1)
+      if (positions.getZ(i) > 0) lipVertices++
     }
+    expect(lipVertices).toBeGreaterThan(0)
+    const parcels = streamed(waterfall, 'aBodyPosition')
+    let connected = 0
+    for (let i = 0; i < parcels.length; i += 3) {
+      const y = parcels[i + 1] ?? 0
+      const z = parcels[i + 2] ?? 0
+      if (y > fall.top - 0.16 - waterfall.group.position.y && z > 0.02 && z < 0.2) connected++
+    }
+    expect(connected).toBeGreaterThan(0)
     waterfall.dispose()
     physics.dispose()
   })
@@ -138,6 +163,7 @@ describe('lake waterfall lifecycle', () => {
       false,
       (jet) => splashes.emit(jet),
       physics,
+      (impact, wind) => splashes.waterfallImpact(impact, wind),
     )
     const returns: number[][] = []
     splashes.onReturn = (...impact) => returns.push(impact)
@@ -147,6 +173,7 @@ describe('lake waterfall lifecycle', () => {
       const wind = calm.sample(time)
       waterfall.update(time, 1, 1, wind)
       splashes.update(time, wind)
+      waterfall.syncCurtain()
     }
     expect(splashes.impacts.landed).toBeGreaterThan(10)
     expect(returns).toHaveLength(splashes.impacts.landed)
@@ -166,7 +193,16 @@ describe('lake waterfall lifecycle', () => {
     const scene = new Scene()
     const physics = await physicsFor()
     physics.world.timestep = 1 / 60
-    const waterfall = new LakeWaterfall(scene, fall, false, false, () => {}, physics)
+    const fragments: SplashJet[] = []
+    const waterfall = new LakeWaterfall(
+      scene,
+      fall,
+      false,
+      false,
+      (jet) => fragments.push(jet),
+      physics,
+      () => {},
+    )
     waterfall.setBlock(0, 1.5, 0.45, 1)
     for (let frame = 0; frame < 240; frame++) {
       const time = frame / 60
@@ -197,6 +233,25 @@ describe('lake waterfall lifecycle', () => {
     expect(Math.abs((depths[Math.floor(depths.length / 2)] ?? 0) - 0.69)).toBeLessThan(0.25)
     expect(clearance).toBeGreaterThan((0.04 + 0.41 * 0.65 + 0.035) * 0.8)
     expect(foamed).toBeGreaterThan(0)
+    expect(fragments.length).toBeGreaterThan(0)
+    expect(fragments.every((jet) => jet.y > 1)).toBe(true)
+    waterfall.setBlock(0, 1.5, 0.45, 0)
+    for (let frame = 240; frame < 420; frame++) {
+      const time = frame / 60
+      waterfall.update(time, 1, 1, steadyWind)
+      physics.world.step()
+      waterfall.syncCurtain()
+    }
+    let restoredClearance = Infinity
+    for (let i = 0; i < foams.length; i++) {
+      const base = i * 3
+      const x = positions[base] ?? 0,
+        y = positions[base + 1] ?? 0,
+        z = positions[base + 2] ?? 0
+      if (Math.abs(y - 1.5) < 0.16)
+        restoredClearance = Math.min(restoredClearance, Math.hypot(x, z - 0.69))
+    }
+    expect(restoredClearance).toBeLessThan(clearance * 0.65)
     waterfall.dispose()
     physics.dispose()
   })
@@ -205,7 +260,15 @@ describe('lake waterfall lifecycle', () => {
     const run = async () => {
       const physics = await physicsFor()
       physics.world.timestep = 1 / 60
-      const waterfall = new LakeWaterfall(scene, fall, false, false, () => {}, physics)
+      const waterfall = new LakeWaterfall(
+        scene,
+        fall,
+        false,
+        false,
+        () => {},
+        physics,
+        () => {},
+      )
       waterfall.setBlock(0.2, 1.2, 0.45, 0.8)
       for (let frame = 0; frame < 120; frame++) {
         const time = frame / 60

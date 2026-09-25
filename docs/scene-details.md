@@ -11,14 +11,16 @@ Fireflies react to nearby input at night. Shore wetness retains moisture after r
 The world seed can select a supported left-bank waterfall with a clear landing in the lake.
 An upstream rock basin contains a shallow pool and narrows into an open spillway at the lip.
 The basin floor and banks belong to the generated terrain; its water feeds a volume of seeded
-particles following prescribed ballistic trajectories. The particles stretch along their velocity.
+particles following ballistic trajectories with fresh seeded variation at each return. A shallow
+animated lip overlaps their sources. The particles stretch along their velocity.
 Local GPU passes reconstruct their surface depth and integrate the optical thickness of the
 ellipsoids. A bounded bilateral filter smooths the surface while retaining gaps between streams.
 The reconstructed physical material uses the scene's lighting, refraction and environment.
 Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile. Main and
 reflected views reuse those allocations; environment probes omit the fluid to avoid self-refraction.
 This is an analytic flow representation, not a separate three-dimensional fluid solver.
-Landing impacts feed the existing water-normal buffer and wave solver;
+Grouped parcel arrivals feed the existing water-normal buffer, wave solver and recycled splash
+droplets. Cursor contact parts the curved flow and releases a few local fragments;
 they do not create another simulation. Reduced motion freezes the particles and stops impacts.
 Foam and spray at the foot sample the lake's shared wave field so the impact follows its surface.
 

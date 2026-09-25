@@ -931,7 +931,9 @@ export class VoxelLandscapeEngine {
         blockTarget = hit.strength * this.intro
       }
     }
-    const rate = this.reducedMotion ? 1 : 1 - Math.exp(-Math.max(0, dt) * 10)
+    const rate = this.reducedMotion
+      ? 1
+      : 1 - Math.exp(-Math.max(0, dt) * (blockTarget > this.blockStrength ? 18 : 4.5))
     this.blockStrength += (blockTarget - this.blockStrength) * rate
     if (Math.abs(this.blockStrength - blockTarget) < 0.0005) this.blockStrength = blockTarget
     this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.45, this.blockStrength)

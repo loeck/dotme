@@ -179,7 +179,19 @@ export class WaterfallFluidPass {
         weights.addAssign(weight)
       }
       const result = total.div(weights.max(0.00001))
-      return vec4(isDepth ? centerDepth.greaterThan(0).select(result, vec2(0)) : result, 0, 1)
+      if (!isDepth) return vec4(result, 0, 1)
+      // Bridge only subpixel holes bracketed by the same surface on both sides.
+      // The bilateral result still owns valid pixels and depth discontinuities.
+      const left = depthNode.sample(point.sub(direction)).r
+      const right = depthNode.sample(point.add(direction)).r
+      const bridge = left
+        .greaterThan(0)
+        .and(right.greaterThan(0))
+        .and(left.sub(right).abs().lessThan(0.08))
+      const filled = centerDepth
+        .greaterThan(0)
+        .select(result.r, bridge.select(left.add(right).mul(0.5), 0))
+      return vec4(filled, 0, 0, 1)
     })()
   }
 

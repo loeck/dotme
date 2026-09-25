@@ -35,20 +35,19 @@ import type { Camera, Node, NodeBuilder, Scene, WebGPURenderer } from 'three/web
 
 import { required } from '../invariant'
 import { WATER_LEVEL } from './lake-bed'
-import type { SplashJet } from './lake-splashes'
+import type { SplashJet, WaterfallImpact } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
 import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import type { VoxelWaterfall } from './voxel-world'
 import { contactNoise } from './water-noise'
-import { fieldUvNode, windFieldNode } from './water-surface'
+import { fieldUvNode, sampleWindField, windFieldNode } from './water-surface'
+import { waterfallDrift } from './waterfall-flow'
 import { WaterfallFluid } from './waterfall-fluid'
 import type { WindState } from './wind'
 
 const GRAVITY = 9.81
 const IMPACT_OFFSET = 0.8
-const SPRAY_RATE = 48
-const SPRAY_RATE_MOBILE = 24
 /** Curtain bodies strike the cursor blocker only; terrain and droplets ignore them. */
 const CURTAIN_GROUPS = (0x0008 << 16) | 0x0010
 const BLOCKER_GROUPS = (0x0010 << 16) | 0x0008
@@ -56,8 +55,6 @@ const BLOCKER_GROUPS = (0x0010 << 16) | 0x0008
 const BLOCKER_HALF_HEIGHT = 0.16
 const KILL_DEPTH = 0.05
 const EXIT_LIFT = 0.1
-const EXIT_DRIFT = 1.15
-const LIP_Z = 0.05
 
 function smoothstepCpu(edge0: number, edge1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
@@ -98,15 +95,24 @@ export class LakeWaterfall {
   private readonly opacity = uniform(0)
   private readonly fall: VoxelWaterfall
   private readonly emitJet: (jet: SplashJet) => void
+  private readonly emitImpact: (impact: WaterfallImpact, wind: WindState) => void
   private readonly physics: PhysicsWorld
   private readonly impactMaterials: readonly FallingWaterMaterial[]
   private readonly fluid: WaterfallFluid
   private readonly reducedMotion: boolean
-  private readonly sprayRate: number
-  private sprayState: number
   private curtainState: number
-  private sprayDebt = 0
   private lastTime: number | undefined
+  private currentWind: WindState | undefined
+  private readonly impactPulse = uniform(0)
+  private readonly previousHeights: Float32Array
+  private readonly impactBins = Array.from({ length: 3 }, () => ({
+    count: 0,
+    x: 0,
+    z: 0,
+    speed: 0,
+    lastTime: -1,
+  }))
+  private lastFragmentTime = -1
   private readonly bodies: RigidBody[] = []
   private readonly blockerBody: RigidBody
   private readonly blockerCollider: Collider
@@ -142,13 +148,13 @@ export class LakeWaterfall {
     reducedMotion: boolean,
     emitJet: (jet: SplashJet) => void,
     physics: PhysicsWorld,
+    emitImpact: (impact: WaterfallImpact, wind: WindState) => void,
   ) {
     this.fall = fall
     this.reducedMotion = reducedMotion
     this.emitJet = emitJet
+    this.emitImpact = emitImpact
     this.physics = physics
-    this.sprayRate = mobile ? SPRAY_RATE_MOBILE : SPRAY_RATE
-    this.sprayState = (fall.seed ^ 0x2f6e2b8b) >>> 0
     this.curtainState = (fall.seed ^ 0x51ab3c7d) >>> 0
     const length = Math.hypot(fall.direction[0], fall.direction[1]) || 1
     this.directionX = fall.direction[0] / length
@@ -173,6 +179,7 @@ export class LakeWaterfall {
       const parcels = this.fluid.particles
       this.sizes = parcels.sizes
       const slots = parcels.count
+      this.previousHeights = new Float32Array(slots)
       this.born = new Float64Array(slots)
       this.phases = new Float32Array(slots)
       const streamedPositions = parcels.geometry.getAttribute('aBodyPosition')
@@ -196,7 +203,7 @@ export class LakeWaterfall {
       const { ColliderDesc, RigidBodyDesc } = this.physics.rapier
       for (let i = 0; i < slots; i++) {
         const seed = this.lipSeed(i)
-        const age = ((i + 0.5) / slots) * this.flightTime(seed.y)
+        const age = seed.age * this.flightTime(seed.y)
         const body = this.physics.world.createRigidBody(
           RigidBodyDesc.dynamic()
             .setTranslation(
@@ -241,15 +248,15 @@ export class LakeWaterfall {
         normals: number[] = [],
         coordinates: number[] = [],
         indices: number[] = []
-      const quad = (x0: number, z0: number, x1: number, z1: number) => {
+      const quad = (x0: number, z0: number, x1: number, z1: number, y0 = height, y1 = height) => {
         const start = positions.length / 3
-        for (const [x, z] of [
-          [x0, z0],
-          [x1, z0],
-          [x1, z1],
-          [x0, z1],
+        for (const [x, y, z] of [
+          [x0, y0, z0],
+          [x1, y0, z0],
+          [x1, y1, z1],
+          [x0, y1, z1],
         ] as const) {
-          positions.push(x, height, z)
+          positions.push(x, y, z)
           normals.push(0, 1, 0)
           coordinates.push(x, z)
         }
@@ -269,6 +276,13 @@ export class LakeWaterfall {
       }
       // The terrain face ends three centimetres behind the free-falling water.
       quad(-fall.width / 2, -0.04, fall.width / 2, 0)
+      // A shallow curved lip overlaps the first parcel centres and hides the seam.
+      for (let column = 0; column < 12; column++) {
+        const x0 = (column / 12 - 0.5) * fall.width
+        const x1 = ((column + 1) / 12 - 0.5) * fall.width
+        quad(x0, 0, x1, 0.07, height, height - 0.035)
+        quad(x0, 0.07, x1, 0.15, height - 0.035, height - 0.095)
+      }
       const basinGeometry = this.resources.own(new BufferGeometry())
       basinGeometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
       basinGeometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3))
@@ -291,7 +305,10 @@ export class LakeWaterfall {
         )
         .mul(0.004)
         .mul(smoothstep(0, 0.3, positionLocal.z.abs()))
-      basin.flowPosition = positionLocal.add(vec3(0, ripple, 0))
+      const lipMotion = smoothstep(0, 0.12, positionLocal.z)
+        .mul(sin(positionLocal.x.mul(9).sub(this.time.mul(3.1))))
+        .mul(0.006)
+      basin.flowPosition = positionLocal.add(vec3(0, ripple.add(lipMotion), 0))
       basin.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
       basin.colorNode = mix(vec3(0.3, 0.43, 0.44), vec3(0.55, 0.66, 0.67), filament.mul(0.4))
       basin.roughnessNode = mix(0.08, 0.2, filament)
@@ -308,11 +325,6 @@ export class LakeWaterfall {
         p.mul(vec2(fall.width * 10, 12)).add(vec2(this.time.mul(0.32), this.time.mul(-1.4))),
       )
       const churn = float(1).sub(smoothstep(0.1, 0.85, foamRadius))
-      const ringAge = fract(this.time.mul(0.65))
-      const ring = float(1)
-        .sub(smoothstep(0.025, 0.11, foamRadius.sub(ringAge.mul(1.2)).abs()))
-        .mul(float(1).sub(ringAge))
-        .mul(0.35)
       foam.flowPosition = vec3(
         p.x.sub(0.5).mul(fall.width * 1.9),
         churn.mul(mix(0.04, 0.14, foamNoise)).add(0.018),
@@ -323,7 +335,7 @@ export class LakeWaterfall {
       foam.roughness = 0.6
       foam.opacityNode = churn
         .mul(mix(0.55, 1, smoothstep(0.2, 0.7, foamNoise)))
-        .add(ring.mul(smoothstep(0.25, 0.65, foamNoise)))
+        .mul(mix(0.28, 1, this.impactPulse))
         .mul(float(1).sub(smoothstep(0.85, 1.05, foamRadius)))
         .mul(this.opacity)
       const foamGeometry = this.resources.own(
@@ -443,7 +455,7 @@ export class LakeWaterfall {
         .mul(chord)
         .mul(sin(puffAge.mul(Math.PI)))
         .mul(mix(0.45, 1, mistDensity))
-        .mul(atFoot.select(0.23, 0.11))
+        .mul(atFoot.select(this.impactPulse.mul(0.18).add(0.08), 0.11))
         .mul(this.opacity)
       this.add(mistGeometry, mist, 'waterfall-mist')
       scene.add(this.group)
@@ -458,14 +470,9 @@ export class LakeWaterfall {
   /** Cursor blocker in the waterfall group's local frame; strength 0 releases it. */
   setBlock(across: number, height: number, radius: number, strength: number) {
     this.blockAcross = across
-    this.blockHeight = height
-    this.blockRadius = radius
+    this.blockHeight = Math.max(0.1, Math.min(this.sheetHeight - 0.1, height))
+    this.blockRadius = Math.min(radius, this.fall.width * 0.28)
     this.blockStrength = strength
-  }
-
-  /** Sheet drift at a height: the blocker rides inside the falling water. */
-  private curtainDrift(height: number) {
-    return LIP_Z + EXIT_DRIFT * Math.sqrt((2 * Math.max(0, this.sheetHeight - height)) / GRAVITY)
   }
 
   /** Fall time from lip height to below the surface, with exit lift. */
@@ -476,20 +483,22 @@ export class LakeWaterfall {
   }
 
   /** Deterministic per-slot emission seed; runtime respawns add fresh jitter. */
-  private lipSeed(index: number) {
+  private lipSeed(index: number, fresh = false) {
     let state = (this.fall.seed ^ Math.imul(index + 1, 0x9e3779b9)) >>> 0
-    const random = () => {
+    const seeded = () => {
       state = (Math.imul(state, 1664525) + 1013904223) >>> 0
       return state / 0x1_0000_0000
     }
+    const random = fresh ? () => this.curtainRandom() : seeded
     const size = required(this.sizes[index])
     return {
       x: (random() - 0.5) * Math.max(0.05, this.fall.width - size * 2),
-      y: this.sheetHeight - 0.02 - random() * 0.15,
-      z: 0.03 + random() * 0.05,
-      vx: (random() - 0.5) * 0.22,
-      vz: 0.9 + random() * 0.5,
+      y: this.sheetHeight - 0.025 - random() * 0.11,
+      z: 0.045 + random() * 0.065,
+      vx: (random() - 0.5) * 0.32,
+      vz: 0.95 + random() * 0.4,
       phase: random() * Math.PI * 2,
+      age: random(),
     }
   }
 
@@ -519,7 +528,7 @@ export class LakeWaterfall {
     if (this.blockStrength > 0.01) {
       const radius = 0.04 + (this.blockRadius - 0.04) * 0.65 * this.blockStrength
       this.blockerRadius = radius
-      this.blockerPlaneZ = this.curtainDrift(this.blockHeight)
+      this.blockerPlaneZ = waterfallDrift(this.sheetHeight, this.blockHeight)
       const [x, y, z] = this.worldPoint(this.blockAcross, this.blockHeight, this.blockerPlaneZ)
       if (!this.blockerActive) {
         this.blockerActive = true
@@ -535,14 +544,13 @@ export class LakeWaterfall {
       const body = required(this.bodies[i])
       let position = body.translation(this.translationTarget)
       if (position.y < WATER_LEVEL - KILL_DEPTH || time - required(this.born[i]) > this.maxAge) {
-        const seed = this.lipSeed(i)
-        const x = seed.x + (this.curtainRandom() - 0.5) * 0.1
-        const z = seed.z + (this.curtainRandom() - 0.5) * 0.04
-        const [wx, wy, wz] = this.worldPoint(x, seed.y, z)
+        const seed = this.lipSeed(i, true)
+        const [wx, wy, wz] = this.worldPoint(seed.x, seed.y, seed.z)
         const [vx, vy, vz] = this.worldDirection(seed.vx, EXIT_LIFT, seed.vz)
         body.setTranslation({ x: wx, y: wy, z: wz }, true)
         body.setLinvel({ x: vx, y: vy, z: vz }, true)
         this.born[i] = time
+        this.phases[i] = seed.phase
         position = body.translation(this.translationTarget)
       }
       const wobble = Math.sin(position.y * 2.5 + time * 3 + required(this.phases[i])) * 0.2
@@ -559,6 +567,12 @@ export class LakeWaterfall {
     if (this.disposed) return
     const dxn = this.directionX,
       dzn = this.directionZ
+    const time = this.lastTime
+    const wind = this.currentWind
+    const active =
+      time !== undefined && wind !== undefined && !this.reducedMotion && this.opacity.value > 0.8
+    if (!active) this.clearPendingImpacts()
+    let fragment: SplashJet | undefined
     for (let i = 0; i < this.bodies.length; i++) {
       const body = required(this.bodies[i])
       const t = body.translation(this.translationTarget)
@@ -576,10 +590,82 @@ export class LakeWaterfall {
       this.velocities[base + 1] = v.y
       this.velocities[base + 2] = dxn * v.x + dzn * v.z
       this.foams[i] = this.blockerFoam(lx, ly, lz)
+      const previous = required(this.previousHeights[i])
+      this.previousHeights[i] = ly
+      // Wind waves stay within this narrow band; avoid sampling their full
+      // spectrum for parcels that are still high above the lake.
+      if (active && ly < 0.2 && previous > -0.2 && v.y < 0) {
+        const surface = sampleWindField(t.x, t.z, time, wind, 0.08)[0]
+        if (previous > surface && ly <= surface) {
+          const bin = Math.max(0, Math.min(2, Math.floor((lx / this.fall.width + 0.5) * 3)))
+          const impact = required(this.impactBins[bin])
+          impact.count++
+          impact.x += t.x
+          impact.z += t.z
+          impact.speed -= v.y
+        }
+      }
+      if (
+        !fragment &&
+        this.blockerActive &&
+        active &&
+        time - this.lastFragmentTime > 0.045 &&
+        required(this.foams[i]) > 0.72 &&
+        Math.abs(ly - this.blockHeight) < 0.15 &&
+        this.curtainRandom() < 0.035
+      ) {
+        const lateral = Math.sign(lx - this.blockAcross) || (this.curtainRandom() < 0.5 ? -1 : 1)
+        const [sideX, , sideZ] = this.worldDirection(
+          lateral * (0.5 + this.curtainRandom()),
+          0,
+          0.15,
+        )
+        fragment = {
+          x: t.x,
+          y: t.y,
+          z: t.z,
+          vx: sideX,
+          vy: 0.4 + this.curtainRandom() * 0.7,
+          vz: sideZ,
+          size: 0.012 + this.curtainRandom() * 0.015,
+          drag: 0.6,
+          windX: wind.direction[0] * wind.speed * 0.1,
+          windZ: wind.direction[1] * wind.speed * 0.1,
+          release: time,
+        }
+      }
+    }
+    if (fragment && active) {
+      this.lastFragmentTime = time
+      this.emitJet(fragment)
+    }
+    if (active) {
+      for (const impact of this.impactBins) {
+        if (impact.count === 0 || time - impact.lastTime < 0.075) continue
+        const x = impact.x / impact.count
+        const z = impact.z / impact.count
+        const energy = Math.min(1, impact.speed / 25)
+        impact.lastTime = time
+        this.impactPulse.value = Math.max(this.impactPulse.value, energy)
+        this.emitImpact({ x, z, time, energy }, wind)
+        impact.count = 0
+        impact.x = 0
+        impact.z = 0
+        impact.speed = 0
+      }
     }
     this.positionsAttribute.needsUpdate = true
     this.velocitiesAttribute.needsUpdate = true
     this.foamsAttribute.needsUpdate = true
+  }
+
+  private clearPendingImpacts() {
+    for (const impact of this.impactBins) {
+      impact.count = 0
+      impact.x = 0
+      impact.z = 0
+      impact.speed = 0
+    }
   }
 
   private blockerFoam(x: number, y: number, z: number) {
@@ -646,44 +732,20 @@ export class LakeWaterfall {
     if (this.disposed) return
     this.time.value = this.reducedMotion ? 0 : time
     this.opacity.value = Math.max(0, Math.min(1, intro))
-    const dt =
-      this.lastTime === undefined || time < this.lastTime
-        ? 0
-        : Math.min(0.1, Math.max(0, time - this.lastTime))
+    const elapsed = this.lastTime === undefined ? 0 : time - this.lastTime
+    const dt = Math.min(0.1, Math.max(0, elapsed))
+    if (elapsed < 0 || elapsed > 0.1) {
+      this.clearPendingImpacts()
+      this.impactPulse.value = 0
+      if (elapsed < 0) {
+        for (const impact of this.impactBins) impact.lastTime = -1
+        this.lastFragmentTime = -1
+      }
+    }
     this.lastTime = time
+    this.currentWind = wind
+    this.impactPulse.value = Math.max(0, this.impactPulse.value - dt * 4)
     if (!this.reducedMotion) this.manageCurtain(time)
-    if (this.reducedMotion || intro < 0.8) return
-    // Bounded debt: a suspended tab resumes with at most one capped frame of jets.
-    this.sprayDebt = Math.min(this.sprayDebt + dt * this.sprayRate, this.sprayRate * 0.1 + 1)
-    while (this.sprayDebt >= 1) {
-      this.sprayDebt -= 1
-      this.emitJet(this.nextJet(time, wind))
-    }
-  }
-
-  private nextJet(time: number, wind: WindState): SplashJet {
-    const random = () => {
-      this.sprayState = (Math.imul(this.sprayState, 1664525) + 1013904223) >>> 0
-      return this.sprayState / 0x1_0000_0000
-    }
-    const across = (random() - 0.5) * this.fall.width
-    const forward = IMPACT_OFFSET + random() * 0.2
-    const lateral = (random() - 0.5) * 1.8
-    const outward = 0.25 + random() * 0.95
-    const [dx, dz] = this.fall.direction
-    return {
-      x: this.fall.x + dz * across + dx * forward,
-      y: WATER_LEVEL + 0.03 + random() * 0.1,
-      z: this.fall.z - dx * across + dz * forward,
-      vx: dz * lateral + dx * outward + wind.direction[0] * wind.speed * 0.025,
-      vy: 1.4 + random() * 1.65,
-      vz: -dx * lateral + dz * outward + wind.direction[1] * wind.speed * 0.025,
-      size: 0.02 + random() * 0.03,
-      drag: 0.3 + random() * 0.9,
-      windX: wind.direction[0] * wind.speed * 0.1,
-      windZ: wind.direction[1] * wind.speed * 0.1,
-      release: time,
-    }
   }
 
   dispose() {

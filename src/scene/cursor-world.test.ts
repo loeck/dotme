@@ -5,12 +5,12 @@ import { CursorTrail, SKY_HOLE_LIFETIME, sampleWaterfallHit, seesWorld } from '.
 const fall = { x: -20, z: -22, top: 6, width: 2, direction: [1, 0] as const }
 
 describe('waterfall cursor hit', () => {
-  it('hits the curtain plane inside its bounds', () => {
+  it('hits the curved sheet inside its bounds', () => {
     const hit = sampleWaterfallHit({ x: -10, y: 3, z: -22 }, { x: -1, y: 0, z: 0 }, fall, 0)
     expect(hit).not.toBeNull()
     expect(hit?.across).toBeCloseTo(0, 6)
     expect(hit?.height).toBeCloseTo(3, 6)
-    expect(hit?.distance).toBeCloseTo(10, 6)
+    expect(hit?.distance).toBeCloseTo(9.05062883, 6)
     expect(hit?.strength).toBe(1)
   })
 

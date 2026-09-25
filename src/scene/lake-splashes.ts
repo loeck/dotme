@@ -94,6 +94,12 @@ type PendingDrop = {
 }
 /** Externally sourced droplet, e.g. a waterfall foot jet. Shared pool and stepper. */
 export type SplashJet = PendingDrop
+export type WaterfallImpact = Readonly<{
+  x: number
+  z: number
+  time: number
+  energy: number
+}>
 const RING_SAMPLES = 3
 type Drop = {
   body: RigidBody
@@ -552,6 +558,29 @@ export class LakeSplashes {
   /** Queues an externally sourced droplet; its landing rings like a shore drop. */
   emit(jet: SplashJet) {
     this.pending.push(jet)
+  }
+
+  /** A grouped curtain landing drives the lake disturbance and a few recycled droplets. */
+  waterfallImpact(impact: WaterfallImpact, wind: WindState) {
+    if (this.shoreAt(impact.x, impact.z) <= 0) return
+    const energy = Math.max(0.08, impact.energy)
+    this.impacts.add(impact.x, impact.z, impact.time, energy)
+    this.onReturn?.(impact.x, impact.z, 0.16 + energy * 0.2, -(0.012 + energy * 0.045))
+    const angle = this.random() * Math.PI * 2
+    const speed = 0.35 + energy * (0.45 + this.random() * 0.65)
+    this.emit({
+      x: impact.x + Math.cos(angle) * 0.035,
+      y: WATER_LEVEL + 0.025,
+      z: impact.z + Math.sin(angle) * 0.035,
+      vx: Math.cos(angle) * speed + wind.direction[0] * wind.speed * 0.025,
+      vy: 0.8 + energy * (0.8 + this.random() * 0.8),
+      vz: Math.sin(angle) * speed + wind.direction[1] * wind.speed * 0.025,
+      size: 0.015 + energy * 0.015,
+      drag: 0.4 + this.random() * 0.5,
+      windX: wind.direction[0] * wind.speed * 0.1,
+      windZ: wind.direction[1] * wind.speed * 0.1,
+      release: impact.time,
+    })
   }
 
   private readonly preStepHooks = new Set<(stepTime: number) => void>()

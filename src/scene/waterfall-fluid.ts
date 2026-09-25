@@ -93,7 +93,14 @@ export class WaterfallFluid {
     // and aerated fraction distinct instead of painting whiteness onto a sheet.
     const opticalThickness = data.r.mul(0.6).clamp(0, 1.5)
     const aeration = data.g.div(data.r.max(0.00001)).clamp(0, 1)
-    const whitewater = opticalThickness.mul(aeration).mul(-7).exp().oneMinus()
+    const edgeFoam = smoothstep(0.015, 0.18, data.r).oneMinus().mul(aeration).mul(0.16)
+    const whitewater = opticalThickness
+      .mul(aeration)
+      .mul(-7)
+      .exp()
+      .oneMinus()
+      .add(edgeFoam)
+      .clamp(0, 1)
     this.material.thicknessNode = opticalThickness
     this.material.transmissionNode = whitewater.oneMinus().mul(0.96)
     this.material.colorNode = mix(vec3(0.88, 0.96, 0.96), vec3(0.99, 1, 0.99), whitewater)

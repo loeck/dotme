@@ -94,6 +94,7 @@ export class SceneDetails {
           reducedMotion,
           (jet) => this.splashes.emit(jet),
           physics,
+          (impact, wind) => this.splashes.waterfallImpact(impact, wind),
         ),
       )
     }
@@ -169,7 +170,7 @@ export class SceneDetails {
     this.floating.update(time, wind, this.reducedMotion)
     this.foam.update(time, wind, this.reducedMotion)
     this.splashes.update(time, wind, this.reducedMotion, intro)
-    // The curtain uploads after the shared step; frozen when reduced motion holds it.
+    // The shared world step is owned by splashes; curtain landings reach the lake next frame.
     if (!this.reducedMotion) this.waterfall?.syncCurtain()
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
     this.fireflies.update(time, wind, {

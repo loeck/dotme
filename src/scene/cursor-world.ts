@@ -1,3 +1,5 @@
+import { WATERFALL_EXIT_DRIFT, WATERFALL_LIP_Z, waterfallDrift } from './waterfall-flow'
+
 export const SKY_HOLE_LIFETIME = 3
 export const SKY_HOLE_COUNT = 8
 export const SKY_HOLE_RADIUS = 12
@@ -21,7 +23,7 @@ export type WaterfallHit = Readonly<{
   strength: number
 }>
 
-/** Ray against the fall's curtain plane, in the waterfall group's local frame. */
+/** Ray against the curved centre of the falling sheet. */
 export function sampleWaterfallHit(
   origin: Point,
   direction: Point,
@@ -32,16 +34,45 @@ export function sampleWaterfallHit(
   if (!(length > 0)) return null
   const nx = fall.direction[0] / length
   const nz = fall.direction[1] / length
-  const denom = direction.x * nx + direction.z * nz
-  if (Math.abs(denom) < 1e-9) return null
-  const distance = ((fall.x - origin.x) * nx + (fall.z - origin.z) * nz) / denom
-  if (!(distance >= 0)) return null
+  const forward = (origin.x - fall.x) * nx + (origin.z - fall.z) * nz
+  const forwardRate = direction.x * nx + direction.z * nz
+  const height0 = origin.y - waterLevel
+  const total = fall.top - waterLevel
+  const shifted = forward - WATERFALL_LIP_Z
+  const factor = (2 * WATERFALL_EXIT_DRIFT ** 2) / 9.81
+  const a = forwardRate * forwardRate
+  const b = 2 * shifted * forwardRate + factor * direction.y
+  const c = shifted * shifted - factor * (total - height0)
+  const roots: number[] = []
+  if (a < 1e-12) {
+    if (Math.abs(b) < 1e-12) return null
+    roots.push(-c / b)
+  } else {
+    const discriminant = b * b - 4 * a * c
+    if (discriminant < 0) return null
+    const root = Math.sqrt(discriminant)
+    roots.push((-b - root) / (2 * a), (-b + root) / (2 * a))
+  }
+  let distance = Infinity
+  for (const candidate of roots) {
+    const height = height0 + direction.y * candidate
+    const depth = forward + forwardRate * candidate
+    if (
+      candidate < 0 ||
+      height < 0 ||
+      height > total ||
+      depth < WATERFALL_LIP_Z - 1e-6 ||
+      Math.abs(depth - waterfallDrift(total, height)) > 1e-4
+    )
+      continue
+    distance = Math.min(distance, candidate)
+  }
+  if (!Number.isFinite(distance)) return null
   const px = origin.x + direction.x * distance
   const py = origin.y + direction.y * distance
   const pz = origin.z + direction.z * distance
   const across = (px - fall.x) * nz - (pz - fall.z) * nx
   const height = py - waterLevel
-  const total = fall.top - waterLevel
   const reach = fall.width / 2 + 0.15
   if (Math.abs(across) > reach || height < 0 || height > total) return null
   const edge = Math.min(reach - Math.abs(across), height, total - height)
