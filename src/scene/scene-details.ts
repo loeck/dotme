@@ -1,6 +1,8 @@
 import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
 import type { Camera, Object3D, Scene, Vector3, WebGPURenderer } from 'three/webgpu'
 
+import { FloatingBodies } from './floating-bodies'
+import { FoamDrift } from './foam-drift'
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
@@ -47,6 +49,8 @@ export class SceneDetails {
     return this.ray.wake
   }
   private readonly splashes: LakeSplashes
+  private readonly floating: FloatingBodies
+  private readonly foam: FoamDrift
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
   private waterImpact: LakeSplashes['onReturn']
@@ -78,6 +82,10 @@ export class SceneDetails {
     this.splashes = this.resources.own(
       new LakeSplashes(scene, world.lakeBed, world.seed, mobile, physics),
     )
+    this.floating = this.resources.own(
+      new FloatingBodies(scene, world.lakeBed, world.seed, mobile, physics, this.splashes),
+    )
+    this.foam = this.resources.own(new FoamDrift(scene, world.lakeBed, world.seed, mobile))
     if (world.waterfall) {
       this.waterfall = this.resources.own(
         new LakeWaterfall(scene, world.waterfall, mobile, reducedMotion),
@@ -115,6 +123,13 @@ export class SceneDetails {
     this.waterfall?.setWaterSurface(uniforms)
     if (handler) this.splashes.onReturn = handler
     else delete this.splashes.onReturn
+    if (handler) this.floating.onWake = handler
+    else delete this.floating.onWake
+  }
+
+  pointerBurst(x: number, z: number, energy: number, time: number, wind: WindState) {
+    if (this.disposed || this.reducedMotion) return
+    this.splashes.spawnBurst(x, z, energy, time, wind)
   }
 
   setEnvironment(environment: Partial<DetailEnvironment>) {
@@ -146,6 +161,8 @@ export class SceneDetails {
     this.fish.update(time, dt, waterPointer, scenePointer)
     this.ray.update(time, dt)
     this.waterfall?.update(time, daylight, intro)
+    this.floating.update(time, wind, this.reducedMotion)
+    this.foam.update(time, wind, this.reducedMotion)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     this.wetness.update(this.reducedMotion ? 0 : dt, rainIntensity)
     this.fireflies.update(time, wind, {

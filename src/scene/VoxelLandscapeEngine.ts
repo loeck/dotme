@@ -915,6 +915,7 @@ export class VoxelLandscapeEngine {
     if (!point) return
     // Queue the contact immediately so a quick touch ending before the next frame still ripples.
     this.simulation.addImpulse(point.x, point.z, 0.7, -0.26)
+    this.details?.pointerBurst(point.x, point.z, 0.55, this.elapsed, this.wind.sample(this.elapsed))
     this.dragging = true
     this.dragPointerId = event.pointerId
     this.pointerType = event.pointerType
