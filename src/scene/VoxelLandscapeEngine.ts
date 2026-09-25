@@ -434,6 +434,7 @@ export class VoxelLandscapeEngine {
         this.bed,
         this.simulation.available,
         prepared.surfaces.submerged,
+        (options.seed ?? 0) >>> 0,
       ),
     )
     this.scene.traverse((object) => {
@@ -452,7 +453,11 @@ export class VoxelLandscapeEngine {
       this.clouds.shadows.applyTo(material, this.camera)
       this.pointerLight.applyTo(material)
     }
-    this.details?.attachMaterials(this.voxelGroup, this.submerged.surfaceMaterials)
+    this.details?.attachMaterials(
+      this.voxelGroup,
+      this.submerged.surfaceMaterials,
+      this.submerged.sandMaterial,
+    )
     const waterGeometry = createWaterGeometry(this.mobile, prepared.surfaces.water)
     this.water = this.resources.own(
       createLakeReflector(waterGeometry, this.mobile, this.simulation.available, {
@@ -1288,6 +1293,8 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
+    uniforms.uLightDirection.value.copy(light.direction)
+    uniforms.uLightColor.value.copy(light.color).multiplyScalar(light.intensity)
     uniforms.uNight.value = 1 - light.daylight
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
@@ -1359,6 +1366,12 @@ export class VoxelLandscapeEngine {
       this.intro,
       light.pointerLightStrength,
     )
+    const wake = this.details?.rayWake
+    if (wake) {
+      uniforms.uWake.value.set(wake.x, wake.z, wake.hx, wake.hz)
+      uniforms.uWakeSpeed.value = wake.speed
+    }
+    this.submerged.update(this.elapsed)
     this.pointerBounds = null
     this.clouds.update(atmosphereTime)
     this.skyMaterial.uniforms.uTime.value = this.elapsed

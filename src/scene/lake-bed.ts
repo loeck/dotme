@@ -15,6 +15,11 @@ export type LakeBed = Readonly<{
   stones: readonly Voxel[]
 }>
 
+const smooth01 = (a: number, b: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
+  return t * t * (3 - 2 * t)
+}
+
 export function lakeIndex(bed: LakeBed, x: number, z: number) {
   const u = (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size
   const v = (z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size
@@ -121,7 +126,10 @@ export function createLakeBed(
     const x = LAKE_BOUNDS.minX + ((i % resolution) + 0.5) * cell
     const z = LAKE_BOUNDS.minZ + (Math.floor(i / resolution) + 0.5) * cell
     const relief = 0.85 + 0.15 * Math.sin(x * 0.8 + (seed % 17)) * Math.cos(z * 0.65)
-    depth[i] = water[i] ? Math.min(7.5, 0.12 + required(distance[i]) * 0.42 * relief) : 0
+    const base = water[i] ? Math.min(7.5, 0.12 + required(distance[i]) * 0.42 * relief) : 0
+    const duneBand = smooth01(0.6, 1.3, base) * (1 - smooth01(3.8, 5.2, base))
+    const dunePhase = x * 2.2 + z * 1.4 + 1.6 * Math.sin(x * 0.5 - z * 0.7 + (seed % 32) * 0.61)
+    depth[i] = water[i] ? base + 0.18 * Math.sin(dunePhase) * duneBand : 0
     if (water[i] && required(depth[i]) < 2.8 && noise(i) > 0.985) {
       const size = 0.09 + noise(i + count) * Math.min(0.3, required(depth[i]))
       stones.push({

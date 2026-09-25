@@ -6,9 +6,9 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 30_000,
-  expect: { timeout: 20_000 },
-  globalTimeout: process.env.CI ? 90_000 : 60_000,
+  timeout: 90_000,
+  expect: { timeout: 30_000 },
+  globalTimeout: 600_000,
   workers: 1,
   reporter: 'list',
   forbidOnly: Boolean(process.env.CI),

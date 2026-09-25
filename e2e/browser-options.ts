@@ -8,7 +8,7 @@ export function chromiumLaunchOptions(): LaunchOptions {
   return {
     args:
       adapter === 'swiftshader'
-        ? ['--enable-unsafe-webgpu', '--use-webgpu-adapter=swiftshader']
+        ? ['--enable-unsafe-webgpu', '--use-angle=swiftshader', '--use-webgpu-adapter=swiftshader']
         : process.platform === 'darwin'
           ? ['--use-angle=metal']
           : ['--enable-unsafe-webgpu'],

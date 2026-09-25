@@ -118,6 +118,14 @@ describe('solar lighting and light-space projection', () => {
       )
     }
   })
+  it('grades water scatter turquoise by day and dark navy by night', () => {
+    const noon = sampleLighting(12 * 3600).waterScatter
+    expect(noon.g).toBeGreaterThan(noon.r * 5)
+    expect(noon.b).toBeGreaterThan(noon.r * 5)
+    const midnight = sampleLighting(0).waterScatter
+    expect(midnight.b).toBeGreaterThan(midnight.r)
+    expect(midnight.r + midnight.g + midnight.b).toBeLessThan(0.05)
+  })
   it('projects every point along a light ray to the same UV, including the horizon', () => {
     for (const direction of [
       new Vector3(1, 0, 0),

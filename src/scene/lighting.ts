@@ -124,8 +124,8 @@ export function sampleLighting(
     haze: nightHaze.clone().add(scaled(horizonRadiance(height), skyExposure * 0.5)),
     nightHaze,
     waterScatter: new Color()
-      .setRGB(0.0006, 0.0028, 0.0085)
-      .lerp(new Color().setRGB(0.018, 0.2, 0.23), daylight),
+      .setRGB(0.0012, 0.007, 0.015)
+      .lerp(new Color().setRGB(0.02, 0.3, 0.33), daylight),
     cloudAmbient: new Color()
       .setRGB(0.006 * night, 0.009 * night, 0.015 * night)
       .add(skyLight(irradiance, CLOUD_AMBIENT * adaptation))

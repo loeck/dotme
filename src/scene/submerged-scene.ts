@@ -1,7 +1,13 @@
+import { attribute, cos, positionLocal, sin, uniform, vec3 } from 'three/tsl'
 import {
   Color,
   DataTexture,
+  DodecahedronGeometry,
+  DoubleSide,
+  Euler,
   HalfFloatType,
+  InstancedBufferAttribute,
+  InstancedMesh,
   LinearFilter,
   RedFormat,
   DepthTexture,
@@ -11,11 +17,13 @@ import {
   OrthographicCamera,
   PerspectiveCamera,
   Matrix4,
+  PlaneGeometry,
   BufferGeometry,
   BufferAttribute,
   Box3,
   Sphere,
   Vector3,
+  Quaternion,
   UnsignedIntType,
   RenderTarget,
   Vector4,
@@ -25,12 +33,17 @@ import type { Scene, WebGPURenderer } from 'three/webgpu'
 
 import type { LakeBed } from './lake-bed'
 import type { PreparedSubmergedSurface } from './lake-geometry-data'
+import { placeHeroRocks, placeSeabedRocks, placeSeagrass } from './lake-seabed'
 
 /** Layer 1 contains only the lit bed. The main and mirror cameras use layer 0. */
 export class SubmergedScene {
   /** Material hooks are installed by the engine after shared light/shadow hooks. */
   get surfaceMaterials(): readonly MeshStandardNodeMaterial[] {
-    return [this.material]
+    return this.hookedMaterials
+  }
+
+  get sandMaterial(): MeshStandardNodeMaterial {
+    return this.material
   }
 
   readonly target = new RenderTarget(1, 1, {
@@ -59,8 +72,31 @@ export class SubmergedScene {
     vertexColors: true,
     fog: false,
   })
+  private readonly hookedMaterials: MeshStandardNodeMaterial[] = [this.material]
+  private readonly rockMaterial = new MeshStandardNodeMaterial({
+    color: 0x5b6569,
+    roughness: 0.93,
+    fog: false,
+  })
+  private readonly grassMaterial = new MeshStandardNodeMaterial({
+    color: 0x46a046,
+    roughness: 0.8,
+    vertexColors: true,
+    side: DoubleSide,
+    fog: false,
+    emissive: 0x123013,
+  })
+  private readonly grassTime = uniform(0)
+  private rockMesh: InstancedMesh | undefined
+  private grassMesh: InstancedMesh | undefined
 
-  constructor(scene: Scene, bed: LakeBed, floatColor: boolean, prepared: PreparedSubmergedSurface) {
+  constructor(
+    scene: Scene,
+    bed: LakeBed,
+    floatColor: boolean,
+    prepared: PreparedSubmergedSurface,
+    seed: number,
+  ) {
     // A steep oblique capture approximates the refracted viewing direction.
     // Unlike a zenith view, it preserves fish flanks and vertical caudal fins;
     // unlike the grazing main camera, it can still see the shallow lake bed.
@@ -94,12 +130,99 @@ export class SubmergedScene {
     const floor = new Mesh(this.geometry, this.material)
     floor.receiveShadow = true
     this.group.add(floor)
+    this.buildRocks(bed, seed)
+    this.buildGrass(bed, seed)
     this.group.traverse((object) => {
       object.layers.set(1)
       object.updateMatrixWorld(true)
       object.matrixAutoUpdate = object.matrixWorldAutoUpdate = false
     })
     scene.add(this.group)
+  }
+
+  private buildRocks(bed: LakeBed, seed: number) {
+    const rocks = [...placeHeroRocks(bed, seed), ...placeSeabedRocks(bed, seed)]
+    if (!rocks.length) return
+    const mesh = new InstancedMesh(
+      new DodecahedronGeometry(0.5, 0),
+      this.rockMaterial,
+      rocks.length,
+    )
+    const matrix = new Matrix4()
+    const rotation = new Quaternion()
+    const euler = new Euler()
+    const position = new Vector3()
+    const scale = new Vector3()
+    for (const [index, rock] of rocks.entries()) {
+      rotation.setFromEuler(euler.set(0, rock.rotY, 0))
+      matrix.compose(
+        position.set(rock.x, rock.y, rock.z),
+        rotation,
+        scale.set(rock.scale, rock.scale * rock.squash, rock.scale),
+      )
+      mesh.setMatrixAt(index, matrix)
+    }
+    mesh.instanceMatrix.needsUpdate = true
+    mesh.frustumCulled = false
+    mesh.receiveShadow = true
+    this.group.add(mesh)
+    this.rockMesh = mesh
+    this.hookedMaterials.push(this.rockMaterial)
+  }
+
+  private buildGrass(bed: LakeBed, seed: number) {
+    const blades = placeSeagrass(bed, seed)
+    if (!blades.length) return
+    const geometry = new PlaneGeometry(0.1, 1, 1, 4)
+    geometry.translate(0, 0.5, 0)
+    const positions = geometry.getAttribute('position')
+    const colors = new Float32Array(positions.count * 3)
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i)
+      positions.setX(i, positions.getX(i) * (1 - y * 0.7))
+      const tone = 0.55 + y * 0.5
+      colors.set([tone, tone, tone], i * 3)
+    }
+    geometry.setAttribute('color', new BufferAttribute(colors, 3))
+    const phases = new Float32Array(blades.length)
+    const mesh = new InstancedMesh(geometry, this.grassMaterial, blades.length)
+    const matrix = new Matrix4()
+    const rotation = new Quaternion()
+    const euler = new Euler()
+    const position = new Vector3()
+    const scale = new Vector3()
+    for (const [index, blade] of blades.entries()) {
+      rotation.setFromEuler(euler.set(blade.tilt, blade.rotY, 0))
+      matrix.compose(
+        position.set(blade.x, blade.y, blade.z),
+        rotation,
+        scale.set(1, blade.height, 1),
+      )
+      mesh.setMatrixAt(index, matrix)
+      phases[index] = blade.phase
+    }
+    mesh.instanceMatrix.needsUpdate = true
+    mesh.frustumCulled = false
+    mesh.receiveShadow = true
+    geometry.setAttribute('aBladePhase', new InstancedBufferAttribute(phases, 1))
+    const bend = positionLocal.y.pow(2)
+    const sway = attribute('aBladePhase', 'float')
+    this.grassMaterial.positionNode = positionLocal.add(
+      vec3(
+        sin(this.grassTime.mul(1.5).add(sway)).mul(bend).mul(0.09),
+        0,
+        cos(this.grassTime.mul(1.1).add(sway.mul(1.7)))
+          .mul(bend)
+          .mul(0.06),
+      ),
+    )
+    this.group.add(mesh)
+    this.grassMesh = mesh
+    this.hookedMaterials.push(this.grassMaterial)
+  }
+
+  update(elapsed: number) {
+    this.grassTime.value = elapsed
   }
 
   resize(mobile: boolean, width = 1280, height = 720) {
@@ -214,5 +337,9 @@ export class SubmergedScene {
     this.depthField.dispose()
     this.geometry.dispose()
     this.material.dispose()
+    this.rockMesh?.geometry.dispose()
+    this.grassMesh?.geometry.dispose()
+    this.rockMaterial.dispose()
+    this.grassMaterial.dispose()
   }
 }

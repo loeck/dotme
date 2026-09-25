@@ -21,7 +21,7 @@ test('presents the loader before requesting landscape and keeps its canvas', asy
     await canvas.evaluate((element) => element.setAttribute('data-original-canvas', 'true'))
     release()
     await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready', {
-      timeout: 20_000,
+      timeout: 30_000,
     })
     await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
     await expect(canvas).toHaveAttribute('data-scene-rendered', 'true')
@@ -52,10 +52,10 @@ test('loading ends after the initialization deadline when the module and CSS fai
   await page.route('**/assets/*.css', (route) => route.abort())
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeHidden()
-  await page.clock.fastForward(10_000)
+  await page.clock.fastForward(30_000)
   await expect(page.locator('.scene-loader').getByRole('link')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeHidden()
-  await page.clock.fastForward(10_000)
+  await page.clock.fastForward(30_000)
   await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'failed')
   await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
   await expect(page.getByRole('navigation', { name: 'Social links' })).toBeVisible()

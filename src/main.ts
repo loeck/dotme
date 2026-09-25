@@ -66,7 +66,7 @@ function start(autoplay = true) {
     const active = () => !signal.aborted
     const deadline = window.setTimeout(() => {
       if (active()) fail()
-    }, 20_000)
+    }, 60_000)
     signal.addEventListener('abort', () => clearTimeout(deadline), { once: true })
     try {
       await releasing

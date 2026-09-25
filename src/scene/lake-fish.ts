@@ -54,7 +54,7 @@ const BODY_MARGIN = 0.8
 const MIN_DEPTH = 1.65
 
 /** Match the captured bed's cell-centered relief without snapping between cells. */
-function bedDepth(bed: LakeBed, x: number, z: number) {
+export function bedDepth(bed: LakeBed, x: number, z: number) {
   const n = bed.resolution
   const gridX = ((x - LAKE_BOUNDS.minX) * n) / LAKE_BOUNDS.size - 0.5
   const gridZ = ((z - LAKE_BOUNDS.minZ) * n) / LAKE_BOUNDS.size - 0.5
