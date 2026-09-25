@@ -48,6 +48,9 @@ export interface WeatherSnapshot {
   timezone: string
   /** Original API time, explicitly requested as UTC Unix seconds (no local-date parsing). */
   timestampUnixSeconds: number
+  /** Today's sunrise/sunset for the requested position, as UTC Unix seconds. */
+  sunriseUnixSeconds: number
+  sunsetUnixSeconds: number
   utcOffsetSeconds: number
   /** Duration of backward-looking sums/averages, in seconds. Usually 900. */
   intervalSeconds: number
@@ -94,6 +97,14 @@ const UNITS = {
   is_day: '',
 } as const
 
+const DAILY_UNITS = {
+  time: 'unixtime',
+  sunrise: 'unixtime',
+  sunset: 'unixtime',
+} as const
+
+const MAX_UNIX_SECONDS = 8_640_000_000_000
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value)
 }
@@ -125,12 +136,32 @@ function number(
   return value
 }
 
+function dailyUnix(data: Record<string, unknown>, key: string): number {
+  const value = data[key]
+  if (!Array.isArray(value) || value.length < 1) throw new TypeError(`Invalid weather data: ${key}`)
+  const first: unknown = value[0]
+  if (
+    typeof first !== 'number' ||
+    !Number.isSafeInteger(first) ||
+    first < 0 ||
+    first > MAX_UNIX_SECONDS
+  ) {
+    throw new TypeError(`Invalid weather data: ${key}`)
+  }
+  return first
+}
+
 function parseWeatherSnapshot(value: unknown): WeatherSnapshot {
   const data = object(value, 'response')
   const current = object(data.current, 'current')
   const units = object(data.current_units, 'current_units')
   for (const [key, unit] of Object.entries({ ...UNITS, time: 'unixtime', interval: 'seconds' })) {
     if (units[key] !== unit) throw new TypeError(`Invalid weather unit: ${key}`)
+  }
+  const daily = object(data.daily, 'daily')
+  const dailyUnits = object(data.daily_units, 'daily_units')
+  for (const [key, unit] of Object.entries(DAILY_UNITS)) {
+    if (dailyUnits[key] !== unit) throw new TypeError(`Invalid weather unit: daily_${key}`)
   }
   if (typeof data.timezone !== 'string' || !data.timezone)
     throw new TypeError('Invalid weather timezone')
@@ -148,7 +179,9 @@ function parseWeatherSnapshot(value: unknown): WeatherSnapshot {
   const condition = interpretWmoCode(weatherCode)
   return {
     timezone: data.timezone,
-    timestampUnixSeconds: number(current, 'time', 0, 8_640_000_000_000, true),
+    timestampUnixSeconds: number(current, 'time', 0, MAX_UNIX_SECONDS, true),
+    sunriseUnixSeconds: dailyUnix(daily, 'sunrise'),
+    sunsetUnixSeconds: dailyUnix(daily, 'sunset'),
     utcOffsetSeconds: number(data, 'utc_offset_seconds', -86_400, 86_400, true),
     intervalSeconds: number(current, 'interval', 1, Infinity, true),
     weatherCode,
@@ -215,6 +248,8 @@ export async function fetchWeather({
       longitude: String(position.longitude),
       timezone: 'auto',
       current: Object.keys(UNITS).join(','),
+      daily: 'sunrise,sunset',
+      forecast_days: '1',
       wind_speed_unit: 'ms',
       temperature_unit: 'celsius',
       precipitation_unit: 'mm',

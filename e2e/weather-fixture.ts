@@ -5,9 +5,11 @@ import { parisWeatherFixture } from '../src/weather/paris.fixture'
 export async function mockParisWeather(
   page: Page,
   current: Partial<ReturnType<typeof parisWeatherFixture>['current']> = {},
+  daily: Partial<ReturnType<typeof parisWeatherFixture>['daily']> = {},
 ) {
   const data = parisWeatherFixture()
   Object.assign(data.current, current)
+  Object.assign(data.daily, daily)
   await page.route('https://api.open-meteo.com/**', (route) => route.fulfill({ json: data }))
 }
 
