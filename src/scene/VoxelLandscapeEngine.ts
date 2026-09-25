@@ -63,7 +63,6 @@ import type { PreparedWorld } from './prepare-world'
 import { DEFAULT_RAIN } from './rain-simulation'
 import type { RainState } from './rain-simulation'
 import { RAIN_LAYER, RainEffect } from './RainEffect'
-import { RenderDiagnostics } from './render-diagnostics'
 import { ResourceScope } from './resource-scope'
 import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
@@ -101,7 +100,6 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
   sceneDetails?: boolean
   detailEnvironment?: Partial<DetailEnvironment>
-  diagnostics?: boolean
   prepared?: PreparedWorld
   rain?: RainState
   weather?: WeatherPreset
@@ -142,7 +140,6 @@ export class VoxelLandscapeEngine {
   private readonly options: Omit<VoxelLandscapeEngineOptions, 'prepared'>
   private readonly container: HTMLDivElement
   private readonly renderer: WebGPURenderer
-  private readonly diagnostics: RenderDiagnostics | undefined
   private readonly depthFocus: DepthFocus
   private readonly atmosphere: VolumetricLight
   private readonly skyAtmosphere: SkyAtmosphere
@@ -344,9 +341,6 @@ export class VoxelLandscapeEngine {
     this.weather = options.weather ?? 'partly-cloudy'
     this.showSun = true
     this.renderer = options.renderer
-    this.diagnostics = options.diagnostics
-      ? this.resources.own(new RenderDiagnostics(this.renderer))
-      : undefined
     this.renderer.setClearColor(0x080c11)
     this.renderer.shadowMap.enabled = true
     this.renderer.shadowMap.type = PCFShadowMap
@@ -543,14 +537,6 @@ export class VoxelLandscapeEngine {
     document.addEventListener('visibilitychange', this.onActivityChange)
     if (this.lowPower && !this.reducedMotion) this.tilt.start()
     this.lastFrameAt = performance.now()
-  }
-
-  private measure<T>(name: string, action: () => T): T {
-    return this.diagnostics ? this.diagnostics.measure(name, action) : action()
-  }
-
-  getDiagnostics() {
-    return this.diagnostics?.snapshot() ?? null
   }
 
   private buildWorld(prepared: PreparedWorld) {
@@ -1192,7 +1178,7 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uShowSun.value = 0
     this.skyMaterial.uniforms.uShowMoon.value = 0
     try {
-      this.measure('environment', () => this.environmentCamera.update(this.renderer, this.scene))
+      this.environmentCamera.update(this.renderer, this.scene)
     } finally {
       this.water.visible = true
       this.scene.environmentIntensity = environmentIntensity
@@ -1202,11 +1188,9 @@ export class VoxelLandscapeEngine {
     // Filter explicitly before the main render. Lazy filtering inside a
     // material upload would nest renderer calls and disturb texture bindings.
     if (this.simulation.available) {
-      this.filteredEnvironment = this.measure('pmrem', () =>
-        this.environmentFilter.fromCubemap(
-          this.environmentTarget.texture,
-          this.filteredEnvironment,
-        ),
+      this.filteredEnvironment = this.environmentFilter.fromCubemap(
+        this.environmentTarget.texture,
+        this.filteredEnvironment,
       )
       this.scene.environment = this.filteredEnvironment.texture
     }
@@ -1252,7 +1236,6 @@ export class VoxelLandscapeEngine {
     if (this.disposed || document.hidden) return
     this.frame = 0
     if (!this.reducedMotion) this.requestFrame()
-    this.diagnostics?.begin(now)
     const activeDelta = Math.max(0, (now - this.lastFrameAt) / 1000)
     const rainDelta = Math.min(activeDelta, 0.1)
     const dt = Math.min(rainDelta, 0.05)
@@ -1390,7 +1373,7 @@ export class VoxelLandscapeEngine {
     }
     this.submerged.update(this.elapsed)
     this.pointerBounds = null
-    this.measure('clouds', () => this.clouds.update(atmosphereTime))
+    this.clouds.update(atmosphereTime)
     this.skyMaterial.uniforms.uTime.value = this.elapsed
     this.water.material.uniforms.uTime.value = this.elapsed
     const waterPointer = this.water.material.uniforms.uPointer.value
@@ -1458,39 +1441,20 @@ export class VoxelLandscapeEngine {
         this.moteMesh.instanceMatrix.needsUpdate = true
       }
     }
-    if (!this.reducedMotion)
-      this.measure('simulation', () => this.simulation.step(dt, this.elapsed))
+    if (!this.reducedMotion) this.simulation.step(dt, this.elapsed)
     uniforms.uState.value = this.simulation.texture
 
-    this.measure('rain-update', () =>
-      this.rain.update(
-        this.reducedMotion ? 0 : rainDelta,
-        this.camera,
-        smooth(0, 0.62, this.intro),
-        { time: this.elapsed, wind },
-      ),
-    )
-    this.measure('rain-slopes', () =>
-      this.rain.renderSlopes(this.renderer, this.camera, this.elapsed),
-    )
+    this.rain.update(this.reducedMotion ? 0 : rainDelta, this.camera, smooth(0, 0.62, this.intro), {
+      time: this.elapsed,
+      wind,
+    })
+    this.rain.renderSlopes(this.renderer, this.camera, this.elapsed)
     this.updateShadows(now)
     this.updateEnvironment(now, atmosphereTime)
-    this.measure('lake-bed', () => this.submerged.render(this.renderer, this.scene, this.camera))
-    this.depthFocus.render(
-      this.renderer,
-      this.scene,
-      this.camera,
-      this.atmosphere,
-      this.moon,
-      this.diagnostics,
-    )
-    this.measure('rain', () =>
-      this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture),
-    )
-    this.measure('interface', () =>
-      this.sceneContrast.render(this.renderer, this.atmosphere.target.texture),
-    )
-    this.diagnostics?.end()
+    this.submerged.render(this.renderer, this.scene, this.camera)
+    this.depthFocus.render(this.renderer, this.scene, this.camera, this.atmosphere, this.moon)
+    this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture)
+    this.sceneContrast.render(this.renderer, this.atmosphere.target.texture)
     if (!this.rendered) {
       this.rendered = true
       this.renderer.domElement.dataset.sceneRendered = 'true'

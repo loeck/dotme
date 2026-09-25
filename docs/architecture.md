@@ -33,10 +33,6 @@ provides screen-linear varyings because GLSL ES 3.00 has no `noperspective`. CPU
 readbacks of render targets arrive bottom-up on WebGL. `pnpm e2e:gpu` compares both
 backends pixel by pixel on fixed scenes.
 
-Diagnostics consume public renderer counters through a minimal interface. CPU submission
-costs are distinct from GPU execution time. Unavailable GPU timings remain null. Snapshot
-consumers never need private renderer or engine fields.
-
 ## Type checking
 
 `tsconfig.json` covers application, unit tests, browser harnesses, scripts and configuration.

@@ -9,33 +9,26 @@ test.beforeEach(async ({ page }) => {
   await mockParisWeather(page)
 })
 
-test('outlined point stays on controls and grows above the dialog', async ({ page }, info) => {
+test('outlined point stays on controls and grows above the dialog', async ({ page }) => {
   await page.goto('/?seed=42')
   await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  const main = page.locator('main')
-  const desktop = info.project.name === 'chromium'
-  if (desktop) await expect(main).toHaveCSS('cursor', nativePoint)
-  else await expect(main).toHaveCSS('cursor', 'auto')
+  await expect(page.locator('main')).toHaveCSS('cursor', nativePoint)
   const trigger = page.getByRole('button', { name: 'About this landscape' })
   await trigger.hover()
-  if (desktop) {
-    await expect(trigger).toHaveCSS('cursor', 'none')
-    await expect(page.locator('.scene-cursor')).toHaveAttribute('data-interactive', 'true')
-    await expect(page.locator('.scene-cursor > span')).toHaveCSS('scale', '1.65')
-    await expect(trigger.locator('svg')).toHaveCSS('cursor', 'none')
-  }
+  await expect(trigger).toHaveCSS('cursor', 'none')
+  await expect(page.locator('.scene-cursor')).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('.scene-cursor > span')).toHaveCSS('scale', '1.65')
+  await expect(trigger.locator('svg')).toHaveCSS('cursor', 'none')
   await trigger.click()
   const dialog = page.getByRole('dialog')
   await expect(dialog).toBeVisible()
-  if (desktop) {
-    await expect(dialog).toHaveCSS('cursor', 'none')
-    await dialog.getByRole('link', { name: 'Three.js' }).hover()
-    await expect(dialog.getByRole('link', { name: 'Three.js' })).toHaveCSS('cursor', 'none')
-    await expect(page.locator('.scene-cursor')).toBeVisible()
-    expect(await dialog.evaluate((element) => getComputedStyle(element, '::backdrop').cursor)).toBe(
-      'none',
-    )
-  }
+  await expect(dialog).toHaveCSS('cursor', 'none')
+  await dialog.getByRole('link', { name: 'Three.js' }).hover()
+  await expect(dialog.getByRole('link', { name: 'Three.js' })).toHaveCSS('cursor', 'none')
+  await expect(page.locator('.scene-cursor')).toBeVisible()
+  expect(await dialog.evaluate((element) => getComputedStyle(element, '::backdrop').cursor)).toBe(
+    'none',
+  )
   await dialog.getByRole('button', { name: 'Close', exact: true }).click()
   await expect(dialog).toBeHidden()
   await expect(trigger).toBeFocused()

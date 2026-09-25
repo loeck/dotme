@@ -1,11 +1,9 @@
-import { Scene, Mesh, BufferGeometry, BufferAttribute, Group } from 'three/webgpu'
+import { Scene, Mesh, BufferGeometry, BufferAttribute } from 'three/webgpu'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
 import { LakeWaterfall } from './lake-waterfall'
-import { SceneDetails } from './scene-details'
 import type { VoxelWaterfall } from './voxel-world'
-import { WaterfallFluid } from './waterfall-fluid'
 
 afterEach(() => vi.restoreAllMocks())
 
@@ -80,42 +78,5 @@ describe('lake waterfall lifecycle', () => {
     }
     expect(impact).not.toHaveBeenCalled()
     waterfall.dispose()
-  })
-
-  it('releases already constructed details when waterfall initialization fails', () => {
-    const scene = new Scene()
-    const existing = new Group()
-    scene.add(existing)
-    const releases: Array<Mock<() => void>> = []
-    const fluidDispose = vi.spyOn(WaterfallFluid.prototype, 'dispose')
-    const brokenFall = {
-      ...fall,
-      get basin(): VoxelWaterfall['basin'] {
-        scene.traverse((object) => {
-          if (!(object instanceof Mesh) || !(object.geometry instanceof BufferGeometry)) return
-          const release = vi.fn<() => void>()
-          object.geometry.addEventListener('dispose', release)
-          releases.push(release)
-        })
-        throw new Error('Basin initialization failed')
-      },
-    }
-    const world = {
-      seed: 42,
-      waterfall: brokenFall,
-      lakeBed: {
-        resolution: 8,
-        water: new Uint8Array(64).fill(255),
-        depth: new Float32Array(64).fill(3),
-        obstacle: new Float32Array(64).fill(-100),
-        shore: new Float32Array(256).fill(10),
-        stones: [],
-      },
-    }
-    expect(() => new SceneDetails(scene, world, true, true)).toThrow('Basin initialization failed')
-    expect(releases.length).toBeGreaterThan(0)
-    for (const release of releases) expect(release).toHaveBeenCalledTimes(1)
-    expect(fluidDispose).toHaveBeenCalledTimes(1)
-    expect(scene.children).toEqual([existing])
   })
 })

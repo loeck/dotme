@@ -51,8 +51,6 @@ export const WAVE_SPEED = 2.4
 export const WATER_DAMPING = 0.65
 export const MAX_WATER_STEPS = 4
 
-export { prepareWaterMask as createWaterMask } from './lake-geometry-data'
-
 /** Shared clock: fixed physical time, bounded recovery after a hidden tab. */
 export class WaterClock {
   private remainder = 0
