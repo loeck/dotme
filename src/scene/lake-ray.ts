@@ -96,6 +96,9 @@ export function selectRayCircuit(bed: LakeBed, seed: number): RayCircuit {
   }
   for (const { cx, cz, rx, rz, phase } of candidates) {
     const circuit = { cx, cz, rx, rz, phase, depth: 1.1 }
+    const start = rayXZ(circuit, 0)
+    // The swimmer cannot leave an unsafe start: movement rejects every unsafe next step.
+    if (rayFootprintDepth(bed, start.x, start.z) < 1.2) continue
     let clearance = Infinity
     let wet = 0
     let samples = 0

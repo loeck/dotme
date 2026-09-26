@@ -112,6 +112,13 @@ export function sampleLighting(
     : new Color(0xa3bfd6).multiplyScalar(moonIntensity * cloudShare * smooth(-0.025, -0.08, height))
   const skyExposure = SKY_EXPOSURE * adaptation
   const nightHaze = new Color().setRGB(0.007 * night, 0.014 * night, 0.023 * night)
+  // Light gathered in the open valley remains visible through an overcast deck.
+  // It follows the diffuse sky rather than the solar disc, so rain keeps its quiet tone.
+  const valleyStrength = (0.025 + 0.19 * daylight) * (0.45 + 0.55 * diffuse)
+  const valleyLight = new Color()
+    .setRGB(0.52, 0.72, 0.82)
+    .lerp(new Color().setRGB(0.95, 0.78, 0.64), 1 - Math.abs(height) / 0.85)
+    .multiplyScalar(valleyStrength)
   return {
     localLightStrength,
     pointerLightStrength,
@@ -132,6 +139,7 @@ export function sampleLighting(
     ambient,
     haze: nightHaze.clone().add(scaled(horizonRadiance(height), skyExposure * 0.5)),
     nightHaze,
+    valleyLight,
     waterScatter: new Color()
       .setRGB(0.0012, 0.007, 0.015)
       .lerp(new Color().setRGB(0.02, 0.3, 0.33), daylight),

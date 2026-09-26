@@ -265,6 +265,7 @@ export class VoxelLandscapeEngine {
   private height = 1
   private mobile = false
   private lowPower = false
+  private readonly cameraTargetY: number
 
   static async create(options: VoxelLandscapeEngineOptions, signal: AbortSignal) {
     const physicsModule = loadPhysics()
@@ -383,6 +384,7 @@ export class VoxelLandscapeEngine {
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
       : window.innerWidth < 768
+    this.cameraTargetY = this.mobile ? 0.4 : 0.6
     this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
     this.solar = options.solar ?? DEFAULT_SOLAR
@@ -580,7 +582,7 @@ export class VoxelLandscapeEngine {
     uniforms.uRainSlopesEnabled.value = this.simulation.available ? 1 : 0
 
     this.camera.position.set(0, 2.3, 16)
-    this.camera.lookAt(0, this.mobile ? 2.3 : 7.3, -25)
+    this.camera.lookAt(0, this.cameraTargetY, -25)
 
     this.resize()
     this.resources.own({ dispose: () => this.removeListeners() })
@@ -1410,7 +1412,7 @@ export class VoxelLandscapeEngine {
     this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
     this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
-    this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
+    this.camera.lookAt(this.camera.position.x * 0.22, this.cameraTargetY, -25)
     this.camera.updateMatrixWorld()
     const pointerOnScene =
       this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
@@ -1441,6 +1443,7 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
+    uniforms.uValleyLight.value.copy(light.valleyLight)
     uniforms.uLightDirection.value.copy(light.direction)
     uniforms.uLightColor.value.copy(light.color).multiplyScalar(light.intensity)
     uniforms.uNight.value = 1 - light.daylight
