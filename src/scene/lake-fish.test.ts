@@ -118,7 +118,7 @@ describe('submerged fish', () => {
       const position = new Vector3()
       const camera = new PerspectiveCamera(54, mobile ? 390 / 844 : 1280 / 720, 0.05, 500)
       camera.position.set(0, 2.3, 16)
-      camera.lookAt(0, mobile ? 0.4 : 0.6, -25)
+      camera.lookAt(0, mobile ? 2.3 : 7.3, -25)
       camera.updateMatrixWorld()
       const physics = await physicsFor(seed, mobile)
       const fish = new LakeFish(new Scene(), lakeBed(seed, mobile), seed, mobile, physics)

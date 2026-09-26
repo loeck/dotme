@@ -52,7 +52,6 @@ function skyUniforms(seed: number, mobile: boolean) {
     uShowMoon: uniform(1),
     uMoonDirection: uniform(moon.offset.normalize()),
     uMoonIntensity: uniform(moon.intensity),
-    uValleyLight: uniform(light.valleyLight),
     uSeed: uniform((seed % 4096) / 379),
     uMobile: uniform(mobile ? 1 : 0),
   }
@@ -110,11 +109,6 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .add(stellarRadiance(direction, moonAngle, u).mul(smoothstep(0.65, 0.98, cloud.a)))
       .mul(cloud.a)
       .add(cloud.rgb)
-    // A broad pool of scattered light in the distant mist, occluded by the ridges below.
-    const valleyGlow = exp(azimuth.sub(0.01).div(0.24).pow2().negate()).mul(
-      exp(elevation.sub(0.035).div(0.047).pow2().negate()),
-    )
-    color = color.add(u.uValleyLight.rgb.mul(valleyGlow))
     // Distant ridges and mist take the sky's own horizon light in their direction:
     // warm towards the sun, rose and blue under the Earth's shadow.
     const air = sky.horizon(direction)
@@ -190,5 +184,4 @@ export function updateSkyLighting(material: SkyMaterial, light: LightingState, s
   u.uShowSun.value = showSun ? 1 : 0
   u.uMoonDirection.value.copy(light.moonDirection)
   u.uMoonIntensity.value = light.moonIntensity
-  u.uValleyLight.value.copy(light.valleyLight)
 }

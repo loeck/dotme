@@ -65,9 +65,9 @@ export type Voxel = Readonly<{ x: number; y: number; z: number; size: number; co
 export type VoxelWorld = VoxelWorldData & Readonly<{ voxels: Voxel[] }>
 
 const TERRAIN_VARIANTS = {
-  ground: [0x1b2b36, 0x273944, 0x344955],
-  shore: [0x263b46, 0x354c57, 0x45606b],
-  rock: [0x22343f, 0x304651, 0x405963],
+  ground: [0x15212b, 0x1d2c36, 0x2b3b46],
+  shore: [0x1a2831, 0x293a45, 0x354955],
+  rock: [0x192630, 0x263742, 0x344955],
 } as const
 
 type MutableGroups = Record<VoxelMaterial, number[]>
@@ -147,22 +147,22 @@ function terrainShape(seed: number, mobile: boolean): TerrainShape {
       ] as const
     ).map(([x, z, width, depth], index) => ({
       x: x + (hash(seed, index, 0, 827) - 0.5) * (mobile ? 1 : 3),
-      z: z + (hash(seed, index, 0, 829) - 0.5) * 2.4,
-      width: width * mix(0.85, 1.08, hash(seed, index, 0, 831)),
-      depth: depth * mix(0.86, 1.1, hash(seed, index, 0, 833)),
+      z: z + (hash(seed, index, 0, 829) - 0.5) * 4,
+      width: width * mix(0.8, 1.15, hash(seed, index, 0, 831)),
+      depth: depth * mix(0.8, 1.2, hash(seed, index, 0, 833)),
       heightScale: mix(0.55, 0.75, hash(seed, index, 0, 835)) * (mobile ? 0.65 : 1),
     })),
     nearHeadlandX: -19 + variation(803) * (mobile ? 2.4 : 2.8),
-    nearHeadlandWidth: 15.5 + variation(805) * (mobile ? 1.4 : 1.8),
-    outerHeadlandWidth: 24.5 + variation(807) * 2.4,
+    nearHeadlandWidth: 16 + variation(805) * (mobile ? 2.1 : 2.7),
+    outerHeadlandWidth: 25 + variation(807) * 3.5,
     rightBankX: 44 + variation(809) * 2.5,
-    rightBankWidth: 18.5 + variation(811) * 1.8,
+    rightBankWidth: 19 + variation(811) * 2.6,
     inletWidth: 7.2 + variation(813) * 0.8,
     inletMouthX: (mobile ? -3 : -11.5) + variation(815) * (mobile ? 0.8 : 1.2),
     inletMouthWidth: (mobile ? 5.5 : 4.3) + variation(817) * 0.5,
-    nearHillHeight: 1.05 + variation(819) * 0.22,
-    leftRidgeHeight: variation(821) * 0.5,
-    leftSlopeHeight: 4.2 + variation(823) * 0.45,
+    nearHillHeight: 1.2 + variation(819) * 0.35,
+    leftRidgeHeight: variation(821) * 0.75,
+    leftSlopeHeight: 4.6 + variation(823) * 0.6,
   }
 }
 
@@ -832,7 +832,7 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     const z = foregroundStart + zi * foregroundStep
     const advance = clamp((z - foregroundStart) / 7, 0, 1)
     const edge =
-      (mobile ? -3 + advance * 2.55 : -12.5 + advance * 8.8) +
+      (mobile ? -2.55 + advance * 2.49 : -10 + advance * 9.4) +
       foregroundShift +
       (smoothNoise(root, z, 0, 1.8, 409) - 0.5) * (mobile ? 0.35 : 1.3)
     for (let xi = 0; xi < Math.ceil(-foregroundMinX / foregroundStep); xi += 1) {

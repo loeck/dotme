@@ -1,8 +1,8 @@
 import { DataTexture, LinearFilter, RedFormat } from 'three/webgpu'
 
 const SKY_TRACE_LIFETIME = 3
-const BRUSH_OUTER_ANGLE = 0.25
-const BRUSH_INNER = Math.cos(0.11)
+const BRUSH_OUTER_ANGLE = 0.022
+const BRUSH_INNER = Math.cos(0.009)
 const BRUSH_OUTER = Math.cos(BRUSH_OUTER_ANGLE)
 
 type Direction = Readonly<{ x: number; y: number; z: number }>
@@ -54,7 +54,7 @@ export class SkyCursorTrace {
             ),
           )
         : 1
-      const steps = previous ? Math.max(1, Math.ceil(Math.acos(dot) / 0.025)) : 1
+      const steps = previous ? Math.max(1, Math.ceil(Math.acos(dot) / 0.01)) : 1
       for (let i = previous ? 1 : 0; i <= steps; i++) {
         const t = i / steps
         const x = previous ? previous.x * (1 - t) + direction.x * t : direction.x

@@ -30,7 +30,7 @@ import {
 } from 'three/webgpu'
 import type { Texture, WebGPURenderer } from 'three/webgpu'
 
-/** Rasterize corner controls when layout changes; shade them on the GPU every frame. */
+/** Rasterize DOM glyph coverage only when layout changes; shade it on the GPU every frame. */
 export class SceneContrast {
   private readonly canvas = document.createElement('canvas')
   private texture = new CanvasTexture(this.canvas)
@@ -49,6 +49,7 @@ export class SceneContrast {
     toneMapped: false,
   })
   private readonly lifetime = new AbortController()
+  private readonly observer: ResizeObserver
   private readonly dialogObserver: MutationObserver
   private dirty = true
   private disposed = false
@@ -107,7 +108,10 @@ export class SceneContrast {
       this.invalidate()
       this.redraw()
     }
+    this.observer = new ResizeObserver(invalidate)
     if (host) {
+      const profile = host.querySelector('.profile-panel')
+      if (profile) this.observer.observe(profile)
       for (const event of ['pointerover', 'pointerout', 'focusin', 'focusout', 'scene-icon-change'])
         host.addEventListener(event, invalidate, { signal })
     }
@@ -179,8 +183,40 @@ export class SceneContrast {
     ctx.strokeStyle = 'black'
     ctx.lineWidth = 0.65
     ctx.lineJoin = 'round'
+    const profile = this.host.querySelector('.profile-panel')
+    if (profile) {
+      const walker = document.createTreeWalker(profile, NodeFilter.SHOW_TEXT)
+      const range = document.createRange()
+      while (walker.nextNode()) {
+        const node = walker.currentNode
+        if (!(node instanceof Text)) continue
+        const parent = node.parentElement
+        if (!parent) continue
+        if (!node.textContent?.trim() || parent.closest('.sr-only, svg')) continue
+        const style = getComputedStyle(parent)
+        ctx.font = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`
+        const metrics = ctx.measureText('M')
+        const ascent = metrics.fontBoundingBoxAscent ?? Number.parseFloat(style.fontSize) * 0.8
+        const descent = metrics.fontBoundingBoxDescent ?? Number.parseFloat(style.fontSize) * 0.2
+        for (let i = 0; i < node.length; i++) {
+          const char = node.data.charAt(i)
+          if (!char.trim()) continue
+          range.setStart(node, i)
+          range.setEnd(node, i + 1)
+          const rect = range.getBoundingClientRect()
+          const x = rect.left - bounds.left
+          const y = rect.top - bounds.top + (rect.height - ascent - descent) / 2 + ascent
+          ctx.strokeText(char, x, y)
+          ctx.fillText(char, x, y)
+        }
+      }
+      for (const link of profile.querySelectorAll('a:hover, a:focus-visible')) {
+        const rect = link.getBoundingClientRect()
+        ctx.fillRect(rect.left - bounds.left, rect.bottom - bounds.top - 2, rect.width, 1)
+      }
+    }
     for (const icon of this.host.querySelectorAll<SVGSVGElement>(
-      '.scene-info-trigger svg, .scene-sound-trigger svg',
+      '.profile-panel svg, .scene-info-trigger svg, .scene-sound-trigger svg',
     ))
       this.drawSvg(ctx, icon, bounds)
     const sound = this.host.querySelector<HTMLElement>(".scene-sound-trigger[data-loading='true']")
@@ -250,6 +286,7 @@ export class SceneContrast {
   dispose() {
     this.disposed = true
     this.lifetime.abort()
+    this.observer.disconnect()
     this.dialogObserver.disconnect()
     this.texture.dispose()
     this.fallback.dispose()

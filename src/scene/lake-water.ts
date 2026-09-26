@@ -83,7 +83,6 @@ export class LakeWaterMaterial extends NodeMaterial {
     uPointer: uniform(new Vector3()),
     uSplash: uniform(new Vector4(0, 0, -100, 0)),
     uWaterScatter: uniform(new Color().setRGB(0.0022, 0.0043, 0.0065)),
-    uValleyLight: uniform(new Color()),
     uLightDirection: uniform(new Vector3(0, 1, 0)),
     uLightColor: uniform(new Color(0, 0, 0)),
     uWaterClarity: uniform(1),
@@ -191,7 +190,10 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       clamp(u.uWindResponse.y, 0.4, 1.6).mul(u.uWaterAgitation.mul(0.6).add(0.8)),
       u,
     )
-    const incidentSlope = field.yz.add(rippleSlope).add(rain.xy).add(capillary)
+    const incidentSlope = field.yz
+      .add(rippleSlope)
+      .add(rain.xy)
+      .add(capillary.mul(mix(1, 0.55, u.uNight)))
     const wakeHeading = vec2(u.uWake.z, u.uWake.w)
     const wakeRel = p.sub(u.uWake.xy)
     const wakeAxial = wakeRel.dot(wakeHeading)
@@ -248,7 +250,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(u.uSplash.w)
       .mul(0.7)
     const roughness = mix(
-      mix(0.03, 0.09, u.uWaterAgitation).mul(mix(1, 0.7, u.uNight)),
+      mix(mix(0.03, 0.09, u.uWaterAgitation), mix(0.07, 0.09, u.uWaterAgitation), u.uNight),
       0.025,
       reveal,
     )
@@ -443,15 +445,13 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
         ).mul(0.6),
       ),
     )
-    const glitterBase = clamp(reflect(u.uLightDirection.negate(), sparkle).dot(view), 0, 1).pow(
-      mix(350, 900, u.uNight),
-    )
+    const glitterBase = clamp(reflect(u.uLightDirection.negate(), sparkle).dot(view), 0, 1).pow(350)
     const sparkleCell = floor(p.mul(14)).add(floor(mod(u.uTime.mul(8), 64)).mul(0.37))
     const sparkleGate = smoothstep(0.982, 1, contactNoise(sparkleCell))
     const glitter = glitterBase
       .mul(u.uLightColor.rgb)
       .mul(1.4)
-      .mul(mix(1, 1.8, u.uNight))
+      .mul(float(1).sub(u.uNight))
       .mul(float(0.55).add(sparkleGate.mul(6)))
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))
     const sssDirection = normalize(u.uLightDirection.negate().add(normal.mul(WATER_IOR - 1)))
@@ -485,10 +485,6 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(u.uLightColor.rgb)
       .mul(0.12)
       .mul(shaftFlicker)
-    const valleyWidth = mix(3.5, 11, clamp(p.y.negate().div(75), 0, 1))
-    const valleyPath = exp(p.x.div(valleyWidth).pow2().negate()).mul(
-      float(1).sub(smoothstep(-55, -3, p.y)),
-    )
     material.waterLighting.foamNode = foam
     material.waterLighting.roughnessNode = roughness
     material.waterLighting.worldNormalNode = normal
@@ -507,7 +503,6 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .add(glitter.mul(float(1).sub(foam)).mul(lightGate))
       .add(sss.mul(float(1).sub(foam)).mul(lightGate))
       .add(shafts.mul(float(1).sub(foam)).mul(lightGate))
-      .add(u.uValleyLight.rgb.mul(valleyPath).mul(0.14).mul(float(1).sub(foam)))
   }
 
   getReflectionCamera(camera: Camera) {

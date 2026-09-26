@@ -13,7 +13,7 @@ function intensity(trace: SkyCursorTrace, x: number, y: number, z: number) {
 
 describe('sky cursor trace', () => {
   it('keeps a stationary opening, connects fast movement, and retains earlier passages', () => {
-    const trace = new SkyCursorTrace(128)
+    const trace = new SkyCursorTrace(256)
     const start = { x: -0.6, y: 0.8, z: 0 }
     const end = { x: 0.6, y: 0.8, z: 0 }
     trace.update(start, 1 / 30)
@@ -39,7 +39,7 @@ describe('sky cursor trace', () => {
   })
 
   it('ends strokes on invalid sky input and fully refills after three seconds', () => {
-    const trace = new SkyCursorTrace(128)
+    const trace = new SkyCursorTrace(256)
     trace.update({ x: -0.6, y: 0.8, z: 0 }, 0)
     trace.update(null, 0)
     trace.update({ x: 0.6, y: 0.8, z: 0 }, 0)

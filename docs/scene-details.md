@@ -16,8 +16,11 @@ animated lip overlaps their sources. The particles stretch along their velocity.
 Local GPU passes reconstruct their surface depth and integrate the optical thickness of the
 ellipsoids. A bounded bilateral filter smooths the surface while retaining gaps between streams.
 The reconstructed physical material uses the scene's lighting, refraction and environment.
+The cursor obstacle is narrow and moves without imparting its own velocity to the water, so quick
+gestures cannot launch individual parcels across the scene.
 Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile. Main and
-reflected views reuse those allocations; environment probes omit the fluid to avoid self-refraction.
+reflected views reuse those allocations; their crop follows the current parcel extents, including
+those displaced by the cursor. Environment probes omit the fluid to avoid self-refraction.
 This is an analytic flow representation, not a separate three-dimensional fluid solver.
 Grouped parcel arrivals feed the existing water-normal buffer, wave solver and recycled splash
 droplets. Cursor contact parts the curved flow and releases a few local fragments;

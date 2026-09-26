@@ -183,23 +183,7 @@
   --profile-divider: #a0aab4;
   --profile-focus: #b9dfff;
 }
-.profile-panel {
-  isolation: isolate;
-}
-.profile-panel::before {
-  content: '';
-  position: absolute;
-  z-index: -1;
-  inset: 0 0 -4rem;
-  pointer-events: none;
-  background: radial-gradient(
-    ellipse 95% 100% at 30% 0%,
-    #08131de8 0%,
-    #08131dd6 42%,
-    #08131d99 68%,
-    transparent 100%
-  );
-}
+main[data-scene-tone='light'] .profile-panel,
 main[data-scene-tone='light'] .scene-info-trigger,
 main[data-scene-tone='light'] .scene-sound-trigger {
   --profile-primary: #17232d;
@@ -208,8 +192,10 @@ main[data-scene-tone='light'] .scene-sound-trigger {
   --profile-divider: #465763;
   --profile-focus: #003b61;
 }
-/* Only the small corner controls use adaptive GPU ink. Profile text uses one
-   stable color per block over its soft backdrop. */
+/* Coverage is drawn once from these DOM glyphs; the GPU shades each covered
+   pixel from the scenery beneath it. DOM hit targets, selection and focus remain. */
+main[data-ui-mask='gpu'] .profile-panel,
+main[data-ui-mask='gpu'] .profile-panel *,
 main[data-ui-mask='gpu'] .scene-info-trigger,
 main[data-ui-mask='gpu'] .scene-sound-trigger {
   color: transparent !important;

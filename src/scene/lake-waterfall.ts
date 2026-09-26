@@ -19,6 +19,7 @@ import {
   vec3,
 } from 'three/tsl'
 import {
+  Box3,
   BufferAttribute,
   BufferGeometry,
   DoubleSide,
@@ -53,7 +54,7 @@ const IMPACT_OFFSET = 0.8
 const CURTAIN_GROUPS = (0x0008 << 16) | 0x0010
 const BLOCKER_GROUPS = (0x0010 << 16) | 0x0008
 /** Vertical capsule: a velocity-stretched hole, not a round dent. */
-const BLOCKER_HALF_HEIGHT = 0.16
+const BLOCKER_HALF_HEIGHT = 0.1
 const KILL_DEPTH = 0.05
 const EXIT_LIFT = 0.1
 
@@ -125,6 +126,8 @@ export class LakeWaterfall {
   private readonly positions: Float32Array
   private readonly velocities: Float32Array
   private readonly foams: Float32Array
+  private readonly parcelExtent: number
+  private readonly nominalBounds: Box3
   private readonly positionsAttribute: InstancedBufferAttribute
   private readonly velocitiesAttribute: InstancedBufferAttribute
   private readonly foamsAttribute: InstancedBufferAttribute
@@ -180,6 +183,8 @@ export class LakeWaterfall {
       this.fluid = this.resources.own(new WaterfallFluid(fall, mobile, this.opacity))
       this.materials = [this.fluid.material, foam, spray, basin, mist]
       const parcels = this.fluid.particles
+      this.parcelExtent = parcels.extent
+      this.nominalBounds = parcels.bounds.clone()
       this.sizes = parcels.sizes
       const slots = parcels.count
       this.previousHeights = new Float32Array(slots)
@@ -475,7 +480,7 @@ export class LakeWaterfall {
   setBlock(across: number, height: number, radius: number, strength: number) {
     this.blockAcross = across
     this.blockHeight = Math.max(0.1, Math.min(this.sheetHeight - 0.1, height))
-    this.blockRadius = Math.min(radius, this.fall.width * 0.28)
+    this.blockRadius = Math.min(radius, this.fall.width * 0.18, 0.25)
     this.blockStrength = strength
   }
 
@@ -535,15 +540,21 @@ export class LakeWaterfall {
   private manageCurtain(time: number) {
     if (this.blockStrength > 0.01) {
       const radius = 0.04 + (this.blockRadius - 0.04) * 0.72 * this.blockStrength
-      this.blockerRadius = radius
+      if (this.blockerRadius !== radius) {
+        this.blockerRadius = radius
+        this.blockerCollider.setRadius(radius)
+      }
       this.blockerPlaneZ = waterfallDrift(this.sheetHeight, this.blockHeight)
       const [x, y, z] = this.worldPoint(this.blockAcross, this.blockHeight, this.blockerPlaneZ)
       if (!this.blockerActive) {
         this.blockerActive = true
         this.blockerBody.setEnabled(true)
       }
-      this.blockerCollider.setRadius(radius)
-      this.blockerBody.setNextKinematicTranslation({ x, y, z })
+      // Position the cursor obstacle without turning a fast pointer movement
+      // into a high-speed rigid body that launches the water sideways.
+      const position = { x, y, z }
+      this.blockerBody.setTranslation(position, true)
+      this.blockerBody.setNextKinematicTranslation(position)
     } else if (this.blockerActive) {
       this.blockerActive = false
       this.blockerBody.setEnabled(false)
@@ -594,6 +605,9 @@ export class LakeWaterfall {
     const wind = this.currentWind
     const active =
       time !== undefined && wind !== undefined && !this.reducedMotion && this.opacity.value > 0.8
+    const bounds = this.fluid.particles.bounds
+    bounds.copy(this.nominalBounds)
+    const extent = this.parcelExtent
     if (!active) this.clearPendingImpacts()
     let fragment: SplashJet | undefined
     for (let i = 0; i < this.bodies.length; i++) {
@@ -609,6 +623,12 @@ export class LakeWaterfall {
       this.positions[base] = lx
       this.positions[base + 1] = ly
       this.positions[base + 2] = lz
+      bounds.min.x = Math.min(bounds.min.x, lx - extent)
+      bounds.min.y = Math.min(bounds.min.y, ly - extent)
+      bounds.min.z = Math.min(bounds.min.z, lz - extent)
+      bounds.max.x = Math.max(bounds.max.x, lx + extent)
+      bounds.max.y = Math.max(bounds.max.y, ly + extent)
+      bounds.max.z = Math.max(bounds.max.z, lz + extent)
       this.velocities[base] = dzn * v.x - dxn * v.z
       this.velocities[base + 1] = v.y
       this.velocities[base + 2] = dxn * v.x + dzn * v.z

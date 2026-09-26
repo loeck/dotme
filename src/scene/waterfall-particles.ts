@@ -115,5 +115,14 @@ export function createWaterfallParticles(fall: VoxelWaterfall, mobile: boolean) 
   )
   geometry.boundingBox = bounds.clone()
   geometry.boundingSphere = bounds.getBoundingSphere(new Sphere())
-  return { geometry, positionNode, aerationNode, chordNode, bounds, count, sizes }
+  return {
+    geometry,
+    positionNode,
+    aerationNode,
+    chordNode,
+    bounds,
+    extent: longRadius,
+    count,
+    sizes,
+  }
 }

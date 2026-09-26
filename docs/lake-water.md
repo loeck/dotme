@@ -17,12 +17,11 @@ Shading-only capillary ripples follow the wind and fade with the pixel footprint
 glints and break up reflections without changing the shared height field. Clear water keeps
 strong red absorption over pale sand for a turquoise tint, the scatter body darkens toward
 deep teal with depth, reflectance near the camera is capped lower so the bed stays visible,
-and light reaching the bed is attenuated by depth on the way down as well as up. A jittered
-sun/moon glitter lobe and a thickness-based turquoise subsurface glow sit on top of the
-reflected and transmitted light; the glitter lobe narrows at night into a moon path. At night
-the bed takes a dim blue moonlit tint that fades with depth, so only the shallows stay visible
-over navy water, and moonlight caustics and a smoother surface keep the bed pattern and moon
-glitter crisp. Shoreline foam is a bright animated band whose width follows wave arrival.
+and light reaching the bed is attenuated by depth on the way down as well as up. Daylight glitter
+and a turquoise subsurface glow sit on top of the reflected and transmitted light. At night the
+glitter and short capillary glints fade, leaving a softer moon reflection. The bed takes a dim
+blue tint that fades with depth, so only the shallows stay visible over navy water. Shoreline
+foam is a bright animated band whose width follows wave arrival.
 
 The bed capture carries a simple seabed: dune relief in the depth field, wave-ripple
 stripes on the sand albedo, dark meadow patches aligned with instanced seagrass tufts that

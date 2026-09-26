@@ -204,12 +204,30 @@ describe('lake waterfall lifecycle', () => {
       () => {},
     )
     waterfall.setBlock(0, 1.5, 0.45, 1)
+    const capture = waterfall.curtain.bounds
+    let outsideCapture = 0
     for (let frame = 0; frame < 240; frame++) {
       const time = frame / 60
       waterfall.update(time, 1, 1, steadyWind)
       physics.world.step()
       waterfall.syncCurtain()
+      const centers = streamed(waterfall, 'aBodyPosition')
+      for (let i = 0; i < centers.length; i += 3) {
+        const x = centers[i] ?? 0,
+          y = centers[i + 1] ?? 0,
+          z = centers[i + 2] ?? 0
+        if (
+          x < capture.min.x ||
+          x > capture.max.x ||
+          y < capture.min.y ||
+          y > capture.max.y ||
+          z < capture.min.z ||
+          z > capture.max.z
+        )
+          outsideCapture++
+      }
     }
+    expect(outsideCapture).toBe(0)
     const positions = streamed(waterfall, 'aBodyPosition')
     const foams = streamed(waterfall, 'aBodyFoam')
     let inBand = 0,
@@ -231,7 +249,7 @@ describe('lake waterfall lifecycle', () => {
     depths.sort((a, b) => a - b)
     // The sheet really falls through the blocker's drift line; the void is in the water.
     expect(Math.abs((depths[Math.floor(depths.length / 2)] ?? 0) - 0.69)).toBeLessThan(0.25)
-    expect(clearance).toBeGreaterThan((0.04 + 0.41 * 0.65 + 0.035) * 0.8)
+    expect(clearance).toBeGreaterThan(0.15)
     expect(foamed).toBeGreaterThan(0)
     expect(fragments.length).toBeGreaterThan(0)
     expect(fragments.every((jet) => jet.y > 1)).toBe(true)
@@ -252,6 +270,39 @@ describe('lake waterfall lifecycle', () => {
         restoredClearance = Math.min(restoredClearance, Math.hypot(x, z - 0.69))
     }
     expect(restoredClearance).toBeLessThan(clearance * 0.65)
+    waterfall.dispose()
+    physics.dispose()
+  })
+
+  it('does not launch the falling water when the cursor crosses the curtain quickly', async () => {
+    const physics = await physicsFor()
+    physics.world.timestep = 1 / 60
+    const waterfall = new LakeWaterfall(
+      new Scene(),
+      fall,
+      false,
+      false,
+      () => {},
+      physics,
+      () => {},
+    )
+    waterfall.setBlock(-0.3, 1.5, 0.45, 1)
+    for (let frame = 0; frame < 60; frame++) {
+      waterfall.update(frame / 60, 1, 1, steadyWind)
+      physics.world.step()
+      waterfall.syncCurtain()
+    }
+    waterfall.setBlock(0.3, 1.5, 0.45, 1)
+    let fastestAcross = 0
+    for (let frame = 60; frame < 66; frame++) {
+      waterfall.update(frame / 60, 1, 1, steadyWind)
+      physics.world.step()
+      waterfall.syncCurtain()
+      const velocities = streamed(waterfall, 'aBodyVelocity')
+      for (let i = 0; i < velocities.length; i += 3)
+        fastestAcross = Math.max(fastestAcross, Math.abs(velocities[i] ?? 0))
+    }
+    expect(fastestAcross).toBeLessThan(4)
     waterfall.dispose()
     physics.dispose()
   })

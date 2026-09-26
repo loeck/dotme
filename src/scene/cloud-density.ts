@@ -76,7 +76,7 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
     uCloudAmbient: uniform(new Color()),
     uCloudDirect: uniform(new Color()),
   }
-  const density = (world: Node<'vec3'>, detail: boolean) =>
+  const density = (world: Node<'vec3'>, detail: boolean, erosion: Node<'float'> = float(0)) =>
     Fn(() => {
       const total = float(0).toVar()
       If(world.y.greaterThan(CLOUD_BASE).and(world.y.lessThan(CLOUD_TOP)), () => {
@@ -92,7 +92,8 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
               .mul(smoothstep(base, base.add(12), world.y))
               .mul(smoothstep(CLOUD_TOP - 12, CLOUD_TOP, world.y).oneMinus())
               .mul(mix(0.22, 1.15, smoothstep(0.2, 0.8, sheet.r)))
-              .mul(mix(0.8, 1.1, sheet.g)),
+              .mul(mix(0.8, 1.1, sheet.g))
+              .mul(erosion.oneMinus()),
           )
         })
         Loop(CLOUD_COUNT, ({ i }) => {
@@ -123,6 +124,7 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
             .sub(boundary.mul(0.8))
             .add(sample.r.sub(0.5).mul(2.4))
             .add(sample.g.sub(0.5).mul(0.7))
+            .sub(erosion.mul(2.2))
             .toVar()
           if (detail) mass.subAssign(texture3D(noise, noisePoint.mul(2.7)).g.oneMinus().mul(0.12))
           total.addAssign(smoothstep(0.03, 0.5, mass).mul(envelope).mul(0.75))

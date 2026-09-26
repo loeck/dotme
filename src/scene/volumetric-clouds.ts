@@ -16,6 +16,7 @@ import {
   smoothstep,
   sqrt,
   texture,
+  texture3D,
   uniform,
   vec2,
   vec3,
@@ -171,6 +172,7 @@ export class VolumetricClouds {
     this.camera = new CubeCamera(0.1, 2, required(this.targets[0]))
     this.volume = createCloudVolume(seed, weather, this.noise)
     const { density, uniforms: u } = this.volume
+    const cursorTrace = texture(this.cursorTrace.texture)
     this.material.fragmentNode = Fn(() => {
       const ray = normalize(positionLocal),
         radiance = vec3(0).toVar(),
@@ -179,20 +181,34 @@ export class VolumetricClouds {
         const entry = float(80).div(ray.y),
           exit = min(float(140).div(ray.y), 2200)
         If(entry.lessThan(exit), () => {
+          const traceUv = ray.xz.div(ray.y.add(1)).mul(0.5).add(0.5)
+          const erosion = float(0).toVar()
+          If(cursorTrace.sample(traceUv).r.greaterThan(0.001), () => {
+            const point = ray.mul(entry)
+            const noisePoint = vec3(
+              point.x.sub(u.uDisplacement.x),
+              point.y,
+              point.z.sub(u.uDisplacement.y),
+            ).mul(0.016)
+            const wander = texture3D(this.noise, noisePoint).rg.sub(0.5).mul(0.002)
+            erosion.assign(cursorTrace.sample(traceUv.add(wander)).r)
+          })
           const stride = exit.sub(entry).div(this.profile.steps)
           const phase = float(0.75).div(
             max(0.05, float(1.25).sub(ray.dot(u.uCloudLightDirection))).pow(1.5),
           )
           Loop(this.profile.steps, ({ i }) => {
             const p = ray.mul(entry.add(float(i).add(0.5).mul(stride)))
-            const d = density(p, true)
+            const d = density(p, true, erosion)
             If(d.greaterThan(0.001), () => {
               const optical = float(0).toVar()
               Loop(3, ({ i: j }) => {
                 optical.addAssign(
-                  density(p.add(u.uCloudLightDirection.mul(float(j).mul(22).add(8))), false).mul(
-                    float(j).mul(12).add(9),
-                  ),
+                  density(
+                    p.add(u.uCloudLightDirection.mul(float(j).mul(22).add(8))),
+                    false,
+                    erosion,
+                  ).mul(float(j).mul(12).add(9)),
                 )
               })
               const moon = exp(optical.mul(-0.055)),
@@ -222,7 +238,7 @@ export class VolumetricClouds {
     this.scene.add(sphere)
   }
   sample(direction: Node<'vec3'>) {
-    const cloud = mix(
+    return mix(
       vec4(0, 0, 0, 1),
       mix(
         smoothCloud(this.uniforms.uCloudPrevious, direction, this.uniforms.uCloudResolution),
@@ -231,9 +247,6 @@ export class VolumetricClouds {
       ),
       this.uniforms.uCloudEnabled,
     )
-    const uv = direction.xz.div(direction.y.add(1)).mul(0.5).add(0.5)
-    const opening = texture(this.cursorTrace.texture, uv).r.mul(this.uniforms.uCloudEnabled)
-    return vec4(cloud.rgb.mul(opening.oneMinus()), mix(cloud.a, 1, opening))
   }
   private setCaptureTime(time: number) {
     const u = this.volume.uniforms

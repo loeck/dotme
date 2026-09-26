@@ -226,6 +226,7 @@ export class VoxelLandscapeEngine {
   private canvasBounds: DOMRect | null = null
   private pointerActive = false
   private pointerType = 'mouse'
+  private primaryMouseDown = false
   private pointerHeight = 0
   private pointerRevision = 0
   private pointerBusy = false
@@ -265,7 +266,6 @@ export class VoxelLandscapeEngine {
   private height = 1
   private mobile = false
   private lowPower = false
-  private readonly cameraTargetY: number
 
   static async create(options: VoxelLandscapeEngineOptions, signal: AbortSignal) {
     const physicsModule = loadPhysics()
@@ -384,7 +384,6 @@ export class VoxelLandscapeEngine {
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
       : window.innerWidth < 768
-    this.cameraTargetY = this.mobile ? 0.4 : 0.6
     this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
     this.solar = options.solar ?? DEFAULT_SOLAR
@@ -582,7 +581,7 @@ export class VoxelLandscapeEngine {
     uniforms.uRainSlopesEnabled.value = this.simulation.available ? 1 : 0
 
     this.camera.position.set(0, 2.3, 16)
-    this.camera.lookAt(0, this.cameraTargetY, -25)
+    this.camera.lookAt(0, this.mobile ? 2.3 : 7.3, -25)
 
     this.resize()
     this.resources.own({ dispose: () => this.removeListeners() })
@@ -940,8 +939,9 @@ export class VoxelLandscapeEngine {
       : 1 - Math.exp(-Math.max(0, dt) * (blockTarget > this.blockStrength ? 18 : 4.5))
     this.blockStrength += (blockTarget - this.blockStrength) * rate
     if (Math.abs(this.blockStrength - blockTarget) < 0.0005) this.blockStrength = blockTarget
-    this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.45, this.blockStrength)
+    this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.24, this.blockStrength)
     const skyPointer =
+      this.primaryMouseDown &&
       pointerOnScene &&
       !this.reducedMotion &&
       !waterPoint &&
@@ -1015,8 +1015,14 @@ export class VoxelLandscapeEngine {
     }
   }
 
+  private setPrimaryMouseDown(active: boolean) {
+    if (this.primaryMouseDown && !active) this.clouds.cursorTrace.clear()
+    this.primaryMouseDown = active
+  }
+
   private onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || !event.isPrimary) return
+    this.setPrimaryMouseDown(event.pointerType === 'mouse')
     this.pointerType = event.pointerType
     this.pointerActive = true
     this.pointerClient.set(event.clientX, event.clientY)
@@ -1043,6 +1049,7 @@ export class VoxelLandscapeEngine {
     if (!this.focused || document.hidden) return
     if (!event.isPrimary || (this.dragging && event.pointerId !== this.dragPointerId)) return
     this.pointerType = event.pointerType
+    this.setPrimaryMouseDown(event.pointerType === 'mouse' && (event.buttons & 1) !== 0)
     this.pointerActive = event.pointerType !== 'touch' || event.buttons !== 0
     this.target.set(
       clamp((event.clientX / this.width) * 2 - 1, -1, 1),
@@ -1069,6 +1076,7 @@ export class VoxelLandscapeEngine {
 
   private onPointerUp = (event: PointerEvent) => {
     if (!event.isPrimary) return
+    if (event.button === 0 || event.type === 'pointercancel') this.setPrimaryMouseDown(false)
     if (event.pointerType === 'touch' && event.pointerId !== this.dragPointerId) {
       this.onPointerLeave()
       return
@@ -1087,6 +1095,7 @@ export class VoxelLandscapeEngine {
 
   private onPointerLeave = () => {
     const pointerId = this.dragPointerId
+    this.setPrimaryMouseDown(false)
     this.pointerActive = false
     this.dragging = false
     this.dragPointerId = -1
@@ -1412,7 +1421,7 @@ export class VoxelLandscapeEngine {
     this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
     this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
     this.camera.position.z = 16
-    this.camera.lookAt(this.camera.position.x * 0.22, this.cameraTargetY, -25)
+    this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
     const pointerOnScene =
       this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
@@ -1443,7 +1452,6 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uMeteorStart.value.copy(this.shootingStars.start)
     this.skyMaterial.uniforms.uMeteorEnd.value.copy(this.shootingStars.end)
     uniforms.uWaterScatter.value.copy(light.waterScatter)
-    uniforms.uValleyLight.value.copy(light.valleyLight)
     uniforms.uLightDirection.value.copy(light.direction)
     uniforms.uLightColor.value.copy(light.color).multiplyScalar(light.intensity)
     uniforms.uNight.value = 1 - light.daylight
