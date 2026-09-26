@@ -40,6 +40,7 @@ import type { LakeWaterMaterial } from './lake-water'
 import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import type { VoxelWaterfall } from './voxel-world'
+import type { WaterContact } from './water-contact'
 import { contactNoise } from './water-noise'
 import { fieldUvNode, sampleWindField, windFieldNode } from './water-surface'
 import { waterfallDrift } from './waterfall-flow'
@@ -97,6 +98,7 @@ export class LakeWaterfall {
   private readonly emitJet: (jet: SplashJet) => void
   private readonly emitImpact: (impact: WaterfallImpact, wind: WindState) => void
   private readonly physics: PhysicsWorld
+  private contact?: WaterContact
   private readonly impactMaterials: readonly FallingWaterMaterial[]
   private readonly fluid: WaterfallFluid
   private readonly reducedMotion: boolean
@@ -105,6 +107,7 @@ export class LakeWaterfall {
   private currentWind: WindState | undefined
   private readonly impactPulse = uniform(0)
   private readonly previousHeights: Float32Array
+  private readonly ccdEnabled: Uint8Array
   private readonly impactBins = Array.from({ length: 3 }, () => ({
     count: 0,
     x: 0,
@@ -180,6 +183,7 @@ export class LakeWaterfall {
       this.sizes = parcels.sizes
       const slots = parcels.count
       this.previousHeights = new Float32Array(slots)
+      this.ccdEnabled = new Uint8Array(slots)
       this.born = new Float64Array(slots)
       this.phases = new Float32Array(slots)
       const streamedPositions = parcels.geometry.getAttribute('aBodyPosition')
@@ -515,6 +519,10 @@ export class LakeWaterfall {
     ]
   }
 
+  setWaterContact(contact: WaterContact) {
+    this.contact = contact
+  }
+
   private worldDirection(x: number, y: number, z: number): [number, number, number] {
     return [
       this.directionZ * x + this.directionX * z,
@@ -526,7 +534,7 @@ export class LakeWaterfall {
   /** Recycles landed bodies and steers the blocker; runs before the world step. */
   private manageCurtain(time: number) {
     if (this.blockStrength > 0.01) {
-      const radius = 0.04 + (this.blockRadius - 0.04) * 0.65 * this.blockStrength
+      const radius = 0.04 + (this.blockRadius - 0.04) * 0.72 * this.blockStrength
       this.blockerRadius = radius
       this.blockerPlaneZ = waterfallDrift(this.sheetHeight, this.blockHeight)
       const [x, y, z] = this.worldPoint(this.blockAcross, this.blockHeight, this.blockerPlaneZ)
@@ -554,6 +562,21 @@ export class LakeWaterfall {
         position = body.translation(this.translationTarget)
       }
       const wobble = Math.sin(position.y * 2.5 + time * 3 + required(this.phases[i])) * 0.2
+      let nearBlocker = false
+      if (this.blockerActive && Math.abs(position.y - WATER_LEVEL - this.blockHeight) < 0.55) {
+        const ox = position.x - this.fall.x,
+          oz = position.z - this.fall.z
+        const across = this.directionZ * ox - this.directionX * oz
+        const depth = this.directionX * ox + this.directionZ * oz
+        nearBlocker =
+          Math.abs(across - this.blockAcross) < this.blockerRadius + 0.35 &&
+          Math.abs(depth - this.blockerPlaneZ) < this.blockerRadius + 0.35
+      }
+      const ccd = Number(nearBlocker)
+      if (this.ccdEnabled[i] !== ccd) {
+        this.ccdEnabled[i] = ccd
+        body.enableCcd(nearBlocker)
+      }
       body.resetForces(false)
       this.forceTarget.x = this.directionZ * wobble
       this.forceTarget.y = 0
@@ -589,13 +612,24 @@ export class LakeWaterfall {
       this.velocities[base] = dzn * v.x - dxn * v.z
       this.velocities[base + 1] = v.y
       this.velocities[base + 2] = dxn * v.x + dzn * v.z
-      this.foams[i] = this.blockerFoam(lx, ly, lz)
+      const proximity = this.blockerFoam(lx, ly, lz)
+      let struckBlocker = false
+      if (active && proximity > 0.55 && this.blockerActive)
+        this.physics.world.contactPair(body.collider(0), this.blockerCollider, (manifold) => {
+          struckBlocker ||= manifold.numSolverContacts() > 0
+        })
+      this.foams[i] = Math.min(
+        1,
+        proximity + (struckBlocker ? Math.min(0.35, Math.hypot(v.x, v.y, v.z) * 0.04) : 0),
+      )
       const previous = required(this.previousHeights[i])
       this.previousHeights[i] = ly
       // Wind waves stay within this narrow band; avoid sampling their full
       // spectrum for parcels that are still high above the lake.
       if (active && ly < 0.2 && previous > -0.2 && v.y < 0) {
-        const surface = sampleWindField(t.x, t.z, time, wind, 0.08)[0]
+        const surface = this.contact
+          ? this.contact.sample(t.x, t.z, time, wind)[0] - WATER_LEVEL
+          : sampleWindField(t.x, t.z, time, wind, 0.08)[0]
         if (previous > surface && ly <= surface) {
           const bin = Math.max(0, Math.min(2, Math.floor((lx / this.fall.width + 0.5) * 3)))
           const impact = required(this.impactBins[bin])
@@ -610,9 +644,9 @@ export class LakeWaterfall {
         this.blockerActive &&
         active &&
         time - this.lastFragmentTime > 0.045 &&
-        required(this.foams[i]) > 0.72 &&
+        struckBlocker &&
         Math.abs(ly - this.blockHeight) < 0.15 &&
-        this.curtainRandom() < 0.035
+        this.curtainRandom() < 0.08
       ) {
         const lateral = Math.sign(lx - this.blockAcross) || (this.curtainRandom() < 0.5 ? -1 : 1)
         const [sideX, , sideZ] = this.worldDirection(
@@ -625,7 +659,7 @@ export class LakeWaterfall {
           y: t.y,
           z: t.z,
           vx: sideX,
-          vy: 0.4 + this.curtainRandom() * 0.7,
+          vy: 0.4 + this.curtainRandom() * 0.7 + Math.min(0.7, Math.hypot(v.x, v.y, v.z) * 0.08),
           vz: sideZ,
           size: 0.012 + this.curtainRandom() * 0.015,
           drag: 0.6,

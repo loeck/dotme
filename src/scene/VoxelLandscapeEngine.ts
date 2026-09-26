@@ -90,7 +90,7 @@ import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
-import { createWaterGeometry, swellHeight } from './water-surface'
+import { createWaterGeometry } from './water-surface'
 import { WATERFALL_FLUID_LAYER } from './waterfall-fluid'
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
@@ -550,6 +550,7 @@ export class VoxelLandscapeEngine {
     this.details?.setWaterImpact(
       (x, z, radius, velocity) => this.simulation.addImpulse(x, z, radius, velocity),
       uniforms,
+      this.simulation.contact,
     )
     this.renderer.domElement.dataset.waterMode = this.simulation.available ? 'gpu' : 'analytic'
     this.water.rotation.x = -Math.PI / 2
@@ -574,6 +575,7 @@ export class VoxelLandscapeEngine {
       ),
     )
     this.rain.setRainState(options.rain ?? DEFAULT_RAIN)
+    this.rain.setWaterContact(this.simulation.contact)
     this.rain.prime()
     if (this.details && this.simulation.available)
       this.rain.setImpactSlopes(this.details.impactSlopes)
@@ -864,9 +866,8 @@ export class VoxelLandscapeEngine {
     const wind = this.wind.sample(this.elapsed)
     for (let i = 0; i < 3; i++) {
       this.waterPlane.constant = -(
-        WATER_LEVEL +
-        this.pointerHeight +
-        swellHeight(this.waterHit.x, this.waterHit.z, this.elapsed, wind)
+        this.simulation.contact.sample(this.waterHit.x, this.waterHit.z, this.elapsed, wind)[0] +
+        this.pointerHeight
       )
       if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
     }
@@ -1627,12 +1628,12 @@ export class VoxelLandscapeEngine {
 
   private resizeReflection() {
     const rain = this.rain.group.visible
-    const scale = this.lowPower ? (rain ? 0.5 : 0.36) : rain ? 0.75 : 0.46
+    const scale = this.lowPower ? (rain ? 0.5 : 0.36) : rain ? 0.78 : 0.62
     const detailed = rain && !this.lowPower
     const reflectionScale = Math.min(
       scale,
-      (detailed ? 1536 : 768) / this.drawingBufferSize.x,
-      (detailed ? 1080 : 832) / this.drawingBufferSize.y,
+      (detailed ? 1536 : this.lowPower ? 768 : 1024) / this.drawingBufferSize.x,
+      (detailed ? 1080 : this.lowPower ? 832 : 960) / this.drawingBufferSize.y,
     )
     this.water.reflectorNode.reflector.resolutionScale = reflectionScale
   }

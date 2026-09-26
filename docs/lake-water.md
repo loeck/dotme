@@ -6,6 +6,8 @@ two alternating WebGPU render targets.
 Pointer impulses have bounded strength and a volume-balanced pressure profile.
 
 The terrain mask reflects waves at banks and the outer border absorbs outgoing waves.
+The transferred depth atlas slows propagation and increases damping in the shallows,
+so an approaching crest loses energy before it reaches the shore.
 The surface combines simulated gradients and directional wind waves with reflections,
 refraction, caustics and direct light. Textures retain explicit color-space, depth and
 orientation handling across passes. Rain and pointer interactions remain independent inputs.
@@ -29,19 +31,25 @@ stones plus larger separated hero rocks, and a spotted ray gliding a deep-water 
 with damped vertical follow and a blob shadow on the sand. Bed props share the capture layer, lighting, cloud shadows
 and caustics with the floor; the ray rides the fish layer so it refracts like the shoals, towing a Kelvin V wake with transverse arcs and foam.
 Daylight god-ray shafts drift in the water column where the view looks down into mid depths. Refraction bends with depth-gated wave slopes and a chromatic offset on desktop, reflection distortion calms with distance, and sun glitter fires thresholded HDR sparkles over its lobe.
-The same field drives CPU motion, surface normals and caustics. Reflection filtering follows
+The analytic wind field drives CPU motion, surface normals and caustics; the GPU field adds
+recent impulses to the visible surface. Reflection filtering follows
 the water roughness without an additional blur floor; the environment probe uses 256-pixel
 faces on desktop and 128-pixel faces on mobile.
 
-The solver does not model breaking waves, depth-dependent dispersion or volumetric fluid
-flow. Catch-up is bounded to prevent an unresponsive frame from creating an unstable burst.
+The solver does not model nonlinear breaking waves or volumetric fluid flow. Its
+depth response is a bounded shallow-water approximation rather than a full dispersion
+model. Catch-up is bounded to prevent an unresponsive frame from creating an unstable burst.
 World generation and interaction sampling remain on the CPU; scene composition and water
 passes use node materials.
 
-Rapier couples rigid bodies to the surface without stepping the wave field itself. Shore
-splashes and pointer bursts fly droplets as dynamic bodies whose landings return impulses
-to the field; a buoy and drifting leaves ride buoyancy sampled from the analytic wind
-field and report wake impulses while moving; foam flecks advect on the CPU with wind and
+Rapier couples rigid bodies to the surface without stepping the wave field itself. A
+bounded CPU contact sampler combines the wind field with recent GPU-bound impulses; it
+provides the height for rain, pointer hits, droplets, curtain landings and buoyancy without
+reading the GPU field each frame. Shore splashes and pointer bursts fly droplets as dynamic
+bodies whose water landings return impulses to the field. Terrain collision events supply
+near-shore impacts. The buoy and drifting leaves receive buoyancy and drag at several body
+points, allowing torque from uneven waves. Continuous collision detection is enabled only
+for curtain parcels near the moving blocker. Foam flecks advect on the CPU with wind and
 slope currents and collapse against the shore distance field.
 
 Unit tests cover equations, fixed-step behavior, impulse bounds, shore handling and wind.

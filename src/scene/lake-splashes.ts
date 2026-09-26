@@ -1,4 +1,4 @@
-import type { RigidBody, Vector } from '@dimforge/rapier3d-compat'
+import type { EventQueue, RigidBody, Vector } from '@dimforge/rapier3d-compat'
 import {
   attribute,
   uv,
@@ -42,6 +42,7 @@ import type { PhysicsWorld } from './physics-world'
 import { SplashImpacts } from './splash-impacts'
 import { createSplashProfile } from './splash-profile'
 import type { SplashProfile } from './splash-profile'
+import type { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
 
@@ -77,7 +78,7 @@ const DROP_MASS = 1000 * (4 / 3) * Math.PI * DROP_RADIUS ** 3
 const PARKED_Y = -100
 const SETTLE_STEPS = 21
 /** Droplets hit terrain but neither each other nor fish; statics keep the default groups. */
-const DROPLET_GROUPS = (0x0002 << 16) | 0xfffb
+const DROPLET_GROUPS = (0x0002 << 16) | 0x0001
 
 type PendingDrop = {
   x: number
@@ -158,6 +159,9 @@ export class LakeSplashes {
 
   private readonly bed: LakeBed
   private readonly physics: PhysicsWorld
+  private readonly contactEvents: EventQueue
+  private readonly colliderDrops = new Map<number, Drop>()
+  private contact?: WaterContact
   constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean, physics: PhysicsWorld) {
     this.bed = bed
     this.physics = physics
@@ -167,20 +171,22 @@ export class LakeSplashes {
     // cursor from evicting live shore drops.
     this.capacity = mobile ? 192 : 448
     const { ColliderDesc, RigidBodyDesc } = physics.rapier
+    this.contactEvents = new physics.rapier.EventQueue(true)
     physics.world.timestep = SPLASH_STEP
     this.drops = Array.from({ length: this.capacity }, () => {
       const body = physics.world.createRigidBody(
         RigidBodyDesc.dynamic().setTranslation(0, PARKED_Y, 0).setCanSleep(false).setEnabled(false),
       )
-      physics.world.createCollider(
+      const collider = physics.world.createCollider(
         ColliderDesc.ball(DROP_RADIUS)
           .setDensity(1000)
           .setRestitution(0.45)
           .setFriction(0.4)
-          .setCollisionGroups(DROPLET_GROUPS),
+          .setCollisionGroups(DROPLET_GROUPS)
+          .setActiveEvents(physics.rapier.ActiveEvents.COLLISION_EVENTS),
         body,
       )
-      return {
+      const drop: Drop = {
         body,
         born: 0,
         size: 0,
@@ -192,6 +198,8 @@ export class LakeSplashes {
         ringCount: 0,
         active: false,
       }
+      this.colliderDrops.set(collider.handle, drop)
+      return drop
     })
     this.shoreResolution = Math.sqrt(bed.shore.length)
     this.shoreCell = LAKE_BOUNDS.size / this.shoreResolution
@@ -341,6 +349,16 @@ export class LakeSplashes {
     scene.add(this.sheets)
   }
 
+  setWaterContact(contact: WaterContact) {
+    this.contact = contact
+  }
+
+  private sampleField(x: number, z: number, time: number, wind: WindState, footprint = 0.08) {
+    if (!this.contact) return sampleWindField(x, z, time, wind, footprint)
+    const [height, dx, dz, speed] = this.contact.sample(x, z, time, wind, footprint)
+    return [height - WATER_LEVEL, dx, dz, speed] as const
+  }
+
   private visibleFromCamera(x: number, z: number) {
     const distance = Math.hypot(x, z - 16)
     for (let step = 0.5; step < distance; step += 0.45) {
@@ -464,7 +482,7 @@ export class LakeSplashes {
 
   private ringGap(drop: Drop, slot: number, wind: WindState) {
     const sample = this.ringSample(drop, slot)
-    return sample.y - WATER_LEVEL - sampleWindField(sample.x, sample.z, sample.t, wind, 0.08)[0]
+    return sample.y - WATER_LEVEL - this.sampleField(sample.x, sample.z, sample.t, wind, 0.08)[0]
   }
 
   /** Frame detection at wall time, refined on the step-grid bracket for frame-rate independence. */
@@ -498,7 +516,7 @@ export class LakeSplashes {
       const gap =
         sampleY -
         WATER_LEVEL -
-        sampleWindField(sampleX, sampleZ, start.t + (end.t - start.t) * mid, wind, 0.08)[0]
+        this.sampleField(sampleX, sampleZ, start.t + (end.t - start.t) * mid, wind, 0.08)[0]
       if (gap > 0) low = mid
       else {
         high = mid
@@ -524,7 +542,7 @@ export class LakeSplashes {
     if (drop.active) {
       const position = drop.body.translation(this.positionTarget)
       const velocity = drop.body.linvel(this.velocityTarget)
-      const surface = WATER_LEVEL + sampleWindField(position.x, position.z, time, wind, 0.08)[0]
+      const surface = WATER_LEVEL + this.sampleField(position.x, position.z, time, wind, 0.08)[0]
       if (velocity.y < 0 && position.y <= surface)
         this.land(drop, position.x, position.y, position.z, -velocity.y, time, wind)
       else {
@@ -570,7 +588,9 @@ export class LakeSplashes {
     const speed = 0.35 + energy * (0.45 + this.random() * 0.65)
     this.emit({
       x: impact.x + Math.cos(angle) * 0.035,
-      y: WATER_LEVEL + 0.025,
+      y: this.contact
+        ? this.contact.sample(impact.x, impact.z, impact.time, wind)[0] + 0.025
+        : WATER_LEVEL + 0.025,
       z: impact.z + Math.sin(angle) * 0.035,
       vx: Math.cos(angle) * speed + wind.direction[0] * wind.speed * 0.025,
       vy: 0.8 + energy * (0.8 + this.random() * 0.8),
@@ -602,7 +622,7 @@ export class LakeSplashes {
     const profile = createSplashProfile(() => this.random(), strength)
     this.emitted++
     this.impacts.add(x, z, time, strength)
-    const surface = WATER_LEVEL + sampleWindField(x, z, time, wind, 0.08)[0]
+    const surface = WATER_LEVEL + this.sampleField(x, z, time, wind, 0.08)[0]
     const { count } = profile
     for (let i = 0; i < count; i++) {
       const drop = this.sampleDrop(profile, strength, i)
@@ -639,7 +659,7 @@ export class LakeSplashes {
       this.nextCheck = time + 0.1
       let bursts = 0
       for (const contact of this.contacts) {
-        const [height, , , velocity] = sampleWindField(contact.x, contact.z, time, wind, 0.08)
+        const [height, , , velocity] = this.sampleField(contact.x, contact.z, time, wind, 0.08)
         if (velocity < -0.008) contact.armed = true
         const facing = Math.max(0, -contact.nx * wind.direction[0] - contact.nz * wind.direction[1])
         const force = Math.max(0, Math.min(1, (wind.speed - 1.7) / 5)) * facing
@@ -679,7 +699,7 @@ export class LakeSplashes {
         bursts++
         this.sheetsState[this.sheetCursor] = {
           x: origin.x,
-          y: WATER_LEVEL + sampleWindField(origin.x, origin.z, time, wind, 0.08)[0],
+          y: WATER_LEVEL + this.sampleField(origin.x, origin.z, time, wind, 0.08)[0],
           z: origin.z,
           heading: Math.atan2(contact.nx, contact.nz),
           born: time,
@@ -700,7 +720,7 @@ export class LakeSplashes {
               WATER_LEVEL +
               Math.max(
                 0.015,
-                sampleWindField(source.x, source.z, time + drop.delay, wind, 0.08)[0] + 0.015,
+                this.sampleField(source.x, source.z, time + drop.delay, wind, 0.08)[0] + 0.015,
               ) +
               this.random() * (0.025 + energy * 0.09),
             z: source.z + contact.nz * (0.015 + this.random() * 0.07),
@@ -726,7 +746,24 @@ export class LakeSplashes {
       this.releaseDue()
       for (const hook of this.preStepHooks) hook(this.stepTime)
       this.applyWind()
-      this.physics.world.step()
+      this.physics.world.step(this.contactEvents)
+      this.contactEvents.drainCollisionEvents((a, b, started) => {
+        if (!started) return
+        const drop = this.colliderDrops.get(a) ?? this.colliderDrops.get(b)
+        const other = this.physics.world.getCollider(this.colliderDrops.has(a) ? b : a)
+        if (!drop?.active || !other || other.parent()) return
+        const position = drop.body.translation()
+        const velocity = drop.body.linvel()
+        if (position.y > WATER_LEVEL + 0.2 || sampleShore(this.bed, position.x, position.z) > 0.4)
+          return
+        const index = lakeIndex(this.bed, position.x, position.z)
+        if (index < 0 || !this.bed.water[index]) return
+        const energy = Math.min(0.8, Math.hypot(velocity.x, velocity.y, velocity.z) * drop.size * 4)
+        if (energy > 0.04) {
+          this.impacts.add(position.x, position.z, this.stepTime, energy)
+          this.onReturn?.(position.x, position.z, 0.12 + energy * 0.15, -energy * 0.035)
+        }
+      })
       this.stepTime += SPLASH_STEP
       for (const drop of this.drops) {
         if (drop.active) this.recordStep(drop)
@@ -820,6 +857,7 @@ export class LakeSplashes {
   }
 
   dispose() {
+    this.contactEvents.free()
     this.preStepHooks.clear()
     for (const drop of this.drops) this.physics.world.removeRigidBody(drop.body)
     this.drops.length = 0

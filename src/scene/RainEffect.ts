@@ -38,6 +38,7 @@ import {
 import type { RainSurface } from './rain-shaders'
 import { IMPACT_LIFETIME, RainSimulation, WATER_Y } from './rain-simulation'
 import type { RainImpact, RainRepulsor, RainState, SegmentTrace } from './rain-simulation'
+import type { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
 
@@ -100,8 +101,11 @@ export class RainEffect {
   private impactsWereVisible = false
   private surfaceTimeOffset = 0
   private surfaceWind?: WindState
+  private waterContact?: WaterContact
   private readonly sampleSurface = (x: number, z: number, time: number) =>
-    WATER_Y + sampleWindField(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
+    this.waterContact
+      ? this.waterContact.sample(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
+      : WATER_Y + sampleWindField(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
 
   private readonly lamps: readonly PointLight[]
   private readonly moon: DirectionalLight
@@ -203,6 +207,10 @@ export class RainEffect {
 
   setRepulsor(repulsor: RainRepulsor | null) {
     this.simulation.setRepulsor(repulsor)
+  }
+
+  setWaterContact(contact: WaterContact) {
+    this.waterContact = contact
   }
 
   resize(width: number, height: number) {

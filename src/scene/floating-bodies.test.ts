@@ -8,6 +8,7 @@ import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
 import type { Voxel } from './voxel-world'
+import { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 
@@ -31,6 +32,9 @@ const run = async (seed: number, frames = 600) => {
   const scene = new Scene()
   const splashes = new LakeSplashes(scene, bed, seed, true, physics)
   const floating = new FloatingBodies(scene, bed, seed, true, physics, splashes)
+  const contact = new WaterContact(bed)
+  splashes.setWaterContact(contact)
+  floating.setWaterContact(contact)
   try {
     const wakes: number[][] = []
     floating.onWake = (...event) => wakes.push(event)

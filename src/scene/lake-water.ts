@@ -123,7 +123,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     super(geometry, material)
     this.reflectorNode = reflector({
       target: this,
-      resolutionScale: mobile ? 0.35 : 0.6,
+      resolutionScale: mobile ? 0.35 : 0.62,
       generateMipmaps: true,
       bounces: false,
       samples: 0,
@@ -414,7 +414,12 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const grain = mix(contactNoise(flow.mul(16)), 0.5, smoothstep(0.035, 0.18, footprint))
     const breakup = smoothstep(0.24, 0.67, lace.add(grain.mul(0.18)))
     const residual = mix(0.08, 0.6, smoothstep(0.32, 0.62, patches))
-    const film = contact.mul(mix(residual, 0.9, arrival)).mul(mix(0.28, 1, breakup))
+    const breakEnergy = smoothstep(0.08, 0.35, incidentSlope.length().add(state.y.abs().mul(0.45)))
+    const shallowBreak = float(1).sub(smoothstep(0.4, 2, depth))
+    const film = contact
+      .mul(mix(residual, 0.9, arrival))
+      .mul(mix(0.28, 1, breakup))
+      .add(contact.mul(shallowBreak).mul(breakEnergy).mul(0.18))
     const crawl = sin(anchor.dot(tangent).mul(2.5).add(u.uTime.mul(1.1))).mul(0.12)
     const front = float(1).sub(
       smoothstep(

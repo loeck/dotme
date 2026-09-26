@@ -43,6 +43,7 @@ import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { prepareWaterMask } from './lake-geometry-data'
 import type { PreparedWaterMask } from './lake-geometry-data'
+import { WaterContact } from './water-contact'
 import { createWindNodes, windFieldNode } from './water-surface'
 import { WindModel, updateWindUniforms } from './wind'
 
@@ -74,6 +75,8 @@ export class WaterSimulation {
   readonly available = true
   readonly channels = 4
   readonly mask: DataTexture
+  readonly depth: DataTexture
+  readonly contact: WaterContact
   private readonly targets: [RenderTarget, RenderTarget]
   private current: 0 | 1 = 0
   private readonly clock = new WaterClock()
@@ -104,6 +107,7 @@ export class WaterSimulation {
   )
   private readonly splatMesh: Mesh
   private disposed = false
+  private surfaceTime = 0
   private readonly windUniforms = createWindNodes()
   private readonly windContact = uniform(0)
   private readonly stateNode
@@ -120,12 +124,16 @@ export class WaterSimulation {
   ) {
     this.renderer = renderer
     this.bed = bed
+    this.contact = new WaterContact(bed)
     this.wind = wind
     this.resolution = mobile ? 512 : 1024
     const mask = preparedMask
     this.mask = new DataTexture(mask.water, mask.resolution, mask.resolution, RedFormat)
     this.mask.minFilter = this.mask.magFilter = NearestFilter
     this.mask.needsUpdate = true
+    this.depth = new DataTexture(mask.depth, mask.resolution, mask.resolution, RedFormat)
+    this.depth.minFilter = this.depth.magFilter = NearestFilter
+    this.depth.needsUpdate = true
     const dx = LAKE_BOUNDS.size / this.resolution
     if ((WAVE_SPEED * WATER_STEP) / dx > Math.SQRT1_2) throw new Error('Unstable water time step')
     const makeTarget = () =>
@@ -140,6 +148,7 @@ export class WaterSimulation {
     this.targets = [makeTarget(), makeTarget()]
     this.stateNode = texture(this.targets[0].texture)
     const maskNode = texture(this.mask)
+    const depthNode = texture(this.depth)
     // TSL texture UVs start at the top. Match the output
     // orientation or ping-pong would mirror the field on every odd step.
     this.material.vertexNode = vec4(positionLocal.x, positionLocal.y.negate(), 0, 1)
@@ -180,9 +189,11 @@ export class WaterSimulation {
         min(float(1).sub(coordinate.x), float(1).sub(coordinate.y)),
       )
       const sponge = float(1).sub(smoothstep(0, 0.055, edge))
-      const decay = exp(sponge.mul(16).add(WATER_DAMPING).mul(-WATER_STEP))
+      const shallow = float(1).sub(smoothstep(0.025, 0.32, depthNode.sample(coordinate).r))
+      const speedScale = float(1).sub(shallow.mul(0.45))
+      const decay = exp(sponge.mul(16).add(shallow.mul(2.2)).add(WATER_DAMPING).mul(-WATER_STEP))
       const velocity = state.y
-        .add(laplacian.mul((WAVE_SPEED ** 2 * WATER_STEP) / dx ** 2))
+        .add(laplacian.mul(speedScale.mul((WAVE_SPEED ** 2 * WATER_STEP) / dx ** 2)))
         .mul(decay)
       const height = state.x.add(velocity.mul(WATER_STEP)).mul(exp(sponge.mul(-8 * WATER_STEP)))
       return maskNode
@@ -246,21 +257,29 @@ export class WaterSimulation {
   }
 
   addImpulse(x: number, z: number, radius: number, velocity: number) {
-    if (this.disposed || this.pending.length >= 128) return
+    if (this.disposed || this.pending.length >= 128 || !Number.isFinite(x + z + radius + velocity))
+      return
     const index = lakeIndex(this.bed, x, z)
     if (index < 0 || !this.bed.water[index]) return
+    const normalizedRadius = Math.max(
+      (LAKE_BOUNDS.size / this.resolution) * 2.5,
+      Math.min(3, radius),
+    )
+    const normalizedVelocity = Math.max(-0.65, Math.min(0.65, velocity))
+    this.contact.addImpulse(x, z, normalizedRadius, normalizedVelocity, this.surfaceTime)
     this.pending.push(
       new Vector4(
         (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size,
         (z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size,
-        Math.max(radius, (LAKE_BOUNDS.size / this.resolution) * 2.5) / LAKE_BOUNDS.size,
-        Math.max(-0.65, Math.min(0.65, velocity)),
+        normalizedRadius / LAKE_BOUNDS.size,
+        normalizedVelocity,
       ),
     )
   }
 
   step(delta: number, windTime?: number) {
     if (this.disposed) return
+    this.surfaceTime = windTime ?? this.surfaceTime + delta
     const steps = this.clock.advance(delta)
     if (!steps) return
     const previous = this.renderer.getRenderTarget(),
@@ -346,7 +365,9 @@ export class WaterSimulation {
   reset() {
     if (this.disposed) return
     this.clock.reset()
+    this.surfaceTime = 0
     this.pending.length = 0
+    this.contact.clear()
     const previous = this.renderer.getRenderTarget(),
       color = this.renderer.getClearColor(new Color()),
       alpha = this.renderer.getClearAlpha()
@@ -367,6 +388,7 @@ export class WaterSimulation {
     this.disposed = true
     for (const target of this.targets) target.dispose()
     this.mask.dispose()
+    this.depth.dispose()
     this.geometry.dispose()
     this.splatGeometry.dispose()
     this.material.dispose()

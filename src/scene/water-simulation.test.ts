@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
-import { LAKE_BOUNDS, createLakeBed, lakeIndex } from './lake-bed'
+import { LAKE_BOUNDS, WATER_LEVEL, createLakeBed, lakeIndex } from './lake-bed'
 import { prepareWaterMask } from './lake-geometry-data'
+import { WaterContact } from './water-contact'
 import { WaterClock, WATER_STEP, WAVE_SPEED, MAX_WATER_STEPS } from './water-simulation'
+import { sampleWindField } from './water-surface'
 
 describe('lake field', () => {
   it('uses stable fixed steps at 30, 60 and 144 Hz, and caps catch-up', () => {
@@ -80,6 +82,12 @@ describe('lake field', () => {
     expect(sample(16, 0).distance).toBe(2)
     const mask = prepareWaterMask(bed)
     expect(mask.resolution).toBe(n)
+    const shallow = Math.floor(((2 - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * n)
+    const deep = Math.floor(((12 - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size) * n)
+    const row = Math.floor(((0 - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size) * n)
+    expect(required(mask.depth[row * n + shallow])).toBeLessThan(
+      required(mask.depth[row * n + deep]),
+    )
     let mismatches = 0
     for (let z = 0; z < n; z++)
       for (let x = 0; x < n; x++) {
@@ -89,5 +97,20 @@ describe('lake field', () => {
         if (mask.water[z * n + x] !== (solid ? 0 : 255)) mismatches++
       }
     expect(mismatches).toBe(0)
+  })
+
+  it('places bounded impulse contacts on water and lets them decay before later landings', () => {
+    const bed = createLakeBed([{ x: 0, y: 0.2, z: 0, size: 2, color: 0 }], 19, true)
+    const contact = new WaterContact(bed)
+    const initial = contact.sample(3, 0, 0.15)[0]
+    contact.addImpulse(0, 0, 0.4, 0.5, 0)
+    expect(contact.sample(3, 0, 0.15)[0]).toBe(initial)
+    contact.addImpulse(3, 0, 0.4, 0.5, 0)
+    expect(contact.sample(3, 0, 0.15)[0]).toBeGreaterThan(initial)
+    expect(contact.sample(3, 0, 3)[0]).toBeCloseTo(
+      WATER_LEVEL + sampleWindField(3, 0, 3, undefined, 0.08)[0],
+      8,
+    )
+    expect(contact.sample(0, 0, 0.15)[0]).toBe(WATER_LEVEL)
   })
 })

@@ -144,13 +144,24 @@ export function prepareWaterSurface(mobile: boolean): PreparedWaterSurface {
   }
 }
 
-export type PreparedWaterMask = { resolution: number; water: Uint8Array }
+export type PreparedWaterMask = { resolution: number; water: Uint8Array; depth: Uint8Array }
 
 /** The simulation wall follows terrain faces at the native shore-grid resolution. */
 export function prepareWaterMask(bed: LakeBed): PreparedWaterMask {
   const resolution = Math.sqrt(bed.shore.length)
-  if (resolution !== bed.resolution * 2) return { resolution: bed.resolution, water: bed.water }
+  if (resolution !== bed.resolution * 2)
+    return {
+      resolution: bed.resolution,
+      water: bed.water,
+      depth: Uint8Array.from(bed.depth, (value) => Math.round(Math.min(1, value / 7.5) * 255)),
+    }
   const water = new Uint8Array(bed.shore.length)
-  for (let i = 0; i < water.length; i++) water[i] = required(bed.shore[i]) > 0 ? 255 : 0
-  return { resolution, water }
+  const depth = new Uint8Array(water.length)
+  for (let i = 0; i < water.length; i++) {
+    const x = Math.floor(((i % resolution) * bed.resolution) / resolution)
+    const z = Math.floor((Math.floor(i / resolution) * bed.resolution) / resolution)
+    water[i] = required(bed.shore[i]) > 0 ? 255 : 0
+    depth[i] = Math.round(Math.min(1, required(bed.depth[z * bed.resolution + x]) / 7.5) * 255)
+  }
+  return { resolution, water, depth }
 }

@@ -18,6 +18,7 @@ import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import { ShoreWetness } from './shore-wetness'
 import type { VoxelWorld } from './voxel-world'
+import type { WaterContact } from './water-contact'
 import type { WindState } from './wind'
 
 /** Normalized inputs supplied by the rain/solar integrations, without fetching weather here. */
@@ -122,9 +123,18 @@ export class SceneDetails {
     return this.splashes.impacts.slopes
   }
 
-  setWaterImpact(handler: LakeSplashes['onReturn'], uniforms: LakeWaterMaterial['uniforms']) {
+  setWaterImpact(
+    handler: LakeSplashes['onReturn'],
+    uniforms: LakeWaterMaterial['uniforms'],
+    contact?: WaterContact,
+  ) {
     this.splashes.impacts.setWaterSurface(uniforms)
     this.waterfall?.setWaterSurface(uniforms)
+    if (contact) {
+      this.splashes.setWaterContact(contact)
+      this.floating.setWaterContact(contact)
+      this.waterfall?.setWaterContact(contact)
+    }
     if (handler) this.splashes.onReturn = handler
     else delete this.splashes.onReturn
     if (handler) this.floating.onWake = handler

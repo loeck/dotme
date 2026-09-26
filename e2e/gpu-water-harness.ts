@@ -34,6 +34,13 @@ interface WaterVerification {
   }>
   dispose(): Promise<void>
   verifyWind(): Promise<{ samples: number; maxErrors: readonly number[] }>
+  verifyShore(): Promise<{
+    finite: boolean
+    maskedHeight: number
+    height: number
+    laterEnergy: number
+    energy: number
+  }>
 }
 declare global {
   interface Window {
@@ -191,6 +198,39 @@ async function main() {
       for (let step = 0; step < 120; step++) simulation.step(WATER_STEP)
       const later = stats((await simulation.snapshot()).state)
       return { ...initial, maxError, laterEnergy: later.energy }
+    },
+    async verifyShore() {
+      const bed = createLakeBed([{ x: 0, y: 0.2, z: 0, size: 2, color: 0 }], 42, true)
+      const shore = new WaterSimulation(renderer, bed, true)
+      try {
+        await shore.compileAsync()
+        shore.addImpulse(1.5, 0, 0.45, 0.65)
+        for (let step = 0; step < 90; step++) shore.step(WATER_STEP)
+        const first = await shore.snapshot()
+        let maskedHeight = 0
+        for (let row = 0; row < first.resolution; row++)
+          for (let col = 0; col < first.resolution; col++) {
+            const x = LAKE_BOUNDS.minX + ((col + 0.5) / first.resolution) * LAKE_BOUNDS.size
+            const z = LAKE_BOUNDS.minZ + ((row + 0.5) / first.resolution) * LAKE_BOUNDS.size
+            if (Math.abs(x) > 0.9 || Math.abs(z) > 0.9) continue
+            maskedHeight = Math.max(
+              maskedHeight,
+              Math.abs(required(first.state[(row * first.resolution + col) * 2])),
+            )
+          }
+        for (let step = 0; step < 120; step++) shore.step(WATER_STEP)
+        const later = stats((await shore.snapshot()).state)
+        const initial = stats(first.state)
+        return {
+          finite: initial.finite && later.finite,
+          maskedHeight,
+          height: initial.height,
+          energy: initial.energy,
+          laterEnergy: later.energy,
+        }
+      } finally {
+        shore.dispose()
+      }
     },
     async dispose() {
       simulation.dispose()

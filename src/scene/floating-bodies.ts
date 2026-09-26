@@ -5,7 +5,9 @@ import {
   InstancedMesh,
   MeshStandardNodeMaterial,
   Object3D,
+  Quaternion,
   SphereGeometry,
+  Vector3,
 } from 'three/webgpu'
 import type { Scene } from 'three/webgpu'
 
@@ -13,6 +15,7 @@ import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import type { LakeSplashes } from './lake-splashes'
 import type { PhysicsWorld } from './physics-world'
+import type { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import type { WindState } from './wind'
 
@@ -20,6 +23,18 @@ import type { WindState } from './wind'
 const FLOATER_GROUPS = (0x0002 << 16) | 0x0001
 const GRAVITY = 9.81
 const LEAF_COLORS = [0x4a7c3a, 0x5d8f43, 0x3d6e33]
+const BUOY_POINTS = [
+  [0, 0],
+  [0.7, 0],
+  [0, 0.7],
+  [-0.7, 0],
+  [0, -0.7],
+] as const
+const LEAF_POINTS = [
+  [0.7, 0],
+  [-0.35, 0.606],
+  [-0.35, -0.606],
+] as const
 
 type Floater = {
   body: RigidBody
@@ -44,11 +59,14 @@ export class FloatingBodies {
   readonly mesh: InstancedMesh<SphereGeometry, MeshStandardNodeMaterial>
   private readonly floaters: Floater[] = []
   private readonly transform = new Object3D()
+  private readonly point = new Vector3()
+  private readonly bodyRotation = new Quaternion()
   private wind: WindState | null = null
   private readonly releaseHook: () => void
   onWake?: (x: number, z: number, radius: number, velocity: number) => void
   private state: number
   private readonly physics: PhysicsWorld
+  private contact?: WaterContact
 
   constructor(
     scene: Scene,
@@ -150,6 +168,12 @@ export class FloatingBodies {
     return null
   }
 
+  private surfaceAt(x: number, z: number, time: number, wind: WindState, footprint: number) {
+    if (this.contact) return this.contact.sample(x, z, time, wind, footprint)
+    const [height, dx, dz, speed] = sampleWindField(x, z, time, wind, footprint)
+    return [WATER_LEVEL + height, dx, dz, speed] as const
+  }
+
   private applyStepForces(stepTime: number) {
     const wind = this.wind
     if (!wind) return
@@ -159,29 +183,53 @@ export class FloatingBodies {
       const { body } = floater
       const position = body.translation()
       const velocity = body.linvel()
-      const [height, dx, dz, dhdt] = sampleWindField(position.x, position.z, stepTime, wind, 0.08)
-      const submerged = Math.max(
-        0,
-        Math.min(1, (WATER_LEVEL + height - position.y + floater.radius) / (2 * floater.radius)),
-      )
+      const angular = body.angvel()
+      const rotation = body.rotation()
+      this.bodyRotation.set(rotation.x, rotation.y, rotation.z, rotation.w)
+      const points = floater.radius > 0.05 ? BUOY_POINTS : LEAF_POINTS
+      const share = 1 / points.length
       body.resetForces(false)
-      if (submerged <= 0) continue
       const push = (value: number) =>
         Math.max(-40, Math.min(40, Number.isFinite(value) ? value : 0)) * floater.mass
-      const surge = (drift: number, slope: number, speed: number) =>
-        push(
-          -slope * GRAVITY * 0.9 * submerged + (drift * floater.windage - speed) * 1.2 * submerged,
+      let wet = 0
+      for (const [sampleX, sampleZ] of points) {
+        this.point
+          .set(sampleX * floater.radius, 0, sampleZ * floater.radius)
+          .applyQuaternion(this.bodyRotation)
+        const { x: ox, y: oy, z: oz } = this.point
+        const x = position.x + ox,
+          y = position.y + oy,
+          z = position.z + oz
+        const [surface, dx, dz, dhdt] = this.surfaceAt(x, z, stepTime, wind, floater.radius)
+        const submerged = Math.max(
+          0,
+          Math.min(1, (surface - y + floater.radius) / (2 * floater.radius)),
         )
-      body.addForce(
-        {
-          x: surge(driftX, dx, velocity.x),
-          y: push(submerged * 2 * GRAVITY - (velocity.y - dhdt) * 4),
-          z: surge(driftZ, dz, velocity.z),
-        },
-        false,
-      )
+        wet += submerged * share
+        if (submerged <= 0) continue
+        const pointVx = velocity.x + angular.y * oz - angular.z * oy
+        const pointVy = velocity.y + angular.z * ox - angular.x * oz
+        const pointVz = velocity.z + angular.x * oy - angular.y * ox
+        body.addForceAtPoint(
+          {
+            x: push(
+              (-dx * GRAVITY * 0.9 + (driftX * floater.windage - pointVx) * 1.2) *
+                submerged *
+                share,
+            ),
+            y: push((2 * GRAVITY - (pointVy - dhdt) * 4) * submerged * share),
+            z: push(
+              (-dz * GRAVITY * 0.9 + (driftZ * floater.windage - pointVz) * 1.2) *
+                submerged *
+                share,
+            ),
+          },
+          { x, y, z },
+          false,
+        )
+      }
       const speed = Math.hypot(velocity.x, velocity.z)
-      if (submerged > 0.3 && speed > 0.15 && stepTime - floater.wakeAt > 0.4) {
+      if (wet > 0.3 && speed > 0.15 && stepTime - floater.wakeAt > 0.4) {
         floater.wakeAt = stepTime
         this.onWake?.(position.x, position.z, 0.3, -(0.008 + speed * 0.008))
       }
@@ -201,8 +249,7 @@ export class FloatingBodies {
   }
 
   private reset(floater: Floater, time: number, wind: WindState) {
-    const surface =
-      WATER_LEVEL + sampleWindField(floater.home.x, floater.home.z, time, wind, 0.08)[0]
+    const surface = this.surfaceAt(floater.home.x, floater.home.z, time, wind, 0.08)[0]
     floater.body.setTranslation({ x: floater.home.x, y: surface + 0.15, z: floater.home.z }, true)
     floater.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
     floater.body.setAngvel({ x: 0, y: 0, z: 0 }, true)
@@ -226,6 +273,10 @@ export class FloatingBodies {
       this.place(i, floater)
     })
     this.mesh.instanceMatrix.needsUpdate = true
+  }
+
+  setWaterContact(contact: WaterContact) {
+    this.contact = contact
   }
 
   dispose() {

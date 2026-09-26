@@ -127,7 +127,10 @@ export class LakeCaustics {
     const convergence = clamp(float(1).div(max(0.35, jacobian)).sub(1), 0, 1)
     const width = max(fwidth(convergence).mul(1.5), 0.025)
     const line = smoothstep(float(0.02).sub(width), width.add(0.7), convergence)
-    const focus = depthFade.mul(u.uCausticStrength).mul(line)
+    const shoreArrival = float(1)
+      .sub(smoothstep(0.5, 2, depth))
+      .mul(smoothstep(0.15, 0.65, convergence))
+    const focus = depthFade.mul(u.uCausticStrength).mul(line).mul(shoreArrival.mul(0.3).add(1))
     const previous = material.colorNode
     const color = (previous ?? materialColor).mul(focus.add(1))
     material.colorNode = color
