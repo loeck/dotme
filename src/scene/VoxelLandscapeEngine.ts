@@ -47,12 +47,7 @@ import { waterfallSound } from '../audio/environment'
 import { sceneParams } from '../scene-params'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { compileWithoutCulling } from './compile-scene'
-import {
-  CursorTrail,
-  sampleWaterfallHit,
-  seesWorld,
-  WATERFALL_OCCLUSION_TOLERANCE,
-} from './cursor-world'
+import { sampleWaterfallHit, seesWorld, WATERFALL_OCCLUSION_TOLERANCE } from './cursor-world'
 import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
@@ -236,8 +231,6 @@ export class VoxelLandscapeEngine {
   private pointerBusy = false
   private pendingPointer: { x: number; y: number; time: number } | null = null
   private previousPointer: { x: number; y: number; time: number } | null = null
-  private readonly cursorTrail = new CursorTrail()
-  private readonly skyHoleFrame: [number, number, number, number][] = []
   private readonly blockPoint = new Vector2(0, 0)
   private blockStrength = 0
   private readonly umbrella = { x: 0, y: 0, z: 0, radius: UMBRELLA_RADIUS }
@@ -773,6 +766,7 @@ export class VoxelLandscapeEngine {
       this.solarClock.timeScale,
     )
     this.reducedMotion = value
+    if (value) this.clouds.cursorTrace.clear()
     if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
     this.cancelFrame()
@@ -912,7 +906,12 @@ export class VoxelLandscapeEngine {
   }
 
   /** Cursor relief valves for the waterfall, clouds and rain; trails decay on their own. */
-  private updateCursorWorld(pointerOnScene: boolean, waterPoint: Vector3 | null, dt: number) {
+  private updateCursorWorld(
+    pointerOnScene: boolean,
+    waterPoint: Vector3 | null,
+    dt: number,
+    activeDelta: number,
+  ) {
     const ray = this.raycaster.ray
     let solid: number | null = null
     const solidDistance = () => {
@@ -940,14 +939,15 @@ export class VoxelLandscapeEngine {
     this.blockStrength += (blockTarget - this.blockStrength) * rate
     if (Math.abs(this.blockStrength - blockTarget) < 0.0005) this.blockStrength = blockTarget
     this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.45, this.blockStrength)
-    if (pointerOnScene && !this.reducedMotion && !waterPoint && ray.direction.y > 0.02) {
-      if (solidDistance() === Infinity)
-        this.cursorTrail.push(ray.direction.x, ray.direction.y, ray.direction.z, this.elapsed)
-    }
-    this.skyHoleFrame.length = 0
-    for (const hole of this.cursorTrail.snapshot(this.elapsed))
-      this.skyHoleFrame.push([hole.x, hole.y, hole.z, hole.strength * this.intro])
-    this.clouds.setSkyHoles(this.skyHoleFrame)
+    const skyPointer =
+      pointerOnScene &&
+      !this.reducedMotion &&
+      !waterPoint &&
+      ray.direction.y > 0.02 &&
+      solidDistance() === Infinity
+        ? ray.direction
+        : null
+    if (!this.reducedMotion) this.clouds.cursorTrace.update(skyPointer, activeDelta, this.intro)
     if (pointerOnScene && !this.reducedMotion && this.rain.group.visible) {
       this.umbrella.x = ray.origin.x + ray.direction.x * 14
       this.umbrella.y = ray.origin.y + ray.direction.y * 14
@@ -1421,7 +1421,7 @@ export class VoxelLandscapeEngine {
       this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
     this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
-    this.updateCursorWorld(pointerOnScene, waterPoint, dt)
+    this.updateCursorWorld(pointerOnScene, waterPoint, dt, activeDelta)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })

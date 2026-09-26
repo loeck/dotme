@@ -15,6 +15,7 @@ import {
   positionLocal,
   smoothstep,
   sqrt,
+  texture,
   uniform,
   vec2,
   vec3,
@@ -41,6 +42,7 @@ import type { CloudRenderer } from './cloud-shadows'
 import { CloudShadows } from './cloud-shadows'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
+import { SkyCursorTrace } from './sky-cursor-trace'
 import type { WeatherPreset } from './weather'
 import type { WindModel } from './wind'
 
@@ -108,6 +110,7 @@ export class VolumetricClouds {
   readonly shadows: CloudShadows
   readonly profile: (typeof CLOUD_PROFILES)[keyof typeof CLOUD_PROFILES]
   readonly uniforms
+  readonly cursorTrace: SkyCursorTrace
   private readonly targets: CubeRenderTarget[]
   private readonly noise
   private readonly volume
@@ -143,6 +146,7 @@ export class VolumetricClouds {
     this.wind = wind
     this.lighting = lighting
     this.profile = lowPower ? CLOUD_PROFILES.mobile : CLOUD_PROFILES.desktop
+    this.cursorTrace = new SkyCursorTrace(lowPower ? 256 : 512)
     this.noise = createCloudNoise(seed, 32, noiseData)
     this.targets = [0, 1, 2].map(
       () =>
@@ -217,20 +221,8 @@ export class VolumetricClouds {
     sphere.frustumCulled = false
     this.scene.add(sphere)
   }
-  /** Cursor-punched holes as ray direction plus strength; missing slots stay shut. */
-  setSkyHoles(holes: readonly (readonly [number, number, number, number])[]) {
-    const slots = this.volume.skyHoles
-    for (let i = 0; i < slots.length; i++) {
-      const hole = holes[i]
-      const slot = slots[i]
-      if (!slot) continue
-      if (hole) slot.set(hole[0], hole[1], hole[2], hole[3])
-      else slot.set(0, 0, 1, 0)
-    }
-  }
-
   sample(direction: Node<'vec3'>) {
-    return mix(
+    const cloud = mix(
       vec4(0, 0, 0, 1),
       mix(
         smoothCloud(this.uniforms.uCloudPrevious, direction, this.uniforms.uCloudResolution),
@@ -239,6 +231,9 @@ export class VolumetricClouds {
       ),
       this.uniforms.uCloudEnabled,
     )
+    const uv = direction.xz.div(direction.y.add(1)).mul(0.5).add(0.5)
+    const opening = texture(this.cursorTrace.texture, uv).r.mul(this.uniforms.uCloudEnabled)
+    return vec4(cloud.rgb.mul(opening.oneMinus()), mix(cloud.a, 1, opening))
   }
   private setCaptureTime(time: number) {
     const u = this.volume.uniforms
@@ -348,6 +343,7 @@ export class VolumetricClouds {
     await this.shadows.compileAsync()
   }
   dispose() {
+    this.cursorTrace.dispose()
     this.shadows.dispose()
     this.noise.dispose()
     this.geometry.dispose()

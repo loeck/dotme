@@ -37,6 +37,11 @@ never to moonlight or lamps.
 A seeded shared wind field drives cloud displacement, water waves and environmental
 motion. Cloud bodies and procedural noise derive from the world seed. Day/night lighting
 and cloud transmission are expressed with TSL nodes rendered through WebGPU.
+The cloud volume is captured at 15 Hz on desktop and 10 Hz on low-power devices. A
+separate upper-sky texture records cursor passages every displayed frame; the sky
+composition uses it to feather both cloud radiance and transmission. The texture is
+anchored to world directions, so openings survive camera motion, and each passage
+refills in about three seconds after the cursor leaves. Reduced motion clears it.
 Terrain shadow layers preserve independent visibility for shadow and main passes.
 
 Profile contrast samples the rendered backdrop through the composition pipeline. The DOM

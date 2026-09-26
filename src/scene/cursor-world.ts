@@ -1,9 +1,5 @@
 import { WATERFALL_EXIT_DRIFT, WATERFALL_LIP_Z, waterfallDrift } from './waterfall-flow'
 
-export const SKY_HOLE_LIFETIME = 3
-export const SKY_HOLE_COUNT = 8
-export const SKY_HOLE_RADIUS = 12
-export const SKY_HOLE_SPACING = 0.05
 /** Voxels less than this in front of the curtain plane don't veto the block. */
 export const WATERFALL_OCCLUSION_TOLERANCE = 0.5
 
@@ -80,14 +76,6 @@ export function sampleWaterfallHit(
   return { across, height, distance, strength: t * t * (3 - 2 * t) }
 }
 
-export type TrailHole = Readonly<{
-  x: number
-  y: number
-  z: number
-  born: number
-  strength: number
-}>
-
 /**
  * The canvas fills the viewport, so any non-interactive topmost element still
  * leaves the world beneath the cursor. Only controls and dialogs capture it.
@@ -97,39 +85,4 @@ export function seesWorld(target: unknown): boolean {
   const closest = target.closest
   if (typeof closest !== 'function') return false
   return closest.call(target, 'dialog, a[href], button, [role="button"]') === null
-}
-
-/**
- * Newest-first ring of cursor ray directions with exponential decay. Clouds
- * are optically thick, so each hole punches the full marched column along its
- * ray instead of a sphere: small tunnels read clearly where spheres vanish.
- */
-export class CursorTrail {
-  private readonly slots: { x: number; y: number; z: number; born: number }[] = []
-  private readonly capacity: number
-  private readonly spacing: number
-
-  constructor(capacity: number = SKY_HOLE_COUNT, spacing: number = SKY_HOLE_SPACING) {
-    this.capacity = capacity
-    this.spacing = spacing
-  }
-
-  /** Stacked pushes refresh the newest hole instead of opening a twin. */
-  push(x: number, y: number, z: number, time: number): boolean {
-    const newest = this.slots[0]
-    if (newest && Math.hypot(x - newest.x, y - newest.y, z - newest.z) < this.spacing) {
-      newest.born = time
-      return false
-    }
-    this.slots.unshift({ x, y, z, born: time })
-    this.slots.length = Math.min(this.slots.length, this.capacity)
-    return true
-  }
-
-  snapshot(time: number): TrailHole[] {
-    return this.slots.map((slot) => ({
-      ...slot,
-      strength: Math.max(0, Math.min(1, Math.exp(-(time - slot.born) / SKY_HOLE_LIFETIME))),
-    }))
-  }
 }

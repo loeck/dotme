@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { CursorTrail, SKY_HOLE_LIFETIME, sampleWaterfallHit, seesWorld } from './cursor-world'
+import { sampleWaterfallHit, seesWorld } from './cursor-world'
 
 const fall = { x: -20, z: -22, top: 6, width: 2, direction: [1, 0] as const }
 
@@ -47,31 +47,5 @@ describe('overlay hit-testing', () => {
     expect(seesWorld(overlayElement(true))).toBe(false)
     expect(seesWorld(null)).toBe(false)
     expect(seesWorld({})).toBe(false)
-  })
-})
-
-describe('cursor trail', () => {
-  it('recycles the oldest hole and refreshes stacked pushes', () => {
-    const trail = new CursorTrail(2)
-    expect(trail.push(0, 1, 0, 0)).toBe(true)
-    expect(trail.push(0.01, 1, 0, 0.1)).toBe(false)
-    expect(trail.push(0.2, 1, 0, 0.2)).toBe(true)
-    expect(trail.push(0.4, 1, 0, 0.3)).toBe(true)
-    const holes = trail.snapshot(0.3)
-    expect(holes).toHaveLength(2)
-    expect(holes.map((hole) => hole.x)).toEqual([0.4, 0.2])
-    expect(trail.push(0.41, 1, 0, 1)).toBe(false)
-    expect(trail.snapshot(1)[0]).toMatchObject({ x: 0.4, born: 1, strength: 1 })
-  })
-
-  it('decays holes over their lifetime', () => {
-    const trail = new CursorTrail(2)
-    trail.push(0, 1, 0, 10)
-    const fresh = trail.snapshot(10)
-    expect(fresh[0]?.strength).toBeCloseTo(1, 6)
-    const old = trail.snapshot(10 + SKY_HOLE_LIFETIME * 6)
-    expect(old[0]?.strength).toBeCloseTo(0, 2)
-    const aged = trail.snapshot(10 + SKY_HOLE_LIFETIME)
-    expect(aged[0]?.strength).toBeCloseTo(Math.exp(-1), 5)
   })
 })
