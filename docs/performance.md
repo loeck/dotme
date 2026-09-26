@@ -34,7 +34,12 @@ BENCH_SECONDS=30 BENCH_REPEATS=3 pnpm benchmark:scene
 The benchmark serves the production build and visits seeded day, night and heavy-rain
 scenes, sequentially on desktop Chromium and mobile WebKit. It discards a two-second
 warm-up, measures animation-frame intervals and records median/p95, loader readiness,
-scene readiness, selected backend and screenshots. Reports are written under
+scene readiness, selected backend and screenshots. `frames`, `medianMs` and `p95Ms`
+describe browser `requestAnimationFrame` callbacks. `sceneRender` separately records
+the actual scene frames, their intervals and CPU duration, and CPU duration and render
+calls for water, environment, submerged capture, waterfall, main view, rain and contrast.
+The waterfall is nested inside the main view, so their costs must not be added together.
+These CPU measurements do not include GPU completion time. Reports are written under
 `artifacts/performance/` and are not functional-test pass/fail thresholds. Mobile browsers
 without a WebGPU adapter are recorded under `unsupportedProfiles` and produce no GPU
 frame-time measurements.

@@ -8,7 +8,7 @@ import { preview } from 'vite'
 
 import { chromiumLaunchOptions } from '../e2e/browser-options.ts'
 import { availableBackend } from '../e2e/graphics-support.ts'
-import type { SceneGpuInfo } from '../src/scene/diagnostics.ts'
+import type { SceneGpuInfo, SceneRenderCapture } from '../src/scene/diagnostics.ts'
 import { parisWeatherFixture } from '../src/weather/paris.fixture.ts'
 
 type LoadingMetrics = {
@@ -39,6 +39,32 @@ if (!baseURL) throw new Error('No preview URL available; build the site first')
 const quantile = (values: readonly number[], q: number) =>
   values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) * q)] ?? 0
 type GpuSnapshot = SceneGpuInfo | null
+function summarizeRender(capture: SceneRenderCapture) {
+  return {
+    frames: capture.frameCpuMs.length,
+    medianIntervalMs: quantile(capture.intervalsMs, 0.5),
+    p95IntervalMs: quantile(capture.intervalsMs, 0.95),
+    medianCpuMs: quantile(capture.frameCpuMs, 0.5),
+    p95CpuMs: quantile(capture.frameCpuMs, 0.95),
+    passes: Object.fromEntries(
+      Object.entries(capture.passes).map(([name, samples]) => [
+        name,
+        {
+          samples: samples.length,
+          medianCpuMs: quantile(
+            samples.map((sample) => sample.cpuMs),
+            0.5,
+          ),
+          p95CpuMs: quantile(
+            samples.map((sample) => sample.cpuMs),
+            0.95,
+          ),
+          renderCalls: samples.reduce((total, sample) => total + sample.renderCalls, 0),
+        },
+      ]),
+    ),
+  }
+}
 const runs: {
   profile: string
   scenario: string
@@ -55,6 +81,7 @@ const runs: {
   compileStages: Array<{ stage: string; ms: number | null }>
   gpuAfterWarmup: GpuSnapshot
   gpuSteady: GpuSnapshot
+  sceneRender: ReturnType<typeof summarizeRender>
   maxLoadingFrameGapMs: number
   loadingLongTaskCount: number | null
   maxLoadingLongTaskMs: number | null
@@ -203,22 +230,30 @@ try {
               stages,
             }
           })
-          const intervals = await page.evaluate(
+          const { intervals, sceneCapture } = await page.evaluate(
             (duration) =>
-              new Promise<number[]>((resolveSamples) => {
-                const samples: number[] = []
-                const start = performance.now()
-                let previous = start
-                const sample = (now: number) => {
-                  if (now - start > 2000) samples.push(now - previous)
-                  previous = now
-                  if (now - start < (duration + 2) * 1000) requestAnimationFrame(sample)
-                  else resolveSamples(samples)
-                }
-                requestAnimationFrame(sample)
-              }),
+              new Promise<{ intervals: number[]; sceneCapture: SceneRenderCapture | null }>(
+                (resolveSamples) => {
+                  const samples: number[] = []
+                  const start = performance.now()
+                  let previous = start
+                  window.setTimeout(() => window.sceneRenderCapture?.start(), 2000)
+                  const sample = (now: number) => {
+                    if (now - start > 2000) samples.push(now - previous)
+                    previous = now
+                    if (now - start < (duration + 2) * 1000) requestAnimationFrame(sample)
+                    else
+                      resolveSamples({
+                        intervals: samples,
+                        sceneCapture: window.sceneRenderCapture?.stop() ?? null,
+                      })
+                  }
+                  requestAnimationFrame(sample)
+                },
+              ),
             seconds,
           )
+          if (!sceneCapture) throw new Error('Scene render diagnostics are unavailable')
           const canvas = page.locator('canvas[data-backend]')
           const backend = await canvas.getAttribute('data-backend')
           const fallbackAdapter = await canvas.getAttribute('data-fallback-adapter')
@@ -244,6 +279,7 @@ try {
             compileStages: loadTimings.stages,
             gpuAfterWarmup,
             gpuSteady,
+            sceneRender: summarizeRender(sceneCapture),
             maxLoadingFrameGapMs: loading.maxLoadingFrameGapMs,
             loadingLongTaskCount: loadingTasks.loadingLongTaskCount,
             maxLoadingLongTaskMs: loadingTasks.maxLoadingLongTaskMs,

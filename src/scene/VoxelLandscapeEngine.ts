@@ -56,6 +56,7 @@ import {
 import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
+import { SceneRenderDiagnostics } from './diagnostics'
 import type { SceneGpuInfo } from './diagnostics'
 import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
@@ -166,6 +167,7 @@ type Mote = Readonly<{
 }>
 
 export class VoxelLandscapeEngine {
+  private readonly renderDiagnostics = new SceneRenderDiagnostics()
   private readonly options: Omit<VoxelLandscapeEngineOptions, 'prepared'>
   private readonly container: HTMLDivElement
   private readonly renderer: WebGPURenderer
@@ -1136,12 +1138,15 @@ export class VoxelLandscapeEngine {
     // Carry display jitter only in the foreground; idle frames never catch up after a delay.
     this.nextFrameAt = this.focused ? this.nextFrameAt + interval : now + interval
     if (this.nextFrameAt <= now) this.nextFrameAt = now + interval
+    const sampleStart = this.renderDiagnostics.frameStart(now)
     try {
       this.render(now)
     } catch (error) {
       console.warn('Landscape rendering failed:', error)
       this.options.onContextFailure()
       this.dispose()
+    } finally {
+      this.renderDiagnostics.frameEnd(sampleStart)
     }
   }
 
@@ -1186,6 +1191,7 @@ export class VoxelLandscapeEngine {
   }
 
   private gpuInfo: (() => SceneGpuInfo) | undefined
+  private renderCaptureHook: Window['sceneRenderCapture']
 
   /** Narrow benchmark hook; read by page.evaluate, never by the scene itself. */
   private publishDiagnostics() {
@@ -1198,6 +1204,11 @@ export class VoxelLandscapeEngine {
       textures: this.renderer.info.memory.textures,
     })
     window.sceneGpuInfo = this.gpuInfo
+    this.renderCaptureHook = {
+      start: () => this.renderDiagnostics.start(),
+      stop: () => this.renderDiagnostics.stop(),
+    }
+    window.sceneRenderCapture = this.renderCaptureHook
   }
 
   /** Capture render state synchronously: the loader borrows this renderer between yields. */
@@ -1576,20 +1587,38 @@ export class VoxelLandscapeEngine {
         this.moteMesh.instanceMatrix.needsUpdate = true
       }
     }
-    if (!this.reducedMotion) this.simulation.step(dt, this.elapsed)
+    const diagnostics = this.renderDiagnostics
+    const renderInfo = this.renderer.info.render
+    if (!this.reducedMotion) {
+      const pass = diagnostics.begin('water', renderInfo.calls)
+      this.simulation.step(dt, this.elapsed)
+      diagnostics.end(pass, renderInfo.calls)
+    }
     uniforms.uState.value = this.simulation.texture
 
     this.rain.update(this.reducedMotion ? 0 : rainDelta, this.camera, smooth(0, 0.62, this.intro), {
       time: this.elapsed,
       wind,
     })
+    const slopes = diagnostics.begin('rainSlopes', renderInfo.calls)
     this.rain.renderSlopes(this.renderer, this.camera, this.elapsed)
+    diagnostics.end(slopes, renderInfo.calls)
     this.updateShadows(now)
+    const probe = diagnostics.begin('environment', renderInfo.calls)
     this.updateEnvironment(now, atmosphereTime)
+    diagnostics.end(probe, renderInfo.calls)
+    const submerged = diagnostics.begin('submerged', renderInfo.calls)
     this.submerged.render(this.renderer, this.scene, this.camera)
+    diagnostics.end(submerged, renderInfo.calls)
+    const main = diagnostics.begin('main', renderInfo.calls)
     this.depthFocus.render(this.renderer, this.scene, this.camera, this.atmosphere, this.moon)
+    diagnostics.end(main, renderInfo.calls)
+    const overlay = diagnostics.begin('rainOverlay', renderInfo.calls)
     this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture)
+    diagnostics.end(overlay, renderInfo.calls)
+    const contrast = diagnostics.begin('contrast', renderInfo.calls)
     this.sceneContrast.render(this.renderer, this.atmosphere.target.texture, this.canvasBounds)
+    diagnostics.end(contrast, renderInfo.calls)
     if (!this.rendered) {
       this.rendered = true
       this.renderer.domElement.dataset.sceneRendered = 'true'
@@ -1654,6 +1683,9 @@ export class VoxelLandscapeEngine {
     if (this.disposed) return
     this.disposed = true
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
+    if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
+      delete window.sceneRenderCapture
+    this.renderCaptureHook = undefined
     this.gpuInfo = undefined
     this.cancelFrame()
     this.removeListeners()

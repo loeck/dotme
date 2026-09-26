@@ -19,6 +19,7 @@ import {
 } from 'three/webgpu'
 import type { Box3, InstancedBufferGeometry, Node, WebGPURenderer } from 'three/webgpu'
 
+import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
 
 export interface WaterfallFluidParticles {
@@ -356,6 +357,7 @@ export class WaterfallFluidPass {
     if (this.disposed || !this.prepare(renderer, camera, parentMatrixWorld)) return false
     const [horizontalDepth, horizontalThickness, verticalDepth, verticalThickness] =
       this.ensurePasses(renderer)
+    const pass = SceneRenderDiagnostics.beginActive('waterfall', renderer.info.render.calls)
     this.withState(renderer, () => {
       renderer.setRenderTarget(this.rawDepth)
       renderer.render(this.depthScene, this.camera)
@@ -370,6 +372,7 @@ export class WaterfallFluidPass {
       renderer.setRenderTarget(this.finalThickness)
       verticalThickness.render()
     })
+    SceneRenderDiagnostics.endActive(pass, renderer.info.render.calls)
     return true
   }
 
