@@ -1,19 +1,26 @@
 import { DataTexture, LinearFilter, RedFormat } from 'three/webgpu'
 
+/** Seconds for a fully open passage to close again. */
+const SKY_TRACE_LIFETIME = 3
 const BRUSH_OUTER_ANGLE = 0.022
 const BRUSH_INNER = Math.cos(0.009)
 const BRUSH_OUTER = Math.cos(BRUSH_OUTER_ANGLE)
 
 type Direction = Readonly<{ x: number; y: number; z: number }>
 
-/** A persistent, camera-independent trace on the upper hemisphere, in stereographic coordinates. */
+/** A camera-independent trace on the upper hemisphere, in stereographic coordinates.
+ * Every texel heals on its own clock, so older passages close while new ones stay open. */
 export class SkyCursorTrace {
   readonly texture: DataTexture
   private readonly resolution: number
   private readonly pixels: Uint8Array
   private previous: Direction | null = null
-  private previousStrength = 0
-  private empty = true
+  private decayRemainder = 0
+  // Inclusive texel rows/columns that may hold non-zero values; empty when top > bottom.
+  private top = 0
+  private bottom = -1
+  private left = 0
+  private right = -1
 
   constructor(resolution = 512) {
     this.resolution = resolution
@@ -24,9 +31,11 @@ export class SkyCursorTrace {
   }
 
   /** A null direction ends the stroke, so an invalid pointer cannot bridge two sky visits. */
-  update(direction: Direction | null, strength = 1) {
+  update(direction: Direction | null, dt: number, strength = 1) {
+    const healed = this.heal(dt)
     if (!direction || direction.y <= 0 || strength <= 0) {
       this.previous = null
+      if (healed) this.texture.needsUpdate = true
       return
     }
     const previous = this.previous
@@ -39,7 +48,6 @@ export class SkyCursorTrace {
           ),
         )
       : 1
-    if (previous && dot === 1 && strength <= this.previousStrength) return
     const steps = previous ? Math.max(1, Math.ceil(Math.acos(dot) / 0.01)) : 1
     for (let i = previous ? 1 : 0; i <= steps; i++) {
       const t = i / steps
@@ -50,17 +58,48 @@ export class SkyCursorTrace {
       this.stamp(x / length, y / length, z / length, strength)
     }
     this.previous = { x: direction.x, y: direction.y, z: direction.z }
-    this.previousStrength = strength
-    this.empty = false
     this.texture.needsUpdate = true
   }
 
   clear() {
     this.previous = null
-    if (this.empty) return
+    this.decayRemainder = 0
+    if (this.top > this.bottom) return
     this.pixels.fill(0)
-    this.empty = true
+    this.top = this.left = 0
+    this.bottom = this.right = -1
     this.texture.needsUpdate = true
+  }
+
+  /** Lowers every open texel by its share of the lifetime; returns whether anything changed. */
+  private heal(dt: number) {
+    if (this.top > this.bottom) {
+      this.decayRemainder = 0
+      return false
+    }
+    this.decayRemainder += (Math.max(0, dt) * 255) / SKY_TRACE_LIFETIME
+    const decay = Math.floor(this.decayRemainder)
+    if (decay === 0) return false
+    this.decayRemainder -= decay
+    const size = this.resolution
+    let open = false
+    for (let row = this.top; row <= this.bottom; row++)
+      for (
+        let index = row * size + this.left, end = row * size + this.right;
+        index <= end;
+        index++
+      ) {
+        const value = this.pixels[index] ?? 0
+        if (value === 0) continue
+        const next = value > decay ? value - decay : 0
+        this.pixels[index] = next
+        if (next) open = true
+      }
+    if (!open) {
+      this.top = this.left = 0
+      this.bottom = this.right = -1
+    }
+    return true
   }
 
   private stamp(x: number, y: number, z: number, strength: number) {
@@ -74,6 +113,17 @@ export class SkyCursorTrace {
     const right = Math.min(size - 1, Math.ceil(cx + reach))
     const top = Math.max(0, Math.floor(cy - reach))
     const bottom = Math.min(size - 1, Math.ceil(cy + reach))
+    if (this.top > this.bottom) {
+      this.top = top
+      this.bottom = bottom
+      this.left = left
+      this.right = right
+    } else {
+      this.top = Math.min(this.top, top)
+      this.bottom = Math.max(this.bottom, bottom)
+      this.left = Math.min(this.left, left)
+      this.right = Math.max(this.right, right)
+    }
     for (let row = top; row <= bottom; row++) {
       const q = (2 * (row + 0.5)) / size - 1
       for (let col = left; col <= right; col++) {

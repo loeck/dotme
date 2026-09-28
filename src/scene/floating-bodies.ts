@@ -9,10 +9,11 @@ import {
   SphereGeometry,
   Vector3,
 } from 'three/webgpu'
-import type { Scene } from 'three/webgpu'
+import type { Scene, Vector4 } from 'three/webgpu'
 
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import { FISH_LAYER } from './lake-fish'
 import type { LakeSplashes } from './lake-splashes'
 import type { PhysicsWorld } from './physics-world'
 import type { WaterContact } from './water-contact'
@@ -22,6 +23,8 @@ import type { WindState } from './wind'
 /** Floaters strike terrain only: neither droplets, fish, nor each other. */
 const FLOATER_GROUPS = (0x0002 << 16) | 0x0001
 const GRAVITY = 9.81
+const SPLASH_REACH = 2.5
+const SPLASH_SPEED = 4
 const LEAF_COLORS = [0x4a7c3a, 0x5d8f43, 0x3d6e33]
 const BUOY_POINTS = [
   [0, 0],
@@ -64,6 +67,7 @@ export class FloatingBodies {
   private wind: WindState | null = null
   private readonly releaseHook: () => void
   onWake?: (x: number, z: number, radius: number, velocity: number) => void
+  private time = 0
   private state: number
   private readonly physics: PhysicsWorld
   private contact?: WaterContact
@@ -136,6 +140,8 @@ export class FloatingBodies {
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)
     this.mesh.frustumCulled = false
     this.mesh.receiveShadow = true
+    // The fish capture is what the lake refracts, so submerged halves stay visible.
+    this.mesh.layers.enable(FISH_LAYER)
     placed.forEach(({ spec }, i) => this.mesh.setColorAt(i, new Color(spec.color)))
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
     this.floaters.forEach((floater, i) => this.place(i, floater))
@@ -266,8 +272,48 @@ export class FloatingBodies {
     this.mesh.setMatrixAt(index, this.transform.matrix)
   }
 
+  /** A splash shoves nearby floaters outward, up and into a roll; Rapier integrates the rest. */
+  splash(x: number, z: number, energy: number) {
+    for (const floater of this.floaters) {
+      const position = floater.body.translation()
+      const dx = position.x - x,
+        dz = position.z - z
+      const distance = Math.hypot(dx, dz)
+      if (distance >= SPLASH_REACH) continue
+      const nx = distance > 1e-4 ? dx / distance : 0,
+        nz = distance > 1e-4 ? dz / distance : 0
+      const impulse = floater.mass * energy * SPLASH_SPEED * (1 - distance / SPLASH_REACH)
+      floater.body.applyImpulse({ x: nx * impulse, y: impulse * 0.6, z: nz * impulse }, true)
+      // Solid-sphere inertia (2/5 m r²) spinning at half the rolling rate of the shove.
+      const roll = 0.2 * impulse * floater.radius
+      floater.body.applyTorqueImpulse({ x: nz * roll, y: 0, z: -nx * roll }, true)
+    }
+  }
+
+  /** Per floater: waterline centre (x, z), circle radius and contact weight; unused slots are zero. */
+  waterlines(out: readonly Vector4[]) {
+    const wind = this.wind
+    out.forEach((slot, i) => {
+      const floater = this.floaters[i]
+      if (!floater || !wind) {
+        slot.set(0, 0, 0, 0)
+        return
+      }
+      const { x, y, z } = floater.body.translation()
+      const height = floater.radius * floater.flatten
+      const offset = (this.surfaceAt(x, z, this.time, wind, floater.radius)[0] - y) / height
+      slot.set(
+        x,
+        z,
+        floater.radius * Math.sqrt(Math.max(0, 1 - offset * offset)),
+        Math.abs(offset) < 1 ? 1 : 0,
+      )
+    })
+  }
+
   update(time: number, wind: WindState, reducedMotion = false) {
     this.wind = wind
+    this.time = time
     this.floaters.forEach((floater, i) => {
       if (!reducedMotion && this.escaped(floater)) this.reset(floater, time, wind)
       this.place(i, floater)

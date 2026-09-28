@@ -12,33 +12,41 @@ function intensity(trace: SkyCursorTrace, x: number, y: number, z: number) {
 }
 
 describe('sky cursor trace', () => {
-  it('keeps every passage, connects fast movement and stays put while stationary', () => {
+  it('connects fast movement and keeps a stationary opening while held', () => {
     const trace = new SkyCursorTrace(256)
     const start = { x: -0.6, y: 0.8, z: 0 }
     const end = { x: 0.6, y: 0.8, z: 0 }
-    trace.update(start)
-    trace.update(end)
+    trace.update(start, 0)
+    trace.update(end, 0)
     expect(intensity(trace, 0, 1, 0)).toBeGreaterThan(200)
-    trace.texture.needsUpdate = false
-    const version = trace.texture.version
-    for (let i = 0; i < 90; i++) trace.update(end)
-    expect(trace.texture.version).toBe(version)
+    for (let i = 0; i < 90; i++) trace.update(end, 1 / 30)
     expect(intensity(trace, end.x, end.y, end.z)).toBeGreaterThan(200)
-    expect(intensity(trace, start.x, start.y, start.z)).toBeGreaterThan(200)
+    expect(intensity(trace, start.x, start.y, start.z)).toBe(0)
     trace.dispose()
   })
 
-  it('ends strokes on invalid sky input without erasing earlier ones', () => {
+  it('heals each passage on its own clock without clearing on release', () => {
     const trace = new SkyCursorTrace(256)
-    trace.update({ x: -0.6, y: 0.8, z: 0 })
-    trace.update(null)
-    trace.update({ x: 0.6, y: 0.8, z: 0 })
+    const first = { x: -0.6, y: 0.8, z: 0 }
+    const second = { x: 0.6, y: 0.8, z: 0 }
+    trace.update(first, 0)
+    trace.update(null, 1 / 60)
+    expect(intensity(trace, first.x, first.y, first.z)).toBeGreaterThan(200)
+    for (let i = 0; i < 20; i++) trace.update(null, 0.1)
+    const healing = intensity(trace, first.x, first.y, first.z)
+    expect(healing).toBeGreaterThan(40)
+    expect(healing).toBeLessThan(160)
+    trace.update(second, 0)
+    trace.update(null, 0)
     expect(intensity(trace, 0, 1, 0)).toBe(0)
-    for (let i = 0; i < 600; i++) trace.update(null)
-    expect(intensity(trace, -0.6, 0.8, 0)).toBeGreaterThan(200)
-    expect(intensity(trace, 0.6, 0.8, 0)).toBeGreaterThan(200)
+    for (let i = 0; i < 12; i++) trace.update(null, 0.1)
+    expect(intensity(trace, first.x, first.y, first.z)).toBe(0)
+    expect(intensity(trace, second.x, second.y, second.z)).toBeGreaterThan(40)
+    for (let i = 0; i < 20; i++) trace.update(null, 0.1)
+    expect(intensity(trace, second.x, second.y, second.z)).toBe(0)
+    trace.update(second, 0)
     trace.clear()
-    expect(intensity(trace, 0.6, 0.8, 0)).toBe(0)
+    expect(intensity(trace, second.x, second.y, second.z)).toBe(0)
     trace.dispose()
   })
 })

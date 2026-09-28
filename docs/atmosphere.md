@@ -40,8 +40,9 @@ and cloud transmission are expressed with TSL nodes rendered through WebGPU.
 The cloud volume is captured at 15 Hz on desktop and 10 Hz on low-power devices. A
 separate upper-sky texture records cursor passages while the left mouse button is held; the cloud
 volume uses it to erode density with a noise-warped edge during capture. The texture is
-anchored to world directions, so openings survive camera motion. Passages accumulate and
-persist: releasing the button, leaving the sky or the canvas only ends the current stroke.
+anchored to world directions, so openings survive camera motion. Each texel heals on its own
+clock, closing about three seconds after it was drawn, so older passages refill while new ones
+stay open; releasing the button, leaving the sky or the canvas only ends the current stroke.
 Reduced motion clears it.
 Terrain shadow layers preserve independent visibility for shadow and main passes.
 

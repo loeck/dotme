@@ -1,5 +1,6 @@
 import {
   Fn,
+  If,
   cameraPosition,
   cameraViewMatrix,
   clamp,
@@ -25,6 +26,7 @@ import {
   smoothstep,
   texture,
   uniform,
+  uniformArray,
   vec2,
   vec3,
   vec4,
@@ -64,11 +66,15 @@ type LakeInputs = {
   pointer: PointerLightUniforms
 }
 
+/** Floating bodies whose waterline draws a meniscus ring on the lake. */
+export const FLOATER_SLOTS = 8
+
 /** Uniform nodes are stable graph inputs; update their values, never replace them. */
 export class LakeWaterMaterial extends NodeMaterial {
   readonly waterLighting = new WaterLightingModel()
   emissiveNode: Node<'vec3'> | null = null
   private readonly empty = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, RGBAFormat)
+  private readonly waterlines = Array.from({ length: FLOATER_SLOTS }, () => new Vector4())
   readonly uniforms = {
     ...createWindNodes(),
     uCell: uniform(0.16),
@@ -78,6 +84,8 @@ export class LakeWaterMaterial extends NodeMaterial {
     uRainResolution: uniform(new Vector2(1, 1)),
     uRainSlopesEnabled: uniform(0),
     uRainIntensity: uniform(0),
+    waterlines: this.waterlines,
+    uFloaters: uniformArray<'vec4'>(this.waterlines, 'vec4'),
     uDirectSun: uniform(1),
     uBedColor: texture(this.empty),
     uBedDepth: texture(this.empty),
@@ -89,7 +97,6 @@ export class LakeWaterMaterial extends NodeMaterial {
     uBedViewProjection: uniform(new Matrix4()),
     uBedTexel: uniform(new Vector2(1, 1)),
     uPointer: uniform(new Vector3()),
-    uSplash: uniform(new Vector4(0, 0, -100, 0)),
     uWaterScatter: uniform(new Color().setRGB(0.0022, 0.0043, 0.0065)),
     uLightDirection: uniform(new Vector3(0, 1, 0)),
     uLightColor: uniform(new Color(0, 0, 0)),
@@ -246,14 +253,6 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(0.97963)
       .add(0.02037)
     const reveal = exp(p.sub(u.uPointer.xy).dot(p.sub(u.uPointer.xy)).div(-2.8)).mul(u.uPointer.z)
-    const splashAge = u.uTime.sub(u.uSplash.z)
-    const splashDistance = p.sub(u.uSplash.xy).length()
-    const splashGate = splashAge.greaterThanEqual(0).select(1, 0)
-    const splashCrown = exp(splashDistance.pow(2).mul(-9))
-      .mul(exp(splashAge.mul(-5)))
-      .mul(splashGate)
-      .mul(u.uSplash.w)
-      .mul(0.7)
     const roughness = mix(
       mix(mix(0.03, 0.09, u.uWaterAgitation), mix(0.07, 0.09, u.uWaterAgitation), u.uNight),
       0.025,
@@ -439,7 +438,19 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(arrival)
       .mul(smoothstep(0.38, 0.7, lace))
       .mul(float(1).sub(smoothstep(1.2, 1.9, distance)))
-    const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(splashCrown))
+    const meniscus = Fn(() => {
+      const total = float(0).toVar()
+      for (let i = 0; i < FLOATER_SLOTS; i++) {
+        const floater = u.uFloaters.element(i)
+        If(floater.w.greaterThan(0), () => {
+          const ringWidth = floater.z.mul(0.16).add(0.004)
+          const ring = p.sub(floater.xy).length().sub(floater.z).div(ringWidth)
+          total.addAssign(exp(ring.pow2().negate()).mul(floater.w).mul(0.32))
+        })
+      }
+      return total
+    })()
+    const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(meniscus))
     const sparkle = normalize(
       normal.add(
         vec3(

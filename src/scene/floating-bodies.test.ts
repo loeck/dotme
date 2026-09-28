@@ -1,4 +1,4 @@
-import { Matrix4, Scene, Vector3 } from 'three'
+import { Matrix4, Scene, Vector3, Vector4 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
@@ -55,6 +55,53 @@ const run = async (seed: number, frames = 600) => {
 }
 
 describe('floating bodies', () => {
+  it('reports a waterline circle for floaters resting on the surface', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    try {
+      for (let frame = 0; frame < 240; frame++) {
+        const time = frame / 60
+        floating.update(time, windy.sample(time))
+        splashes.update(time, windy.sample(time))
+      }
+      const slots = Array.from({ length: 8 }, () => new Vector4())
+      floating.waterlines(slots)
+      const [buoy] = slots
+      expect(required(buoy).w).toBe(1)
+      expect(required(buoy).z).toBeGreaterThan(0.03)
+      expect(required(buoy).z).toBeLessThanOrEqual(0.09)
+      expect(required(slots.at(-1)).toArray()).toEqual([0, 0, 0, 0])
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
+  it('is pushed away and lifted by a nearby splash', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    try {
+      const [buoy] = positionsOf(floating)
+      const [bx, , bz] = required(buoy)
+      floating.splash(bx - 0.5, bz, 0.55)
+      floating.splash(bx + 40, bz, 0.55)
+      physics.world.step()
+      floating.update(0, windy.sample(0), false)
+      const [after] = positionsOf(floating)
+      expect(required(after)[0]).toBeGreaterThan(bx)
+      expect(required(after)[1]).toBeGreaterThan(required(buoy)[1] ?? 0)
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
   it('rides the surface and drifts downwind without sinking', async () => {
     const { start, end, wakes } = await run(42)
     expect(end.length).toBeGreaterThan(0)

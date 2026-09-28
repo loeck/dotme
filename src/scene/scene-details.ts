@@ -1,5 +1,5 @@
 import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
-import type { Camera, Object3D, Scene, Vector3, WebGPURenderer } from 'three/webgpu'
+import type { Camera, Object3D, Scene, Vector3, Vector4, WebGPURenderer } from 'three/webgpu'
 
 import type { FishBait } from './fish-pointer'
 import { PointerDisturbance } from './fish-pointer'
@@ -54,6 +54,7 @@ export class SceneDetails {
   }
   private readonly splashes: LakeSplashes
   private readonly floating: FloatingBodies
+  private waterlines?: readonly Vector4[]
   private readonly foam: FoamDrift
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
@@ -130,6 +131,7 @@ export class SceneDetails {
   ) {
     this.splashes.impacts.setWaterSurface(uniforms)
     this.waterfall?.setWaterSurface(uniforms)
+    this.waterlines = uniforms.waterlines
     if (contact) {
       this.splashes.setWaterContact(contact)
       this.floating.setWaterContact(contact)
@@ -144,6 +146,7 @@ export class SceneDetails {
   pointerBurst(x: number, z: number, energy: number, time: number, wind: WindState) {
     if (this.disposed || this.reducedMotion) return
     this.splashes.spawnBurst(x, z, energy, time, wind)
+    this.floating.splash(x, z, energy)
   }
 
   setWaterfallBlock(across: number, height: number, radius: number, strength: number) {
@@ -183,6 +186,7 @@ export class SceneDetails {
     this.ray.update(time, dt, waterPointer, pointerActivity)
     this.waterfall?.update(time, daylight, intro, wind)
     this.floating.update(time, wind, this.reducedMotion)
+    if (this.waterlines) this.floating.waterlines(this.waterlines)
     this.foam.update(time, wind, this.reducedMotion)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     // The shared world step is owned by splashes; curtain landings reach the lake next frame.

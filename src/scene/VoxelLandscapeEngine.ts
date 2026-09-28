@@ -949,8 +949,13 @@ export class VoxelLandscapeEngine {
     )
   }
 
-  /** Cursor relief valves for the waterfall, clouds and rain; sky traces persist. */
-  private updateCursorWorld(pointerOnScene: boolean, waterPoint: Vector3 | null, dt: number) {
+  /** Cursor relief valves for the waterfall, clouds and rain; trails heal on their own. */
+  private updateCursorWorld(
+    pointerOnScene: boolean,
+    waterPoint: Vector3 | null,
+    dt: number,
+    activeDelta: number,
+  ) {
     const ray = this.raycaster.ray
     let solid: number | null = null
     const solidDistance = () => {
@@ -987,7 +992,7 @@ export class VoxelLandscapeEngine {
       solidDistance() === Infinity
         ? ray.direction
         : null
-    if (!this.reducedMotion) this.clouds.cursorTrace.update(skyPointer, this.intro)
+    if (!this.reducedMotion) this.clouds.cursorTrace.update(skyPointer, activeDelta, this.intro)
     if (pointerOnScene && !this.reducedMotion && this.rain.group.visible) {
       this.umbrella.x = ray.origin.x + ray.direction.x * 14
       this.umbrella.y = ray.origin.y + ray.direction.y * 14
@@ -1069,7 +1074,6 @@ export class VoxelLandscapeEngine {
     }
     const point = this.hitWater(event.clientX, event.clientY)
     if (!point) return
-    this.water.material.uniforms.uSplash.value.set(point.x, point.z, this.elapsed, 1)
     this.bait = { x: point.x, z: point.z, born: this.elapsed }
     this.details?.pointerBurst(point.x, point.z, 0.55, this.elapsed, this.wind.sample(this.elapsed))
     this.dragging = true
@@ -1504,7 +1508,7 @@ export class VoxelLandscapeEngine {
       this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
     this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
-    this.updateCursorWorld(pointerOnScene, waterPoint, dt)
+    this.updateCursorWorld(pointerOnScene, waterPoint, dt, activeDelta)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
