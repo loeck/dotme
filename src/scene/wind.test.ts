@@ -3,10 +3,17 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { createCloudNoise, periodicNoise } from './cloud-noise'
-import { sampleWindField, swellHeight } from './water-surface'
+import { RIPPLE_SPECTRUM, sampleWindField, swellHeight } from './water-surface'
 import { WIND_BEARING, WindModel } from './wind'
+import type { WindState } from './wind'
 
 const h = 0.00001
+
+const heightEnergy = (wind: WindState) => {
+  let sum = 0
+  for (let x = 0; x < 200; x++) sum += required(sampleWindField(x * 0.37, -9, 4, wind)[0]) ** 2
+  return sum
+}
 
 describe('shared atmospheric wind', () => {
   it('is seeded, positive, continuous and independent of sampling history', () => {
@@ -90,6 +97,44 @@ describe('shared atmospheric wind', () => {
     }
   })
 
+  it('flattens every wave band in calm air', () => {
+    const reference = heightEnergy(
+      new WindModel(12, { meanSpeed: 3, gustStrength: 0, turnStrength: 0 }).sample(0),
+    )
+    const calm = heightEnergy(
+      new WindModel(12, { meanSpeed: 0.3, gustStrength: 0, turnStrength: 0 }).sample(0),
+    )
+    expect(calm).toBeLessThan(reference * 0.02)
+  })
+
+  it('adds positive bursts when the reported gust exceeds the symmetric gusts', () => {
+    const wind = new WindModel(9182, { meanSpeed: 0.36, gustSpeed: 2.8 })
+    const plain = new WindModel(9182, { meanSpeed: 0.36 })
+    const speeds = Array.from({ length: 2000 }, (_, t) => wind.sample(t * 0.3).speed)
+    expect(Math.min(...speeds)).toBeGreaterThan(0)
+    expect(Math.max(...speeds)).toBeGreaterThan(2)
+    expect(Math.max(...speeds)).toBeLessThanOrEqual(2.8 + 1e-9)
+    expect(Math.max(...speeds)).toBeGreaterThan(
+      Math.max(...Array.from({ length: 2000 }, (_, t) => plain.sample(t * 0.3).speed)) * 2,
+    )
+    for (const time of [3.1, 47.9]) {
+      const state = wind.sample(time)
+      const before = wind.sample(time - h),
+        after = wind.sample(time + h)
+      for (let axis = 0; axis < 2; axis++)
+        expect(
+          (required(after.displacement[axis]) - required(before.displacement[axis])) / (2 * h),
+        ).toBeCloseTo(required(state.direction[axis]) * state.speed, 6)
+    }
+    const average = speeds.reduce((sum, speed) => sum + speed, 0) / speeds.length
+    expect(wind.centreSpeed).toBeCloseTo(0.36 + (2.8 - 0.36 * 1.43) / 2, 6)
+    expect(average).toBeGreaterThan(wind.centreSpeed * 0.8)
+    expect(average).toBeLessThan(wind.centreSpeed * 1.2)
+    expect(new WindModel(9182, { meanSpeed: 5, gustSpeed: 6 }).sample(12)).toEqual(
+      new WindModel(9182, { meanSpeed: 5 }).sample(12),
+    )
+  })
+
   it('reverses advection and wave orientation with one bearing, and strengthens short waves', () => {
     const forward = new WindModel(12).sample(7)
     const reverse = new WindModel(12, { bearing: WIND_BEARING + Math.PI }).sample(7)
@@ -105,6 +150,15 @@ describe('shared atmospheric wind', () => {
       strongEnergy += required(sampleWindField(x, -3, 0, strong)[1]) ** 2
     }
     expect(strongEnergy).toBeGreaterThan(weakEnergy * 2)
+  })
+
+  it('spreads capillary slope over many components so no pair forms a lattice', () => {
+    const energy = RIPPLE_SPECTRUM.map(({ slope }) => slope * slope)
+    const total = energy.reduce((sum, value) => sum + value, 0)
+    expect(Math.max(...energy) / total).toBeLessThan(0.08)
+    const offsets = RIPPLE_SPECTRUM.map(({ dx, dz }) => Math.atan2(dz, dx) - WIND_BEARING)
+    expect(Math.max(...offsets.map(Math.abs))).toBeLessThan(Math.PI / 2)
+    expect(Math.max(...offsets) - Math.min(...offsets)).toBeGreaterThan(0.5)
   })
 
   it('seeds independently moving small clouds and large banks', () => {

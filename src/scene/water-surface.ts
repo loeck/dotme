@@ -1,10 +1,29 @@
-import { Fn, float, vec2, vec4, uniform, sin, cos, mix, smoothstep } from 'three/tsl'
+import {
+  Fn,
+  If,
+  dot,
+  exp,
+  float,
+  floor,
+  fract,
+  length,
+  max,
+  vec2,
+  vec4,
+  uniform,
+  sin,
+  cos,
+  mix,
+  smoothstep,
+  step,
+} from 'three/tsl'
 import { BufferAttribute, BufferGeometry, Sphere, Vector2, Vector3, Vector4 } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
 import { LAKE_BOUNDS } from './lake-bed'
 import { prepareWaterSurface } from './lake-geometry-data'
 import type { PreparedWaterSurface } from './lake-geometry-data'
+import { WIND_BEARING } from './wind'
 import type { WindState } from './wind'
 
 // Crossing swells and directionally spread shorter wind waves. Band amplitudes
@@ -84,7 +103,8 @@ export function sampleWindField(
     const velocity = response[2] * (1 - small) + response[3] * small
     const filter = Math.max(0, Math.min(1, (footprint - wavelength * 0.18) / (wavelength * 0.32)))
     const base = baseAmplitude * (1 - filter * filter * (3 - 2 * filter))
-    const amplitude = base * (1 + sensitivity * (strength - 1))
+    const calm = strength < 1
+    const amplitude = base * (calm ? strength : 1 + sensitivity * (strength - 1))
     const sine = Math.sin(wavePhase),
       cosine = Math.cos(wavePhase)
     field[0] += sine * amplitude * packet
@@ -105,7 +125,7 @@ export function sampleWindField(
       0.36 * Math.sin(cross) * crossVelocity * alongPacket
     field[3] +=
       amplitude * (cosine * phaseVelocity * packet + sine * packetVelocity) +
-      base * sensitivity * velocity * sine * packet
+      base * (calm ? 1 : sensitivity) * velocity * sine * packet
   }
   return field
 }
@@ -169,11 +189,11 @@ export function windFieldNode(
       const base = float(w.amplitude).mul(
         float(1).sub(smoothstep(w.wavelength * 0.18, w.wavelength * 0.5, footprint)),
       )
-      const amplitude = base.mul(
-        mix(u.uWindResponse.x, u.uWindResponse.y, w.small).sub(1).mul(w.sensitivity).add(1),
-      )
+      const strength = mix(u.uWindResponse.x, u.uWindResponse.y, w.small)
+      const calm = strength.lessThan(1)
+      const amplitude = base.mul(calm.select(strength, strength.sub(1).mul(w.sensitivity).add(1)))
       const amplitudeVelocity = base
-        .mul(w.sensitivity)
+        .mul(calm.select(1, w.sensitivity))
         .mul(mix(u.uWindResponse.z, u.uWindResponse.w, w.small))
       height.addAssign(sin(phase).mul(amplitude).mul(packet))
       gradient.addAssign(
@@ -207,28 +227,44 @@ export function windFieldNode(
   })()
 }
 
-const RIPPLES = (
-  [
-    [0.35, 0.93, 0.034, 0.7],
-    [-0.9, 0.61, 0.028, 2.9],
-    [1.6, 0.43, 0.024, 4.4],
-    [-0.2, 0.29, 0.018, 1.2],
-    [2.4, 0.19, 0.013, 5.6],
-    [2.9, 0.12, 0.009, 0.3],
-    [0.9, 0.07, 0.005, 2.2],
-  ] as const
-).map(([angle, wavelength, slope, phase]) => {
-  const k = (Math.PI * 2) / wavelength
-  return {
-    wavelength,
-    slope,
-    phase,
-    k,
-    dx: Math.cos(angle),
-    dz: Math.sin(angle),
-    omega: Math.sqrt(9.81 * k),
+// Total capillary slope variance of the previous seven-band ripples.
+const RIPPLE_SLOPE_VARIANCE = 0.0015
+const RIPPLE_COUNT = 32
+
+/** Seeded downwind components with cos⁸ spreading and a near-saturated spectrum,
+ * so no crossing pair dominates the slope and draws a lattice. */
+export const RIPPLE_SPECTRUM = (() => {
+  let state = 0x5f3759df
+  const random = () => {
+    state = (Math.imul(state, 1664525) + 1013904223) >>> 0
+    return state / 0x1_0000_0000
   }
-})
+  const longest = Math.log(1),
+    shortest = Math.log(0.06)
+  const components = Array.from({ length: RIPPLE_COUNT }, (_, i) => {
+    const wavelength = Math.exp(
+      longest + ((i + 0.2 + random() * 0.6) / RIPPLE_COUNT) * (shortest - longest),
+    )
+    let spread = 0
+    do spread = (random() - 0.5) * Math.PI
+    while (random() > Math.cos(spread) ** 8)
+    const angle = WIND_BEARING + spread
+    const k = (Math.PI * 2) / wavelength
+    return {
+      wavelength,
+      slope: wavelength ** 0.25 * (0.8 + random() * 0.4),
+      phase: random() * Math.PI * 2,
+      k,
+      dx: Math.cos(angle),
+      dz: Math.sin(angle),
+      omega: Math.sqrt(9.81 * k + 0.000074 * k ** 3),
+    }
+  })
+  const variance = components.reduce((sum, { slope }) => sum + slope * slope, 0)
+  const scale = Math.sqrt(RIPPLE_SLOPE_VARIANCE / variance)
+  for (const component of components) component.slope *= scale
+  return components
+})()
 
 /** Shading-only capillary slopes; heights stay with the shared spectrum. */
 export function rippleSlopeNode(
@@ -239,21 +275,96 @@ export function rippleSlopeNode(
 ) {
   return Fn(() => {
     const slope = vec2(0).toVar()
-    for (const w of RIPPLES) {
-      const direction = windRotate(u, w.dx, w.dz)
-      const crest = sin(
-        p
-          .dot(vec2(direction.y.negate(), direction.x))
-          .mul(3.1 / w.wavelength)
-          .add(w.phase * 3),
+    const [c, s] = [u.uWindRotation.x, u.uWindRotation.y]
+    const local = vec2(c.mul(p.x).add(s.mul(p.y)), c.mul(p.y).sub(s.mul(p.x))).toVar()
+    for (const w of RIPPLE_SPECTRUM)
+      If(footprint.lessThan(w.wavelength * 0.45), () => {
+        const fade = float(1).sub(smoothstep(w.wavelength * 0.12, w.wavelength * 0.45, footprint))
+        const phase = local.dot(vec2(w.dx, w.dz)).mul(w.k).sub(u.uTime.mul(w.omega)).add(w.phase)
+        slope.addAssign(vec2(w.dx, w.dz).mul(cos(phase).mul(w.slope).mul(fade)))
+      })
+    return vec2(c.mul(slope.x).sub(s.mul(slope.y)), s.mul(slope.x).add(c.mul(slope.y))).mul(
+      strength,
+    )
+  })()
+}
+
+const RAIN_RING_CELL = 0.28
+const RAIN_RING_PERIOD = 0.6
+const RAIN_RING_WAVELENGTH = 0.05
+
+function hash2(cell: Node<'vec2'>) {
+  return fract(
+    sin(vec2(dot(cell, vec2(127.1, 311.7)), dot(cell, vec2(269.5, 183.3)))).mul(43758.5453),
+  )
+}
+
+/** xy: ring slope; z: slope variance of rings too small to resolve. */
+export function rainRingsNode(
+  p: Node<'vec2'>,
+  footprint: Node<'float'>,
+  intensity: Node<'float'>,
+  time: Node<'float'>,
+) {
+  return Fn(() => {
+    const result = vec4(0).toVar()
+    If(intensity.greaterThan(0).and(footprint.lessThan(RAIN_RING_CELL * 0.6)), () => {
+      const slope = vec2(0).toVar()
+      const fade = float(1).sub(
+        smoothstep(RAIN_RING_WAVELENGTH * 0.3, RAIN_RING_WAVELENGTH * 2.5, footprint),
       )
-        .mul(0.5)
-        .add(0.5)
-      const fade = float(1).sub(smoothstep(w.wavelength * 0.12, w.wavelength * 0.45, footprint))
-      const phase = p.dot(direction).mul(w.k).sub(u.uTime.mul(w.omega)).add(w.phase)
-      slope.addAssign(direction.mul(cos(phase).mul(w.slope).mul(fade).mul(crest.mul(0.7).add(0.3))))
-    }
-    return slope.mul(strength)
+      const speck = max(0.02, footprint.mul(1.3))
+      const speckRange = float(1).sub(
+        smoothstep(RAIN_RING_CELL * 0.25, RAIN_RING_CELL * 0.6, footprint),
+      )
+      const specks = vec2(0).toVar()
+      for (let layer = 0; layer < 2; layer++) {
+        const q = p.div(RAIN_RING_CELL).add(vec2(layer * 0.5, layer * 0.5))
+        const base = floor(q)
+        for (let i = 0; i < 9; i++) {
+          const cell = base.add(vec2((i % 3) - 1, Math.floor(i / 3) - 1))
+          const seed = cell.add(layer * 41.7)
+          const clock = time.div(RAIN_RING_PERIOD).add(hash2(seed).x)
+          const phase = fract(clock)
+          const drop = hash2(seed.add(floor(clock).mul(vec2(7.13, 3.71))))
+          const shape = hash2(drop.mul(91.3))
+          const d = q.sub(cell).sub(drop).mul(RAIN_RING_CELL)
+          const r = length(d)
+          const size = shape.x.mul(0.5).add(0.5)
+          const ring = r.sub(phase.mul(RAIN_RING_CELL * 0.45).mul(size))
+          const envelope = exp(
+            ring
+              .div(RAIN_RING_WAVELENGTH * 0.6)
+              .pow2()
+              .negate(),
+          ).mul(phase.oneMinus().pow2())
+          const wave = sin(ring.mul((Math.PI * 2) / RAIN_RING_WAVELENGTH))
+          const falls = step(shape.y, intensity)
+          slope.addAssign(
+            d.div(max(r, 0.0001)).mul(wave).mul(envelope).mul(falls).mul(size.mul(0.45)),
+          )
+          specks.addAssign(
+            d
+              .div(speck)
+              .mul(exp(r.div(speck).pow2().negate()))
+              .mul(smoothstep(0.25, 0, phase))
+              .mul(falls)
+              .mul(0.5),
+          )
+        }
+      }
+      result.assign(
+        vec4(
+          slope.mul(fade).add(specks.mul(fade.oneMinus()).mul(speckRange)),
+          intensity.mul(mix(0.0025, 0.008, fade.oneMinus())),
+          0,
+        ),
+      )
+    })
+    If(intensity.greaterThan(0).and(footprint.greaterThanEqual(RAIN_RING_CELL * 0.6)), () => {
+      result.assign(vec4(0, 0, intensity.mul(0.008), 0))
+    })
+    return result
   })()
 }
 

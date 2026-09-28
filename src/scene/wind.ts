@@ -10,6 +10,7 @@ const GUSTS = [
   [0.071, 0.14],
   [0.31, 0.07],
 ] as const
+const GUST_WEIGHT = GUSTS.reduce((sum, [, weight]) => sum + weight, 0)
 
 export type WindState = Readonly<{
   direction: readonly [number, number]
@@ -25,6 +26,9 @@ export type WindOptions = Readonly<{
   bearing?: number
   meanSpeed?: number
   gustStrength?: number
+  /** Reported peak gust. Beyond the symmetric gusts the oscillation centre rises by half the
+   * excess, so peaks reach the gust without the wind reversing; the average rises with it. */
+  gustSpeed?: number
   turnStrength?: number
 }>
 
@@ -37,6 +41,9 @@ export class WindModel {
   private readonly turnStrength: number
   private readonly meanSpeed: number
   private readonly gustStrength: number
+  private readonly burstSpeed: number
+  /** Speed the gusts oscillate around; above meanSpeed when bursts are needed to reach the reported gust. */
+  readonly centreSpeed: number
 
   constructor(seed: number, options: WindOptions = {}) {
     let state = (seed ^ 0xa511e9b3) >>> 0
@@ -50,21 +57,27 @@ export class WindModel {
     this.turnStrength = Math.max(0, Math.min(1, options.turnStrength ?? 1))
     this.meanSpeed = Math.max(0, options.meanSpeed ?? REFERENCE_SPEED)
     this.gustStrength = Math.max(0, Math.min(1, options.gustStrength ?? 1))
+    const symmetricPeak = this.meanSpeed * (1 + GUST_WEIGHT * this.gustStrength)
+    const gustSpeed = options.gustSpeed ?? 0
+    this.burstSpeed = Number.isFinite(gustSpeed) ? Math.max(0, gustSpeed - symmetricPeak) : 0
+    this.centreSpeed = this.meanSpeed + this.burstSpeed * 0.5
   }
 
   sample(time: number): WindState {
-    let speed = this.meanSpeed
+    const base = this.centreSpeed
+    let speed = base
     let acceleration = 0
-    let distance = this.meanSpeed * time
+    let distance = base * time
     const response: [number, number, number, number] = [
-      this.meanSpeed / REFERENCE_SPEED,
-      this.meanSpeed / REFERENCE_SPEED,
+      base / REFERENCE_SPEED,
+      base / REFERENCE_SPEED,
       0,
       0,
     ]
     GUSTS.forEach(([frequency, weight], i) => {
       const phase = required(this.phases[i])
-      const amplitude = this.meanSpeed * weight * this.gustStrength
+      const amplitude =
+        this.meanSpeed * weight * this.gustStrength + (this.burstSpeed * 0.5 * weight) / GUST_WEIGHT
       const angle = frequency * time + phase
       const sine = Math.sin(angle),
         cosine = Math.cos(angle)

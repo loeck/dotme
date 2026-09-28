@@ -2,7 +2,7 @@ import { BufferAttribute, BufferGeometry, DataUtils, PlaneGeometry } from 'three
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
-import { prepareGeometryBounds, prepareShadowBounds } from './geometry-bounds'
+import { prepareGeometryBounds } from './geometry-bounds'
 import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { prepareSubmergedSurface, prepareWaterSurface } from './lake-geometry-data'
@@ -86,11 +86,6 @@ describe('worker-prepared bounds', () => {
     expect(bounds.max).toEqual(required(reference.boundingBox).max.toArray())
     expect(bounds.center).toEqual(required(reference.boundingSphere).center.toArray())
     expect(bounds.radius).toBe(required(reference.boundingSphere).radius)
-    const matrices = new Float32Array([2, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2, 0, 3, -1, 7, 1])
-    const shadow = prepareShadowBounds(matrices)
-    expect(shadow.min).toEqual([2, -2, 6])
-    expect(shadow.max).toEqual([4, 0, 8])
-    expect(shadow.radius).toBe(Math.sqrt(3))
     reference.dispose()
   })
 })

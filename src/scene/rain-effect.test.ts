@@ -80,6 +80,18 @@ it('keeps small-drop impacts as surface ripples and reserves visible ejection fo
   large.rain.dispose()
 })
 
+it('keeps its own wind and only takes the gust factor from the lake wind', () => {
+  const { rain, camera } = fixture(0.004)
+  rain.setRainState({ intensity: 0.001, wind: { x: 12, z: -3 } })
+  const wind = new WindModel(42, { meanSpeed: 4, bearing: 0, gustStrength: 0, turnStrength: 0 })
+  rain.update(RAIN_STEP, camera, 1, { time: 0, wind: wind.sample(0), gust: 1.5 })
+  expect(rain.simulation.state.wind.x).toBeCloseTo(18)
+  expect(rain.simulation.state.wind.z).toBeCloseTo(-4.5)
+  rain.update(RAIN_STEP, camera, 1, { time: RAIN_STEP, wind: wind.sample(RAIN_STEP) })
+  expect(rain.simulation.state.wind.x).toBeCloseTo(12)
+  rain.dispose()
+})
+
 it('keeps the lake and collision clocks aligned when a frame contains a fractional simulation step', () => {
   const wind = new WindModel(42, { meanSpeed: 3, gustStrength: 0, turnStrength: 0 }).sample(0)
   const contacts = [30, 60, 144].map((fps) => {

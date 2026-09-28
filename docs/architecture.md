@@ -22,8 +22,8 @@ water geometry, the half-float depth/shore atlas and the simulation mask. It tra
 typed buffers; the render thread wraps those buffers in GPU resources without repeating
 array generation or bounds scans. Audio has its own asynchronous resource lifetime.
 
-Shadow batches carry their transforms as instanced vertex attributes, sharing shader
-programs across batch sizes. Environment materials are compiled once with all meshes
+Terrain and shadow batches are geometries inside one `BatchedMesh` per material, so every
+batch shares one shader program and one render object regardless of its size. Environment materials are compiled once with all meshes
 included; the six cubemap views reuse those programs with normal culling restored.
 
 Both backends must produce the same image. Three normalizes texture and screen

@@ -62,7 +62,8 @@ conditions do not create rain. Snowflakes, lightning and weather-driven fog are 
 
 Wind bearing and speed drive the rain and shared atmospheric/water wind model. Rain wind is capped
 at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
-procedural gust strength. Sunrise, sunset and the snapshot time are converted to location-local
+procedural gust strength; a gust beyond the symmetric range arrives as positive bursts, so a calm
+mean with strong gusts still produces them. Rain keeps the reported wind and scales it each frame by the sampled gust factor. Sunrise, sunset and the snapshot time are converted to location-local
 seconds past midnight and seed the solar clock and its orbit. Polar days without a sunrise
 before sunset keep live weather with the default 06:00–18:00 orbit.
 

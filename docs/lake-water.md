@@ -12,9 +12,17 @@ The surface combines simulated gradients and directional wind waves with reflect
 refraction, caustics and direct light. Textures retain explicit color-space, depth and
 orientation handling across passes. Rain and pointer interactions remain independent inputs.
 
-Wind waves use crossing directions and shorter transverse packets at small wavelengths.
-Shading-only capillary ripples follow the wind and fade with the pixel footprint; they sharpen
-glints and break up reflections without changing the shared height field. Clear water keeps
+Wind waves use crossing directions and shorter transverse packets at small wavelengths. Below the
+reference wind every band scales with the filtered wind, so calm air leaves a nearly still lake;
+above it long waves grow more slowly than short ones. Capillary ripples follow the wind alone:
+rain adds rings and roughness, not travelling waves.
+Shading-only capillary ripples are 32 seeded downwind components with cos⁸ spreading and a
+near-saturated spectrum, so no crossing pair dominates the slope and draws a lattice; they fade with
+the pixel footprint, sharpen glints and break up reflections without changing the shared height field.
+Rain adds a jittered field of expanding rings whose density follows rain intensity, roughens the
+whole surface so reflections dull, and turns rings below a pixel into roughness and brief impact
+specks instead of aliasing. Sun glitter, subsurface glow and shafts are direct sun
+and follow the cloud shadow. Clear water keeps
 strong red absorption over pale sand for a turquoise tint, the scatter body darkens toward
 deep teal with depth, reflectance near the camera is capped lower so the bed stays visible,
 and light reaching the bed is attenuated by depth on the way down as well as up. Daylight glitter

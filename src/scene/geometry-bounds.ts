@@ -41,19 +41,3 @@ export function prepareGeometryBounds(positions: Float32Array | Float64Array): P
     radius: Math.sqrt(radiusSquared),
   }
 }
-
-/** Conservative bounds of axis-aligned unit cubes transformed by worker-built matrices. */
-export function prepareShadowBounds(matrices: Float32Array): PreparedBounds {
-  const corners = new Float64Array((matrices.length / 16) * 8 * 3)
-  let offset = 0
-  for (let i = 0; i < matrices.length; i += 16) {
-    for (const x of [-0.5, 0.5])
-      for (const y of [-0.5, 0.5])
-        for (const z of [-0.5, 0.5]) {
-          corners[offset++] = required(matrices[i + 12]) + x * required(matrices[i])
-          corners[offset++] = required(matrices[i + 13]) + y * required(matrices[i + 5])
-          corners[offset++] = required(matrices[i + 14]) + z * required(matrices[i + 10])
-        }
-  }
-  return prepareGeometryBounds(corners)
-}

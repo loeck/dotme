@@ -2,7 +2,7 @@ import { required } from '../invariant'
 
 export type RainState = Readonly<{ intensity: number; wind: Readonly<{ x: number; z: number }> }>
 export const DEFAULT_RAIN: RainState = { intensity: 0.55, wind: { x: 2, z: 0.5 } }
-export const RAIN_STEP = 1 / 120
+export const RAIN_STEP = 1 / 60
 export const WATER_Y = -0.035
 export const IMPACT_LIFETIME = 1.1
 // Conservative bounds for the lake's small wind-driven displacement. Avoid
@@ -120,6 +120,11 @@ export class RainSimulation {
     }
   }
 
+  /** Horizontal wind in m/s; drops relax toward it at their size-dependent rate. */
+  setWind(x: number, z: number) {
+    this.state = normalizeRainState({ intensity: this.state.intensity, wind: { x, z } })
+  }
+
   /** The callback returns world-space height at simulation time, in seconds. */
   setWaterSurface(sampler?: RainSurfaceSampler) {
     this.waterSurface = sampler
@@ -153,18 +158,25 @@ export class RainSimulation {
     let highGap = endGap
     let low = 0
     let high = 1
-    for (let i = 0; i < 6; i++) {
-      const fraction = (low + high) * 0.5
+    let side = 0
+    // Illinois regula falsi: the surface is smooth, so it converges in a few samples.
+    for (let i = 0; i < 5; i++) {
+      const fraction = low + ((high - low) * lowGap) / (lowGap - highGap)
       const x = a.x + (b.x - a.x) * fraction
       const z = a.z + (b.z - a.z) * fraction
       const y = a.y + (b.y - a.y) * fraction
       const gap = y - this.waterHeight(x, z, startTime + RAIN_STEP * fraction)
+      if (Math.abs(gap) < 1e-7) return fraction
       if (gap > 0) {
         low = fraction
         lowGap = gap
+        if (side === 1) highGap *= 0.5
+        side = 1
       } else {
         high = fraction
         highGap = gap
+        if (side === -1) lowGap *= 0.5
+        side = -1
       }
     }
     // Interpolate the final narrow bracket to retain sub-millimetre contact

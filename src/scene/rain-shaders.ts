@@ -14,7 +14,6 @@ import {
   dFdy,
   exp,
   float,
-  fwidth,
   length,
   mat3,
   max,
@@ -42,6 +41,7 @@ import {
   DoubleSide,
   CustomBlending,
   OneFactor,
+  OneMinusSrcAlphaFactor,
   ReinhardToneMapping,
   SRGBColorSpace,
 } from 'three/webgpu'
@@ -87,7 +87,6 @@ export function createRainUniforms(
     uLampColor: uniformArray<'color'>(lampColors, 'color'),
     uDepth: texture(depthTexture),
     uOverlay: uniform(false),
-    uReflectionPass: uniform(false),
     uOpacity: uniform(1),
   }
 }
@@ -102,7 +101,7 @@ function rainLight(world: Node<'vec3'>, u: RainUniforms, lampCount: number) {
   const view = normalize(cameraPosition.sub(world))
   let light = u.uAmbientColor.rgb
     .add(u.uFogColor.rgb)
-    .mul(0.9)
+    .mul(1.2)
     .add(u.uMoonColor.rgb.mul(abs(view.dot(u.uMoonDirection)).pow(5).mul(0.65).add(0.35)))
   for (let i = 0; i < lampCount; i++) {
     const delta = u.uLampPosition.element(i).sub(world),
@@ -114,8 +113,10 @@ function rainLight(world: Node<'vec3'>, u: RainUniforms, lampCount: number) {
   }
   return mix(light, u.uFogColor.rgb, fogAmount(world, u))
 }
-function rainOutput(output: Node<'vec4'>, u: RainUniforms) {
-  return u.uOverlay.select(renderOutput(output, ReinhardToneMapping, SRGBColorSpace), output)
+// renderOutput unpremultiplies its input and premultiplies its result, so both the
+// input and the blend state must be premultiplied.
+function rainOutput(output: Node<'vec4'>) {
+  return renderOutput(vec4(output.rgb.mul(output.a), output.a), ReinhardToneMapping, SRGBColorSpace)
 }
 function occlude(u: RainUniforms) {
   Discard(
@@ -134,6 +135,12 @@ export function createRainParticleMaterial(
     depthWrite: false,
     side: DoubleSide,
     forceSinglePass: true,
+    fog: false,
+    blending: CustomBlending,
+    blendSrc: OneFactor,
+    blendDst: OneMinusSrcAlphaFactor,
+    blendSrcAlpha: OneFactor,
+    blendDstAlpha: OneMinusSrcAlphaFactor,
   })
   if (kind === 'crown') {
     material.name = 'RainCrowns'
@@ -169,7 +176,6 @@ export function createRainParticleMaterial(
           rainLight(world, u, lampCount),
           rim.mul(0.24).add(0.04).mul(sqrt(fresnel).mul(0.7).add(0.3)).mul(fade).mul(u.uOpacity),
         ),
-        u,
       )
     })()
     return material
@@ -200,16 +206,11 @@ export function createRainParticleMaterial(
     .mul(u.uResolution.y)
     .mul(0.5)
     .div(max(0.1, head.z.negate()))
-  const coc = smoothstep(0.8, 4, head.z.negate())
-    .oneMinus()
-    .mul(0.65)
+  const coc = clamp(float(5).div(max(head.z.negate(), 0.4)).sub(0.6), 0, 14)
     .mul(u.uPixelRatio)
     .mul(kind === 'spray' ? 0.22 : 1)
-  const width = u.uReflectionPass.select(
-    physical.add(2),
-    sqrt(physical.pow(2).add(6.25).add(coc.pow(2).mul(4))),
-  )
-  const lengthPx = max(streak, 1).add(u.uReflectionPass.select(1, width)),
+  const width = sqrt(physical.pow(2).add(u.uPixelRatio.pow2().mul(6.25)).add(coc.pow(2).mul(4)))
+  const lengthPx = max(streak, 1).add(width),
     side = vec2(direction.y.negate(), direction.x)
   const offset = side
     .mul(positionLocal.x)
@@ -221,59 +222,37 @@ export function createRainParticleMaterial(
     ),
     headClip.zw,
   )
-  const vSide = varying(positionLocal.x.mul(width)),
-    vPhysical = varying(physical),
-    seed = varying(velocity.w),
+  const seed = varying(velocity.w),
     profileContrast = varying(float(1).div(coc.mul(0.5).add(1)))
   const coverage = varying(
-    u.uReflectionPass
-      .select(1, min(1, physical.div(width)))
-      .mul(max(streak, 1))
-      .div(lengthPx)
-      .mul(exposure)
-      .div(RAIN_EXPOSURE),
+    min(1, physical.div(width)).mul(max(streak, 1)).div(lengthPx).mul(exposure).div(RAIN_EXPOSURE),
   )
   const lighting = varying(rainLight(world, u, lampCount)),
     clarity = varying(fogAmount(world, u).oneMinus()),
-    floor = varying(exposure.mul(0.2 / RAIN_EXPOSURE))
+    floor = varying(
+      exposure.mul(0.2 / RAIN_EXPOSURE).mul(min(1, u.uPixelRatio.mul(2.5).div(width))),
+    )
   material.fragmentNode = Fn(() => {
     occlude(u)
-    const pixelSpan = max(fwidth(vSide), 0.0001),
-      halfDrop = vPhysical.mul(0.5)
-    const integrated = max(
-      0,
-      min(vSide.add(pixelSpan.mul(0.5)), halfDrop).sub(
-        max(vSide.sub(pixelSpan.mul(0.5)), halfDrop.negate()),
-      ),
-    ).div(pixelSpan)
-    const across = u.uReflectionPass.select(
-      integrated,
-      exp(uv().x.sub(0.5).mul(4.2).pow2().negate()),
-    )
+    const across = exp(uv().x.sub(0.5).mul(4.2).pow2().negate())
     const ends = smoothstep(0, 0.18, uv().y).mul(smoothstep(0.8, 1, uv().y).oneMinus())
     const profile = sin(uv().y.mul(seed.mul(17).add(9)).add(seed.mul(50))).pow2(),
       lobes = mix(0.72, profile.mul(0.65).add(0.35), profileContrast),
       glint = mix(0.75, 1, seed.pow(2))
     const alpha =
       kind === 'spray'
-        ? u.uReflectionPass
-            .select(
-              min(0.85, across.mul(coverage).mul(5.5)),
-              across.mul(min(0.85, coverage.mul(13))),
-            )
+        ? across
+            .mul(min(0.85, coverage.mul(13)))
             .mul(ends)
             .mul(u.uOpacity)
-        : u.uReflectionPass
-            .select(
-              min(0.65, across.mul(coverage).mul(2)),
-              across.mul(min(0.65, max(coverage.mul(4.8), floor))),
-            )
+        : across
+            .mul(min(0.65, max(coverage.mul(4.8), floor)))
             .mul(ends)
             .mul(clarity)
             .mul(lobes)
             .mul(glint)
             .mul(u.uOpacity)
-    return rainOutput(vec4(lighting, alpha), u)
+    return rainOutput(vec4(lighting, alpha))
   })()
   return material
 }

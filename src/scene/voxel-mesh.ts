@@ -1,7 +1,8 @@
 import { BoxGeometry, Color } from 'three/webgpu'
 
 import { required } from '../invariant'
-import { prepareGeometryBounds, prepareShadowBounds } from './geometry-bounds'
+import { terrainEyes } from './camera-rig'
+import { prepareGeometryBounds } from './geometry-bounds'
 import type { PreparedBounds } from './geometry-bounds'
 import { createVoxelIndex, overlappingVoxels } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
@@ -9,6 +10,8 @@ import type { VoxelMaterial, VoxelWorld } from './voxel-world'
 
 export type TerrainBatch = {
   material: VoxelMaterial
+  /** BoxGeometry face order: +x, -x, +y, -y, +z, -z. */
+  face: number
   bounds: PreparedBounds
   positions: Float32Array
   normals: Int8Array
@@ -18,7 +21,6 @@ export type TerrainBatch = {
 export type PreparedTerrain = {
   batches: TerrainBatch[]
   shadowMatrices: Float32Array[]
-  shadowBounds: PreparedBounds[]
   index: VoxelIndex
   totalFaces: number
   exposedFaces: number
@@ -77,7 +79,9 @@ export function exposedVoxelFaces(index: VoxelIndex, id: number): boolean[] {
   })
 }
 
-export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
+export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): PreparedTerrain {
+  const nearest = [0, 1, 2].map((axis) => Math.min(...eyes.map((eye) => required(eye[axis]))))
+  const farthest = [0, 1, 2].map((axis) => Math.max(...eyes.map((eye) => required(eye[axis]))))
   const index = createVoxelIndex(world.voxels)
   const cube = new BoxGeometry(1, 1, 1)
   const positions = cube.getAttribute('position'),
@@ -97,10 +101,15 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
     }
     offset += world.groups[material].count
     for (const ids of chunks.values()) {
-      const p: number[] = [],
-        n: number[] = [],
-        c: number[] = [],
-        triangles: number[] = []
+      const faces = Array.from(
+        { length: 6 },
+        (): { p: number[]; n: number[]; c: number[]; triangles: number[] } => ({
+          p: [],
+          n: [],
+          c: [],
+          triangles: [],
+        }),
+      )
       for (const id of ids) {
         const voxel = required(world.voxels[id])
         color.setHex(voxel.color)
@@ -108,6 +117,14 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
         for (let face = 0; face < 6; face++) {
           if (!visible[face]) continue
           exposedFaces++
+          const axis = face >>> 1
+          const plane =
+            Math.fround(required([voxel.x, voxel.y, voxel.z][axis])) +
+            (face % 2 === 0 ? 0.5 : -0.5) * Math.fround(voxel.size)
+          // Axis-aligned faces are front-facing to some eye iff one eye lies beyond their plane.
+          if (face % 2 === 0 ? required(farthest[axis]) <= plane : required(nearest[axis]) >= plane)
+            continue
+          const { p, n, c, triangles } = required(faces[face])
           const base = p.length / 3
           for (let vertex = face * 4; vertex < face * 4 + 4; vertex++) {
             p.push(
@@ -125,17 +142,19 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
           triangles.push(base, base + 2, base + 1, base + 2, base + 3, base + 1)
         }
       }
-      if (p.length) {
+      faces.forEach(({ p, n, c, triangles }, face) => {
+        if (!p.length) return
         const batchPositions = new Float32Array(p)
         batches.push({
           material,
+          face,
           positions: batchPositions,
           bounds: prepareGeometryBounds(batchPositions),
           normals: new Int8Array(n),
           colors: new Float32Array(c),
           indices: p.length / 3 <= 65535 ? new Uint16Array(triangles) : new Uint32Array(triangles),
         })
-      }
+      })
     }
   }
   cube.dispose()
@@ -143,7 +162,6 @@ export function prepareTerrain(world: VoxelWorld): PreparedTerrain {
   return {
     batches,
     shadowMatrices,
-    shadowBounds: shadowMatrices.map(prepareShadowBounds),
     index,
     totalFaces: world.voxels.length * 6,
     exposedFaces,

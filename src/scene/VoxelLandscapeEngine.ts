@@ -1,12 +1,11 @@
-import { attribute, exp, mat4, positionGeometry, shadow, uniform, uv, vec4 } from 'three/tsl'
+import { exp, shadow, uniform, uv, vec4 } from 'three/tsl'
 import {
   AdditiveBlending,
   AmbientLight,
   BackSide,
+  BatchedMesh,
   BoxGeometry,
-  Box3,
   Camera,
-  Sphere,
   BufferAttribute,
   BufferGeometry,
   Color,
@@ -16,13 +15,11 @@ import {
   FogExp2,
   Group,
   HalfFloatType,
-  InstancedBufferGeometry,
-  InstancedInterleavedBuffer,
   InstancedMesh,
-  InterleavedBufferAttribute,
   Mesh,
   MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
+  OrthographicCamera,
   Object3D,
   PCFShadowMap,
   PMREMGenerator,
@@ -44,7 +41,9 @@ import type { RenderTarget } from 'three/webgpu'
 
 import type { AmbientEnvironment } from '../audio/environment'
 import { waterfallSound } from '../audio/environment'
+import { required } from '../invariant'
 import { sceneParams } from '../scene-params'
+import { CAMERA_IDLE_DRIFT, CAMERA_REST, cameraTarget, ENVIRONMENT_PROBE } from './camera-rig'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { compileWithoutCulling } from './compile-scene'
 import { sampleWaterfallHit, seesWorld, WATERFALL_OCCLUSION_TOLERANCE } from './cursor-world'
@@ -68,7 +67,7 @@ import { prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
 import { DEFAULT_RAIN, UMBRELLA_RADIUS } from './rain-simulation'
 import type { RainState } from './rain-simulation'
-import { RAIN_LAYER, RainEffect } from './RainEffect'
+import { RainEffect } from './RainEffect'
 import { ResourceScope } from './resource-scope'
 import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
@@ -82,6 +81,7 @@ import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
+import type { TerrainBatch } from './voxel-mesh'
 import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
@@ -161,6 +161,31 @@ type Mote = Readonly<{
   speed: number
 }>
 
+/** Each batch holds one face orientation. Only valid for FrontSide materials: a batch
+ * that can only face away from the eye would be fully back-face culled anyway. */
+function cullBackFacingBatches(
+  mesh: BatchedMesh,
+  instances: readonly { id: number; face: number; bounds: TerrainBatch['bounds'] }[],
+) {
+  const eye = new Vector3()
+  const frustumCull = mesh.onBeforeRender.bind(mesh)
+  mesh.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
+    const perspective = !(camera instanceof OrthographicCamera)
+    camera.getWorldPosition(eye)
+    for (const { id, face, bounds } of instances) {
+      const axis = face >> 1
+      const position = eye.getComponent(axis)
+      const visible =
+        !perspective ||
+        (face % 2 === 0
+          ? position > required(bounds.min[axis])
+          : position < required(bounds.max[axis]))
+      if (mesh.getVisibleAt(id) !== visible) mesh.setVisibleAt(id, visible)
+    }
+    frustumCull(renderer, scene, camera, geometry, material, group)
+  }
+}
+
 export class VoxelLandscapeEngine {
   private readonly renderDiagnostics = new SceneRenderDiagnostics()
   private readonly options: Omit<VoxelLandscapeEngineOptions, 'prepared'>
@@ -193,8 +218,9 @@ export class VoxelLandscapeEngine {
   private readonly detailPointerNdc = new Vector2()
   private readonly target = new Vector2(0, 0)
   private readonly tilt = new DeviceTilt()
+  private readonly moonShadowDirection = new Vector3(Number.NaN, Number.NaN, Number.NaN)
+  private readonly shadowProbe = new Vector3()
   private lampShadowCursor = 0
-  private moonShadowAt = -Infinity
   private readonly waterPointerTarget = new Vector3(0, 0, 0)
   private readonly objects: Object3D[] = []
   private readonly materials: Array<{ dispose: () => void }> = []
@@ -254,6 +280,7 @@ export class VoxelLandscapeEngine {
   private focused = document.hasFocus()
   private environmentAt = -Infinity
   private environmentTime = -Infinity
+  private environmentFace = 6
   private lastFrameAt = 0
   private elapsed = 0
   private intro = 0
@@ -332,7 +359,6 @@ export class VoxelLandscapeEngine {
       performance.mark('compile:reflection')
       const reflected = engine.water.getReflectionCamera(engine.camera)
       reflected.copy(engine.camera)
-      reflected.layers.enable(RAIN_LAYER)
       engine.water.visible = false
       try {
         await engine.compileView(reflected, engine.water.getRenderTarget(reflected))
@@ -411,7 +437,11 @@ export class VoxelLandscapeEngine {
     this.environmentFilter = this.resources.own(new PMREMGenerator(this.renderer))
     this.environmentTarget.texture.name = 'Live landscape environment'
     this.environmentCamera = new CubeCamera(0.1, 500, this.environmentTarget)
-    this.environmentCamera.position.set(0, 3, -18)
+    this.environmentCamera.position.set(
+      ENVIRONMENT_PROBE.x,
+      ENVIRONMENT_PROBE.y,
+      ENVIRONMENT_PROBE.z,
+    )
     this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower))
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ReinhardToneMapping
@@ -578,11 +608,10 @@ export class VoxelLandscapeEngine {
     if (this.details && this.simulation.available)
       this.rain.setImpactSlopes(this.details.impactSlopes)
     this.scene.add(this.rain.group)
-    this.water.getReflectionCamera(this.camera).layers.enable(RAIN_LAYER)
     this.water.material.uniforms.uRainSlopeMap.value = this.rain.texture
     uniforms.uRainSlopesEnabled.value = this.simulation.available ? 1 : 0
 
-    this.camera.position.set(0, 2.3, 16)
+    this.camera.position.set(CAMERA_REST.x, CAMERA_REST.y, CAMERA_REST.z)
     this.camera.lookAt(0, this.mobile ? 2.3 : 7.3, -25)
 
     this.resize()
@@ -616,29 +645,31 @@ export class VoxelLandscapeEngine {
         vertexColors: true,
       })
       this.materials.push(this.resources.own(material))
-      for (const batch of terrain.batches) {
-        if (batch.material !== kind) continue
+      const batches = terrain.batches.filter((batch) => batch.material === kind)
+      if (!batches.length) continue
+      const mesh = new BatchedMesh(
+        batches.length,
+        batches.reduce((sum, batch) => sum + batch.positions.length / 3, 0),
+        batches.reduce((sum, batch) => sum + batch.indices.length, 0),
+        material,
+      )
+      const instances = batches.map((batch) => {
         const geometry = new BufferGeometry()
         geometry.setAttribute('position', new BufferAttribute(batch.positions, 3))
         geometry.setAttribute('normal', new BufferAttribute(batch.normals, 3, true))
         geometry.setAttribute('color', new BufferAttribute(batch.colors, 3))
         geometry.setIndex(new BufferAttribute(batch.indices, 1))
-        geometry.boundingBox = new Box3(
-          new Vector3().fromArray(batch.bounds.min),
-          new Vector3().fromArray(batch.bounds.max),
-        )
-        geometry.boundingSphere = new Sphere(
-          new Vector3().fromArray(batch.bounds.center),
-          batch.bounds.radius,
-        )
-        const mesh = new Mesh(geometry, material)
-        mesh.receiveShadow = true
-        mesh.updateMatrixWorld(true)
-        mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
-        this.voxelGroup.add(mesh)
-        this.objects.push(mesh)
-        this.geometries.push(this.resources.own(geometry))
-      }
+        const id = mesh.addInstance(mesh.addGeometry(geometry))
+        geometry.dispose()
+        return { id, face: batch.face, bounds: batch.bounds }
+      })
+      cullBackFacingBatches(mesh, instances)
+      mesh.receiveShadow = true
+      mesh.updateMatrixWorld(true)
+      mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
+      this.voxelGroup.add(mesh)
+      this.objects.push(mesh)
+      this.resources.own(mesh)
     }
 
     this.buildShadowCasters(terrain)
@@ -790,44 +821,54 @@ export class VoxelLandscapeEngine {
 
   private buildShadowCasters(terrain: PreparedWorld['terrain']) {
     const box = new BoxGeometry(1, 1, 1)
+    const corners = box.getAttribute('position')
+    const corner = (vertex: number) =>
+      (corners.getX(vertex) > 0 ? 1 : 0) |
+      (corners.getY(vertex) > 0 ? 2 : 0) |
+      (corners.getZ(vertex) > 0 ? 4 : 0)
+    const cubeIndices = Array.from(required(box.index).array, corner)
+    box.dispose()
+    const cubes = terrain.shadowMatrices.reduce((sum, matrices) => sum + matrices.length / 16, 0)
     const material = new MeshBasicNodeMaterial()
-    // Vertex attributes share one shader across every batch. Per-mesh matrix
-    // buffers otherwise generate unique WGSL names and hundreds of pipelines.
-    material.positionNode = mat4(
-      attribute('shadowMatrix0', 'vec4'),
-      attribute('shadowMatrix1', 'vec4'),
-      attribute('shadowMatrix2', 'vec4'),
-      attribute('shadowMatrix3', 'vec4'),
-    ).mul(vec4(positionGeometry, 1)).xyz
-    this.geometries.push(this.resources.own(box))
     this.materials.push(this.resources.own(material))
-    for (const [index, matrices] of terrain.shadowMatrices.entries()) {
-      const geometry = this.resources.own(new InstancedBufferGeometry())
-      geometry.setIndex(box.getIndex())
-      for (const [name, buffer] of Object.entries(box.attributes))
-        geometry.setAttribute(name, buffer)
-      const transforms = new InstancedInterleavedBuffer(matrices, 16)
-      for (let column = 0; column < 4; column++)
-        geometry.setAttribute(
-          `shadowMatrix${column}`,
-          new InterleavedBufferAttribute(transforms, 4, column * 4),
-        )
-      geometry.instanceCount = matrices.length / 16
-      const mesh = new Mesh(geometry, material)
-      mesh.castShadow = true
-      mesh.layers.set(5)
-      const bounds = terrain.shadowBounds[index]
-      if (!bounds) throw new Error('Missing prepared shadow bounds')
-      geometry.boundingBox = new Box3(
-        new Vector3().fromArray(bounds.min),
-        new Vector3().fromArray(bounds.max),
-      )
-      geometry.boundingSphere = new Sphere(new Vector3().fromArray(bounds.center), bounds.radius)
-      mesh.updateMatrixWorld(true)
-      mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
-      this.shadowGroup.add(mesh)
-      this.objects.push(mesh)
+    const mesh = new BatchedMesh(
+      terrain.shadowMatrices.length,
+      cubes * 8,
+      cubes * cubeIndices.length,
+      material,
+    )
+    mesh.sortObjects = false
+    for (const matrices of terrain.shadowMatrices) {
+      const count = matrices.length / 16
+      const positions = new Float32Array(count * 24)
+      const indices = new Uint32Array(count * cubeIndices.length)
+      for (let cube = 0; cube < count; cube++) {
+        const half = required(matrices[cube * 16]) * 0.5
+        const x = required(matrices[cube * 16 + 12]),
+          y = required(matrices[cube * 16 + 13]),
+          z = required(matrices[cube * 16 + 14])
+        for (let k = 0; k < 8; k++) {
+          const at = (cube * 8 + k) * 3
+          positions[at] = x + (k & 1 ? half : -half)
+          positions[at + 1] = y + (k & 2 ? half : -half)
+          positions[at + 2] = z + (k & 4 ? half : -half)
+        }
+        for (let i = 0; i < cubeIndices.length; i++)
+          indices[cube * cubeIndices.length + i] = cube * 8 + required(cubeIndices[i])
+      }
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new BufferAttribute(positions, 3))
+      geometry.setIndex(new BufferAttribute(indices, 1))
+      mesh.addInstance(mesh.addGeometry(geometry))
+      geometry.dispose()
     }
+    mesh.castShadow = true
+    mesh.layers.set(5)
+    mesh.updateMatrixWorld(true)
+    mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
+    this.shadowGroup.add(mesh)
+    this.objects.push(mesh)
+    this.resources.own(mesh)
   }
 
   private configurePointShadow(light: PointLight) {
@@ -908,13 +949,8 @@ export class VoxelLandscapeEngine {
     )
   }
 
-  /** Cursor relief valves for the waterfall, clouds and rain; trails decay on their own. */
-  private updateCursorWorld(
-    pointerOnScene: boolean,
-    waterPoint: Vector3 | null,
-    dt: number,
-    activeDelta: number,
-  ) {
+  /** Cursor relief valves for the waterfall, clouds and rain; sky traces persist. */
+  private updateCursorWorld(pointerOnScene: boolean, waterPoint: Vector3 | null, dt: number) {
     const ray = this.raycaster.ray
     let solid: number | null = null
     const solidDistance = () => {
@@ -951,7 +987,7 @@ export class VoxelLandscapeEngine {
       solidDistance() === Infinity
         ? ray.direction
         : null
-    if (!this.reducedMotion) this.clouds.cursorTrace.update(skyPointer, activeDelta, this.intro)
+    if (!this.reducedMotion) this.clouds.cursorTrace.update(skyPointer, this.intro)
     if (pointerOnScene && !this.reducedMotion && this.rain.group.visible) {
       this.umbrella.x = ray.origin.x + ray.direction.x * 14
       this.umbrella.y = ray.origin.y + ray.direction.y * 14
@@ -1018,7 +1054,6 @@ export class VoxelLandscapeEngine {
   }
 
   private setPrimaryMouseDown(active: boolean) {
-    if (this.primaryMouseDown && !active) this.clouds.cursorTrace.clear()
     this.primaryMouseDown = active
   }
 
@@ -1317,14 +1352,20 @@ export class VoxelLandscapeEngine {
     // Reuse broad indirect lighting; planar water reflections stay per-frame.
     // Intro, still renders and clock discontinuities always refresh the probe.
     const interval = 1000 / (this.focused ? (this.lowPower ? 4 : 15) : 3)
-    if (
-      now - this.environmentAt < interval &&
+    const continuous =
       atmosphereTime >= this.environmentTime &&
       atmosphereTime - this.environmentTime <= 1 &&
       this.intro === 1 &&
       !this.reducedMotion
-    )
-      return
+    let faces: readonly number[]
+    if (!continuous) faces = [0, 1, 2, 3, 4, 5]
+    else if (this.environmentFace < 6) faces = [this.environmentFace]
+    else if (now - this.environmentAt >= interval) faces = [0]
+    else return
+    if (faces[0] === 0) {
+      this.environmentAt = now
+      this.environmentTime = atmosphereTime
+    }
 
     this.water.visible = false
     const environmentIntensity = this.scene.environmentIntensity
@@ -1334,13 +1375,15 @@ export class VoxelLandscapeEngine {
     this.skyMaterial.uniforms.uShowSun.value = 0
     this.skyMaterial.uniforms.uShowMoon.value = 0
     try {
-      this.environmentCamera.update(this.renderer, this.scene)
+      for (const face of faces) this.renderEnvironmentFace(face)
     } finally {
       this.water.visible = true
       this.scene.environmentIntensity = environmentIntensity
       this.skyMaterial.uniforms.uShowSun.value = this.showSun ? 1 : 0
       this.skyMaterial.uniforms.uShowMoon.value = 1
     }
+    this.environmentFace = (faces.at(-1) ?? 5) + 1
+    if (this.environmentFace < 6) return
     // Filter explicitly before the main render. Lazy filtering inside a
     // material upload would nest renderer calls and disturb texture bindings.
     if (this.simulation.available) {
@@ -1352,26 +1395,55 @@ export class VoxelLandscapeEngine {
     }
     this.water.material.uniforms.uEnvironment.value =
       this.filteredEnvironment?.texture ?? this.environmentTarget.texture
-    this.environmentAt = now
-    this.environmentTime = atmosphereTime
+  }
+
+  /** CubeCamera.update for one face, so a refresh spreads over six frames. */
+  private renderEnvironmentFace(face: number) {
+    const camera = this.environmentCamera
+    const target = this.environmentTarget
+    if (camera.parent === null) camera.updateMatrixWorld()
+    const faceCamera = camera.children[face]
+    if (!(faceCamera instanceof Camera)) throw new Error('Missing environment cube camera')
+    const previous = this.renderer.getRenderTarget(),
+      previousFace = this.renderer.getActiveCubeFace(),
+      previousMip = this.renderer.getActiveMipmapLevel()
+    const generateMipmaps = target.texture.generateMipmaps
+    // Mipmaps are generated during the render of the final face.
+    target.texture.generateMipmaps = face === 5 && generateMipmaps
+    try {
+      this.renderer.setRenderTarget(target, face, camera.activeMipmapLevel)
+      if (this.renderer.reversedDepthBuffer && !this.renderer.autoClear) this.renderer.clearDepth()
+      this.renderer.render(this.scene, faceCamera)
+    } finally {
+      target.texture.generateMipmaps = generateMipmaps
+      this.renderer.setRenderTarget(previous, previousFace, previousMip)
+    }
+    if (face === 5) target.texture.needsPMREMUpdate = true
   }
 
   /** Static casters: low-power devices refresh the slow sun and one moving lamp per frame. */
-  private updateShadows(now: number) {
+  /** Shadow casters (layer 5) are static terrain, so maps only follow light motion. */
+  private updateShadows() {
     const throttle = this.lowPower && this.intro === 1 && !this.reducedMotion
-    if (!throttle || now - this.moonShadowAt >= 250) {
+    const direction = this.shadowProbe
+      .copy(this.moon.position)
+      .sub(this.moon.target.position)
+      .normalize()
+    // 5e-4 rad moves the far shadow edge by about half a 2048² texel.
+    if (!(direction.dot(this.moonShadowDirection) > 1 - 1.25e-7)) {
       this.moon.shadow.needsUpdate = true
-      this.moonShadowAt = now
+      this.moonShadowDirection.copy(direction)
     }
-    if (this.nightLightFade === 0) return
-    if (!throttle) {
-      for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
-      return
+    if (this.nightLightFade === 0 || !this.lampLights.length) return
+    // Lanterns drift slowly; a three-frame round robin keeps their cube shadows current.
+    let count = Math.ceil(this.lampLights.length / 3)
+    if (throttle) count = 1
+    else if (this.reducedMotion) count = this.lampLights.length
+    for (let i = 0; i < count; i++) {
+      this.lampShadowCursor = (this.lampShadowCursor + 1) % this.lampLights.length
+      const lamp = this.lampLights[this.lampShadowCursor]
+      if (lamp) lamp.light.shadow.needsUpdate = true
     }
-    if (!this.lampLights.length) return
-    this.lampShadowCursor = (this.lampShadowCursor + 1) % this.lampLights.length
-    const lamp = this.lampLights[this.lampShadowCursor]
-    if (lamp) lamp.light.shadow.needsUpdate = true
   }
 
   private applyLighting(light: LightingState) {
@@ -1416,10 +1488,11 @@ export class VoxelLandscapeEngine {
     if (this.tilt.active) this.target.x = this.tilt.value
     this.pointer.lerp(this.target, parallax)
     const idleDrift =
-      this.reducedMotion || this.tilt.active ? 0 : Math.sin(this.elapsed * 0.17) * 0.15
-    this.camera.position.x += (this.pointer.x * 1.9 + idleDrift - this.camera.position.x) * parallax
-    this.camera.position.y += (2.3 + this.pointer.y * -0.16 - this.camera.position.y) * parallax
-    this.camera.position.z = 16
+      this.reducedMotion || this.tilt.active ? 0 : Math.sin(this.elapsed * 0.17) * CAMERA_IDLE_DRIFT
+    const target = cameraTarget(this.pointer.x, this.pointer.y, idleDrift)
+    this.camera.position.x += (target.x - this.camera.position.x) * parallax
+    this.camera.position.y += (target.y - this.camera.position.y) * parallax
+    this.camera.position.z = CAMERA_REST.z
     this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
     const pointerOnScene =
@@ -1431,7 +1504,7 @@ export class VoxelLandscapeEngine {
       this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
     this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
-    this.updateCursorWorld(pointerOnScene, waterPoint, dt, activeDelta)
+    this.updateCursorWorld(pointerOnScene, waterPoint, dt)
     void this.processPointer().catch(() => {
       this.previousPointer = null
     })
@@ -1454,6 +1527,9 @@ export class VoxelLandscapeEngine {
     uniforms.uLightDirection.value.copy(light.direction)
     uniforms.uLightColor.value.copy(light.color).multiplyScalar(light.intensity)
     uniforms.uNight.value = 1 - light.daylight
+    uniforms.uDirectSun.value =
+      Math.max(0, (WEATHER[this.weather].diffuse - 0.5) / 0.5) *
+      (1 - 0.5 * this.rain.simulation.state.intensity)
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
@@ -1485,6 +1561,9 @@ export class VoxelLandscapeEngine {
     const optics = sampleWaterOptics(this.rain.simulation.state.intensity, wind.speed)
     uniforms.uWaterClarity.value = optics.clarity
     uniforms.uWaterAgitation.value = optics.agitation
+    uniforms.uRainIntensity.value = this.rain.group.visible
+      ? this.rain.simulation.state.intensity
+      : 0
     // Airborne colonies follow the cursor's projected proximity. Terrain picking
     // jumps between bank heights and distant water and cannot drive their motion.
     let fireflyPointer = null
@@ -1609,11 +1688,12 @@ export class VoxelLandscapeEngine {
     this.rain.update(this.reducedMotion ? 0 : rainDelta, this.camera, smooth(0, 0.62, this.intro), {
       time: this.elapsed,
       wind,
+      gust: this.wind.centreSpeed > 0 ? wind.speed / this.wind.centreSpeed : 1,
     })
     const slopes = diagnostics.begin('rainSlopes', renderInfo.calls)
     this.rain.renderSlopes(this.renderer, this.camera, this.elapsed)
     diagnostics.end(slopes, renderInfo.calls)
-    this.updateShadows(now)
+    this.updateShadows()
     const probe = diagnostics.begin('environment', renderInfo.calls)
     this.updateEnvironment(now, atmosphereTime)
     diagnostics.end(probe, renderInfo.calls)

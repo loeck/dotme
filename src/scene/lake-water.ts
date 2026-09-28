@@ -50,7 +50,13 @@ import { pointerLightAt } from './pointer-light'
 import type { PointerLightUniforms } from './pointer-light'
 import { WATER_IOR, WaterLightingModel } from './water-lighting'
 import { contactNoise } from './water-noise'
-import { createWindNodes, fieldUvNode, rippleSlopeNode, windFieldNode } from './water-surface'
+import {
+  createWindNodes,
+  fieldUvNode,
+  rainRingsNode,
+  rippleSlopeNode,
+  windFieldNode,
+} from './water-surface'
 
 type LakeInputs = {
   wind: Omit<ReturnType<typeof createWindNodes>, 'uTime'>
@@ -71,6 +77,8 @@ export class LakeWaterMaterial extends NodeMaterial {
     uRainSlopeMap: texture(this.empty),
     uRainResolution: uniform(new Vector2(1, 1)),
     uRainSlopesEnabled: uniform(0),
+    uRainIntensity: uniform(0),
+    uDirectSun: uniform(1),
     uBedColor: texture(this.empty),
     uBedDepth: texture(this.empty),
     uBedHeight: texture(this.empty),
@@ -184,15 +192,12 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       wetHeight(p.add(vec2(0, stepSize))).sub(wetHeight(p.sub(vec2(0, stepSize)))),
     ).div(stepSize.mul(2))
     const rain = u.uRainSlopeMap.sample(screenUV).mul(u.uRainSlopesEnabled)
-    const capillary = rippleSlopeNode(
-      p,
-      footprint,
-      clamp(u.uWindResponse.y, 0.4, 1.6).mul(u.uWaterAgitation.mul(0.6).add(0.8)),
-      u,
-    )
+    const capillary = rippleSlopeNode(p, footprint, clamp(u.uWindResponse.y, 0, 1.6), u)
+    const rings = rainRingsNode(p, footprint, u.uRainIntensity, u.uTime)
     const incidentSlope = field.yz
       .add(rippleSlope)
       .add(rain.xy)
+      .add(rings.xy)
       .add(capillary.mul(mix(1, 0.55, u.uNight)))
     const wakeHeading = vec2(u.uWake.z, u.uWake.w)
     const wakeRel = p.sub(u.uWake.xy)
@@ -255,7 +260,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       reveal,
     )
       .pow(2)
-      .add(min(0.04, rain.z))
+      .add(min(0.04, rain.z.add(rings.z)))
       .sqrt()
     const reflected = reflect(view.negate(), normal)
     const flatReflected = reflect(view.negate(), vec3(0, 1, 0))
@@ -359,9 +364,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
           .add(bedTap(bedUv.add(bedBlur)).rgb.mul(0.3))
           .add(bedTap(bedUv.sub(bedBlur)).rgb.mul(0.3))
       : vec3(bedTap(bedUv.sub(chromaVec)).r, bedTap(bedUv).g, bedTap(bedUv.add(chromaVec)).b)
-    const lightGate = inputs
-      ? mix(mix(0.25, 0.8, u.uNight), 1, cloudShadow(positionWorld, inputs.cloud))
-      : float(1)
+    const sunlit = inputs ? cloudShadow(positionWorld, inputs.cloud) : float(1)
+    const lightGate = inputs ? mix(mix(0.25, 0.8, u.uNight), 1, sunlit) : float(1)
     const scatter = u.uWaterScatter.rgb
       .mul(lightGate)
       .mul(mix(vec3(1.18, 1.12, 0.92), vec3(0.8, 1.08, 1.12), u.uWaterClarity))
@@ -452,6 +456,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(u.uLightColor.rgb)
       .mul(1.4)
       .mul(float(1).sub(u.uNight))
+      .mul(sunlit)
+      .mul(u.uDirectSun)
       .mul(float(0.55).add(sparkleGate.mul(6)))
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))
     const sssDirection = normalize(u.uLightDirection.negate().add(normal.mul(WATER_IOR - 1)))
@@ -460,6 +466,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(sssDepth)
       .mul(mix(0.3, 1, clarity))
       .mul(u.uLightColor.rgb)
+      .mul(sunlit)
       .mul(vec3(0.35, 0.95, 0.9))
       .mul(0.06)
     const downFace = clamp(normal.dot(view), 0, 1).pow(2)
@@ -483,6 +490,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(shaftDepth)
       .mul(mix(0.35, 1, clarity))
       .mul(u.uLightColor.rgb)
+      .mul(sunlit)
       .mul(0.12)
       .mul(shaftFlicker)
     material.waterLighting.foamNode = foam

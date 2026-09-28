@@ -84,7 +84,19 @@ describe('static terrain', () => {
         b = new Vector3(),
         c = new Vector3(),
         normal = new Vector3()
+      const outward = [
+        [127, 0, 0],
+        [-127, 0, 0],
+        [0, 127, 0],
+        [0, -127, 0],
+        [0, 0, 127],
+        [0, 0, -127],
+      ]
       for (const batch of terrain.batches) {
+        // Back-facing batch culling relies on one orientation per batch.
+        const expected = required(outward[batch.face])
+        for (let i = 0; i < batch.normals.length; i += 3)
+          expect([batch.normals[i], batch.normals[i + 1], batch.normals[i + 2]]).toEqual(expected)
         expect(batch.positions.length).toBe(batch.normals.length)
         expect(batch.colors.length).toBe(batch.positions.length)
         for (let i = 0; i < batch.indices.length; i += 6) {

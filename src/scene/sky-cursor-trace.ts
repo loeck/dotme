@@ -1,20 +1,19 @@
 import { DataTexture, LinearFilter, RedFormat } from 'three/webgpu'
 
-const SKY_TRACE_LIFETIME = 3
 const BRUSH_OUTER_ANGLE = 0.022
 const BRUSH_INNER = Math.cos(0.009)
 const BRUSH_OUTER = Math.cos(BRUSH_OUTER_ANGLE)
 
 type Direction = Readonly<{ x: number; y: number; z: number }>
 
-/** A camera-independent trace on the upper hemisphere, in stereographic coordinates. */
+/** A persistent, camera-independent trace on the upper hemisphere, in stereographic coordinates. */
 export class SkyCursorTrace {
   readonly texture: DataTexture
   private readonly resolution: number
   private readonly pixels: Uint8Array
   private previous: Direction | null = null
-  private decayRemainder = 0
-  private remaining = 0
+  private previousStrength = 0
+  private empty = true
 
   constructor(resolution = 512) {
     this.resolution = resolution
@@ -25,57 +24,42 @@ export class SkyCursorTrace {
   }
 
   /** A null direction ends the stroke, so an invalid pointer cannot bridge two sky visits. */
-  update(direction: Direction | null, dt: number, strength = 1) {
-    let dirty = false
-    if (this.remaining > 0) {
-      const elapsed = Math.max(0, dt)
-      this.remaining = Math.max(0, this.remaining - elapsed)
-      this.decayRemainder += (elapsed * 255) / SKY_TRACE_LIFETIME
-      const decay = Math.floor(this.decayRemainder)
-      this.decayRemainder -= decay
-      if (this.remaining === 0) {
-        this.pixels.fill(0)
-        this.decayRemainder = 0
-        dirty = true
-      } else if (decay > 0) {
-        for (let i = 0; i < this.pixels.length; i++)
-          this.pixels[i] = Math.max(0, (this.pixels[i] ?? 0) - decay)
-        dirty = true
-      }
+  update(direction: Direction | null, strength = 1) {
+    if (!direction || direction.y <= 0 || strength <= 0) {
+      this.previous = null
+      return
     }
-    if (direction && direction.y > 0 && strength > 0) {
-      const previous = this.previous
-      const dot = previous
-        ? Math.max(
-            -1,
-            Math.min(
-              1,
-              previous.x * direction.x + previous.y * direction.y + previous.z * direction.z,
-            ),
-          )
-        : 1
-      const steps = previous ? Math.max(1, Math.ceil(Math.acos(dot) / 0.01)) : 1
-      for (let i = previous ? 1 : 0; i <= steps; i++) {
-        const t = i / steps
-        const x = previous ? previous.x * (1 - t) + direction.x * t : direction.x
-        const y = previous ? previous.y * (1 - t) + direction.y * t : direction.y
-        const z = previous ? previous.z * (1 - t) + direction.z * t : direction.z
-        const length = Math.hypot(x, y, z)
-        this.stamp(x / length, y / length, z / length, strength)
-      }
-      this.previous = { x: direction.x, y: direction.y, z: direction.z }
-      this.remaining = SKY_TRACE_LIFETIME
-      dirty = true
-    } else this.previous = null
-    if (dirty) this.texture.needsUpdate = true
+    const previous = this.previous
+    const dot = previous
+      ? Math.max(
+          -1,
+          Math.min(
+            1,
+            previous.x * direction.x + previous.y * direction.y + previous.z * direction.z,
+          ),
+        )
+      : 1
+    if (previous && dot === 1 && strength <= this.previousStrength) return
+    const steps = previous ? Math.max(1, Math.ceil(Math.acos(dot) / 0.01)) : 1
+    for (let i = previous ? 1 : 0; i <= steps; i++) {
+      const t = i / steps
+      const x = previous ? previous.x * (1 - t) + direction.x * t : direction.x
+      const y = previous ? previous.y * (1 - t) + direction.y * t : direction.y
+      const z = previous ? previous.z * (1 - t) + direction.z * t : direction.z
+      const length = Math.hypot(x, y, z)
+      this.stamp(x / length, y / length, z / length, strength)
+    }
+    this.previous = { x: direction.x, y: direction.y, z: direction.z }
+    this.previousStrength = strength
+    this.empty = false
+    this.texture.needsUpdate = true
   }
 
   clear() {
     this.previous = null
-    this.decayRemainder = 0
-    if (this.remaining === 0) return
+    if (this.empty) return
     this.pixels.fill(0)
-    this.remaining = 0
+    this.empty = true
     this.texture.needsUpdate = true
   }
 

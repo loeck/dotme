@@ -67,12 +67,32 @@ compare identical seeds and mocked weather at day/night/rain, fixed viewport and
 ratio. Keep representative captures with the review; do not infer visual equivalence
 from a successful compilation alone.
 
+## Frame budget
+
+Terrain chunks are split by face orientation and drawn through one `BatchedMesh` per material,
+so three.js does per-object work three times per pass instead of once per chunk. Each render
+culls chunks against its own frustum and skips orientations that can only face away from the
+eye; with front-side materials those triangles were already back-face culled, so the image is
+unchanged. Shadow cubes use the same batching with their closed-cube geometry baked per cell.
+The camera only eases inside a small parallax box (`camera-rig.ts`); faces that are
+back-facing to that box, its mirror image under the reflection plane and the environment probe
+are dropped when the terrain is prepared, about 37% of the exposed faces.
+Greedy meshing was measured and rejected: neighbouring voxel colours differ, so it would only
+remove about a third of the faces while introducing T-junction pixel gaps.
+
+Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
+the light direction moves by more than about half a texel. Drifting lanterns refresh their cube
+shadows in a three-frame round robin. The environment probe renders one cube face per frame and
+filters once all six are current; clock discontinuities, the intro and reduced motion refresh
+every face at once. Capillary ripples and rain rings branch past components the pixel footprint
+has already faded, and the rain simulation steps at the 60 Hz frame cap.
+
 ## Low-power profile
 
 Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
 use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
 foreground cap, pixel ratio capped at 1.25, a 64 px environment probe refreshed at 4 Hz,
-the moon shadow refreshed at 4 Hz and one visible lamp shadow per frame, a third-resolution
+one lamp shadow per frame, a third-resolution
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
 
 On these devices, leaning the phone left or right (gravity projected onto the screen,

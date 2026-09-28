@@ -75,6 +75,7 @@ export function weatherForScene(snapshot: WeatherSnapshot): SceneWeather {
       meanSpeed: Math.min(8, speed),
       gustStrength:
         speed > 0 ? Math.min(1, Math.max(0, snapshot.windGustsMs / speed - 1) / 0.43) : 0,
+      gustSpeed: Math.min(12, snapshot.windGustsMs),
       turnStrength: 0.15,
     },
     source: 'live',

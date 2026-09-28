@@ -1,6 +1,8 @@
 # Rain
 
-`RainSimulation` advances world-space droplets at a fixed 120 Hz. One world unit represents
+`RainSimulation` advances world-space droplets at a fixed 60 Hz, matching the engine's frame cap;
+streak heads are extrapolated by the unstepped remainder so drops never stall between steps. Water
+crossings use Illinois regula falsi on the moving surface. One world unit represents
 one metre. Segment/voxel collisions retire drops and create pooled impacts; catch-up and
 pool capacities are bounded. Horizontal wind, drop size and emission respond to the weather
 state. Reduced motion suppresses rain; hidden pages pause updates.
@@ -9,7 +11,10 @@ state. Reduced motion suppresses rain; hidden pages pause updates.
 TSL composition handles depth occlusion and the appearance of impact waves on WebGPU. Water collision uses the shared CPU contact sampler, including bounded recent lake impulses,
 while visible surface effects follow the GPU wave field. Streak radiance follows the ambient environment
 plus moon and lamp glints, since a drop refracts most of its surroundings, and blends into the
-scene's exponential fog with distance so far rain reads as haze rather than dark streaks. This is an artistic rain approximation, not
+scene's exponential fog with distance so far rain reads as haze rather than dark streaks. The overlay
+blends premultiplied colour, since `renderOutput` unpremultiplies its input and premultiplies its
+result; straight alpha there darkens the background by the drop's coverage. Streaks are
+not reflected by the lake: drop reflections are practically invisible and read as dashes on the water. This is an artistic rain approximation, not
 volumetric optical scattering or a fluid solver.
 
 The public rain state accepts intensity in 0–1 and horizontal wind bounded to ±20 m/s.

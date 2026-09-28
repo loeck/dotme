@@ -48,7 +48,7 @@ import type { WindState } from './wind'
 const impactEnergy = (impact: RainImpact) =>
   Math.min(1, (impact.size / 0.004) ** 3 * (impact.vy / 9) ** 2)
 
-/** Layer 2 is reflected by the lake and drawn after the lens; layer 1 belongs to the bed. */
+/** Layer 2 is drawn after the lens; layer 1 belongs to the bed. */
 export const RAIN_LAYER = 2
 
 function instancedPlane(capacity: number, firstName: string, secondName: string, segments = 1) {
@@ -72,7 +72,7 @@ function instancedPlane(capacity: number, firstName: string, secondName: string,
 
 export type RainEnvironment = Readonly<{ ambient: AmbientLight; fog: FogExp2 }>
 
-/** Rain is independent of weather; the only control input is setRainState(). */
+/** Rain is independent of weather: setRainState() sets it, update() only scales its wind by a gust factor. */
 export class RainEffect {
   readonly group = new Group()
   readonly simulation: RainSimulation
@@ -102,6 +102,7 @@ export class RainEffect {
   private readonly ambientColor = new Color()
   private readonly fogColor = new Color()
   private readonly splashLimit: number
+  private wind: RainState['wind'] = { x: 0, z: 0 }
   private slopeDirty = true
   private impactSlopes?: Object3D
   private impactsWereVisible = false
@@ -176,7 +177,6 @@ export class RainEffect {
         const target = renderer.getRenderTarget()
         if (target) this.renderResolution.set(target.viewport.z, target.viewport.w)
         else renderer.getDrawingBufferSize(this.renderResolution)
-        this.uniforms.uReflectionPass.value = !this.uniforms.uOverlay.value
         this.uniforms.uPixelRatio.value =
           (renderer.getPixelRatio() * this.renderResolution.y) / this.bufferHeight
       }
@@ -202,6 +202,7 @@ export class RainEffect {
 
   setRainState(state: RainState) {
     this.simulation.setRainState(state)
+    this.wind = this.simulation.state.wind
     this.group.visible = !this.reducedMotion && this.simulation.state.intensity > 0
     this.slopeDirty = true
     if (!this.group.visible) {
@@ -235,13 +236,15 @@ export class RainEffect {
     delta: number,
     camera: PerspectiveCamera,
     opacity: number,
-    surface?: { time: number; wind: WindState },
+    surface?: { time: number; wind: WindState; gust?: number },
   ) {
     if (!this.group.visible) return
     if (surface) {
       this.surfaceTimeOffset =
         surface.time - (this.simulation.elapsedTime + Math.max(0, Math.min(delta, 0.1)))
       this.surfaceWind = surface.wind
+      const gust = surface.gust ?? 1
+      this.simulation.setWind(this.wind.x * gust, this.wind.z * gust)
       this.simulation.setWaterSurface(this.sampleSurface)
     }
     this.simulation.update(delta)
@@ -259,9 +262,16 @@ export class RainEffect {
         .multiplyScalar(lamp.intensity * 1.6)
     })
     let count = 0
+    const ahead = this.simulation.elapsedTime - this.simulation.time
     for (const drop of this.simulation.drops) {
       if (!drop.alive) continue
-      this.drops.first.setXYZW(count, drop.x, drop.y, drop.z, drop.size)
+      this.drops.first.setXYZW(
+        count,
+        drop.x + drop.vx * ahead,
+        drop.y + drop.vy * ahead,
+        drop.z + drop.vz * ahead,
+        drop.size,
+      )
       this.contactAges.setX(count, -1)
       this.drops.second.setXYZW(count++, drop.vx, drop.vy, drop.vz, drop.seed)
     }
@@ -372,7 +382,6 @@ export class RainEffect {
     renderer.outputColorSpace = LinearSRGBColorSpace
     renderer.getDrawingBufferSize(this.renderResolution)
     this.uniforms.uPixelRatio.value = renderer.getPixelRatio()
-    this.uniforms.uReflectionPass.value = false
     this.uniforms.uDepth.value = depth
     this.uniforms.uOverlay.value = true
     for (const material of this.particleMaterials) material.depthTest = false
@@ -388,7 +397,6 @@ export class RainEffect {
       renderer.toneMapping = toneMapping
       renderer.outputColorSpace = outputColorSpace
       this.uniforms.uOverlay.value = false
-      this.uniforms.uReflectionPass.value = true
       for (const material of this.particleMaterials) material.depthTest = true
     }
   }
