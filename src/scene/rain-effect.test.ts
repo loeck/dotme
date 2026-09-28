@@ -1,4 +1,4 @@
-import { DirectionalLight, Mesh, PerspectiveCamera } from 'three/webgpu'
+import { AmbientLight, DirectionalLight, FogExp2, Mesh, PerspectiveCamera } from 'three/webgpu'
 import { InstancedBufferGeometry } from 'three/webgpu'
 import { expect, it } from 'vitest'
 
@@ -19,6 +19,7 @@ function fixture(size: number) {
     false,
     new LakeWaterMaterial().uniforms,
     false,
+    { ambient: new AmbientLight(), fog: new FogExp2(0, 0.009) },
   )
   rain.setRainState({ intensity: 0.001, wind: { x: 0, z: 0 } })
   Object.assign(required(rain.simulation.drops[0]), {

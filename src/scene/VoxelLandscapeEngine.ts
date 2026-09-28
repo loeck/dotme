@@ -179,6 +179,7 @@ export class VoxelLandscapeEngine {
   private readonly weather
   private readonly showSun: boolean
   private readonly ambient = new AmbientLight()
+  private readonly fog = new FogExp2(0x14202a, 0.009)
   private readonly scene = new Scene()
   private readonly camera = new PerspectiveCamera(54, 1, 0.05, 500)
   private readonly raycaster = new Raycaster()
@@ -418,7 +419,7 @@ export class VoxelLandscapeEngine {
     this.renderer.domElement.dataset.seed = String((options.seed ?? 0) >>> 0)
     this.renderer.domElement.dataset.weather = this.weather
     this.renderer.domElement.dataset.generatorVersion = 'voxel-landscape-v1'
-    this.scene.fog = new FogExp2(0x14202a, 0.009)
+    this.scene.fog = this.fog
     this.scene.background = new Color(0x080c11)
     this.scene.add(this.ambient)
     this.moon.position.set(-35, 48, -48)
@@ -568,6 +569,7 @@ export class VoxelLandscapeEngine {
         !!options.reducedMotion,
         uniforms,
         this.simulation.available,
+        { ambient: this.ambient, fog: this.fog },
       ),
     )
     this.rain.setRainState(options.rain ?? DEFAULT_RAIN)
@@ -1378,11 +1380,8 @@ export class VoxelLandscapeEngine {
     this.moon.color.copy(light.color)
     this.ambient.color.copy(light.ambient)
     this.ambient.intensity = 1
-    const fog = this.scene.fog
-    if (fog instanceof FogExp2) {
-      fog.color.copy(light.haze)
-      fog.density = Math.sqrt(WEATHER[this.weather].extinction / 100)
-    }
+    this.fog.color.copy(light.haze)
+    this.fog.density = Math.sqrt(WEATHER[this.weather].extinction / 100)
     updateSkyLighting(this.skyMaterial, light, this.showSun)
   }
 

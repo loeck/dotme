@@ -7,7 +7,9 @@ state. Reduced motion suppresses rain; hidden pages pause updates.
 
 `RainEffect` translates simulation state into node materials for streaks and surface impacts.
 TSL composition handles depth occlusion and the appearance of impact waves on WebGPU. Water collision uses the shared CPU contact sampler, including bounded recent lake impulses,
-while visible surface effects follow the GPU wave field. This is an artistic rain approximation, not
+while visible surface effects follow the GPU wave field. Streak radiance follows the ambient environment
+plus moon and lamp glints, since a drop refracts most of its surroundings, and blends into the
+scene's exponential fog with distance so far rain reads as haze rather than dark streaks. This is an artistic rain approximation, not
 volumetric optical scattering or a fluid solver.
 
 The public rain state accepts intensity in 0–1 and horizontal wind bounded to ±20 m/s.

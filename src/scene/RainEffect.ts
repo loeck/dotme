@@ -18,6 +18,8 @@ import {
   RenderTarget,
 } from 'three/webgpu'
 import type {
+  AmbientLight,
+  FogExp2,
   Object3D,
   DirectionalLight,
   PerspectiveCamera,
@@ -68,6 +70,8 @@ function instancedPlane(capacity: number, firstName: string, secondName: string,
   return { geometry, first, second, attributes: [first, second] }
 }
 
+export type RainEnvironment = Readonly<{ ambient: AmbientLight; fog: FogExp2 }>
+
 /** Rain is independent of weather; the only control input is setRainState(). */
 export class RainEffect {
   readonly group = new Group()
@@ -95,6 +99,8 @@ export class RainEffect {
   private readonly lampColors: Color[]
   private readonly moonColor = new Color()
   private readonly moonDirection = new Vector3()
+  private readonly ambientColor = new Color()
+  private readonly fogColor = new Color()
   private readonly splashLimit: number
   private slopeDirty = true
   private impactSlopes?: Object3D
@@ -109,6 +115,7 @@ export class RainEffect {
 
   private readonly lamps: readonly PointLight[]
   private readonly moon: DirectionalLight
+  private readonly environment: RainEnvironment
   private readonly reducedMotion: boolean
 
   constructor(
@@ -120,9 +127,11 @@ export class RainEffect {
     reducedMotion: boolean,
     surfaceUniforms: RainSurface,
     slopesSupported: boolean,
+    environment: RainEnvironment,
   ) {
     this.lamps = lamps
     this.moon = moon
+    this.environment = environment
     this.reducedMotion = reducedMotion
     this.simulation = new RainSimulation(trace, mobile, seed)
     this.splashLimit = mobile ? 48 : 128
@@ -143,6 +152,8 @@ export class RainEffect {
       this.renderResolution,
       this.moonColor,
       this.moonDirection,
+      this.ambientColor,
+      this.fogColor,
       this.lampPositions,
       this.lampColors,
       this.emptyDepth,
@@ -237,6 +248,10 @@ export class RainEffect {
     this.uniforms.uOpacity.value = opacity
     this.moonColor.copy(this.moon.color).multiplyScalar(this.moon.intensity * 1.8)
     this.moonDirection.copy(this.moon.position).sub(this.moon.target.position).normalize()
+    const { ambient, fog } = this.environment
+    this.ambientColor.copy(ambient.color).multiplyScalar(ambient.intensity)
+    this.fogColor.copy(fog.color)
+    this.uniforms.uFogDensity.value = fog.density
     this.lamps.forEach((lamp, i) => {
       required(this.lampPositions[i]).copy(lamp.position)
       required(this.lampColors[i])

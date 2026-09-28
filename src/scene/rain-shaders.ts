@@ -50,7 +50,7 @@ import type { LakeWaterMaterial } from './lake-water'
 import { IMPACT_LIFETIME } from './rain-simulation'
 import { fieldUvNode, windFieldNode } from './water-surface'
 
-export const RAIN_EXPOSURE = 1 / 90
+export const RAIN_EXPOSURE = 1 / 48
 export const RAIN_CROWN_LIFETIME = 0.13
 export const RAIN_SPRAY_LIFETIME = 0.18
 export type RainSurface = Pick<
@@ -68,6 +68,8 @@ export function createRainUniforms(
   resolution: Vector2,
   moonColor: Color,
   moonDirection: Vector3,
+  ambientColor: Color,
+  fogColor: Color,
   lampPositions: Vector3[],
   lampColors: Color[],
   depthTexture: DepthTexture,
@@ -78,6 +80,9 @@ export function createRainUniforms(
     uPixelRatio: uniform(1),
     uMoonColor: uniform(moonColor),
     uMoonDirection: uniform(moonDirection),
+    uAmbientColor: uniform(ambientColor),
+    uFogColor: uniform(fogColor),
+    uFogDensity: uniform(0),
     uLampPosition: uniformArray<'vec3'>(lampPositions, 'vec3'),
     uLampColor: uniformArray<'color'>(lampColors, 'color'),
     uDepth: texture(depthTexture),
@@ -90,9 +95,15 @@ type RainUniforms = ReturnType<typeof createRainUniforms>
 function heightAt(p: Node<'vec2'>, u: RainSurface) {
   return windFieldNode(p, float(0), u).x.add(u.uState.sample(fieldUvNode(p)).r)
 }
+function fogAmount(world: Node<'vec3'>, u: RainUniforms) {
+  return exp(length(cameraPosition.sub(world)).mul(u.uFogDensity).pow2().negate()).oneMinus()
+}
 function rainLight(world: Node<'vec3'>, u: RainUniforms, lampCount: number) {
   const view = normalize(cameraPosition.sub(world))
-  let light = u.uMoonColor.rgb.mul(abs(view.dot(u.uMoonDirection)).pow(5).mul(0.65).add(0.35))
+  let light = u.uAmbientColor.rgb
+    .add(u.uFogColor.rgb)
+    .mul(0.9)
+    .add(u.uMoonColor.rgb.mul(abs(view.dot(u.uMoonDirection)).pow(5).mul(0.65).add(0.35)))
   for (let i = 0; i < lampCount; i++) {
     const delta = u.uLampPosition.element(i).sub(world),
       glint = abs(view.dot(normalize(delta)))
@@ -101,7 +112,7 @@ function rainLight(world: Node<'vec3'>, u: RainUniforms, lampCount: number) {
         .add(0.3)
     light = light.add(u.uLampColor.element(i).rgb.mul(glint).div(delta.dot(delta).add(1)))
   }
-  return light.mul(exp(length(cameraPosition.sub(world)).mul(-0.009)))
+  return mix(light, u.uFogColor.rgb, fogAmount(world, u))
 }
 function rainOutput(output: Node<'vec4'>, u: RainUniforms) {
   return u.uOverlay.select(renderOutput(output, ReinhardToneMapping, SRGBColorSpace), output)
@@ -222,7 +233,9 @@ export function createRainParticleMaterial(
       .mul(exposure)
       .div(RAIN_EXPOSURE),
   )
-  const lighting = varying(rainLight(world, u, lampCount))
+  const lighting = varying(rainLight(world, u, lampCount)),
+    clarity = varying(fogAmount(world, u).oneMinus()),
+    floor = varying(exposure.mul(0.2 / RAIN_EXPOSURE))
   material.fragmentNode = Fn(() => {
     occlude(u)
     const pixelSpan = max(fwidth(vSide), 0.0001),
@@ -253,9 +266,10 @@ export function createRainParticleMaterial(
         : u.uReflectionPass
             .select(
               min(0.65, across.mul(coverage).mul(2)),
-              across.mul(min(0.65, coverage.mul(4.8))),
+              across.mul(min(0.65, max(coverage.mul(4.8), floor))),
             )
             .mul(ends)
+            .mul(clarity)
             .mul(lobes)
             .mul(glint)
             .mul(u.uOpacity)
