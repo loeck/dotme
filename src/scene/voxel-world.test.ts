@@ -132,7 +132,7 @@ describe('voxel lake world', () => {
     const desktop = worldFor(12, false)
     const mobile = worldFor(12, true)
     expect(mobile.voxels.length).toBeLessThan(desktop.voxels.length)
-    expect(mobile.voxels.length).toBeLessThan(22_000)
+    expect(mobile.voxels.length).toBeLessThan(23_000)
     expect(mobile.shoreCount).toBeGreaterThan(20)
     expect(mobile.lamps.some((lamp) => lamp.x < 0)).toBe(true)
     expect(mobile.lamps.some((lamp) => lamp.x > 0)).toBe(true)

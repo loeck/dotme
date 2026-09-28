@@ -116,7 +116,7 @@ export function selectRayCircuit(bed: LakeBed, seed: number): RayCircuit {
     }
     const coverage = wet / samples
     if (clearance >= 1.8 && clearance > bestClearance) {
-      best = { ...circuit, depth: Math.max(1.2, Math.min(2.2, clearance - 1)) }
+      best = { ...circuit, depth: Math.max(0.85, Math.min(1.1, clearance - 0.65)) }
       bestClearance = clearance
     } else if (bestClearance < 1.8 && coverage > bestCoverage) {
       best = circuit

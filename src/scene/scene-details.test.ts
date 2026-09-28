@@ -64,6 +64,7 @@ describe('details water layer', () => {
       const floaterStart = firstInstance(scene, 'floating-bodies')
       const foamStart = firstInstance(scene, 'drifting-foam')
       details.pointerBurst(5, -5, 0.55, 0, windy.sample(0))
+      expect(returns[0]?.slice(0, 2)).toEqual([5, -5])
       for (let frame = 0; frame < 120; frame++) {
         const time = frame / 60
         details.update(time, 1 / 60, windy.sample(time), null, null, 0, 1)

@@ -80,7 +80,7 @@ describe('floating bodies', () => {
     }
   })
 
-  it('is pushed away and lifted by a nearby splash', async () => {
+  it('only receives an immediate shove when the click reaches its hull', async () => {
     const physics = await physicsFor()
     const scene = new Scene()
     const splashes = new LakeSplashes(scene, bed, 42, true, physics)
@@ -88,13 +88,17 @@ describe('floating bodies', () => {
     try {
       const [buoy] = positionsOf(floating)
       const [bx, , bz] = required(buoy)
-      floating.splash(bx - 0.5, bz, 0.55)
-      floating.splash(bx + 40, bz, 0.55)
+      floating.splash(bx - 1.5, bz, 0.55)
+      physics.world.step()
+      floating.update(0, windy.sample(0), false)
+      const [afterFarClick] = positionsOf(floating)
+      expect(required(afterFarClick)[0]).toBeCloseTo(bx, 6)
+
+      floating.splash(bx - 0.1, bz, 0.55)
       physics.world.step()
       floating.update(0, windy.sample(0), false)
       const [after] = positionsOf(floating)
       expect(required(after)[0]).toBeGreaterThan(bx)
-      expect(required(after)[1]).toBeGreaterThan(required(buoy)[1] ?? 0)
     } finally {
       floating.dispose()
       splashes.dispose()

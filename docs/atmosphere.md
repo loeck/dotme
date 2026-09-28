@@ -44,6 +44,8 @@ anchored to world directions, so openings survive camera motion. Each texel heal
 clock, closing about three seconds after it was drawn, so older passages refill while new ones
 stay open; releasing the button, leaving the sky or the canvas only ends the current stroke.
 Reduced motion clears it.
+Cloud transmission samples the opening at the actual cloud crossing of each light ray.
+Direct shafts appear only when a passage also crosses the sun or moon direction.
 Terrain shadow layers preserve independent visibility for shadow and main passes.
 
 Profile contrast samples the rendered backdrop through the composition pipeline. The DOM

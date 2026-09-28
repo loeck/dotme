@@ -52,7 +52,9 @@ passes use node materials.
 Rapier couples rigid bodies to the surface without stepping the wave field itself. A
 bounded CPU contact sampler combines the wind field with recent GPU-bound impulses; it
 provides the height for rain, pointer hits, droplets, curtain landings and buoyancy without
-reading the GPU field each frame. Pointer bursts also shove floaters within 2.5 m outward, up and into a roll through Rapier impulses. Floaters
+reading the GPU field each frame. Pointer bursts start a local surface wave immediately and
+shove a floater only when the impact footprint touches its hull. Propagating waves move
+floaters through buoyancy as they arrive. Floaters
 join the fish capture, so their submerged half refracts through the surface, and each reports its
 waterline circle so the lake draws a thin meniscus ring where it crosses the moving surface.
 Shore splashes and pointer bursts fly droplets as dynamic

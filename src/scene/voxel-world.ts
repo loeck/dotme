@@ -331,14 +331,22 @@ function selectWaterfall(
   lakeBed: LakeBed,
   voxelSize: number,
   zNear: number,
+  relaxed = false,
 ): VoxelWaterfall | null {
-  if (hash(seed, 0, 0, 911) >= 0.58) return null
   const desiredWidth = mix(mobile ? 0.7 : 1.5, mobile ? 1 : 2, hash(seed, 0, 0, 919))
   const landingOffset = 0.8
+  const portraitPosition = (cell: SurfaceCell) =>
+    Math.abs(cell.x / ((16 - cell.z) * Math.tan((54 * Math.PI) / 360) * 0.46) + 0.48)
   const candidates = columns
     .flatMap((cell) => {
       const x = profileX(cell.x, mobile)
-      if (x < -38 || x > -13 || cell.z < -34 || cell.z > -12) return []
+      if (
+        x < (relaxed ? -45 : -38) ||
+        x > (relaxed ? -8 : -13) ||
+        cell.z < (relaxed ? -40 : -34) ||
+        cell.z > (relaxed ? -8 : -12)
+      )
+        return []
       return (
         [
           [1, 0],
@@ -360,6 +368,7 @@ function selectWaterfall(
     .toSorted(
       (a, b) =>
         (mobile ? b.direction[1] - a.direction[1] : 0) ||
+        (mobile ? portraitPosition(a.cell) - portraitPosition(b.cell) : 0) ||
         hash(seed, a.cell.xi, a.cell.zi, 929) - hash(seed, b.cell.xi, b.cell.zi, 929),
     )
   for (const { cell, direction, width, offset } of candidates) {
@@ -369,12 +378,12 @@ function selectWaterfall(
       centerZ = cell.z - nx * offset
     const x = centerX + nx * (cell.size / 2 + 0.03)
     const z = centerZ + nz * (cell.size / 2 + 0.03)
-    if (z < -34 || z > -12) continue
+    if (z < (relaxed ? -40 : -34) || z > (relaxed ? -8 : -12)) continue
     // A physically exposed sheet must also face the camera enough to show its width.
     const facing = (-x * nx + (16 - z) * nz) / Math.hypot(x, 16 - z)
-    if (facing < 0.35) continue
+    if (facing < (relaxed ? 0.16 : 0.35)) continue
     const halfView = (16 - z) * Math.tan((54 * Math.PI) / 360) * (mobile ? 0.46 : 1.6)
-    if (Math.abs(x) + width / 2 > halfView * 0.92) continue
+    if (Math.abs(x) + width / 2 > halfView * (relaxed ? 1 : 0.92)) continue
     if (lamps.some((lamp) => Math.hypot(lamp.x - x, lamp.z - z) < 2.2)) continue
     const halfWidth = width / 2
     const samples = Math.ceil(width / (voxelSize / 2))
@@ -431,8 +440,8 @@ function selectWaterfall(
     if (!visible) continue
     // An upstream pool widens behind the narrow outlet. Its floor and banks
     // replace the actual terrain columns, so water never lies over solid rock.
-    const basinHalfWidth = mobile ? 1.0 : 1.75
-    const basinDepth = mobile ? 2.24 : 3
+    const basinHalfWidth = mobile ? (relaxed ? 0.8 : 1.0) : 1.75
+    const basinDepth = mobile ? (relaxed ? 1.7 : 2.24) : 3
     const basinCenter = basinDepth * 0.56
     const basinRadius = basinDepth * 0.44
     const basin = new Map<string, SurfaceCell>()
@@ -472,7 +481,8 @@ function selectWaterfall(
         )
       }
     }
-    if (basin.size < (mobile ? 10 : 20) || existingWaterCells < basin.size * 0.7) continue
+    if (basin.size < (mobile ? 10 : 20) || existingWaterCells < basin.size * (relaxed ? 0.4 : 0.7))
+      continue
     const patch = new Map<string, SurfaceCell>()
     for (const [key, support] of basin) patch.set(key, { ...support, height: top - voxelSize })
     for (const support of basin.values()) {
@@ -503,7 +513,7 @@ function selectWaterfall(
     // Blend the small raised reservoir back into the original bank, rather
     // than leaving a uniform retaining wall around its entire perimeter.
     let rim = [...patch.values()].filter((support) => !basin.has(cellKey(support.xi, support.zi)))
-    for (let ring = 0; ring < (mobile ? 2 : 3); ring++) {
+    for (let ring = 0; ring < (mobile ? (relaxed ? 0 : 2) : 3); ring++) {
       const next: SurfaceCell[] = []
       for (const edge of rim) {
         for (const [dx, dz] of [
@@ -578,6 +588,8 @@ function selectWaterfall(
     }
     const rasterSize = LAKE_BOUNDS.size / lakeBed.resolution
     for (const support of patch.values()) {
+      // The compact portrait fallback spends its geometry on the pool and sheet.
+      if (mobile && relaxed) continue
       for (const [dx, dz] of [
         [1, 0],
         [-1, 0],
@@ -638,7 +650,8 @@ function selectWaterfall(
     }
     const count =
       (edited.ground.length + edited.shore.length + edited.rock.length + positions.length) / 3
-    if (mobile && count >= 22_000) continue
+    // A rare portrait fallback may use a little more geometry to keep the fall.
+    if (mobile && count >= (relaxed ? 23_000 : 22_000)) continue
     edited.ground.push(...positions)
     for (const material of MATERIALS) groups[material] = edited[material]
     return {
@@ -655,7 +668,21 @@ function selectWaterfall(
       seed: Math.floor(hash(seed, cell.xi, cell.zi, 937) * 0x1_0000_0000),
     }
   }
-  return null
+  return relaxed
+    ? null
+    : selectWaterfall(
+        seed,
+        mobile,
+        columns,
+        surface,
+        voxels,
+        groups,
+        lamps,
+        lakeBed,
+        voxelSize,
+        zNear,
+        true,
+      )
 }
 
 /**
@@ -997,16 +1024,24 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
           clamp((profileX(required(positions[index]), mobile) - 31) / 18, 0, 1) *
           clamp((-required(positions[index + 2]) - 29) / 18, 0, 1) *
           clamp((required(positions[index + 1]) - 1.4) / 3, 0, 1)
+        const z = required(positions[index + 2])
+        const x = profileX(required(positions[index]), mobile)
+        // Let nearby rock facets catch a little soft sky light, while the
+        // middle islands remain legible through the darker far haze.
+        const middleIsland = x > 4 && x < 24 && z < -8 && z > -36
+        const colorScale =
+          z > 2
+            ? material === 'rock'
+              ? 0.56
+              : 0.47
+            : 1 - ridgeShade * 0.25 + (middleIsland ? 0.08 : 0)
         voxels.push({
           x: required(positions[index]),
           y: required(positions[index + 1]),
           z: required(positions[index + 2]),
           // A block must cover its grid cell completely; smaller randomized sizes open cracks.
           size: terrainSizeAt(required(positions[index + 2])),
-          color: dimColor(
-            required(TERRAIN_VARIANTS[material][colorIndex]),
-            required(positions[index + 2]) > 2 ? 0.4 : 1 - ridgeShade * 0.25,
-          ),
+          color: dimColor(required(TERRAIN_VARIANTS[material][colorIndex]), colorScale),
         })
       }
     }

@@ -1,12 +1,21 @@
+import { clamp, normalize, smoothstep, texture, vec2 } from 'three/tsl'
 import { DataTexture, LinearFilter, RedFormat } from 'three/webgpu'
+import type { Node } from 'three/webgpu'
 
 /** Seconds for a fully open passage to close again. */
 const SKY_TRACE_LIFETIME = 3
-const BRUSH_OUTER_ANGLE = 0.022
-const BRUSH_INNER = Math.cos(0.009)
+const BRUSH_OUTER_ANGLE = 0.036
+const BRUSH_INNER = Math.cos(0.012)
 const BRUSH_OUTER = Math.cos(BRUSH_OUTER_ANGLE)
 
 type Direction = Readonly<{ x: number; y: number; z: number }>
+
+/** The same stereographic aperture is used by the sky and ground lighting. */
+export function skyTraceSample(direction: Node<'vec3'>, trace: ReturnType<typeof texture<'vec4'>>) {
+  const ray = normalize(direction)
+  const uv = ray.xz.div(ray.y.add(1)).mul(0.5).add(0.5)
+  return trace.sample(clamp(uv, vec2(0.001), vec2(0.999))).r.mul(smoothstep(0, 0.04, ray.y))
+}
 
 /** A camera-independent trace on the upper hemisphere, in stereographic coordinates.
  * Every texel heals on its own clock, so older passages close while new ones stay open. */
@@ -130,8 +139,13 @@ export class SkyCursorTrace {
         const p = (2 * (col + 0.5)) / size - 1
         const inverse = 1 / (1 + p * p + q * q)
         const dot = (2 * p * x + (1 - p * p - q * q) * y + 2 * q * z) * inverse
-        if (dot <= BRUSH_OUTER) continue
-        const edge = Math.min(1, Math.max(0, (dot - BRUSH_OUTER) / (BRUSH_INNER - BRUSH_OUTER)))
+        // Warp only the rim. The center stays solid, while the contour follows
+        // small cloud-like variations instead of a perfectly circular brush.
+        const irregularity =
+          0.78 + 0.12 * Math.sin(p * 173 + q * 91) + 0.1 * Math.sin(p * 311 - q * 247)
+        const outer = BRUSH_OUTER + (BRUSH_INNER - BRUSH_OUTER) * (1 - irregularity) * 0.5
+        if (dot <= outer) continue
+        const edge = Math.min(1, Math.max(0, (dot - outer) / (BRUSH_INNER - outer)))
         const value = Math.round(255 * strength * edge * edge * (3 - 2 * edge))
         const index = row * size + col
         this.pixels[index] = Math.max(this.pixels[index] ?? 0, value)

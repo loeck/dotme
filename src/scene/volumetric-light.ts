@@ -141,7 +141,7 @@ export class VolumetricLight {
               visible.mulAssign(cloudShadow(world, clouds))
             })
             const source = ambient
-              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(6))
+              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(3))
               .mul(sigma)
             radiance.addAssign(accumulated.mul(source).mul(integral))
             accumulated.mulAssign(transmission)
@@ -197,8 +197,8 @@ export class VolumetricLight {
     )
   }
   update(light: LightingState) {
-    this.sunDirection.value.copy(light.sunDirection)
-    this.sunRadiance.value.copy(light.sunColor).multiplyScalar(light.sunIntensity)
+    this.sunDirection.value.copy(light.direction)
+    this.sunRadiance.value.copy(light.color).multiplyScalar(light.intensity)
     const airDay = 1 - light.daylight * 0.7
     this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
     this.skyAir.value = 0.5 * airDay

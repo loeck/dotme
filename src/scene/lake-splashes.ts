@@ -622,6 +622,7 @@ export class LakeSplashes {
     const profile = createSplashProfile(() => this.random(), strength)
     this.emitted++
     this.impacts.add(x, z, time, strength)
+    this.onReturn?.(x, z, 0.15 + strength * 0.2, -(0.012 + strength * 0.05))
     const surface = WATER_LEVEL + this.sampleField(x, z, time, wind, 0.08)[0]
     const { count } = profile
     for (let i = 0; i < count; i++) {

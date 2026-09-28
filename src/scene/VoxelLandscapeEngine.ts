@@ -254,6 +254,7 @@ export class VoxelLandscapeEngine {
   private pointerActive = false
   private pointerType = 'mouse'
   private primaryMouseDown = false
+  private skyPointerId = -1
   private pointerHeight = 0
   private pointerRevision = 0
   private pointerBusy = false
@@ -984,7 +985,7 @@ export class VoxelLandscapeEngine {
     if (Math.abs(this.blockStrength - blockTarget) < 0.0005) this.blockStrength = blockTarget
     this.details?.setWaterfallBlock(this.blockPoint.x, this.blockPoint.y, 0.24, this.blockStrength)
     const skyPointer =
-      this.primaryMouseDown &&
+      (this.primaryMouseDown || this.skyPointerId >= 0) &&
       pointerOnScene &&
       !this.reducedMotion &&
       !waterPoint &&
@@ -1073,7 +1074,13 @@ export class VoxelLandscapeEngine {
       return
     }
     const point = this.hitWater(event.clientX, event.clientY)
-    if (!point) return
+    if (!point) {
+      if (event.pointerType === 'touch') {
+        this.skyPointerId = event.pointerId
+        this.renderer.domElement.setPointerCapture(event.pointerId)
+      }
+      return
+    }
     this.bait = { x: point.x, z: point.z, born: this.elapsed }
     this.details?.pointerBurst(point.x, point.z, 0.55, this.elapsed, this.wind.sample(this.elapsed))
     this.dragging = true
@@ -1088,7 +1095,12 @@ export class VoxelLandscapeEngine {
 
   private onPointerMove = (event: PointerEvent) => {
     if (!this.focused || document.hidden) return
-    if (!event.isPrimary || (this.dragging && event.pointerId !== this.dragPointerId)) return
+    if (
+      !event.isPrimary ||
+      (this.dragging && event.pointerId !== this.dragPointerId) ||
+      (this.skyPointerId >= 0 && event.pointerId !== this.skyPointerId)
+    )
+      return
     this.pointerType = event.pointerType
     this.setPrimaryMouseDown(event.pointerType === 'mouse' && (event.buttons & 1) !== 0)
     this.pointerActive = event.pointerType !== 'touch' || event.buttons !== 0
@@ -1118,6 +1130,10 @@ export class VoxelLandscapeEngine {
   private onPointerUp = (event: PointerEvent) => {
     if (!event.isPrimary) return
     if (event.button === 0 || event.type === 'pointercancel') this.setPrimaryMouseDown(false)
+    if (event.pointerId === this.skyPointerId) {
+      this.onPointerLeave()
+      return
+    }
     if (event.pointerType === 'touch' && event.pointerId !== this.dragPointerId) {
       this.onPointerLeave()
       return
@@ -1131,12 +1147,13 @@ export class VoxelLandscapeEngine {
   }
 
   private onLostCapture = () => {
-    if (this.dragging) this.onPointerLeave()
+    if (this.dragging || this.skyPointerId >= 0) this.onPointerLeave()
   }
 
   private onPointerLeave = () => {
-    const pointerId = this.dragPointerId
+    const pointerId = this.dragPointerId >= 0 ? this.dragPointerId : this.skyPointerId
     this.setPrimaryMouseDown(false)
+    this.skyPointerId = -1
     this.pointerActive = false
     this.dragging = false
     this.dragPointerId = -1

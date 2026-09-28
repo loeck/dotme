@@ -90,7 +90,8 @@ export class SceneContrast {
               .mul((x === 0 ? 0.5 : 0.25) * (y === 0 ? 0.5 : 0.25)),
           )
         }
-      const ink = smoothstep(0.154, 0.204, luminance).oneMinus(),
+      // Switch decisively between light and dark ink over midtone clouds.
+      const ink = smoothstep(0.17, 0.185, luminance).oneMinus(),
         support = smoothstep(0.08, 0.35, ink).mul(0.7)
       const coverage = alpha.add(max(0, expanded.sub(alpha)).mul(support))
       return renderOutput(

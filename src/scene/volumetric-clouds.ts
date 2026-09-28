@@ -43,7 +43,7 @@ import type { CloudRenderer } from './cloud-shadows'
 import { CloudShadows } from './cloud-shadows'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
-import { SkyCursorTrace } from './sky-cursor-trace'
+import { SkyCursorTrace, skyTraceSample } from './sky-cursor-trace'
 import type { WeatherPreset } from './weather'
 import type { WindModel } from './wind'
 
@@ -172,7 +172,7 @@ export class VolumetricClouds {
     this.camera = new CubeCamera(0.1, 2, required(this.targets[0]))
     this.volume = createCloudVolume(seed, weather, this.noise)
     const { density, uniforms: u } = this.volume
-    const cursorTrace = texture(this.cursorTrace.texture)
+    const cursorTrace = texture<'vec4'>(this.cursorTrace.texture)
     this.material.fragmentNode = Fn(() => {
       const ray = normalize(positionLocal),
         radiance = vec3(0).toVar(),
@@ -183,7 +183,7 @@ export class VolumetricClouds {
         If(entry.lessThan(exit), () => {
           const traceUv = ray.xz.div(ray.y.add(1)).mul(0.5).add(0.5)
           const erosion = float(0).toVar()
-          If(cursorTrace.sample(traceUv).r.greaterThan(0.001), () => {
+          If(skyTraceSample(ray, cursorTrace).greaterThan(0.001), () => {
             const point = ray.mul(entry)
             const noisePoint = vec3(
               point.x.sub(u.uDisplacement.x),
@@ -229,7 +229,12 @@ export class VolumetricClouds {
       const fade = smoothstep(0.035, 0.075, ray.y)
       return vec4(sqrt(max(radiance.mul(fade), vec3(0)).div(16)), mix(1, transmission, fade))
     })()
-    this.shadows = new CloudShadows(renderer, this.volume, this.uniforms.uCloudBlend)
+    this.shadows = new CloudShadows(
+      renderer,
+      this.volume,
+      this.uniforms.uCloudBlend,
+      this.cursorTrace,
+    )
     this.shadows.uniforms.uCloudShadowStrength.value = weather === 'clear' ? 0 : 1
     this.shadows.uniforms.uHorizonSeed.value = (seed % 4096) / 379
     this.shadows.uniforms.uHorizonMobile.value = mobile ? 1 : 0

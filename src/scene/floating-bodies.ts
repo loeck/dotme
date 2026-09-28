@@ -23,8 +23,7 @@ import type { WindState } from './wind'
 /** Floaters strike terrain only: neither droplets, fish, nor each other. */
 const FLOATER_GROUPS = (0x0002 << 16) | 0x0001
 const GRAVITY = 9.81
-const SPLASH_REACH = 2.5
-const SPLASH_SPEED = 4
+const SPLASH_SPEED = 1
 const LEAF_COLORS = [0x4a7c3a, 0x5d8f43, 0x3d6e33]
 const BUOY_POINTS = [
   [0, 0],
@@ -83,7 +82,7 @@ export class FloatingBodies {
     this.physics = physics
     this.state = (seed ^ 0x3f10a7) >>> 0
     const specs: FloaterSpec[] = [
-      { radius: 0.09, density: 500, windage: 0.25, flatten: 1, color: 0xc23b2e },
+      { radius: 0.075, density: 500, windage: 0.25, flatten: 1, color: 0x91625a },
     ]
     const leaves = mobile ? 2 : 6
     for (let i = 0; i < leaves; i++)
@@ -272,17 +271,21 @@ export class FloatingBodies {
     this.mesh.setMatrixAt(index, this.transform.matrix)
   }
 
-  /** A splash shoves nearby floaters outward, up and into a roll; Rapier integrates the rest. */
+  /** Only the impact itself shoves a floater; travelling waves act through surface buoyancy. */
   splash(x: number, z: number, energy: number) {
+    if (!Number.isFinite(x + z + energy) || energy <= 0) return
+    const strength = Math.min(1, energy)
     for (const floater of this.floaters) {
       const position = floater.body.translation()
       const dx = position.x - x,
         dz = position.z - z
       const distance = Math.hypot(dx, dz)
-      if (distance >= SPLASH_REACH) continue
+      const reach = 0.15 + strength * 0.2 + floater.radius
+      if (distance >= reach) continue
       const nx = distance > 1e-4 ? dx / distance : 0,
         nz = distance > 1e-4 ? dz / distance : 0
-      const impulse = floater.mass * energy * SPLASH_SPEED * (1 - distance / SPLASH_REACH)
+      const falloff = 1 - distance / reach
+      const impulse = floater.mass * strength * SPLASH_SPEED * falloff * falloff
       floater.body.applyImpulse({ x: nx * impulse, y: impulse * 0.6, z: nz * impulse }, true)
       // Solid-sphere inertia (2/5 m r²) spinning at half the rolling rate of the shove.
       const roll = 0.2 * impulse * floater.radius

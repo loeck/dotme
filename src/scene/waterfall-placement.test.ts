@@ -167,10 +167,14 @@ describe('procedural waterfall placement', () => {
     },
   )
 
-  it.each([false, true])(
-    'omits the waterfall for a seed without a source (mobile=%s)',
-    (mobile) => {
-      expect(createVoxelWorld(0, mobile).waterfall).toBeNull()
-    },
-  )
+  it.each(
+    [false, true].flatMap((mobile) =>
+      [0, 1, 2, 3, 4, 5, 7, 12, 42, 99, 1234, 9182].map((seed) => ({ mobile, seed })),
+    ),
+  )('keeps a visible source (mobile=$mobile, seed=$seed)', ({ mobile, seed }) => {
+    const fall = required(createVoxelWorld(seed, mobile).waterfall)
+    expect(fall.x).toBeLessThan(0)
+    expect(fall.width).toBeGreaterThanOrEqual(mobile ? 0.7 : 1.5)
+    expect(fall.basin.length).toBeGreaterThan(0)
+  })
 })

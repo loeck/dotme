@@ -40,8 +40,11 @@ import type {
 } from 'three/webgpu'
 
 import { required } from '../invariant'
+import { CAMERA_REST } from './camera-rig'
 import type { CloudVolume } from './cloud-density'
 import { distantLightVisibility } from './distant-horizon'
+import { skyTraceSample } from './sky-cursor-trace'
+import type { SkyCursorTrace } from './sky-cursor-trace'
 
 export const CLOUD_SHADOW_SIZE = 768
 const TILE = 384
@@ -116,10 +119,16 @@ export class CloudShadows {
   }
   private readonly renderer: CloudRenderer
   private readonly volume: CloudVolume
-  constructor(renderer: CloudRenderer, volume: CloudVolume, blend: UniformNode<'float', number>) {
+  constructor(
+    renderer: CloudRenderer,
+    volume: CloudVolume,
+    blend: UniformNode<'float', number>,
+    cursorTrace: SkyCursorTrace,
+  ) {
     this.renderer = renderer
     this.volume = volume
     this.uniforms.uCloudShadowBlend = blend
+    const skyTrace = texture<'vec4'>(cursorTrace.texture)
     this.atlas.texture.name = 'Light-space cloud transmission atlas'
     this.atlas.scissorTest = true
     this.material.vertexNode = vec4(uv().mul(vec2(2, -2)).add(vec2(-1, 1)), 0, 1)
@@ -133,13 +142,25 @@ export class CloudShadows {
             .add(this.up.mul(uv().y.sub(0.5)))
             .mul(CLOUD_SHADOW_SIZE),
         )
+        // Sample the aperture where this light ray crosses the cloud deck.
+        // A passage away from the celestial direction stays a sky opening,
+        // without creating a disconnected shaft in the view.
+        const cloudPoint = ground.add(direction.mul(float(110).sub(ground.y).div(direction.y)))
+        const opening = skyTraceSample(
+          cloudPoint.sub(vec3(CAMERA_REST.x, CAMERA_REST.y, CAMERA_REST.z)),
+          skyTrace,
+        ).mul(smoothstep(0.1, 0.35, skyTraceSample(direction, skyTrace)))
         const stride = min(float(60).div(direction.y), 2400).div(32)
         const entry = clamp(float(80).sub(ground.y).div(direction.y), -12000, 12000)
         const opticalDepth = float(0).toVar()
         Loop(32, ({ i }) => {
           opticalDepth.addAssign(
             volume
-              .density(ground.add(direction.mul(entry.add(float(i).add(0.5).mul(stride)))), true)
+              .density(
+                ground.add(direction.mul(entry.add(float(i).add(0.5).mul(stride)))),
+                true,
+                opening,
+              )
               .mul(stride)
               .mul(0.055),
           )
