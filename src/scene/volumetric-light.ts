@@ -52,6 +52,20 @@ export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float
 export function airPhase(cosine: Node<'float'>) {
   return float(0.0795774715 * 0.64).div(float(1.36).sub(cosine.mul(1.2)).pow(1.5))
 }
+/** Moonlit air scatters less than sunlit air; day shafts keep full strength. */
+export function airSunScale(daylight: number) {
+  return 0.35 + 0.65 * Math.max(0, Math.min(1, daylight))
+}
+const smooth01 = (edge0: number, edge1: number, x: number) => {
+  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)))
+  return t * t * (3 - 2 * t)
+}
+/** High sun floods the frame through the forward lobe; golden hours keep their glow. */
+export function airElevationScale(directionY: number, daylight: number) {
+  const dayGate = smooth01(0.3, 0.7, daylight)
+  const elevationGate = 1 - smooth01(0.2, 0.6, directionY) * 0.85
+  return 1 - dayGate * (1 - elevationGate)
+}
 export class VolumetricLight {
   readonly target = new RenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false })
   readonly airTarget = new RenderTarget(1, 1, {
@@ -141,7 +155,7 @@ export class VolumetricLight {
               visible.mulAssign(cloudShadow(world, clouds))
             })
             const source = ambient
-              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(3))
+              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(2))
               .mul(sigma)
             radiance.addAssign(accumulated.mul(source).mul(integral))
             accumulated.mulAssign(transmission)
@@ -198,7 +212,13 @@ export class VolumetricLight {
   }
   update(light: LightingState) {
     this.sunDirection.value.copy(light.direction)
-    this.sunRadiance.value.copy(light.color).multiplyScalar(light.intensity)
+    this.sunRadiance.value
+      .copy(light.color)
+      .multiplyScalar(
+        light.intensity *
+          airSunScale(light.daylight) *
+          airElevationScale(light.direction.y, light.daylight),
+      )
     const airDay = 1 - light.daylight * 0.7
     this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
     this.skyAir.value = 0.5 * airDay

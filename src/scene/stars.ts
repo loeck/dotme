@@ -119,7 +119,7 @@ export function stellarRadiance(
   const q = q0.add(q0.dot(q0.yxz.add(33.33)))
   const random = fract(q.xxy.add(q.yzz).mul(q.zyx))
   const offset = fract(sky).sub(random.xy.mul(0.7).add(0.15))
-  const brightness = random.z.pow(7)
+  const brightness = random.z.pow(4.5)
   const visibility = smoothstep(
     0,
     NIGHT_FADE,
@@ -137,7 +137,7 @@ export function stellarRadiance(
   const lunar = mix(0.15, 1, smoothstep(0.02, 0.3, moonAngle))
   const radiance = mix(vec3(0.65, 0.78, 1), vec3(1, 0.88, 0.7), random.x)
     .mul(point)
-    .mul(brightness.mul(0.22).add(0.008))
+    .mul(brightness.mul(0.38).add(0.01))
     .mul(visibility)
     .mul(twinkle)
     .mul(horizon)

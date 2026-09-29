@@ -133,4 +133,21 @@ describe('static terrain', () => {
     },
     30_000,
   )
+
+  it('mosses upward ground faces above the waterline', () => {
+    const terrain = prepareTerrain(createVoxelWorld(42, false))
+    const greenExcess = (face: number) => {
+      let total = 0,
+        count = 0
+      for (const batch of terrain.batches) {
+        if (batch.material !== 'ground' || batch.face !== face) continue
+        for (let i = 0; i < batch.colors.length; i += 3)
+          total += required(batch.colors[i + 1]) - required(batch.colors[i])
+        count += batch.colors.length / 3
+      }
+      return count > 0 ? total / count : 0
+    }
+    expect(greenExcess(2)).toBeGreaterThan(greenExcess(0) + 0.02)
+    expect(greenExcess(2)).toBeGreaterThan(greenExcess(4) + 0.02)
+  }, 30_000)
 })

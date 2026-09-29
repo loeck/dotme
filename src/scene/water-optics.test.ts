@@ -26,4 +26,12 @@ describe('weather-driven water optics', () => {
     expect(sampleWaterOptics(-3, -1)).toEqual(sampleWaterOptics(0, 0))
     expect(sampleWaterOptics(4, 40)).toEqual(sampleWaterOptics(1, 9))
   })
+
+  it('mutes light penetration under cloud cover without touching agitation', () => {
+    const clear = sampleWaterOptics(0, 2, 1)
+    const overcast = sampleWaterOptics(0, 2, 0.65)
+    expect(overcast.clarity).toBeLessThan(clear.clarity)
+    expect(overcast.agitation).toBe(clear.agitation)
+    expect(sampleWaterOptics(0, 2, NaN)).toEqual(clear)
+  })
 })

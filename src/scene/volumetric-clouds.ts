@@ -194,8 +194,9 @@ export class VolumetricClouds {
             erosion.assign(cursorTrace.sample(traceUv.add(wander)).r)
           })
           const stride = exit.sub(entry).div(this.profile.steps)
-          const phase = float(0.75).div(
-            max(0.05, float(1.25).sub(ray.dot(u.uCloudLightDirection))).pow(1.5),
+          const phase = min(
+            float(10),
+            float(0.75).div(max(0.05, float(1.25).sub(ray.dot(u.uCloudLightDirection))).pow(1.5)),
           )
           Loop(this.profile.steps, ({ i }) => {
             const p = ray.mul(entry.add(float(i).add(0.5).mul(stride)))
@@ -215,7 +216,7 @@ export class VolumetricClouds {
                 sky = exp(density(p.add(vec3(0, 18, 0)), false).mul(-18 * 0.055))
               const source = u.uCloudAmbient.rgb
                 .mul(sky.mul(1.65).add(0.25))
-                .add(u.uCloudDirect.rgb.mul(moon).mul(phase.mul(0.35).add(0.3)))
+                .add(u.uCloudDirect.rgb.mul(moon).mul(phase.mul(0.2).add(0.3)))
               const opacity = exp(d.mul(stride).mul(-0.055)).oneMinus()
               radiance.addAssign(transmission.mul(opacity).mul(source))
               transmission.mulAssign(opacity.oneMinus())

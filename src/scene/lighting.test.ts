@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { cloudShadowFrame } from './cloud-shadows'
-import { fadeNightLight, sampleLighting } from './lighting'
+import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
 import { parseInitialTime, SolarClock } from './solar-clock'
 import { parseWeather, WEATHER } from './weather'
 
@@ -69,6 +69,20 @@ describe('solar lighting and light-space projection', () => {
     expect(sampleLighting(18 * 3600).sunDirection.y).toBeCloseTo(0)
     expect(sampleLighting(0).sunIntensity).toBe(0)
     expect(sampleLighting(0).moonIntensity).toBeGreaterThan(1)
+  })
+  it('keeps both golden-hour discs and the night moon in front of the camera', () => {
+    const morning = sampleLighting(6.5 * 3600)
+    expect(morning.sunDirection.z).toBeLessThan(0)
+    expect(morning.sunDirection.x).toBeGreaterThan(0)
+    const evening = sampleLighting(17.5 * 3600)
+    expect(evening.sunDirection.z).toBeLessThan(0)
+    expect(evening.sunDirection.x).toBeLessThan(0)
+    for (const hour of [21, 23, 0, 1]) {
+      const moon = sampleLighting(hour * 3600).moonDirection
+      expect(moon.z).toBeLessThan(0.2)
+      expect(moon.y).toBeGreaterThan(0.15)
+      expect(moon.y).toBeLessThan(0.6)
+    }
   })
   it('keeps late-September sun up at 18:26 instead of forcing night at 18:00', () => {
     const paris = { sunrise: 27_720, sunset: 71_040 }
@@ -150,6 +164,23 @@ describe('solar lighting and light-space projection', () => {
         required(dusk[2]),
       )
     }
+  })
+  it('veils low sun under cloud cover and burns off as it climbs', () => {
+    expect(mistFactor(0.05, 0.65)).toBeGreaterThan(0.2)
+    expect(mistFactor(0.05, 1)).toBe(0)
+    expect(mistFactor(0.5, 0.65)).toBe(0)
+    expect(mistFactor(0.05, 0.65)).toBeGreaterThan(mistFactor(0.05, 0.9))
+  })
+  it('exposes the weather diffusion factor for sky and water grading', () => {
+    expect(sampleLighting(12 * 3600, 0, 'clear').weatherDiffuse).toBe(WEATHER.clear.diffuse)
+    expect(sampleLighting(12 * 3600, 0, 'overcast').weatherDiffuse).toBe(WEATHER.overcast.diffuse)
+  })
+  it('dims and greys water scatter under cloud cover', () => {
+    const clear = sampleLighting(12 * 3600, 0, 'clear').waterScatter
+    const overcast = sampleLighting(12 * 3600, 0, 'overcast').waterScatter
+    expect(overcast.g + overcast.b).toBeLessThan(clear.g + clear.b)
+    expect(overcast.g / overcast.r).toBeLessThan(clear.g / clear.r)
+    expect(overcast.g / overcast.r).toBeLessThan(2)
   })
   it('grades water scatter turquoise by day and dark navy by night', () => {
     const noon = sampleLighting(12 * 3600).waterScatter

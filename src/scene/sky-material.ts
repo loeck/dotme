@@ -5,6 +5,7 @@ import {
   cameraViewMatrix,
   clamp,
   cross,
+  dot,
   exp,
   float,
   length,
@@ -33,6 +34,8 @@ import type { VolumetricClouds } from './volumetric-clouds'
 
 const SUN_RADIUS = 0.0097
 
+const luminanceOf = (value: Node<'vec3'>) => dot(value, vec3(0.2126, 0.7152, 0.0722))
+
 function skyUniforms(seed: number, mobile: boolean) {
   const moon = sampleMoonLight(0),
     light = sampleLighting(0)
@@ -54,6 +57,8 @@ function skyUniforms(seed: number, mobile: boolean) {
     uMoonIntensity: uniform(moon.intensity),
     uSeed: uniform((seed % 4096) / 379),
     uMobile: uniform(mobile ? 1 : 0),
+    uWeatherLight: uniform(1),
+    uOvercast: uniform(0),
   }
 }
 type SkyUniforms = ReturnType<typeof skyUniforms>
@@ -68,7 +73,7 @@ function solarDisc(direction: Node<'vec3'>, u: SkyUniforms) {
     front = smoothstep(0, 0.2, direction.dot(sun))
   const limb = pow(sqrt(clamp(radius.mul(radius).oneMinus(), 0.0001, 1)), vec3(0.397, 0.503, 0.652))
   const disc = smoothstep(0.94, 1.06, radius).oneMinus().mul(front)
-  const corona = exp(radius.mul(-0.9)).mul(0.012).mul(front)
+  const corona = exp(radius.mul(-1.6)).mul(0.006).mul(front)
   return u.uSunDisc.rgb.mul(limb.mul(disc).add(corona)).mul(u.uShowSun)
 }
 
@@ -90,13 +95,18 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       elevation.sub(0.018).sub(variation.sub(0.5).mul(0.012)).mul(12).pow2().negate(),
     )
     const valley = exp(azimuth.sub(0.08).div(0.46).pow2().negate())
+    const radiance = sky.radiance(direction)
+    const radianceGrey = luminanceOf(radiance)
+    const dimRadiance = mix(radiance, vec3(radianceGrey), u.uOvercast.mul(0.45)).mul(
+      u.uWeatherLight,
+    )
     let color = mix(
       vec3(0.0026, 0.0038, 0.0051),
       vec3(0.012, 0.018, 0.027),
       horizon.mul(variation.mul(0.27).add(valley.mul(0.15)).add(0.58)),
     )
       .mul(night)
-      .add(sky.radiance(direction))
+      .add(dimRadiance)
       .add(solarDisc(direction, u))
     const moonAngle = acos(clamp(direction.dot(u.uMoonDirection), -1, 1))
     const disc = smoothstep(0.008, 0.01, moonAngle).oneMinus(),
@@ -111,7 +121,7 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .add(cloud.rgb)
     // Distant ridges and mist take the sky's own horizon light in their direction:
     // warm towards the sun, rose and blue under the Earth's shadow.
-    const air = sky.horizon(direction)
+    const air = sky.horizon(direction).mul(u.uWeatherLight)
     const tone = (nightTone: Node<'vec3'>, strength: number) =>
       nightTone.mul(night).add(air.mul(strength))
     const drift = u.uTime.mul(0.011),
@@ -160,6 +170,15 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       tone(vec3(0.023, 0.033, 0.044), 0.5),
       lowMist.mul(mistNoise.mul(0.16).add(detail.mul(0.055)).add(pool.mul(0.22)).add(0.12)),
     )
+    const mistBand = smoothstep(0.05, 0.55, elevation).oneMinus()
+    const lowSun = smoothstep(0, 0.35, u.uSunDirection.y)
+      .oneMinus()
+      .mul(smoothstep(-0.06, 0.02, u.uSunDirection.y))
+    const sunward = smoothstep(0.3, 0.95, dot(direction, u.uSunDirection))
+    const mistAmount = lowSun.mul(u.uOvercast).mul(mistBand).mul(sunward.mul(0.8).add(0.6))
+    const airGrey = luminanceOf(air)
+    const mistColor = mix(vec3(airGrey), air, 0.22).mul(0.55)
+    color = mix(color, mistColor, mistAmount)
     this.fragmentNode = vec4(
       color.mul(u.uReflectionCapture.oneMinus()),
       float(1).sub(u.uReflectionCapture),
@@ -176,6 +195,8 @@ export function createSkyMaterial(
 }
 export function updateSkyLighting(material: SkyMaterial, light: LightingState, showSun: boolean) {
   const u = material.uniforms
+  u.uWeatherLight.value = light.weatherDiffuse ** 2
+  u.uOvercast.value = 1 - light.weatherDiffuse
   u.uSunDirection.value.copy(light.sunDirection)
   u.uSunApparent.value.copy(light.sunApparent)
   u.uSunFlattening.value = light.sunFlattening

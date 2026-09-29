@@ -105,6 +105,28 @@ describe('voxel lake world', () => {
     expect(blockedChannel).toBe(false)
   })
 
+  it('plants deterministic trees on high ground, clear of water and falls', () => {
+    const first = worldFor(9182, false)
+    const second = createVoxelWorld(9182, false)
+    expect(first.trees).toEqual(second.trees)
+    expect(first.trees.length).toBeGreaterThan(0)
+    expect(first.trees.length).toBeLessThanOrEqual(14)
+    expect(first.trees.some((tree) => tree.z < -3 && tree.z > -40)).toBe(true)
+    for (const tree of first.trees) {
+      expect(tree.y).toBeGreaterThan(0.4)
+      expect(tree.z).toBeLessThan(0)
+      expect(tree.scale).toBeGreaterThanOrEqual(0.9)
+      expect(tree.scale).toBeLessThanOrEqual(1.7)
+    }
+    for (let a = 0; a < first.trees.length; a++)
+      for (let b = a + 1; b < first.trees.length; b++) {
+        const left = required(first.trees[a]),
+          right = required(first.trees[b])
+        expect((left.x - right.x) ** 2 + (left.z - right.z) ** 2).toBeGreaterThanOrEqual(6.25)
+      }
+    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(7)
+  })
+
   it.each(cases)(
     'seeds three detached right islands while keeping the lake channel open (mobile=$mobile, seed=$seed)',
     ({ mobile, seed }) => {

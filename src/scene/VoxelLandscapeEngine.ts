@@ -28,7 +28,7 @@ import {
   PlaneGeometry,
   PointLight,
   Raycaster,
-  ReinhardToneMapping,
+  ACESFilmicToneMapping,
   SRGBColorSpace,
   Scene,
   SphereGeometry,
@@ -58,7 +58,7 @@ import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
-import { fadeNightLight, sampleLighting } from './lighting'
+import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import type { PhysicsWorld } from './physics-world'
@@ -82,7 +82,7 @@ import { SubmergedScene } from './submerged-scene'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
 import type { TerrainBatch } from './voxel-mesh'
-import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
+import type { VoxelLamp, VoxelMaterial, VoxelTree, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
@@ -204,7 +204,8 @@ export class VoxelLandscapeEngine {
   private readonly weather
   private readonly showSun: boolean
   private readonly ambient = new AmbientLight()
-  private readonly fog = new FogExp2(0x14202a, 0.009)
+  private readonly baseFogDensity = 0.0105
+  private readonly fog = new FogExp2(0x14202a, this.baseFogDensity)
   private readonly scene = new Scene()
   private readonly camera = new PerspectiveCamera(54, 1, 0.05, 500)
   private readonly raycaster = new Raycaster()
@@ -462,7 +463,7 @@ export class VoxelLandscapeEngine {
     )
     this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower))
     this.renderer.outputColorSpace = SRGBColorSpace
-    this.renderer.toneMapping = ReinhardToneMapping
+    this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
     this.renderer.domElement.dataset.seed = String((options.seed ?? 0) >>> 0)
     this.renderer.domElement.dataset.weather = this.weather
@@ -692,14 +693,14 @@ export class VoxelLandscapeEngine {
 
     this.buildShadowCasters(terrain)
 
-    const bulbGeometry = new SphereGeometry(0.085, 6, 5)
-    const glowGeometry = new PlaneGeometry(1.3, 1.3)
+    const bulbGeometry = new SphereGeometry(0.11, 6, 5)
+    const glowGeometry = new PlaneGeometry(2.0, 2.0)
     this.geometries.push(this.resources.own(bulbGeometry), this.resources.own(glowGeometry))
     world.lamps.forEach((lamp) => {
       const bulb = new Mesh(
         bulbGeometry,
         new MeshBasicNodeMaterial({
-          color: 0xb4d9f5,
+          color: 0xffc37a,
           transparent: true,
           opacity: 0,
           depthWrite: false,
@@ -711,7 +712,7 @@ export class VoxelLandscapeEngine {
       this.scene.add(bulb)
       this.objects.push(bulb)
       this.materials.push(this.resources.own(bulb.material))
-      const light = new PointLight(0xa5d4ee, 22 * lamp.intensity, 8, 2)
+      const light = new PointLight(0xffab5e, 22 * lamp.intensity, 8, 2)
       light.position.copy(bulb.position)
       this.configurePointShadow(light)
       this.scene.add(light)
@@ -728,7 +729,7 @@ export class VoxelLandscapeEngine {
       const p = uv().sub(0.5).mul(2)
       const r = p.dot(p)
       glowMaterial.fragmentNode = vec4(
-        uniform(new Color(0xa5d9ff))
+        uniform(new Color(0xffb46b))
           .mul(
             exp(r.mul(-39))
               .mul(0.76)
@@ -753,6 +754,7 @@ export class VoxelLandscapeEngine {
         glowStrength,
       })
     })
+    this.buildTrees(world.trees)
 
     // A few dim, square flecks drift in depth. They provide a living scale cue without
     // turning the open sky into a particle field.
@@ -835,6 +837,34 @@ export class VoxelLandscapeEngine {
     }
     this.details?.setEnvironment(environment)
     if (this.reducedMotion) this.requestFrame()
+  }
+
+  private buildTrees(trees: readonly VoxelTree[]) {
+    if (!trees.length) return
+    const parts = [
+      { geometry: new BoxGeometry(0.16, 0.62, 0.16), color: 0x4a3a2a, dy: 0.31 },
+      { geometry: new BoxGeometry(0.72, 0.55, 0.72), color: 0x3f6b3a, dy: 0.85 },
+      { geometry: new BoxGeometry(0.44, 0.38, 0.44), color: 0x4d7d46, dy: 1.28 },
+    ] as const
+    const placement = new Object3D()
+    for (const part of parts) {
+      const material = new MeshStandardNodeMaterial({ color: part.color, roughness: 0.95 })
+      this.materials.push(this.resources.own(material))
+      this.geometries.push(this.resources.own(part.geometry))
+      const mesh = new InstancedMesh(part.geometry, material, trees.length)
+      trees.forEach((tree, index) => {
+        placement.position.set(tree.x, tree.y + part.dy * tree.scale, tree.z)
+        placement.scale.setScalar(tree.scale)
+        placement.updateMatrix()
+        mesh.setMatrixAt(index, placement.matrix)
+      })
+      mesh.instanceMatrix.needsUpdate = true
+      mesh.castShadow = true
+      mesh.frustumCulled = false
+      this.scene.add(mesh)
+      this.objects.push(mesh)
+      this.resources.own(mesh)
+    }
   }
 
   private buildShadowCasters(terrain: PreparedWorld['terrain']) {
@@ -1576,6 +1606,8 @@ export class VoxelLandscapeEngine {
     uniforms.uDirectSun.value =
       Math.max(0, (WEATHER[this.weather].diffuse - 0.5) / 0.5) *
       (1 - 0.5 * this.rain.simulation.state.intensity)
+    this.fog.density =
+      this.baseFogDensity * (1 + mistFactor(light.sunDirection.y, light.weatherDiffuse) * 1.4)
     this.atmosphere.update(light)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
@@ -1604,7 +1636,11 @@ export class VoxelLandscapeEngine {
       })
     }
     updateWindUniforms(this.windUniforms, wind)
-    const optics = sampleWaterOptics(this.rain.simulation.state.intensity, wind.speed)
+    const optics = sampleWaterOptics(
+      this.rain.simulation.state.intensity,
+      wind.speed,
+      WEATHER[this.weather].diffuse,
+    )
     uniforms.uWaterClarity.value = optics.clarity
     uniforms.uWaterAgitation.value = optics.agitation
     uniforms.uRainIntensity.value = this.rain.group.visible
@@ -1701,9 +1737,9 @@ export class VoxelLandscapeEngine {
       lamp.glow.position.copy(lamp.bulb.position)
       lamp.glow.quaternion.copy(this.camera.quaternion)
       lamp.light.intensity = 22 * source.intensity * energy
-      lamp.glowStrength.value = 0.58 * energy
+      lamp.glowStrength.value = 1.15 * energy
       lamp.bulb.material.opacity = presence
-      lamp.bulb.material.color.copy(lamp.color).multiplyScalar(breathing)
+      lamp.bulb.material.color.copy(lamp.color).multiplyScalar(breathing * 1.6)
     }
     if (this.moteMesh) {
       this.moteMesh.visible = this.nightLightFade > 0

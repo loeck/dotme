@@ -15,7 +15,7 @@ export const EARTH = {
   mieScattering: 3.996e-3,
   mieExtinction: 4.44e-3,
   mieHeight: 1.2,
-  mieAnisotropy: 0.8,
+  mieAnisotropy: 0.68,
   ozoneAbsorption: [0.65e-3, 1.881e-3, 0.085e-3],
   ozoneCenter: 25,
   ozoneHalfWidth: 15,

@@ -4,6 +4,7 @@ import { required } from '../invariant'
 import { terrainEyes } from './camera-rig'
 import { prepareGeometryBounds } from './geometry-bounds'
 import type { PreparedBounds } from './geometry-bounds'
+import { WATER_LEVEL } from './lake-bed'
 import { createVoxelIndex, overlappingVoxels } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelMaterial, VoxelWorld } from './voxel-world'
@@ -90,6 +91,13 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   let offset = 0,
     exposedFaces = 0
   const color = new Color()
+  const moss = new Color(0x648052)
+  const topColor = new Color()
+  const mossPatch = (id: number) => {
+    let n = Math.imul(id + 1, 0x85ebca6b)
+    n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35)
+    return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
+  }
   for (const material of ['ground', 'shore', 'rock'] as const) {
     const chunks = new Map<string, number[]>()
     for (let i = offset; i < offset + world.groups[material].count; i++) {
@@ -113,6 +121,11 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
       for (const id of ids) {
         const voxel = required(world.voxels[id])
         color.setHex(voxel.color)
+        const mossy =
+          material === 'ground' && voxel.y + voxel.size / 2 > WATER_LEVEL + 0.05
+            ? 0.65 + 0.3 * mossPatch(id)
+            : 0
+        topColor.copy(color).lerp(moss, mossy)
         const visible = exposedVoxelFaces(index, id)
         for (let face = 0; face < 6; face++) {
           if (!visible[face]) continue
@@ -126,6 +139,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
             continue
           const { p, n, c, triangles } = required(faces[face])
           const base = p.length / 3
+          const faceColor = face === 2 ? topColor : color
           for (let vertex = face * 4; vertex < face * 4 + 4; vertex++) {
             p.push(
               Math.fround(voxel.x) + positions.getX(vertex) * Math.fround(voxel.size),
@@ -137,7 +151,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
               normals.getY(vertex) * 127,
               normals.getZ(vertex) * 127,
             )
-            c.push(color.r, color.g, color.b)
+            c.push(faceColor.r, faceColor.g, faceColor.b)
           }
           triangles.push(base, base + 2, base + 1, base + 2, base + 3, base + 1)
         }

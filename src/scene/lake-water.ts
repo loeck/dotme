@@ -6,6 +6,7 @@ import {
   clamp,
   dFdx,
   dFdy,
+  dot,
   exp,
   sin,
   floor,
@@ -254,8 +255,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .add(0.02037)
     const reveal = exp(p.sub(u.uPointer.xy).dot(p.sub(u.uPointer.xy)).div(-2.8)).mul(u.uPointer.z)
     const roughness = mix(
-      mix(mix(0.03, 0.09, u.uWaterAgitation), mix(0.07, 0.09, u.uWaterAgitation), u.uNight),
-      0.025,
+      mix(mix(0.018, 0.07, u.uWaterAgitation), mix(0.05, 0.07, u.uWaterAgitation), u.uNight),
+      0.015,
       reveal,
     )
       .pow(2)
@@ -349,7 +350,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(2.8, 6, depth))
       .mul(float(1).sub(smoothstep(24, 48, cameraPosition.xz.sub(p).length())))
     const clarity = max(u.uWaterClarity.mul(nearShallow.mul(0.1).add(0.9)), reveal)
-    const absorption = mix(vec3(0.55, 0.24, 0.15), vec3(0.5, 0.085, 0.04), clarity)
+    const absorption = mix(vec3(0.8, 0.55, 0.45), vec3(0.5, 0.085, 0.04), clarity)
     const transmission = exp(absorption.mul(path).negate())
     const bedBlur = u.uBedTexel.mul(mix(1.1, 0.18, clarity))
     const bedTap = (coordinate: typeof bedUv) =>
@@ -371,10 +372,13 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const shallow = float(1).sub(smoothstep(0.3, 3.2, depth))
     const scatterBody = scatter
       .mul(mix(vec3(1), vec3(0.22, 0.3, 0.48), smoothstep(2, 6, depth).mul(mix(0.35, 1, clarity))))
-      .mul(mix(vec3(1), vec3(0.55, 1.0, 1.15), u.uNight.mul(shallow)))
-    const litBed = bed
+      .mul(mix(vec3(1), vec3(0.4, 0.6, 0.72), u.uNight.mul(shallow)))
+    const bedVeil = float(1).sub(clamp(clarity, 0, 1))
+    const bedLuminance = dot(bed, vec3(0.2126, 0.7152, 0.0722))
+    const bedMuted = mix(bed, vec3(bedLuminance), bedVeil.mul(0.75)).mul(mix(1, 0.7, bedVeil))
+    const litBed = bedMuted
       .mul(exp(absorption.mul(depth).negate()))
-      .mul(mix(vec3(1), vec3(0.34, 0.58, 0.8).mul(shallow.mul(0.9).add(0.1)), u.uNight))
+      .mul(mix(vec3(1), vec3(0.17, 0.3, 0.44).mul(shallow.mul(0.9).add(0.1)), u.uNight))
     const transmitted = mix(
       scatterBody,
       litBed.mul(transmission).add(scatterBody.mul(vec3(1).sub(transmission))),
@@ -400,7 +404,9 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const window = float(1)
       .sub(smoothstep(30, 85, viewDist))
       .mul(u.uWaterClarity)
-    const reflectance = mix(fresnel, min(fresnel, mix(0.14, 0.1, u.uNight)), window)
+      .mul(u.uWaterClarity)
+    const dayFloor = mix(0.14, 1, float(1).sub(clamp(clarity, 0, 1)))
+    const reflectance = mix(fresnel, min(fresnel, mix(dayFloor, 0.1, u.uNight)), window)
     const shorePixel = min(1, fwidth(shore)),
       distance = max(0, shore)
     const crest = smoothstep(-0.018, 0.04, field.x.add(state.x))
@@ -465,11 +471,11 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const sparkleGate = smoothstep(0.982, 1, contactNoise(sparkleCell))
     const glitter = glitterBase
       .mul(u.uLightColor.rgb)
-      .mul(1.4)
+      .mul(1.0)
       .mul(float(1).sub(u.uNight))
       .mul(sunlit)
       .mul(u.uDirectSun)
-      .mul(float(0.55).add(sparkleGate.mul(6)))
+      .mul(float(0.55).add(sparkleGate.mul(3)))
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))
     const sssDirection = normalize(u.uLightDirection.negate().add(normal.mul(WATER_IOR - 1)))
     const sss = clamp(view.dot(sssDirection), 0, 1)

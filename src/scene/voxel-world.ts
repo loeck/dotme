@@ -28,6 +28,13 @@ export type VoxelLamp = Readonly<{
   driftRadius: number
 }>
 
+export type VoxelTree = Readonly<{
+  x: number
+  y: number
+  z: number
+  scale: number
+}>
+
 export type VoxelWaterfall = Readonly<{
   basin: readonly Readonly<{ x: number; z: number; size: number }>[]
   direction: readonly [number, number]
@@ -51,6 +58,7 @@ export type VoxelWorldData = Readonly<{
   shores: Float32Array
   shoreCount: number
   lamps: readonly VoxelLamp[]
+  trees: readonly VoxelTree[]
   bounds: Readonly<{ minX: number; maxX: number; minZ: number; maxZ: number }>
   suggestedCamera: Readonly<{
     position: readonly [number, number, number]
@@ -685,6 +693,52 @@ function selectWaterfall(
       )
 }
 
+/** Trees colonize the mid-ground islets first, then high ground elsewhere. */
+function placeTrees(
+  voxels: readonly Voxel[],
+  groundCount: number,
+  voxelSize: number,
+  seed: number,
+  mobile: boolean,
+  waterfall: VoxelWaterfall | null,
+): VoxelTree[] {
+  const tops = new Map<string, { x: number; top: number; z: number }>()
+  for (let index = 0; index < groundCount; index++) {
+    const voxel = required(voxels[index])
+    const key = `${Math.round(voxel.x / voxelSize)}:${Math.round(voxel.z / voxelSize)}`
+    const top = voxel.y + voxel.size / 2
+    if ((tops.get(key)?.top ?? -Infinity) < top) tops.set(key, { x: voxel.x, top, z: voxel.z })
+  }
+  const clear = [...tops.values()].filter(
+    (cell) =>
+      cell.top > 0.4 &&
+      cell.z < 0 &&
+      (!waterfall || (cell.x - waterfall.x) ** 2 + (cell.z - waterfall.z) ** 2 > 6.25),
+  )
+  const spread = (cell: { x: number; z: number }) =>
+    hash(seed, Math.round(cell.x * 10), Math.round(cell.z * 10), 911)
+  const midground = clear
+    .filter((cell) => cell.z < -3 && cell.z > -40)
+    .sort((a, b) => spread(b) - spread(a))
+  const ridges = clear.filter((cell) => cell.z >= -3 || cell.z <= -40).sort((a, b) => b.top - a.top)
+  const cap = mobile ? 7 : 14
+  const trees: VoxelTree[] = []
+  const plant = (cell: { x: number; top: number; z: number }, gate: number) => {
+    if (trees.length >= cap) return
+    const xi = Math.round(cell.x * 10),
+      zi = Math.round(cell.z * 10)
+    if (hash(seed, xi, zi, 911) < gate) return
+    if (trees.some((tree) => (tree.x - cell.x) ** 2 + (tree.z - cell.z) ** 2 < 6.25)) return
+    trees.push({ x: cell.x, y: cell.top, z: cell.z, scale: 0.9 + hash(seed, xi, zi, 913) * 0.8 })
+  }
+  for (const cell of midground) {
+    if (trees.length >= cap / 2) break
+    plant(cell, 0.3)
+  }
+  for (const cell of midground.concat(ridges)) plant(cell, 0.45)
+  return trees
+}
+
 /**
  * Build a single scene-sized lake: close heavy left shore, a deliberately empty middle water
  * corridor, a recessed right bank and detached islets. The output contains no Three dependency.
@@ -1073,6 +1127,7 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     // the elevated pool remains land in the separate lake-level water mask.
     lakeBed = createLakeBed(voxels, root, mobile)
   }
+  const trees = placeTrees(voxels, resultGroups.ground.count, voxelSize, root, mobile, waterfall)
   return {
     version: 'lake-voxel-v1',
     variant,
@@ -1085,6 +1140,7 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     shores: new Float32Array(shores),
     shoreCount: shores.length / 3,
     lamps,
+    trees,
     bounds: {
       minX: -xCells * voxelSize,
       maxX: xCells * voxelSize,

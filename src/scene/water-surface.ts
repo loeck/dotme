@@ -29,20 +29,20 @@ import type { WindState } from './wind'
 // Crossing swells and directionally spread shorter wind waves. Band amplitudes
 // set the energy without one coherent family of parallel crests.
 export const WIND_WAVES = [
-  [0.55, 12.7, 0.024, 1.3],
-  [1.92, 8.3, 0.016, 4.7],
-  [1.15, 5.1, 0.014, 2.1],
-  [-0.15, 3.6, 0.011, 5.8],
-  [1.62, 2.4, 0.008, 0.4],
+  [0.55, 12.7, 0.017, 1.3],
+  [1.92, 8.3, 0.011, 4.7],
+  [1.15, 5.1, 0.01, 2.1],
+  [-0.15, 3.6, 0.008, 5.8],
+  [1.62, 2.4, 0.0056, 0.4],
   // Calm wind: fade short, fast waves before they dominate the lamp glints.
   // Keep this spectrum uniform across the lake, including the lit left bank.
-  [0.08, 1.61, 0.0048, 3.2],
-  [1.48, 1.07, 0.0024, 5.1],
-  [-0.4, 0.72, 0.0012, 1.7],
-  [1.95, 0.49, 0.00055, 4.2],
-  [0.63, 0.33, 0.00025, 0.9],
-  [-0.77, 0.22, 0.0001, 3.8],
-  [2.16, 0.145, 0.00004, 2.6],
+  [0.08, 1.61, 0.0034, 3.2],
+  [1.48, 1.07, 0.0017, 5.1],
+  [-0.4, 0.72, 0.00085, 1.7],
+  [1.95, 0.49, 0.0004, 4.2],
+  [0.63, 0.33, 0.00018, 0.9],
+  [-0.77, 0.22, 0.00007, 3.8],
+  [2.16, 0.145, 0.00003, 2.6],
 ] as const
 
 // Precompute the same spectrum coefficients for CPU sampling and TSL shading.
