@@ -304,6 +304,7 @@ export class VoxelLandscapeEngine {
     signal.throwIfAborted()
     const resources = new ResourceScope()
     for (const stage of COMPILE_STAGES) performance.clearMarks(`compile:${stage}`)
+    performance.clearMeasures()
     const releaseCompilationScheduler = installCompilationScheduler()
     let engine: VoxelLandscapeEngine | undefined
     const abort = () => {
@@ -328,38 +329,52 @@ export class VoxelLandscapeEngine {
       engine.nightLightFade = initialLight.localLightStrength
       performance.mark('compile:clouds')
       await engine.clouds.compileAsync()
+      engine.snapshotPrograms('clouds')
       performance.mark('compile:sky')
       await engine.skyAtmosphere.compileAsync()
       engine.skyAtmosphere.update(initialLight.sunDirection, initialLight.skyExposure)
       await preparationFrame(signal)
+      engine.snapshotPrograms('sky')
       performance.mark('compile:rain')
       await engine.compileRain()
       await preparationFrame(signal)
+      engine.snapshotPrograms('rain')
       performance.mark('compile:contrast')
       await engine.sceneContrast.compileAsync(options.renderer)
+      engine.snapshotPrograms('contrast')
       performance.mark('compile:simulation')
       await engine.simulation.compileAsync()
       signal.throwIfAborted()
       await preparationFrame(signal)
+      engine.snapshotPrograms('simulation')
       performance.mark('compile:fluid')
       await engine.details?.prepareFluid(options.renderer, engine.camera)
       signal.throwIfAborted()
       await preparationFrame(signal)
+      engine.snapshotPrograms('fluid')
       performance.mark('compile:environment')
       await engine.prepareEnvironment(signal)
       performance.mark('compile:submerged')
       await engine.submerged.compileAsync(options.renderer, engine.scene, engine.camera)
+      engine.snapshotPrograms('submerged')
       signal.throwIfAborted()
       performance.mark('compile:view')
       await engine.compileView(engine.camera, engine.depthFocus.target)
       await preparationFrame(signal)
+      engine.snapshotPrograms('view')
       performance.mark('compile:atmosphere')
       await engine.atmosphere.compileAsync(engine.depthFocus.target, engine.camera, engine.moon)
+      engine.snapshotPrograms('atmosphere')
       performance.mark('compile:depth')
       await engine.depthFocus.compileAsync(options.renderer, engine.camera)
+      engine.snapshotPrograms('depth')
       performance.mark('compile:reflection')
       const reflected = engine.water.getReflectionCamera(engine.camera)
       reflected.copy(engine.camera)
+      // The mirrored capture would rebuild the whole fluid pass for a view that
+      // the lake surface distorts beyond recognition. Curtains and splashes
+      // still reflect; only the fluid volume renders from the main camera.
+      reflected.layers.disable(WATERFALL_FLUID_LAYER)
       engine.water.visible = false
       try {
         await engine.compileView(reflected, engine.water.getRenderTarget(reflected))
@@ -367,9 +382,11 @@ export class VoxelLandscapeEngine {
         engine.water.visible = true
       }
       await preparationFrame(signal)
+      engine.snapshotPrograms('reflection')
       signal.throwIfAborted()
       performance.mark('compile:warmup')
       engine.warmupScene()
+      engine.snapshotPrograms('warmup')
       await preparationFrame(signal)
       signal.throwIfAborted()
       engine.publishDiagnostics()
@@ -1259,6 +1276,10 @@ export class VoxelLandscapeEngine {
     return this.details ? this.details.compileAsync(compile) : compile()
   }
 
+  private snapshotPrograms(stage: string) {
+    performance.measure(`programs:${stage}:${this.renderer.info.memory.programs}`)
+  }
+
   private gpuInfo: (() => SceneGpuInfo) | undefined
   private renderCaptureHook: Window['sceneRenderCapture']
 
@@ -1274,8 +1295,9 @@ export class VoxelLandscapeEngine {
     })
     window.sceneGpuInfo = this.gpuInfo
     this.renderCaptureHook = {
-      start: () => this.renderDiagnostics.start(),
+      start: () => this.renderDiagnostics.start(this.renderer),
       stop: () => this.renderDiagnostics.stop(),
+      resolveGpu: () => this.renderDiagnostics.resolveGpu(),
     }
     window.sceneRenderCapture = this.renderCaptureHook
   }
@@ -1317,6 +1339,7 @@ export class VoxelLandscapeEngine {
     try {
       const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
       if (!cubeCamera) throw new Error('Missing environment cube camera')
+      this.snapshotPrograms('environment')
       // All six faces use the same lighting, layers and attachment formats. Include
       // off-axis meshes once instead of compiling their cached variants on every face.
       performance.mark('compile:env-probe')
@@ -1324,6 +1347,7 @@ export class VoxelLandscapeEngine {
         this.compileView(cubeCamera, this.environmentTarget),
       )
       await preparationFrame(signal)
+      this.snapshotPrograms('env-probe')
       // The material used by the public shadow node is shared with the actual shadow pass.
       performance.mark('compile:env-shadows')
       for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
@@ -1364,6 +1388,7 @@ export class VoxelLandscapeEngine {
     this.moon.shadow.needsUpdate = true
     for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
     this.updateEnvironment(performance.now(), 0)
+    this.snapshotPrograms('env-shadows')
     await preparationFrame(signal)
   }
 

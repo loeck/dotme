@@ -46,22 +46,24 @@ function summarizeRender(capture: SceneRenderCapture) {
     p95IntervalMs: quantile(capture.intervalsMs, 0.95),
     medianCpuMs: quantile(capture.frameCpuMs, 0.5),
     p95CpuMs: quantile(capture.frameCpuMs, 0.95),
+    gpuAvailable: capture.gpuAvailable,
     passes: Object.fromEntries(
-      Object.entries(capture.passes).map(([name, samples]) => [
-        name,
-        {
-          samples: samples.length,
-          medianCpuMs: quantile(
-            samples.map((sample) => sample.cpuMs),
-            0.5,
-          ),
-          p95CpuMs: quantile(
-            samples.map((sample) => sample.cpuMs),
-            0.95,
-          ),
-          renderCalls: samples.reduce((total, sample) => total + sample.renderCalls, 0),
-        },
-      ]),
+      Object.entries(capture.passes).map(([name, samples]) => {
+        const cpuMs = samples.map((sample) => sample.cpuMs)
+        const gpuMs = samples.map((sample) => sample.gpuMs).filter((value) => value !== null)
+        return [
+          name,
+          {
+            samples: samples.length,
+            medianCpuMs: quantile(cpuMs, 0.5),
+            p95CpuMs: quantile(cpuMs, 0.95),
+            gpuSamples: gpuMs.length,
+            medianGpuMs: gpuMs.length ? quantile(gpuMs, 0.5) : null,
+            p95GpuMs: gpuMs.length ? quantile(gpuMs, 0.95) : null,
+            renderCalls: samples.reduce((total, sample) => total + sample.renderCalls, 0),
+          },
+        ]
+      }),
     ),
   }
 }
@@ -78,7 +80,7 @@ const runs: {
   readyMs: number
   physicsMs: number | null
   worldPrepMs: number | null
-  compileStages: Array<{ stage: string; ms: number | null }>
+  compileStages: Array<{ stage: string; ms: number | null; programs: number | null }>
   gpuAfterWarmup: GpuSnapshot
   gpuSteady: GpuSnapshot
   sceneRender: ReturnType<typeof summarizeRender>
@@ -205,23 +207,34 @@ try {
             const worldReady = performance.getEntriesByName('worldprep-ready')[0]?.startTime ?? null
             const presented =
               performance.getEntriesByName('landscape-presented')[0]?.startTime ?? null
-            const stages: Array<{ stage: string; ms: number | null }> = []
+            const programs = new Map<string, number>()
+            for (const entry of performance.getEntriesByType('measure')) {
+              const match = /^programs:([^:]+):(\d+)$/.exec(entry.name)
+              if (match?.[1] && match[2]) programs.set(match[1], Number(match[2]))
+            }
+            const stages: Array<{ stage: string; ms: number | null; programs: number | null }> = []
             const prefix = 'compile:'
             let previous: PerformanceEntry | null = null
             for (const entry of performance.getEntriesByType('mark')) {
               if (!entry.name.startsWith(prefix)) continue
-              if (previous)
+              if (previous) {
+                const stage = previous.name.substring(prefix.length)
                 stages.push({
-                  stage: previous.name.substring(prefix.length),
+                  stage,
                   ms: entry.startTime - previous.startTime,
+                  programs: programs.get(stage) ?? null,
                 })
+              }
               previous = entry
             }
-            if (previous)
+            if (previous) {
+              const stage = previous.name.substring(prefix.length)
               stages.push({
-                stage: previous.name.substring(prefix.length),
+                stage,
                 ms: presented === null ? null : presented - previous.startTime,
+                programs: programs.get(stage) ?? null,
               })
+            }
             return {
               physicsMs:
                 physicsStart === null || physicsReady === null ? null : physicsReady - physicsStart,
@@ -254,6 +267,9 @@ try {
             seconds,
           )
           if (!sceneCapture) throw new Error('Scene render diagnostics are unavailable')
+          const gpuCapture = await page.evaluate(
+            () => window.sceneRenderCapture?.resolveGpu() ?? null,
+          )
           const canvas = page.locator('canvas[data-backend]')
           const backend = await canvas.getAttribute('data-backend')
           const fallbackAdapter = await canvas.getAttribute('data-fallback-adapter')
@@ -279,7 +295,7 @@ try {
             compileStages: loadTimings.stages,
             gpuAfterWarmup,
             gpuSteady,
-            sceneRender: summarizeRender(sceneCapture),
+            sceneRender: summarizeRender(gpuCapture ?? sceneCapture),
             maxLoadingFrameGapMs: loading.maxLoadingFrameGapMs,
             loadingLongTaskCount: loadingTasks.loadingLongTaskCount,
             maxLoadingLongTaskMs: loadingTasks.maxLoadingLongTaskMs,

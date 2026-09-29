@@ -68,7 +68,7 @@ export class WaterfallFluid {
   constructor(fall: VoxelWaterfall, mobile: boolean, opacity: Node<'float'>) {
     this.fall = fall
     this.particles = createWaterfallParticles(fall, mobile)
-    this.pass = new WaterfallFluidPass(this.particles, mobile)
+    this.pass = new WaterfallFluidPass(this.particles)
     const depth = texture(this.pass.depthTexture)
     const thickness = texture(this.pass.thicknessTexture)
     const vertexUV = vec2(uv().x, uv().y.oneMinus())

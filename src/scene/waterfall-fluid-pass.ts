@@ -65,11 +65,8 @@ export class WaterfallFluidPass {
   private readonly horizontalDepth = this.target(FloatType)
   private readonly horizontalThickness = this.target(HalfFloatType)
   private readonly finalDepth = this.target(FloatType)
-  private readonly finalThickness = this.target(HalfFloatType)
   private readonly texel = uniform(new Vector2(1, 1))
-  private passes:
-    | readonly [FullscreenPass, FullscreenPass, FullscreenPass, FullscreenPass]
-    | undefined
+  private passes: readonly [FullscreenPass, FullscreenPass, FullscreenPass] | undefined
   private readonly particles: WaterfallFluidParticles
   private readonly crop = new Matrix4()
   private readonly viewProjection = new Matrix4()
@@ -77,21 +74,22 @@ export class WaterfallFluidPass {
   private readonly targets: readonly RenderTarget[]
   private disposed = false
 
-  constructor(particles: WaterfallFluidParticles, mobile: boolean) {
+  constructor(particles: WaterfallFluidParticles) {
     this.particles = particles
     this.depthTexture = this.finalDepth.texture
-    this.thicknessTexture = this.finalThickness.texture
+    // Streams are vertically continuous from overlapping parcels, so thickness
+    // stops after the horizontal pass; only depth needs the vertical bridge.
+    this.thicknessTexture = this.horizontalThickness.texture
     this.targets = [
       this.rawDepth,
       this.rawThickness,
       this.horizontalDepth,
       this.horizontalThickness,
       this.finalDepth,
-      this.finalThickness,
     ]
-    // A fixed allocation survives camera motion, reflections and cube-map views.
+    // A fixed allocation survives camera motion without reallocating.
     // The cropped projection, not the texture aspect, defines the world-space rays.
-    const resolution = mobile ? 128 : 192
+    const resolution = 128
     this.captureSize.set(resolution, resolution)
     this.texel.value.set(1 / resolution, 1 / resolution)
     for (const renderTarget of this.targets) renderTarget.setSize(resolution, resolution)
@@ -120,10 +118,6 @@ export class WaterfallFluidPass {
       new FullscreenPass(
         renderer,
         this.filter(this.horizontalDepth, this.horizontalDepth, false, true),
-      ),
-      new FullscreenPass(
-        renderer,
-        this.filter(this.horizontalThickness, this.horizontalDepth, false, false),
       ),
     ]
     return this.passes
@@ -332,8 +326,7 @@ export class WaterfallFluidPass {
     parentMatrixWorld: Matrix4,
   ): Promise<void> {
     if (this.disposed || !this.prepare(renderer, camera, parentMatrixWorld)) return
-    const [horizontalDepth, horizontalThickness, verticalDepth, verticalThickness] =
-      this.ensurePasses(renderer)
+    const [horizontalDepth, horizontalThickness, verticalDepth] = this.ensurePasses(renderer)
     await this.withState(renderer, () => {
       renderer.setRenderTarget(this.rawDepth)
       return renderer.compileAsync(this.depthScene, this.camera)
@@ -349,28 +342,33 @@ export class WaterfallFluidPass {
     await this.withState(renderer, () => horizontalThickness.compileAsync(this.horizontalThickness))
     if (this.disposed) return
     await this.withState(renderer, () => verticalDepth.compileAsync(this.finalDepth))
-    if (this.disposed) return
-    await this.withState(renderer, () => verticalThickness.compileAsync(this.finalThickness))
   }
 
   render(renderer: WebGPURenderer, camera: Camera, parentMatrixWorld: Matrix4): boolean {
     if (this.disposed || !this.prepare(renderer, camera, parentMatrixWorld)) return false
-    const [horizontalDepth, horizontalThickness, verticalDepth, verticalThickness] =
-      this.ensurePasses(renderer)
+    const [horizontalDepth, horizontalThickness, verticalDepth] = this.ensurePasses(renderer)
     const pass = SceneRenderDiagnostics.beginActive('waterfall', renderer.info.render.calls)
     this.withState(renderer, () => {
+      const capture = SceneRenderDiagnostics.beginActive(
+        'waterfallCapture',
+        renderer.info.render.calls,
+      )
       renderer.setRenderTarget(this.rawDepth)
       renderer.render(this.depthScene, this.camera)
       renderer.setRenderTarget(this.rawThickness)
       renderer.render(this.thicknessScene, this.camera)
+      SceneRenderDiagnostics.endActive(capture, renderer.info.render.calls)
+      const filters = SceneRenderDiagnostics.beginActive(
+        'waterfallFilters',
+        renderer.info.render.calls,
+      )
       renderer.setRenderTarget(this.horizontalDepth)
       horizontalDepth.render()
       renderer.setRenderTarget(this.horizontalThickness)
       horizontalThickness.render()
       renderer.setRenderTarget(this.finalDepth)
       verticalDepth.render()
-      renderer.setRenderTarget(this.finalThickness)
-      verticalThickness.render()
+      SceneRenderDiagnostics.endActive(filters, renderer.info.render.calls)
     })
     SceneRenderDiagnostics.endActive(pass, renderer.info.render.calls)
     return true

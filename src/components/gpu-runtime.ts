@@ -111,9 +111,9 @@ async function requestDevice(signal: AbortSignal) {
     .catch(() => null)
   signal.throwIfAborted()
   if (!adapter) return { device: undefined, fallback: false }
-  const requiredFeatures: GPUFeatureName[] = adapter.features.has('float32-filterable')
-    ? ['float32-filterable']
-    : []
+  const requiredFeatures: GPUFeatureName[] = []
+  for (const feature of ['float32-filterable', 'timestamp-query'] as const)
+    if (adapter.features.has(feature)) requiredFeatures.push(feature)
   const device = await adapter.requestDevice({ requiredFeatures }).catch(() => undefined)
   if (signal.aborted) {
     device?.destroy()

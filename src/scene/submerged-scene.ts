@@ -31,6 +31,7 @@ import {
 } from 'three/webgpu'
 import type { Scene, WebGPURenderer } from 'three/webgpu'
 
+import { SceneRenderDiagnostics } from './diagnostics'
 import type { LakeBed } from './lake-bed'
 import type { PreparedSubmergedSurface } from './lake-geometry-data'
 import { placeHeroRocks, placeSeabedRocks, placeSeagrass } from './lake-seabed'
@@ -226,8 +227,8 @@ export class SubmergedScene {
   }
 
   resize(mobile: boolean, width = 1280, height = 720) {
-    this.bedSize = mobile ? 512 : 1024
-    const scale = Math.min(1, (mobile ? 960 : 1600) / width)
+    this.bedSize = mobile ? 512 : 768
+    const scale = mobile ? Math.min(1, 960 / width) : Math.min(0.5, 800 / width)
     this.fishWidth = Math.max(1, Math.round(width * scale))
     this.fishHeight = Math.max(1, Math.round(height * scale))
     const atlasWidth = Math.max(this.bedSize, this.fishWidth)
@@ -304,7 +305,9 @@ export class SubmergedScene {
       this.target.viewport.set(0, 0, this.bedSize, this.bedSize)
       this.target.scissor.copy(this.target.viewport)
       renderer.setRenderTarget(this.target)
+      const bed = SceneRenderDiagnostics.beginActive('submergedBed', renderer.info.render.calls)
       renderer.render(scene, this.camera)
+      SceneRenderDiagnostics.endActive(bed, renderer.info.render.calls)
       this.fishCamera.copy(camera)
       this.fishCamera.coordinateSystem = renderer.coordinateSystem
       this.fishCamera.updateProjectionMatrix()
@@ -319,7 +322,9 @@ export class SubmergedScene {
       this.target.viewport.set(0, this.bedSize, this.fishWidth, this.fishHeight)
       this.target.scissor.copy(this.target.viewport)
       renderer.setRenderTarget(this.target)
+      const fish = SceneRenderDiagnostics.beginActive('submergedFish', renderer.info.render.calls)
       renderer.render(scene, this.fishCamera)
+      SceneRenderDiagnostics.endActive(fish, renderer.info.render.calls)
     } finally {
       renderer.autoClear = autoClear
       scene.background = background

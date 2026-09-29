@@ -12,19 +12,16 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { WaterfallFluidPass } from './waterfall-fluid-pass'
 
-function createPass(mobile = false) {
+function createPass() {
   const geometry = new InstancedBufferGeometry()
   const bounds = new Box3(new Vector3(-0.8, -1, -0.5), new Vector3(0.8, 1, 0.5))
-  const pass = new WaterfallFluidPass(
-    {
-      geometry,
-      bounds,
-      positionNode: positionLocal,
-      chordNode: float(0.2),
-      aerationNode: float(0.5),
-    },
-    mobile,
-  )
+  const pass = new WaterfallFluidPass({
+    geometry,
+    bounds,
+    positionNode: positionLocal,
+    chordNode: float(0.2),
+    aerationNode: float(0.5),
+  })
   return { pass, geometry, bounds }
 }
 
@@ -79,14 +76,14 @@ describe('waterfall fluid capture', () => {
           .applyMatrix4(inverseParent)
         expect(restored.distanceTo(point)).toBeLessThan(1e-8)
       }
-      expect(pass.captureSize.toArray()).toEqual([192, 192])
+      expect(pass.captureSize.toArray()).toEqual([128, 128])
       pass.dispose()
       geometry.dispose()
     },
   )
 
   it('rejects offscreen bounds and conservatively captures bounds crossing the camera plane', () => {
-    const { pass, geometry } = createPass(true)
+    const { pass, geometry } = createPass()
     const camera = new PerspectiveCamera(54, 1, 0.1, 100)
     camera.coordinateSystem = WebGPUCoordinateSystem
     camera.updateProjectionMatrix()
@@ -100,41 +97,37 @@ describe('waterfall fluid capture', () => {
     geometry.dispose()
   })
 
-  it.each([false, true])(
-    'keeps texture storage fixed across portrait and reflected views (mobile=%s)',
-    (mobile) => {
-      const { pass, geometry } = createPass(mobile)
-      const parent = new Matrix4().makeTranslation(-2, 1.4, -5)
-      const camera = cameraFor(false)
-      camera.aspect = 2.5
-      camera.updateProjectionMatrix()
-      expect(pass.updateCamera(camera, parent)).toBe(true)
-      const depth = pass.depthTexture
-      const thickness = pass.thicknessTexture
-      const rectangle = pass.uvRect.clone()
-      const projection = pass.projectionInverse.clone()
-      const mirror = cameraFor(true)
-      // Preserve the oblique clipping row while changing the horizontal field of view.
-      mirror.projectionMatrix.elements[0] *= 16 / 9 / 0.6
-      expect(pass.updateCamera(mirror, parent)).toBe(true)
-      expect(pass.uvRect.equals(rectangle)).toBe(false)
-      expect(pass.projectionInverse.equals(projection)).toBe(false)
-      expect(pass.depthTexture).toBe(depth)
-      expect(pass.thicknessTexture).toBe(thickness)
-      const size = mobile ? 128 : 192
-      expect(pass.captureSize.toArray()).toEqual([size, size])
-      for (const texture of [depth, thickness]) {
-        const image: unknown = texture.image
-        expect(image).toMatchObject({ width: size, height: size })
-      }
-      expect(pass.updateCamera(camera, parent)).toBe(true)
-      expect(pass.captureSize.toArray()).toEqual([size, size])
-      expect(pass.depthTexture).toBe(depth)
-      expect(pass.thicknessTexture).toBe(thickness)
-      pass.dispose()
-      geometry.dispose()
-    },
-  )
+  it('keeps texture storage fixed across portrait and reflected views', () => {
+    const { pass, geometry } = createPass()
+    const parent = new Matrix4().makeTranslation(-2, 1.4, -5)
+    const camera = cameraFor(false)
+    camera.aspect = 2.5
+    camera.updateProjectionMatrix()
+    expect(pass.updateCamera(camera, parent)).toBe(true)
+    const depth = pass.depthTexture
+    const thickness = pass.thicknessTexture
+    const rectangle = pass.uvRect.clone()
+    const projection = pass.projectionInverse.clone()
+    const mirror = cameraFor(true)
+    // Preserve the oblique clipping row while changing the horizontal field of view.
+    mirror.projectionMatrix.elements[0] *= 16 / 9 / 0.6
+    expect(pass.updateCamera(mirror, parent)).toBe(true)
+    expect(pass.uvRect.equals(rectangle)).toBe(false)
+    expect(pass.projectionInverse.equals(projection)).toBe(false)
+    expect(pass.depthTexture).toBe(depth)
+    expect(pass.thicknessTexture).toBe(thickness)
+    expect(pass.captureSize.toArray()).toEqual([128, 128])
+    for (const texture of [depth, thickness]) {
+      const image: unknown = texture.image
+      expect(image).toMatchObject({ width: 128, height: 128 })
+    }
+    expect(pass.updateCamera(camera, parent)).toBe(true)
+    expect(pass.captureSize.toArray()).toEqual([128, 128])
+    expect(pass.depthTexture).toBe(depth)
+    expect(pass.thicknessTexture).toBe(thickness)
+    pass.dispose()
+    geometry.dispose()
+  })
 
   it('can release an uninitialized pass repeatedly without releasing borrowed particle geometry', () => {
     const { pass, geometry } = createPass()

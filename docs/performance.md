@@ -36,13 +36,20 @@ scenes, sequentially on desktop Chromium and mobile WebKit. It discards a two-se
 warm-up, measures animation-frame intervals and records median/p95, loader readiness,
 scene readiness, selected backend and screenshots. `frames`, `medianMs` and `p95Ms`
 describe browser `requestAnimationFrame` callbacks. `sceneRender` separately records
-the actual scene frames, their intervals and CPU duration, and CPU duration and render
-calls for water, environment, submerged capture, waterfall, main view, rain and contrast.
-The waterfall is nested inside the main view, so their costs must not be added together.
-These CPU measurements do not include GPU completion time. Reports are written under
-`artifacts/performance/` and are not functional-test pass/fail thresholds. Mobile browsers
-without a WebGPU adapter are recorded under `unsupportedProfiles` and produce no GPU
-frame-time measurements.
+the actual scene frames, their intervals and CPU duration, and CPU duration, GPU
+duration and render calls for water, environment, submerged capture, waterfall, main
+view, rain and contrast, with bed/fish and capture/filter sub-passes nested
+inside the submerged and waterfall entries. The waterfall is nested inside the
+main view, so their costs must not be added together. GPU durations come from
+timestamp queries around each render context, attributed to the innermost open
+pass; the device requests the `timestamp-query` feature when the adapter offers
+it, and tracking runs only while a capture is recording. `gpuAvailable` reports
+whether timestamps were usable; WebGL fallback and adapters without the feature
+record CPU only. `compileStages` also carries the cumulative `programs` count
+after each stage, so variant minters stand out from pure waiting. Reports are
+written under `artifacts/performance/` and are not functional-test pass/fail
+thresholds. Mobile browsers without a WebGPU adapter are recorded under
+`unsupportedProfiles` and produce no GPU frame-time measurements.
 
 Loading responsiveness includes the largest animation-frame gap and the count/maximum
 duration of long tasks until the scene is ready or fails; unsupported long-task APIs report `null`.
@@ -66,6 +73,35 @@ Long captures and motion reviews remain outside the default suite. For image par
 compare identical seeds and mocked weather at day/night/rain, fixed viewport and pixel
 ratio. Keep representative captures with the review; do not infer visual equivalence
 from a successful compilation alone.
+
+## Measured budget (desktop WebGPU, 1280x720)
+
+Per-pass GPU medians show the scene is GPU-bound: the main view takes about
+13 ms on the GPU by itself. The waterfall fluid pass costs about 5 ms (capture
+1 ms plus three bilateral filter passes), the submerged lakebed capture about
+4 ms (bed 2 ms plus fish 2 ms) and the text-contrast overlay about 3.2 ms;
+water simulation, rain slopes and the environment probe face together stay near
+1 ms. CPU-side numbers understate all of this (main pass about 1.2-1.7 ms CPU),
+so runtime work must be guided by the GPU columns, not the CPU ones. The fluid
+volume renders from the main camera only: the mirrored capture is skipped
+because the lake surface distorts it beyond recognition, which halved the
+waterfall cost. The lakebed capture runs at 768 px and the fish region at half
+canvas resolution; the fluid capture runs at 128 px with horizontal-only
+thickness filtering. Before/after pixel parity for these cuts holds to under
+0.5% of pixels, confined to the lake and the waterfall column.
+
+Load compiles about 100 shader programs (vertex plus fragment stages; a loader
+program count of 4 is included until the loader releases). The environment probe
+mints the most (+29), then the submerged capture (+18), the fluid pass (+10),
+the main view (+6, including the 241 KB water fragment shader) and the warmup
+render (+7). The warmup additions are vertex-stage duplicates of already
+compiled programs: the nested reflection render rebuilds instanced materials
+with fresh generated identifier suffixes, so their code misses the program
+cache. That duplication is inherent to multi-context rendering with
+non-deterministic shader codegen and cannot be removed application-side; the
+per-stage program inventory exists to catch regressions of this shape. No
+programs are compiled after the first presented frame, so shader stutter does
+not occur at runtime.
 
 ## Frame budget
 
