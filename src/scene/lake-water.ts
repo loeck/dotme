@@ -557,7 +557,6 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
 export function createLakeReflector(
   geometry: BufferGeometry,
   lowPower: boolean,
-  _filteredEnvironment = true,
   inputs?: LakeInputs,
 ) {
   return new LakeReflector(geometry, lowPower, inputs)

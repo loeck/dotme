@@ -264,7 +264,7 @@ const RIPPLE_COUNT = 32
 /** Seeded downwind components with cos⁸ spreading and a near-saturated spectrum,
  * so no crossing pair dominates the slope and draws a lattice. Every count keeps
  * the same total slope variance. */
-export function rippleSpectrum(count: number) {
+function rippleSpectrum(count: number) {
   let state = 0x5f3759df
   const random = () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
@@ -303,15 +303,13 @@ export const RIPPLE_SPECTRUM = rippleSpectrum(RIPPLE_COUNT)
 // rather than a per-component cost. The image differs in 70 of 345k pixels.
 export const LOW_POWER_RIPPLE_SPECTRUM = rippleSpectrum(8)
 
-export type RippleComponent = (typeof RIPPLE_SPECTRUM)[number]
-
 /** Shading-only capillary slopes; heights stay with the shared spectrum. */
 export function rippleSlopeNode(
   p: Node<'vec2'>,
   footprint: Node<'float'>,
   strength: Node<'float'>,
   u: ReturnType<typeof createWindNodes>,
-  spectrum: readonly RippleComponent[] = RIPPLE_SPECTRUM,
+  spectrum: typeof RIPPLE_SPECTRUM,
 ) {
   return Fn(() => {
     const slope = vec2(0).toVar()

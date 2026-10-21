@@ -51,7 +51,7 @@ import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
 import { SceneRenderDiagnostics } from './diagnostics'
-import type { RenderLabeler, SceneElimination, SceneGpuInfo } from './diagnostics'
+import type { SceneElimination, SceneGpuInfo } from './diagnostics'
 import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -232,6 +232,7 @@ export class VoxelLandscapeEngine {
   }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
+  private readonly trees: InstancedMesh[] = []
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -535,17 +536,16 @@ export class VoxelLandscapeEngine {
     )
     const waterGeometry = createWaterGeometry(this.mobile, prepared.surfaces.water)
     this.water = this.resources.own(
-      createLakeReflector(waterGeometry, this.lowPower, this.simulation.available, {
+      createLakeReflector(waterGeometry, this.lowPower, {
         wind: this.windUniforms,
         cloud: this.clouds.shadows.uniforms,
         pointer: this.pointerLight.uniforms,
       }),
     )
     const reflectedCamera = this.water.getReflectionCamera(this.camera)
-    this.water.getRenderTarget(reflectedCamera).texture.anisotropy = Math.min(
-      this.lowPower ? 4 : 8,
-      this.renderer.getMaxAnisotropy(),
-    )
+    const reflection = this.water.getRenderTarget(reflectedCamera).texture
+    reflection.anisotropy = Math.min(this.lowPower ? 4 : 8, this.renderer.getMaxAnisotropy())
+    reflection.name = 'Lake reflection'
     this.skyMaterial.uniforms.uReflectionCapture.onObjectUpdate(({ camera }) =>
       camera === reflectedCamera ? 1 : 0,
     )
@@ -841,6 +841,7 @@ export class VoxelLandscapeEngine {
       mesh.frustumCulled = false
       this.scene.add(mesh)
       this.objects.push(mesh)
+      this.trees.push(mesh)
       this.resources.own(mesh)
     }
   }
@@ -1292,16 +1293,7 @@ export class VoxelLandscapeEngine {
 
   private gpuInfo: (() => SceneGpuInfo) | undefined
   private renderCaptureHook: Window['sceneRenderCapture']
-
-  /** Names a render context for per-target GPU attribution while a capture records. */
-  private renderLabel: RenderLabeler = (_scene, camera, target) => {
-    if (camera === this.moon.shadow.camera) return 'moon shadow'
-    if (this.lampLights.some(({ light }) => light.shadow.camera === camera)) return 'lamp shadow'
-    if (camera === this.water.reflectorNode.reflector.getVirtualCamera(this.camera))
-      return 'reflection'
-    if (target === this.depthFocus.target && camera === this.camera) return 'scene'
-    return target?.texture.name || undefined
-  }
+  private eliminationHook: SceneElimination | undefined
 
   /** Narrow benchmark hook; read by page.evaluate, never by the scene itself. */
   private publishDiagnostics() {
@@ -1315,7 +1307,7 @@ export class VoxelLandscapeEngine {
     })
     window.sceneGpuInfo = this.gpuInfo
     this.renderCaptureHook = {
-      start: () => this.renderDiagnostics.start(this.renderer, this.renderLabel),
+      start: () => this.renderDiagnostics.start(this.renderer),
       stop: () => this.renderDiagnostics.stop(),
       resolveGpu: () => this.renderDiagnostics.resolveGpu(),
     }
@@ -1324,20 +1316,17 @@ export class VoxelLandscapeEngine {
     window.sceneElimination = this.eliminationHook
   }
 
-  private eliminationHook: SceneElimination | undefined
-
   /** Clearing layer masks removes a group from every camera without touching visibility state. */
   private createElimination(): SceneElimination {
     const groups: Record<string, readonly Object3D[]> = {
       water: [this.water],
       sky: [this.sky],
-      terrain: [this.voxelGroup],
+      terrain: [this.voxelGroup, this.shadowGroup],
+      trees: this.trees,
       ...this.details?.debugGroups,
       rain: [this.rain.group],
-      lamps: [
-        ...this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
-        ...(this.moteMesh ? [this.moteMesh] : []),
-      ],
+      lamps: this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
+      motes: this.moteMesh ? [this.moteMesh] : [],
     }
     const saved = new Map<Object3D, number>()
     const restore = () => {
@@ -1937,6 +1926,7 @@ export class VoxelLandscapeEngine {
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture
+    this.renderDiagnostics.dispose()
     if (this.eliminationHook && window.sceneElimination === this.eliminationHook) {
       this.eliminationHook.hide(null)
       delete window.sceneElimination

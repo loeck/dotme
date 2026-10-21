@@ -2,28 +2,16 @@
 /* eslint-disable no-await-in-loop */
 import type { WebGPURenderer } from 'three/webgpu'
 
+import { perFrame, quantile, targetsPerFrame } from '../scene/capture-stats'
+import { LENS_TARGET } from '../scene/depth-focus'
 import type { SceneRenderCapture } from '../scene/diagnostics'
 
 const WINDOW_MS = 4000
 const SPLIT_MS = 2500
+// Reduced motion renders only on demand, so a capture window may hold no frames.
+const IDLE = 'no frames rendered (reduced motion?)'
 // Lets shadow and probe refreshes triggered by the removal leave the window.
 const SETTLE_MS = 800
-// Children run inside their parent's span: list them under it, never in the total.
-const NESTED: Record<string, string> = {
-  submergedBed: 'submerged',
-  submergedFish: 'submerged',
-  view: 'main',
-  atmosphere: 'main',
-  lens: 'main',
-  waterfall: 'view',
-  waterfallCapture: 'waterfall',
-  waterfallFilters: 'waterfall',
-}
-
-const median = (values: readonly number[]) =>
-  values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) / 2)] ?? 0
-const p95 = (values: readonly number[]) =>
-  values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) * 0.95)] ?? 0
 const ms = (value: number | null) => (value === null ? '   -' : value.toFixed(1).padStart(4))
 
 function adapterLabel(renderer: WebGPURenderer) {
@@ -33,42 +21,52 @@ function adapterLabel(renderer: WebGPURenderer) {
       ? backend.device
       : undefined
   if (!device) return 'webgl'
-  const info = device.adapterInfo
+  // GPUDevice.adapterInfo is recent; older WebGPU builds omit it.
+  const info: GPUAdapterInfo | undefined = device.adapterInfo
+  if (!info) return 'webgpu'
   return ['webgpu', info.vendor, info.architecture, info.description].filter(Boolean).join(' ')
 }
 
-const perFrame = (capture: SceneRenderCapture, total: number) =>
-  total / Math.max(1, capture.frameCpuMs.length)
 const gpuTotal = (capture: SceneRenderCapture) =>
   perFrame(
     capture,
     Object.values(capture.targets).reduce((a, b) => a + b, 0),
   )
+const sceneGpu = (capture: SceneRenderCapture) =>
+  perFrame(capture, capture.targets[LENS_TARGET] ?? 0)
 
-export function summarize(capture: SceneRenderCapture) {
-  const interval = median(capture.intervalsMs)
-  // Alternate-frame passes are averaged over every frame, not over the frames they ran.
-  const frames = Math.max(1, capture.frameCpuMs.length)
-  const own = new Map<string, { cpuMs: number; gpuMs: number | null }>()
+function summarize(capture: SceneRenderCapture) {
+  const interval = quantile(capture.intervalsMs, 0.5)
+  const own = new Map<string, { cpuMs: number; gpuMs: number | null; parent: string | null }>()
   for (const [name, samples] of Object.entries(capture.passes)) {
     const gpu = samples.map((sample) => sample.gpuMs).filter((value) => value !== null)
     own.set(name, {
-      cpuMs: samples.reduce((total, sample) => total + sample.cpuMs, 0) / frames,
-      gpuMs: capture.gpuAvailable && gpu.length ? gpu.reduce((a, b) => a + b, 0) / frames : null,
+      cpuMs: perFrame(
+        capture,
+        samples.reduce((total, sample) => total + sample.cpuMs, 0),
+      ),
+      gpuMs:
+        capture.gpuAvailable && gpu.length
+          ? perFrame(
+              capture,
+              gpu.reduce((a, b) => a + b, 0),
+            )
+          : null,
+      parent: samples[0]?.parent ?? null,
     })
   }
   // Timestamps go to the innermost open pass, so a parent's GPU time is its own plus
   // its children's, and the frame total is the sum of every pass's own time.
-  const children = (parent: string | undefined) =>
-    [...own.keys()].filter((name) => NESTED[name] === parent)
+  const children = (parent: string | null) =>
+    [...own].filter(([, pass]) => pass.parent === parent).map(([name]) => name)
   const gpuOf = (name: string): number | null => {
     const parts = [own.get(name)?.gpuMs ?? null, ...children(name).map(gpuOf)]
     const known = parts.filter((value) => value !== null)
     return known.length ? known.reduce((a, b) => a + b, 0) : null
   }
   const lines = [
-    `${(1000 / Math.max(interval, 1e-3)).toFixed(0)} fps  frame ${ms(interval)} p95 ${ms(p95(capture.intervalsMs))} ms`,
-    `cpu ${ms(median(capture.frameCpuMs))} p95 ${ms(p95(capture.frameCpuMs))} ms`,
+    `${(1000 / Math.max(interval, 1e-3)).toFixed(0)} fps  frame ${ms(interval)} p95 ${ms(quantile(capture.intervalsMs, 0.95))} ms`,
+    `cpu ${ms(quantile(capture.frameCpuMs, 0.5))} p95 ${ms(quantile(capture.frameCpuMs, 0.95))} ms`,
     '',
     `${'pass'.padEnd(22)}  cpu   gpu`,
   ]
@@ -78,12 +76,11 @@ export function summarize(capture: SceneRenderCapture) {
     )
     for (const child of children(name)) visit(child, level + 1)
   }
-  for (const name of children(undefined)) visit(name, 0)
+  for (const name of children(null)) visit(name, 0)
   lines.push(
     `${'gpu total'.padEnd(22)}       ${capture.gpuAvailable ? ms(gpuTotal(capture)) : '   -'}`,
   )
-  const targets = Object.entries(capture.targets)
-    .map(([name, total]) => [name, total / frames] as const)
+  const targets = Object.entries(targetsPerFrame(capture))
     .filter(([, gpuMs]) => gpuMs >= 0.05)
     .toSorted((a, b) => b[1] - a[1])
   if (targets.length) lines.push('', 'gpu by target')
@@ -95,7 +92,7 @@ export function summarize(capture: SceneRenderCapture) {
 export function initPerfOverlay(
   renderer: WebGPURenderer,
   signal: AbortSignal,
-  mode: 'live' | 'split' = 'live',
+  mode: 'live' | 'split',
 ) {
   const panel = document.createElement('pre')
   panel.setAttribute('aria-hidden', 'true')
@@ -151,6 +148,7 @@ export function initPerfOverlay(
       }
       const capture = await measure(WINDOW_MS)
       if (capture) panel.textContent = `${header()}\n${summarize(capture)}`
+      else if (!signal.aborted) panel.textContent = `${header()}\n${IDLE}`
     }
   }
 
@@ -168,16 +166,21 @@ export function initPerfOverlay(
         panel.textContent = `${header()}\nsplit: ${group}…\n\n${rows.join('\n')}`
         await wait(SETTLE_MS)
         const baseline = await measure(SPLIT_MS)
+        if (baseline && !baseline.gpuAvailable) {
+          panel.textContent = `${header()}\nsplit needs GPU timestamps (timestamp-query)`
+          return
+        }
         elimination.hide(group)
         await wait(SETTLE_MS)
         const without = await measure(SPLIT_MS)
         elimination.hide(null)
-        if (!baseline || !without) return
+        if (!baseline || !without) {
+          if (!signal.aborted) panel.textContent = `${header()}\nsplit: ${IDLE}`
+          return
+        }
         last = baseline
-        const scene = (capture: SceneRenderCapture) =>
-          perFrame(capture, capture.targets['scene'] ?? 0)
         rows.push(
-          `${group.padEnd(10)} ${ms(scene(baseline))}   ${ms(scene(without))}   ${ms(gpuTotal(baseline) - gpuTotal(without))}`,
+          `${group.padEnd(10)} ${ms(sceneGpu(baseline))}   ${ms(sceneGpu(without))}   ${ms(gpuTotal(baseline) - gpuTotal(without))}`,
         )
       }
       if (last)

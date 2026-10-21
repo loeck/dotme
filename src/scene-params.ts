@@ -53,7 +53,10 @@ export function debugParams(search: string) {
   const rawRatio = Number(params.get('dpr') ?? Number.NaN)
   const pixelRatio =
     Number.isFinite(rawRatio) && rawRatio > 0 ? Math.min(3, Math.max(0.25, rawRatio)) : undefined
-  const mode: 'live' | 'split' = params.get('perf') === 'split' ? 'split' : 'live'
-  const perf = params.has('perf') ? mode : null
+  const perf: 'live' | 'split' | null = !params.has('perf')
+    ? null
+    : params.get('perf') === 'split'
+      ? 'split'
+      : 'live'
   return { perf, pixelRatio }
 }

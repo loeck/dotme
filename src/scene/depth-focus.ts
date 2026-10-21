@@ -23,6 +23,9 @@ import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
 import type { VolumetricLight } from './volumetric-light'
 
+/** Texture name of the main view's render target, which GPU captures attribute by. */
+export const LENS_TARGET = 'Landscape lens color'
+
 /** Scene radiance and depth remain linear until the final output transform. */
 export class DepthFocus {
   readonly target = new RenderTarget(1, 1, {
@@ -36,7 +39,7 @@ export class DepthFocus {
   private readonly cssPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
   constructor(renderer: WebGPURenderer, lowPower: boolean) {
-    this.target.texture.name = 'Landscape lens color'
+    this.target.texture.name = LENS_TARGET
     const samples = lowPower ? 12 : 20
     const distance = (coord: Node<'vec2'>) => {
       const d = this.depth.sample(coord).r
@@ -104,21 +107,21 @@ export class DepthFocus {
     this.cameraRange.value.set(camera.near, camera.far)
     const previous = renderer.getRenderTarget()
     try {
-      const calls = () => renderer.info.render.calls
-      const view = SceneRenderDiagnostics.beginActive('view', calls())
+      const info = renderer.info.render
+      const view = SceneRenderDiagnostics.beginActive('view', info.calls)
       renderer.setRenderTarget(this.target)
       renderer.render(scene, camera)
-      SceneRenderDiagnostics.endActive(view, calls())
-      const air = SceneRenderDiagnostics.beginActive('atmosphere', calls())
+      SceneRenderDiagnostics.endActive(view, info.calls)
+      const air = SceneRenderDiagnostics.beginActive('atmosphere', info.calls)
       this.color.value =
         atmosphere && light
           ? atmosphere.render(renderer, this.target, camera, light)
           : this.target.texture
-      SceneRenderDiagnostics.endActive(air, calls())
-      const lens = SceneRenderDiagnostics.beginActive('lens', calls())
+      SceneRenderDiagnostics.endActive(air, info.calls)
+      const lens = SceneRenderDiagnostics.beginActive('lens', info.calls)
       renderer.setRenderTarget(previous)
       this.pipeline.render()
-      SceneRenderDiagnostics.endActive(lens, calls())
+      SceneRenderDiagnostics.endActive(lens, info.calls)
     } finally {
       renderer.setRenderTarget(previous)
     }

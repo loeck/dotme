@@ -56,8 +56,9 @@ with the frame interval, frame CPU and the per-pass CPU and GPU time averaged ov
 frame, nested passes under their parent (`main` splits into `view`, `atmosphere` and
 `lens`). `dpr=<ratio>` overrides the pixel-ratio cap so the same build can be compared at
 several resolutions; both parameters survive URL cleaning. A second section sums GPU time
-by render context: the engine names shadows, the reflection and the main scene, named
-targets keep their texture name and anything else takes its pass name. `?perf=split`
+by render target texture name (`ShadowMap`, `PointShadowMap`, `Lake reflection`, the main
+view's `Landscape lens color`, ...); the canvas and unnamed targets count toward their pass.
+Name new render targets to keep them separate there. `?perf=split`
 instead removes one scene group at a time (water, sky, terrain, details, waterfall, rain,
 lamps) and reports what each frees, pairing every removal with a fresh baseline because
 phone clocks drift with heat. WebGPU needs a secure context,
