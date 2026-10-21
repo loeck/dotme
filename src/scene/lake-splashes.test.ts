@@ -179,7 +179,8 @@ describe('wave impacts', () => {
         expect(position.y).toBeGreaterThanOrEqual(
           WATER_LEVEL +
             sampleWindField(position.x, position.z, time, windy.sample(time), 0.08)[0] -
-            0.001,
+            // Contact sampling drops the sub-metre bands (under 2 mm of crest).
+            0.004,
         )
         // Wind travels +X: west-facing walls break, the sheltered east face does not.
         expect(position.x).toBeLessThan(0)

@@ -1,6 +1,6 @@
 import { WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
-import { sampleWindField } from './water-surface'
+import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
 type Disturbance = { x: number; z: number; radius: number; velocity: number; born: number }
@@ -39,7 +39,7 @@ export class WaterContact {
   sample(x: number, z: number, time: number, wind?: WindState, footprint = 0.08) {
     const index = lakeIndex(this.bed, x, z)
     if (index < 0 || !this.bed.water[index]) return [WATER_LEVEL, 0, 0, 0] as const
-    let [height, dx, dz, speed] = sampleWindField(x, z, time, wind, footprint)
+    let [height, dx, dz, speed] = sampleWaterContact(x, z, time, wind, footprint)
     const latest = this.disturbances.at(-1)
     if (!latest || time - latest.born > 2.5) return boundedSample(height, dx, dz, speed)
     let shoreFade: number | undefined

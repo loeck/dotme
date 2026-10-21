@@ -14,5 +14,20 @@ export function chromiumLaunchOptions(): LaunchOptions {
   // Force every repeat cold: without this, repeat 0 populates the Dawn blob
   // cache and later repeats in the same browser profile measure warm compiles.
   if (process.env.BENCH_COLD === '1') args.push('--enable-dawn-features=disable_blob_cache')
-  return { args }
+  // Playwright's bundled headless shell has no GPU on Linux, so benchmarks run
+  // against a full browser through this opt-in path.
+  const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH
+  if (!executablePath) return { args }
+  return {
+    executablePath,
+    args: [
+      ...args,
+      '--no-sandbox',
+      '--disable-dev-shm-usage',
+      '--use-gl=angle',
+      '--use-angle=vulkan',
+      '--enable-features=Vulkan,DefaultANGLEVulkan',
+      '--disable-vulkan-surface',
+    ],
+  }
 }

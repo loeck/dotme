@@ -1,4 +1,3 @@
-import type { Collider, RigidBody, Vector } from '@dimforge/rapier3d-compat'
 import {
   attribute,
   cross,
@@ -38,25 +37,28 @@ import { required } from '../invariant'
 import { WATER_LEVEL } from './lake-bed'
 import type { SplashJet, WaterfallImpact } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
-import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import type { VoxelWaterfall } from './voxel-world'
 import type { WaterContact } from './water-contact'
 import { contactNoise } from './water-noise'
-import { fieldUvNode, sampleWindField, windFieldNode } from './water-surface'
+import { fieldUvNode, sampleWaterContact, windFieldNode } from './water-surface'
 import { waterfallDrift } from './waterfall-flow'
 import { WaterfallFluid } from './waterfall-fluid'
 import type { WindState } from './wind'
 
 const GRAVITY = 9.81
 const IMPACT_OFFSET = 0.8
-/** Curtain bodies strike the cursor blocker only; terrain and droplets ignore them. */
-const CURTAIN_GROUPS = (0x0008 << 16) | 0x0010
-const BLOCKER_GROUPS = (0x0010 << 16) | 0x0008
 /** Vertical capsule: a velocity-stretched hole, not a round dent. */
 const BLOCKER_HALF_HEIGHT = 0.1
 const KILL_DEPTH = 0.05
 const EXIT_LIFT = 0.1
+/** Curtain motion integrates at the physics rate so it stays frame-rate independent. */
+const CURTAIN_STEP = 1 / 60
+const MAX_CURTAIN_STEPS = 4
+/** Band for the horizontal wobble, as an acceleration: the previous force per ball mass. */
+const WOBBLE_FORCE = 0.2
+const PARCEL_DENSITY = 1000
+const PARCEL_VOLUME = (4 / 3) * Math.PI
 
 function smoothstepCpu(edge0: number, edge1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
@@ -98,7 +100,6 @@ export class LakeWaterfall {
   private readonly fall: VoxelWaterfall
   private readonly emitJet: (jet: SplashJet) => void
   private readonly emitImpact: (impact: WaterfallImpact, wind: WindState) => void
-  private readonly physics: PhysicsWorld
   private contact?: WaterContact
   private readonly impactMaterials: readonly FallingWaterMaterial[]
   private readonly fluid: WaterfallFluid
@@ -108,7 +109,6 @@ export class LakeWaterfall {
   private currentWind: WindState | undefined
   private readonly impactPulse = uniform(0)
   private readonly previousHeights: Float32Array
-  private readonly ccdEnabled: Uint8Array
   private readonly impactBins = Array.from({ length: 3 }, () => ({
     count: 0,
     x: 0,
@@ -117,12 +117,17 @@ export class LakeWaterfall {
     lastTime: -1,
   }))
   private lastFragmentTime = -1
-  private readonly bodies: RigidBody[] = []
-  private readonly blockerBody: RigidBody
-  private readonly blockerCollider: Collider
   private readonly born: Float64Array
   private readonly phases: Float32Array
   private readonly sizes: Float32Array
+  /** Horizontal wobble acceleration per parcel, folded from the old force per ball mass. */
+  private readonly wobbleAccel: Float32Array
+  /** Parcel motion is analytic: the curtain only ever collided with the cursor blocker. */
+  private readonly worldPositions: Float32Array
+  private readonly worldVelocities: Float32Array
+  private readonly struck: Uint8Array
+  private curtainAccumulator = 0
+  private curtainClock = 0
   private readonly positions: Float32Array
   private readonly velocities: Float32Array
   private readonly foams: Float32Array
@@ -142,9 +147,6 @@ export class LakeWaterfall {
   private blockerActive = false
   private blockerRadius = 0
   private blockerPlaneZ = 0
-  private readonly translationTarget: Vector = { x: 0, y: 0, z: 0 }
-  private readonly velocityTarget: Vector = { x: 0, y: 0, z: 0 }
-  private readonly forceTarget: Vector = { x: 0, y: 0, z: 0 }
   private disposed = false
 
   constructor(
@@ -153,14 +155,12 @@ export class LakeWaterfall {
     mobile: boolean,
     reducedMotion: boolean,
     emitJet: (jet: SplashJet) => void,
-    physics: PhysicsWorld,
     emitImpact: (impact: WaterfallImpact, wind: WindState) => void,
   ) {
     this.fall = fall
     this.reducedMotion = reducedMotion
     this.emitJet = emitJet
     this.emitImpact = emitImpact
-    this.physics = physics
     this.curtainState = (fall.seed ^ 0x51ab3c7d) >>> 0
     const length = Math.hypot(fall.direction[0], fall.direction[1]) || 1
     this.directionX = fall.direction[0] / length
@@ -188,9 +188,12 @@ export class LakeWaterfall {
       this.sizes = parcels.sizes
       const slots = parcels.count
       this.previousHeights = new Float32Array(slots)
-      this.ccdEnabled = new Uint8Array(slots)
       this.born = new Float64Array(slots)
       this.phases = new Float32Array(slots)
+      this.wobbleAccel = new Float32Array(slots)
+      this.worldPositions = new Float32Array(slots * 3)
+      this.worldVelocities = new Float32Array(slots * 3)
+      this.struck = new Uint8Array(slots)
       const streamedPositions = parcels.geometry.getAttribute('aBodyPosition')
       const streamedVelocities = parcels.geometry.getAttribute('aBodyVelocity')
       const streamedFoams = parcels.geometry.getAttribute('aBodyFoam')
@@ -209,44 +212,28 @@ export class LakeWaterfall {
       this.positionsAttribute = streamedPositions
       this.velocitiesAttribute = streamedVelocities
       this.foamsAttribute = streamedFoams
-      const { ColliderDesc, RigidBodyDesc } = this.physics.rapier
       for (let i = 0; i < slots; i++) {
         const seed = this.lipSeed(i)
         const age = seed.age * this.flightTime(seed.y)
-        const body = this.physics.world.createRigidBody(
-          RigidBodyDesc.dynamic()
-            .setTranslation(
-              ...this.worldPoint(
-                seed.x + seed.vx * age,
-                seed.y + EXIT_LIFT * age - (GRAVITY / 2) * age * age,
-                seed.z + seed.vz * age,
-              ),
-            )
-            .setLinvel(...this.worldDirection(seed.vx, EXIT_LIFT - GRAVITY * age, seed.vz))
-            .setLinearDamping(1)
-            .setCanSleep(false),
+        const [x, y, z] = this.worldPoint(
+          seed.x + seed.vx * age,
+          seed.y + EXIT_LIFT * age - (GRAVITY / 2) * age * age,
+          seed.z + seed.vz * age,
         )
-        this.physics.world.createCollider(
-          ColliderDesc.ball(required(this.sizes[i]))
-            .setDensity(1000)
-            .setRestitution(0.05)
-            .setFriction(0.05)
-            .setCollisionGroups(CURTAIN_GROUPS),
-          body,
-        )
-        this.bodies.push(body)
+        const [vx, vy, vz] = this.worldDirection(seed.vx, EXIT_LIFT - GRAVITY * age, seed.vz)
+        const base = i * 3
+        const radius = required(this.sizes[i])
+        this.worldPositions[base] = x
+        this.worldPositions[base + 1] = y
+        this.worldPositions[base + 2] = z
+        this.worldVelocities[base] = vx
+        this.worldVelocities[base + 1] = vy
+        this.worldVelocities[base + 2] = vz
+        this.wobbleAccel[i] =
+          WOBBLE_FORCE / Math.max(1e-5, PARCEL_DENSITY * PARCEL_VOLUME * radius * radius * radius)
         this.born[i] = -age
         this.phases[i] = seed.phase
       }
-      this.blockerBody = this.physics.world.createRigidBody(
-        RigidBodyDesc.kinematicPositionBased()
-          .setTranslation(fall.x, WATER_LEVEL - 50, fall.z)
-          .setEnabled(false),
-      )
-      this.blockerCollider = this.physics.world.createCollider(
-        ColliderDesc.capsule(BLOCKER_HALF_HEIGHT, 0.05).setCollisionGroups(BLOCKER_GROUPS),
-        this.blockerBody,
-      )
       this.syncCurtain()
       this.group.add(this.fluid.mesh)
       this.impactMaterials = [foam, spray, mist]
@@ -536,64 +523,96 @@ export class LakeWaterfall {
     ]
   }
 
-  /** Recycles landed bodies and steers the blocker; runs before the world step. */
+  /** Places the cursor blocker and recycles landed parcels before integration. */
   private manageCurtain(time: number) {
     if (this.blockStrength > 0.01) {
-      const radius = 0.04 + (this.blockRadius - 0.04) * 0.72 * this.blockStrength
-      if (this.blockerRadius !== radius) {
-        this.blockerRadius = radius
-        this.blockerCollider.setRadius(radius)
-      }
+      this.blockerRadius = 0.04 + (this.blockRadius - 0.04) * 0.72 * this.blockStrength
       this.blockerPlaneZ = waterfallDrift(this.sheetHeight, this.blockHeight)
-      const [x, y, z] = this.worldPoint(this.blockAcross, this.blockHeight, this.blockerPlaneZ)
-      if (!this.blockerActive) {
-        this.blockerActive = true
-        this.blockerBody.setEnabled(true)
-      }
-      // Position the cursor obstacle without turning a fast pointer movement
-      // into a high-speed rigid body that launches the water sideways.
-      const position = { x, y, z }
-      this.blockerBody.setTranslation(position, true)
-      this.blockerBody.setNextKinematicTranslation(position)
-    } else if (this.blockerActive) {
+      this.blockerActive = true
+    } else {
       this.blockerActive = false
-      this.blockerBody.setEnabled(false)
     }
-    for (let i = 0; i < this.bodies.length; i++) {
-      const body = required(this.bodies[i])
-      let position = body.translation(this.translationTarget)
-      if (position.y < WATER_LEVEL - KILL_DEPTH || time - required(this.born[i]) > this.maxAge) {
+    for (let i = 0; i < this.born.length; i++) {
+      const base = i * 3
+      const y = required(this.worldPositions[base + 1])
+      if (y < WATER_LEVEL - KILL_DEPTH || time - required(this.born[i]) > this.maxAge) {
         const seed = this.lipSeed(i, true)
-        const [wx, wy, wz] = this.worldPoint(seed.x, seed.y, seed.z)
+        const [x, wy, z] = this.worldPoint(seed.x, seed.y, seed.z)
         const [vx, vy, vz] = this.worldDirection(seed.vx, EXIT_LIFT, seed.vz)
-        body.setTranslation({ x: wx, y: wy, z: wz }, true)
-        body.setLinvel({ x: vx, y: vy, z: vz }, true)
+        this.worldPositions[base] = x
+        this.worldPositions[base + 1] = wy
+        this.worldPositions[base + 2] = z
+        this.worldVelocities[base] = vx
+        this.worldVelocities[base + 1] = vy
+        this.worldVelocities[base + 2] = vz
         this.born[i] = time
         this.phases[i] = seed.phase
-        position = body.translation(this.translationTarget)
       }
-      const wobble = Math.sin(position.y * 2.5 + time * 3 + required(this.phases[i])) * 0.2
-      let nearBlocker = false
-      if (this.blockerActive && Math.abs(position.y - WATER_LEVEL - this.blockHeight) < 0.55) {
-        const ox = position.x - this.fall.x,
-          oz = position.z - this.fall.z
-        const across = this.directionZ * ox - this.directionX * oz
-        const depth = this.directionX * ox + this.directionZ * oz
-        nearBlocker =
-          Math.abs(across - this.blockAcross) < this.blockerRadius + 0.35 &&
-          Math.abs(depth - this.blockerPlaneZ) < this.blockerRadius + 0.35
-      }
-      const ccd = Number(nearBlocker)
-      if (this.ccdEnabled[i] !== ccd) {
-        this.ccdEnabled[i] = ccd
-        body.enableCcd(nearBlocker)
-      }
-      body.resetForces(false)
-      this.forceTarget.x = this.directionZ * wobble
-      this.forceTarget.y = 0
-      this.forceTarget.z = -this.directionX * wobble
-      body.addForce(this.forceTarget, false)
     }
+  }
+
+  /** Advances the analytic curtain by a fixed step, matching the previous rigid-body rate. */
+  private stepCurtain(dt: number) {
+    const dxn = this.directionX,
+      dzn = this.directionZ
+    const time = this.curtainClock
+    const blocked = this.blockerActive
+    const blockerX = this.fall.x + dzn * this.blockAcross + dxn * this.blockerPlaneZ
+    const blockerZ = this.fall.z - dxn * this.blockAcross + dzn * this.blockerPlaneZ
+    const blockerY = WATER_LEVEL + this.blockHeight
+    const bottom = blockerY - BLOCKER_HALF_HEIGHT
+    const top = blockerY + BLOCKER_HALF_HEIGHT
+    const damping = 1 / (1 + dt)
+    for (let i = 0; i < this.born.length; i++) {
+      const base = i * 3
+      const px = required(this.worldPositions[base]),
+        py = required(this.worldPositions[base + 1]),
+        pz = required(this.worldPositions[base + 2])
+      let vx = required(this.worldVelocities[base]),
+        vy = required(this.worldVelocities[base + 1]),
+        vz = required(this.worldVelocities[base + 2])
+      // A small horizontal wobble acceleration, then damping, as the solver did.
+      const wobble =
+        Math.sin(py * 2.5 + time * 3 + required(this.phases[i])) * required(this.wobbleAccel[i])
+      vx = (vx + dzn * wobble * dt) * damping
+      vy = (vy - GRAVITY * dt) * damping
+      vz = (vz - dxn * wobble * dt) * damping
+      let x = px + vx * dt
+      const y = py + vy * dt
+      let z = pz + vz * dt
+      if (blocked) {
+        // Sphere against the vertical blocker capsule, resolved along the surface.
+        const closest = y < bottom ? bottom : y > top ? top : y
+        const dx = x - blockerX,
+          dy = y - closest,
+          dz = z - blockerZ
+        const limit = this.blockerRadius + required(this.sizes[i])
+        const distance = Math.sqrt(dx * dx + dy * dy + dz * dz)
+        if (distance < limit) {
+          const inverse = distance > 1e-6 ? 1 / distance : 0
+          const nx = dx * inverse,
+            ny = dy * inverse,
+            nz = dz * inverse
+          x = blockerX + nx * limit
+          z = blockerZ + nz * limit
+          // Restitution 0.05 with friction: keep the tangential motion, stop ingress.
+          const inward = vx * nx + vy * ny + vz * nz
+          if (inward < 0) {
+            vx -= inward * 1.05 * nx
+            vy -= inward * 1.05 * ny
+            vz -= inward * 1.05 * nz
+          }
+          this.struck[i] = 1
+        }
+      }
+      this.worldPositions[base] = x
+      this.worldPositions[base + 1] = y
+      this.worldPositions[base + 2] = z
+      this.worldVelocities[base] = vx
+      this.worldVelocities[base + 1] = vy
+      this.worldVelocities[base + 2] = vz
+    }
+    this.curtainClock += dt
   }
 
   /** Uploads stepped body state to the render attributes; runs after the world step. */
@@ -610,15 +629,19 @@ export class LakeWaterfall {
     const extent = this.parcelExtent
     if (!active) this.clearPendingImpacts()
     let fragment: SplashJet | undefined
-    for (let i = 0; i < this.bodies.length; i++) {
-      const body = required(this.bodies[i])
-      const t = body.translation(this.translationTarget)
-      const v = body.linvel(this.velocityTarget)
-      const ox = t.x - this.fall.x,
-        oz = t.z - this.fall.z
+    const count = this.born.length
+    for (let i = 0; i < count; i++) {
       const base = i * 3
+      const x = required(this.worldPositions[base]),
+        y = required(this.worldPositions[base + 1]),
+        z = required(this.worldPositions[base + 2])
+      const vx = required(this.worldVelocities[base]),
+        vy = required(this.worldVelocities[base + 1]),
+        vz = required(this.worldVelocities[base + 2])
+      const ox = x - this.fall.x,
+        oz = z - this.fall.z
       const lx = dzn * ox - dxn * oz
-      const ly = t.y - WATER_LEVEL
+      const ly = y - WATER_LEVEL
       const lz = dxn * ox + dzn * oz
       this.positions[base] = lx
       this.positions[base + 1] = ly
@@ -629,34 +652,30 @@ export class LakeWaterfall {
       bounds.max.x = Math.max(bounds.max.x, lx + extent)
       bounds.max.y = Math.max(bounds.max.y, ly + extent)
       bounds.max.z = Math.max(bounds.max.z, lz + extent)
-      this.velocities[base] = dzn * v.x - dxn * v.z
-      this.velocities[base + 1] = v.y
-      this.velocities[base + 2] = dxn * v.x + dzn * v.z
+      this.velocities[base] = dzn * vx - dxn * vz
+      this.velocities[base + 1] = vy
+      this.velocities[base + 2] = dxn * vx + dzn * vz
       const proximity = this.blockerFoam(lx, ly, lz)
-      let struckBlocker = false
-      if (active && proximity > 0.55 && this.blockerActive)
-        this.physics.world.contactPair(body.collider(0), this.blockerCollider, (manifold) => {
-          struckBlocker ||= manifold.numSolverContacts() > 0
-        })
+      const struckBlocker = active && proximity > 0.55 && this.blockerActive && this.struck[i] !== 0
       this.foams[i] = Math.min(
         1,
-        proximity + (struckBlocker ? Math.min(0.35, Math.hypot(v.x, v.y, v.z) * 0.04) : 0),
+        proximity + (struckBlocker ? Math.min(0.35, Math.hypot(vx, vy, vz) * 0.04) : 0),
       )
       const previous = required(this.previousHeights[i])
       this.previousHeights[i] = ly
       // Wind waves stay within this narrow band; avoid sampling their full
       // spectrum for parcels that are still high above the lake.
-      if (active && ly < 0.2 && previous > -0.2 && v.y < 0) {
+      if (active && ly < 0.2 && previous > -0.2 && vy < 0) {
         const surface = this.contact
-          ? this.contact.sample(t.x, t.z, time, wind)[0] - WATER_LEVEL
-          : sampleWindField(t.x, t.z, time, wind, 0.08)[0]
+          ? this.contact.sample(x, z, time, wind)[0] - WATER_LEVEL
+          : sampleWaterContact(x, z, time, wind, 0.08)[0]
         if (previous > surface && ly <= surface) {
           const bin = Math.max(0, Math.min(2, Math.floor((lx / this.fall.width + 0.5) * 3)))
           const impact = required(this.impactBins[bin])
           impact.count++
-          impact.x += t.x
-          impact.z += t.z
-          impact.speed -= v.y
+          impact.x += x
+          impact.z += z
+          impact.speed -= vy
         }
       }
       if (
@@ -675,11 +694,11 @@ export class LakeWaterfall {
           0.15,
         )
         fragment = {
-          x: t.x,
-          y: t.y,
-          z: t.z,
+          x,
+          y,
+          z,
           vx: sideX,
-          vy: 0.4 + this.curtainRandom() * 0.7 + Math.min(0.7, Math.hypot(v.x, v.y, v.z) * 0.08),
+          vy: 0.4 + this.curtainRandom() * 0.7 + Math.min(0.7, Math.hypot(vx, vy, vz) * 0.08),
           vz: sideZ,
           size: 0.012 + this.curtainRandom() * 0.015,
           drag: 0.6,
@@ -689,6 +708,7 @@ export class LakeWaterfall {
         }
       }
     }
+    this.struck.fill(0)
     if (fragment && active) {
       this.lastFragmentTime = time
       this.emitJet(fragment)
@@ -799,15 +819,22 @@ export class LakeWaterfall {
     this.lastTime = time
     this.currentWind = wind
     this.impactPulse.value = Math.max(0, this.impactPulse.value - dt * 4)
-    if (!this.reducedMotion) this.manageCurtain(time)
+    if (this.reducedMotion) return
+    this.manageCurtain(time)
+    // Fixed steps keep the fall identical to the previous rigid-body rate.
+    this.curtainAccumulator = Math.min(
+      this.curtainAccumulator + dt,
+      CURTAIN_STEP * MAX_CURTAIN_STEPS,
+    )
+    while (this.curtainAccumulator >= CURTAIN_STEP) {
+      this.stepCurtain(CURTAIN_STEP)
+      this.curtainAccumulator -= CURTAIN_STEP
+    }
   }
 
   dispose() {
     if (this.disposed) return
     this.disposed = true
-    for (const body of this.bodies) this.physics.world.removeRigidBody(body)
-    this.bodies.length = 0
-    this.physics.world.removeRigidBody(this.blockerBody)
     this.group.removeFromParent()
     this.resources.dispose()
     this.group.clear()

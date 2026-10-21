@@ -53,9 +53,8 @@ const streamed = (waterfall: LakeWaterfall, name: string) => {
 }
 
 describe('lake waterfall lifecycle', () => {
-  it('emits only when falling parcels reach the lake, without a suspended-time burst', async () => {
+  it('emits only when falling parcels reach the lake, without a suspended-time burst', () => {
     const scene = new Scene()
-    const physics = await physicsFor()
     let impacts = 0
     const waterfall = new LakeWaterfall(
       scene,
@@ -63,16 +62,13 @@ describe('lake waterfall lifecycle', () => {
       false,
       false,
       () => {},
-      physics,
       () => impacts++,
     )
     waterfall.update(0, 1, 1, steadyWind)
     waterfall.update(0.3, 1, 1, steadyWind)
     expect(impacts).toBe(0)
-    physics.world.timestep = 1 / 60
     for (let frame = 1; frame <= 90; frame++) {
       waterfall.update(frame / 60, 1, 1, steadyWind)
-      physics.world.step()
       waterfall.syncCurtain()
     }
     expect(impacts).toBeGreaterThan(0)
@@ -101,12 +97,10 @@ describe('lake waterfall lifecycle', () => {
     expect(impacts).toBe(emitted)
     expect(scene.children).toHaveLength(0)
     for (const release of releases) expect(release).toHaveBeenCalledTimes(1)
-    physics.dispose()
   })
 
-  it('keeps reduced-motion water visible without emitting spray', async () => {
+  it('keeps reduced-motion water visible without emitting spray', () => {
     const scene = new Scene()
-    const physics = await physicsFor()
     const waterfall = new LakeWaterfall(
       scene,
       fall,
@@ -115,7 +109,6 @@ describe('lake waterfall lifecycle', () => {
       () => {
         throw new Error('Reduced motion must not emit spray')
       },
-      physics,
       () => {
         throw new Error('Reduced motion must not emit impacts')
       },
@@ -147,7 +140,6 @@ describe('lake waterfall lifecycle', () => {
     }
     expect(connected).toBeGreaterThan(0)
     waterfall.dispose()
-    physics.dispose()
   })
 
   it('lands foot jets through the shared pool and rings each return', async () => {
@@ -162,7 +154,6 @@ describe('lake waterfall lifecycle', () => {
       false,
       false,
       (jet) => splashes.emit(jet),
-      physics,
       (impact, wind) => splashes.waterfallImpact(impact, wind),
     )
     const returns: number[][] = []
@@ -189,10 +180,8 @@ describe('lake waterfall lifecycle', () => {
     expect(scene.children).toHaveLength(0)
   })
 
-  it('parts the curtain around the cursor blocker without penetrating its core', async () => {
+  it('parts the curtain around the cursor blocker without penetrating its core', () => {
     const scene = new Scene()
-    const physics = await physicsFor()
-    physics.world.timestep = 1 / 60
     const fragments: SplashJet[] = []
     const waterfall = new LakeWaterfall(
       scene,
@@ -200,7 +189,6 @@ describe('lake waterfall lifecycle', () => {
       false,
       false,
       (jet) => fragments.push(jet),
-      physics,
       () => {},
     )
     waterfall.setBlock(0, 1.5, 0.45, 1)
@@ -209,7 +197,6 @@ describe('lake waterfall lifecycle', () => {
     for (let frame = 0; frame < 240; frame++) {
       const time = frame / 60
       waterfall.update(time, 1, 1, steadyWind)
-      physics.world.step()
       waterfall.syncCurtain()
       const centers = streamed(waterfall, 'aBodyPosition')
       for (let i = 0; i < centers.length; i += 3) {
@@ -257,7 +244,6 @@ describe('lake waterfall lifecycle', () => {
     for (let frame = 240; frame < 420; frame++) {
       const time = frame / 60
       waterfall.update(time, 1, 1, steadyWind)
-      physics.world.step()
       waterfall.syncCurtain()
     }
     let restoredClearance = Infinity
@@ -271,32 +257,26 @@ describe('lake waterfall lifecycle', () => {
     }
     expect(restoredClearance).toBeLessThan(clearance * 0.65)
     waterfall.dispose()
-    physics.dispose()
   })
 
-  it('does not launch the falling water when the cursor crosses the curtain quickly', async () => {
-    const physics = await physicsFor()
-    physics.world.timestep = 1 / 60
+  it('does not launch the falling water when the cursor crosses the curtain quickly', () => {
     const waterfall = new LakeWaterfall(
       new Scene(),
       fall,
       false,
       false,
       () => {},
-      physics,
       () => {},
     )
     waterfall.setBlock(-0.3, 1.5, 0.45, 1)
     for (let frame = 0; frame < 60; frame++) {
       waterfall.update(frame / 60, 1, 1, steadyWind)
-      physics.world.step()
       waterfall.syncCurtain()
     }
     waterfall.setBlock(0.3, 1.5, 0.45, 1)
     let fastestAcross = 0
     for (let frame = 60; frame < 66; frame++) {
       waterfall.update(frame / 60, 1, 1, steadyWind)
-      physics.world.step()
       waterfall.syncCurtain()
       const velocities = streamed(waterfall, 'aBodyVelocity')
       for (let i = 0; i < velocities.length; i += 3)
@@ -304,38 +284,32 @@ describe('lake waterfall lifecycle', () => {
     }
     expect(fastestAcross).toBeLessThan(4)
     waterfall.dispose()
-    physics.dispose()
   })
 
-  it('replays the same curtain deterministically from the seed', async () => {
-    const run = async () => {
-      const physics = await physicsFor()
-      physics.world.timestep = 1 / 60
+  it('replays the same curtain deterministically from the seed', () => {
+    const run = () => {
       const waterfall = new LakeWaterfall(
         scene,
         fall,
         false,
         false,
         () => {},
-        physics,
         () => {},
       )
       waterfall.setBlock(0.2, 1.2, 0.45, 0.8)
       for (let frame = 0; frame < 120; frame++) {
         const time = frame / 60
         waterfall.update(time, 1, 1, steadyWind)
-        physics.world.step()
         waterfall.syncCurtain()
       }
       const positions = Array.from(streamed(waterfall, 'aBodyPosition'))
       const velocities = Array.from(streamed(waterfall, 'aBodyVelocity'))
       waterfall.dispose()
-      physics.dispose()
       return { positions, velocities }
     }
     const scene = new Scene()
-    const first = await run()
-    const second = await run()
+    const first = run()
+    const second = run()
     expect(second.positions).toEqual(first.positions)
     expect(second.velocities).toEqual(first.velocities)
     expect(scene.children).toHaveLength(0)

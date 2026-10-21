@@ -107,10 +107,13 @@ describe('lake field', () => {
     expect(contact.sample(3, 0, 0.15)[0]).toBe(initial)
     contact.addImpulse(3, 0, 0.4, 0.5, 0)
     expect(contact.sample(3, 0, 0.15)[0]).toBeGreaterThan(initial)
-    expect(contact.sample(3, 0, 3)[0]).toBeCloseTo(
-      WATER_LEVEL + sampleWindField(3, 0, 3, undefined, 0.08)[0],
-      8,
-    )
+    // Contacts follow the shaded surface, minus the sub-metre bands the physics
+    // spectrum omits: their combined crest stays under 2 mm.
+    expect(
+      Math.abs(
+        contact.sample(3, 0, 3)[0] - (WATER_LEVEL + sampleWindField(3, 0, 3, undefined, 0.08)[0]),
+      ),
+    ).toBeLessThan(0.004)
     expect(contact.sample(0, 0, 0.15)[0]).toBe(WATER_LEVEL)
   })
 })

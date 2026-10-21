@@ -43,7 +43,7 @@ import { SplashImpacts } from './splash-impacts'
 import { createSplashProfile } from './splash-profile'
 import type { SplashProfile } from './splash-profile'
 import type { WaterContact } from './water-contact'
-import { sampleWindField } from './water-surface'
+import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
 const hash = (q: Node<'vec2'>) => fract(sin(q.dot(vec2(127.1, 311.7))).mul(43758.5453))
@@ -354,7 +354,7 @@ export class LakeSplashes {
   }
 
   private sampleField(x: number, z: number, time: number, wind: WindState, footprint = 0.08) {
-    if (!this.contact) return sampleWindField(x, z, time, wind, footprint)
+    if (!this.contact) return sampleWaterContact(x, z, time, wind, footprint)
     const [height, dx, dz, speed] = this.contact.sample(x, z, time, wind, footprint)
     return [height - WATER_LEVEL, dx, dz, speed] as const
   }
