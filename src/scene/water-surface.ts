@@ -180,12 +180,10 @@ export const windRotate = (u: ReturnType<typeof createWindNodes>, x: number, z: 
     u.uWindRotation.y.mul(x).add(u.uWindRotation.x.mul(z)),
   )
 
-/** `velocity: false` leaves w at zero; `cull` skips bands the footprint has already faded out. */
 export function windFieldNode(
   p: Node<'vec2'>,
   footprint: Node<'float'>,
   u: ReturnType<typeof createWindNodes>,
-  { velocity: withVelocity = true, cull = false } = {},
 ) {
   return Fn(() => {
     // Separate accumulators avoid mutable vec4 swizzles in the Metal compiler,
@@ -193,7 +191,7 @@ export function windFieldNode(
     const height = float(0).toVar()
     const gradient = vec2(0).toVar()
     const velocity = float(0).toVar()
-    const band = (w: (typeof WAVE_SPECTRUM)[number]) => {
+    for (const w of WAVE_SPECTRUM) {
       const k = windRotate(u, w.kx, w.kz)
       const spatial = p.dot(k)
       const crossK = vec2(k.y.negate(), k.x).mul(w.crossScale)
@@ -236,7 +234,6 @@ export function windFieldNode(
             .add(packetGradient.mul(sin(phase))),
         ),
       )
-      if (!withVelocity) return
       const spatialVelocity = u.uWindRotationVelocity.mul(p.dot(vec2(k.y.negate(), k.x)))
       const crossVelocity = u.uWindRotationVelocity
         .mul(p.dot(vec2(crossK.y.negate(), crossK.x)))
@@ -256,9 +253,6 @@ export function windFieldNode(
           .add(amplitudeVelocity.mul(sin(phase)).mul(packet)),
       )
     }
-    for (const w of WAVE_SPECTRUM)
-      if (cull) If(footprint.lessThan(w.wavelength * 0.5), () => band(w))
-      else band(w)
     return vec4(height, gradient, velocity)
   })()
 }
@@ -268,8 +262,8 @@ const RIPPLE_SLOPE_VARIANCE = 0.0015
 const RIPPLE_COUNT = 32
 
 /** Seeded downwind components with cos⁸ spreading and a near-saturated spectrum,
- * so no crossing pair dominates the slope and draws a lattice. Any count keeps the
- * same total slope variance. */
+ * so no crossing pair dominates the slope and draws a lattice. Every count keeps
+ * the same total slope variance. */
 export function rippleSpectrum(count: number) {
   let state = 0x5f3759df
   const random = () => {
@@ -304,6 +298,12 @@ export function rippleSpectrum(count: number) {
 }
 
 export const RIPPLE_SPECTRUM = rippleSpectrum(RIPPLE_COUNT)
+// Arm Valhall phones fell from about 20 ms to 9 ms of scene GPU time with 8
+// components: the full water shader exceeds that compiler's budget, a cliff
+// rather than a per-component cost. The image differs in 70 of 345k pixels.
+export const LOW_POWER_RIPPLE_SPECTRUM = rippleSpectrum(8)
+
+export type RippleComponent = (typeof RIPPLE_SPECTRUM)[number]
 
 /** Shading-only capillary slopes; heights stay with the shared spectrum. */
 export function rippleSlopeNode(
@@ -311,7 +311,7 @@ export function rippleSlopeNode(
   footprint: Node<'float'>,
   strength: Node<'float'>,
   u: ReturnType<typeof createWindNodes>,
-  spectrum: readonly (typeof RIPPLE_SPECTRUM)[number][] = RIPPLE_SPECTRUM,
+  spectrum: readonly RippleComponent[] = RIPPLE_SPECTRUM,
 ) {
   return Fn(() => {
     const slope = vec2(0).toVar()
@@ -345,7 +345,6 @@ export function rainRingsNode(
   footprint: Node<'float'>,
   intensity: Node<'float'>,
   time: Node<'float'>,
-  layers = 2,
 ) {
   return Fn(() => {
     const result = vec4(0).toVar()
@@ -359,7 +358,7 @@ export function rainRingsNode(
         smoothstep(RAIN_RING_CELL * 0.25, RAIN_RING_CELL * 0.6, footprint),
       )
       const specks = vec2(0).toVar()
-      for (let layer = 0; layer < layers; layer++) {
+      for (let layer = 0; layer < 2; layer++) {
         const q = p.div(RAIN_RING_CELL).add(vec2(layer * 0.5, layer * 0.5))
         const base = floor(q)
         for (let i = 0; i < 9; i++) {

@@ -5,7 +5,7 @@ export const MIN_TIME_SCALE = 1
 export const MAX_TIME_SCALE = 100
 const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale'])
 // Diagnostics survive reloads on a phone but are not part of the public scene API.
-const DEBUG_KEYS = new Set(['perf', 'dpr', 'wx'])
+const DEBUG_KEYS = new Set(['perf', 'dpr'])
 
 /** The complete public URL API. Missing/invalid values use the scene defaults. */
 export function sceneParams(search: string) {
@@ -53,8 +53,7 @@ export function debugParams(search: string) {
   const rawRatio = Number(params.get('dpr') ?? Number.NaN)
   const pixelRatio =
     Number.isFinite(rawRatio) && rawRatio > 0 ? Math.min(3, Math.max(0.25, rawRatio)) : undefined
-  const raw = params.get('perf')
-  const mode: 'live' | 'split' | 'water' = raw === 'split' || raw === 'water' ? raw : 'live'
+  const mode: 'live' | 'split' = params.get('perf') === 'split' ? 'split' : 'live'
   const perf = params.has('perf') ? mode : null
   return { perf, pixelRatio }
 }

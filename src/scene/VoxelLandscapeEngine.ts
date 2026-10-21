@@ -535,7 +535,7 @@ export class VoxelLandscapeEngine {
     )
     const waterGeometry = createWaterGeometry(this.mobile, prepared.surfaces.water)
     this.water = this.resources.own(
-      createLakeReflector(waterGeometry, this.mobile, this.simulation.available, {
+      createLakeReflector(waterGeometry, this.lowPower, this.simulation.available, {
         wind: this.windUniforms,
         cloud: this.clouds.shadows.uniforms,
         pointer: this.pointerLight.uniforms,
