@@ -8,18 +8,14 @@ const WINDOW_MS = 4000
 const SPLIT_MS = 2500
 const WATER_VARIANTS = [
   '',
-  'waves',
-  'capillary',
-  'ripple,shore',
-  'refraction',
-  'foam',
-  'fish',
-  'glitter,sss,shafts,pointer',
-  'cloud',
-  'env',
-  'mirror',
-  'lights',
-  'waves,capillary,ripple,shore,refraction,foam,fish,glitter,sss,shafts,pointer,cloud,env,mirror,lights',
+  'cap8',
+  'cap16',
+  'novel',
+  'wavebranch',
+  'rings1',
+  'cap8,novel',
+  'cap16,novel',
+  'cap8,rings1',
   // Matches no feature: a closing baseline exposes thermal drift over the sweep.
   'none',
 ]

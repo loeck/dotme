@@ -56,8 +56,10 @@ import { contactNoise } from './water-noise'
 import {
   createWindNodes,
   fieldUvNode,
+  RIPPLE_SPECTRUM,
   rainRingsNode,
   rippleSlopeNode,
+  rippleSpectrum,
   windFieldNode,
 } from './water-surface'
 
@@ -76,6 +78,8 @@ const WX = new Set(
     ?.split(',') ?? [],
 )
 const off = (name: string) => WX.has(name)
+const RIPPLE_8 = rippleSpectrum(8)
+const RIPPLE_16 = rippleSpectrum(16)
 
 /** Uniform nodes are stable graph inputs; update their values, never replace them. */
 export class LakeWaterMaterial extends NodeMaterial {
@@ -201,7 +205,9 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       : shoreGradient.div(max(shoreGradient.length(), 0.0001))
     const stepSize = max(u.uCell, footprint.mul(0.5))
     const state = u.uState.sample(clamp(fieldUv, 0, 1))
-    const field = off('waves') ? vec4(0) : windFieldNode(p, footprint, u)
+    const field = off('waves')
+      ? vec4(0)
+      : windFieldNode(p, footprint, u, { velocity: !off('novel'), cull: off('wavebranch') })
     const wetHeight = (point: Node<'vec2'>) =>
       shoreDistanceAt(fieldUvNode(point)).lessThanEqual(0).select(state.x, interactionHeight(point))
     const rippleSlope = off('ripple')
@@ -213,8 +219,16 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const rain = u.uRainSlopeMap.sample(screenUV).mul(u.uRainSlopesEnabled)
     const capillary = off('capillary')
       ? vec2(0)
-      : rippleSlopeNode(p, footprint, clamp(u.uWindResponse.y, 0, 1.6), u)
-    const rings = off('rings') ? vec4(0) : rainRingsNode(p, footprint, u.uRainIntensity, u.uTime)
+      : rippleSlopeNode(
+          p,
+          footprint,
+          clamp(u.uWindResponse.y, 0, 1.6),
+          u,
+          off('cap8') ? RIPPLE_8 : off('cap16') ? RIPPLE_16 : RIPPLE_SPECTRUM,
+        )
+    const rings = off('rings')
+      ? vec4(0)
+      : rainRingsNode(p, footprint, u.uRainIntensity, u.uTime, off('rings1') ? 1 : 2)
     const incidentSlope = field.yz
       .add(rippleSlope)
       .add(rain.xy)
