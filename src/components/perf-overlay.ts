@@ -6,6 +6,23 @@ import type { SceneRenderCapture } from '../scene/diagnostics'
 
 const WINDOW_MS = 4000
 const SPLIT_MS = 2500
+const WATER_VARIANTS = [
+  '',
+  'waves',
+  'capillary',
+  'ripple,shore',
+  'refraction',
+  'foam',
+  'fish',
+  'glitter,sss,shafts,pointer',
+  'cloud',
+  'env',
+  'mirror',
+  'lights',
+  'waves,capillary,ripple,shore,refraction,foam,fish,glitter,sss,shafts,pointer,cloud,env,mirror,lights',
+  // Matches no feature: a closing baseline exposes thermal drift over the sweep.
+  'none',
+]
 // Lets shadow and probe refreshes triggered by the removal leave the window.
 const SETTLE_MS = 800
 // Children run inside their parent's span: list them under it, never in the total.
@@ -95,7 +112,7 @@ export function summarize(capture: SceneRenderCapture) {
 export function initPerfOverlay(
   renderer: WebGPURenderer,
   signal: AbortSignal,
-  mode: 'live' | 'split' = 'live',
+  mode: 'live' | 'split' | 'water' = 'live',
 ) {
   const panel = document.createElement('pre')
   panel.setAttribute('aria-hidden', 'true')
@@ -186,5 +203,40 @@ export function initPerfOverlay(
       elimination.hide(null)
     }
   }
-  void (mode === 'split' ? split() : live())
+  // Experiment: reload once per water-shader variant (`wx`) and tabulate the scene cost.
+  const water = async () => {
+    const key = 'perf-water'
+    const url = new URL(location.href)
+    const variant = url.searchParams.get('wx') ?? ''
+    const index = Math.max(0, WATER_VARIANTS.indexOf(variant))
+    const stored = sessionStorage.getItem(key)
+    const parsed: unknown = index > 0 && stored ? JSON.parse(stored) : []
+    const results = Array.isArray(parsed)
+      ? parsed.filter((line): line is string => typeof line === 'string')
+      : []
+    while (!signal.aborted && !window.sceneRenderCapture) await wait(500)
+    panel.textContent = `${header()}\nwater ${index + 1}/${WATER_VARIANTS.length}: ${variant || 'baseline'}…\n\n${results.join('\n')}`
+    await wait(SETTLE_MS * 4)
+    const scenes: number[] = []
+    const totals: number[] = []
+    for (let i = 0; i < 3; i++) {
+      const capture = await measure(SPLIT_MS)
+      if (!capture) return
+      scenes.push(perFrame(capture, capture.targets['scene'] ?? 0))
+      totals.push(gpuTotal(capture))
+    }
+    results.push(
+      `${(variant || 'baseline').slice(0, 16).padEnd(16)} ${ms(median(scenes))}  ${ms(median(totals))}`,
+    )
+    const next = WATER_VARIANTS[index + 1]
+    if (next === undefined) {
+      sessionStorage.removeItem(key)
+      panel.textContent = `${header()}\n\nwater off       scene  total\n${results.join('\n')}`
+      return
+    }
+    sessionStorage.setItem(key, JSON.stringify(results))
+    url.searchParams.set('wx', next)
+    location.replace(url)
+  }
+  void (mode === 'split' ? split() : mode === 'water' ? water() : live())
 }

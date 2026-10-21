@@ -69,6 +69,13 @@ type LakeInputs = {
 
 /** Floating bodies whose waterline draws a meniscus ring on the lake. */
 export const FLOATER_SLOTS = 8
+// Temporary experiment: `wx` strips water features to price them on a device.
+const WX = new Set(
+  new URLSearchParams(typeof location === 'undefined' ? '' : location.search)
+    .get('wx')
+    ?.split(',') ?? [],
+)
+const off = (name: string) => WX.has(name)
 
 /** Uniform nodes are stable graph inputs; update their values, never replace them. */
 export class LakeWaterMaterial extends NodeMaterial {
@@ -117,7 +124,7 @@ export class LakeWaterMaterial extends NodeMaterial {
     this.side = DoubleSide
     this.depthWrite = true
     this.fog = false
-    this.lights = true
+    this.lights = !off('lights')
     this.empty.needsUpdate = true
   }
 
@@ -189,19 +196,25 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       shoreDistanceAt(fieldUv.add(shoreStep)).sub(shoreDistanceAt(fieldUv.sub(shoreStep))),
       shoreDistanceAt(fieldUv.add(shoreStep.yx)).sub(shoreDistanceAt(fieldUv.sub(shoreStep.yx))),
     )
-    const shoreNormal = shoreGradient.div(max(shoreGradient.length(), 0.0001))
+    const shoreNormal = off('shore')
+      ? vec2(0, 1)
+      : shoreGradient.div(max(shoreGradient.length(), 0.0001))
     const stepSize = max(u.uCell, footprint.mul(0.5))
     const state = u.uState.sample(clamp(fieldUv, 0, 1))
-    const field = windFieldNode(p, footprint, u)
+    const field = off('waves') ? vec4(0) : windFieldNode(p, footprint, u)
     const wetHeight = (point: Node<'vec2'>) =>
       shoreDistanceAt(fieldUvNode(point)).lessThanEqual(0).select(state.x, interactionHeight(point))
-    const rippleSlope = vec2(
-      wetHeight(p.add(vec2(stepSize, 0))).sub(wetHeight(p.sub(vec2(stepSize, 0)))),
-      wetHeight(p.add(vec2(0, stepSize))).sub(wetHeight(p.sub(vec2(0, stepSize)))),
-    ).div(stepSize.mul(2))
+    const rippleSlope = off('ripple')
+      ? vec2(0)
+      : vec2(
+          wetHeight(p.add(vec2(stepSize, 0))).sub(wetHeight(p.sub(vec2(stepSize, 0)))),
+          wetHeight(p.add(vec2(0, stepSize))).sub(wetHeight(p.sub(vec2(0, stepSize)))),
+        ).div(stepSize.mul(2))
     const rain = u.uRainSlopeMap.sample(screenUV).mul(u.uRainSlopesEnabled)
-    const capillary = rippleSlopeNode(p, footprint, clamp(u.uWindResponse.y, 0, 1.6), u)
-    const rings = rainRingsNode(p, footprint, u.uRainIntensity, u.uTime)
+    const capillary = off('capillary')
+      ? vec2(0)
+      : rippleSlopeNode(p, footprint, clamp(u.uWindResponse.y, 0, 1.6), u)
+    const rings = off('rings') ? vec4(0) : rainRingsNode(p, footprint, u.uRainIntensity, u.uTime)
     const incidentSlope = field.yz
       .add(rippleSlope)
       .add(rain.xy)
@@ -244,7 +257,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
           .mul(incidentSlope.dot(shoreNormal))
           .mul(float(1).sub(smoothstep(0, u.uCell.mul(2), max(0, shore)))),
       )
-      .add(wakeSlope)
+      .add(off('wake') ? vec2(0) : wakeSlope)
     const normal = normalize(vec3(slope.x.negate(), 1, slope.y.negate()))
     material.normalNode = normalize(cameraViewMatrix.mul(vec4(normal, 0)).xyz)
     const view = normalize(cameraPosition.sub(positionWorld))
@@ -295,13 +308,15 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     // Let the surface roughness choose its reflection detail; an extra floor
     // smears the sky across otherwise resolved wave slopes.
     u.uEnvironment.levelNode = roughness
-    const environment = u.uEnvironment
+    const environment = off('env') ? vec3(0.03, 0.04, 0.05) : u.uEnvironment
     const localReflection = this.reflectorNode
-    const reflection = mix(
-      environment,
-      localReflection.rgb.add(environment.mul(float(1).sub(clamp(localReflection.a, 0, 1)))),
-      smoothstep(0, 0.06, mirrorEdge),
-    )
+    const reflection = off('mirror')
+      ? environment
+      : mix(
+          environment,
+          localReflection.rgb.add(environment.mul(float(1).sub(clamp(localReflection.a, 0, 1)))),
+          smoothstep(0, 0.06, mirrorEdge),
+        )
     const bedDepthAt = (coordinate: typeof fieldUv) =>
       u.uBedHeight.sample(
         clamp(coordinate.mul(u.uBedFieldLayout.xy), halfTexel, u.uBedFieldLayout.xy.sub(halfTexel)),
@@ -310,7 +325,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const candidate = Fn(() => {
       const point = positionWorld.toVar()
       const depth = bedDepthAt(fieldUv).toVar()
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < (off('refraction') ? 1 : 4); i++) {
         point.assign(
           positionWorld.add(
             direction.mul(
@@ -364,7 +379,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
           .add(bedTap(bedUv.add(bedBlur)).rgb.mul(0.3))
           .add(bedTap(bedUv.sub(bedBlur)).rgb.mul(0.3))
       : vec3(bedTap(bedUv.sub(chromaVec)).r, bedTap(bedUv).g, bedTap(bedUv.add(chromaVec)).b)
-    const sunlit = inputs ? cloudShadow(positionWorld, inputs.cloud) : float(1)
+    const sunlit = inputs && !off('cloud') ? cloudShadow(positionWorld, inputs.cloud) : float(1)
     const lightGate = inputs ? mix(mix(0.25, 0.8, u.uNight), 1, sunlit) : float(1)
     const scatter = u.uWaterScatter.rgb
       .mul(lightGate)
@@ -396,7 +411,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .div(max(0.35, direction.y.negate()))
     const fishTransmission = exp(absorption.mul(fishPath).negate())
     const fishVeil = exp(fishPath.mul(-0.25))
-    const fishWeight = fish.a.mul(fishVeil)
+    const fishWeight = off('fish') ? float(0) : fish.a.mul(fishVeil)
     const waterColumn = transmitted
       .mul(float(1).sub(fishWeight))
       .add(fish.rgb.mul(fishTransmission).mul(fishVeil))
@@ -456,7 +471,15 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       }
       return total
     })()
-    const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(meniscus))
+    const foam = off('foam')
+      ? float(0)
+      : min(
+          0.97,
+          (off('contact') ? float(0) : film.add(fragments.mul(0.8)))
+            .add(rain.a)
+            .add(off('wake') ? float(0) : wakeFoam)
+            .add(off('meniscus') ? float(0) : meniscus),
+        )
     const sparkle = normalize(
       normal.add(
         vec3(
@@ -469,23 +492,27 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const glitterBase = clamp(reflect(u.uLightDirection.negate(), sparkle).dot(view), 0, 1).pow(350)
     const sparkleCell = floor(p.mul(14)).add(floor(mod(u.uTime.mul(8), 64)).mul(0.37))
     const sparkleGate = smoothstep(0.982, 1, contactNoise(sparkleCell))
-    const glitter = glitterBase
-      .mul(u.uLightColor.rgb)
-      .mul(1.0)
-      .mul(float(1).sub(u.uNight))
-      .mul(sunlit)
-      .mul(u.uDirectSun)
-      .mul(float(0.55).add(sparkleGate.mul(3)))
+    const glitter = off('glitter')
+      ? vec3(0)
+      : glitterBase
+          .mul(u.uLightColor.rgb)
+          .mul(1.0)
+          .mul(float(1).sub(u.uNight))
+          .mul(sunlit)
+          .mul(u.uDirectSun)
+          .mul(float(0.55).add(sparkleGate.mul(3)))
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))
     const sssDirection = normalize(u.uLightDirection.negate().add(normal.mul(WATER_IOR - 1)))
-    const sss = clamp(view.dot(sssDirection), 0, 1)
-      .pow(6)
-      .mul(sssDepth)
-      .mul(mix(0.3, 1, clarity))
-      .mul(u.uLightColor.rgb)
-      .mul(sunlit)
-      .mul(vec3(0.35, 0.95, 0.9))
-      .mul(0.06)
+    const sss = off('sss')
+      ? vec3(0)
+      : clamp(view.dot(sssDirection), 0, 1)
+          .pow(6)
+          .mul(sssDepth)
+          .mul(mix(0.3, 1, clarity))
+          .mul(u.uLightColor.rgb)
+          .mul(sunlit)
+          .mul(vec3(0.35, 0.95, 0.9))
+          .mul(0.06)
     const downFace = clamp(normal.dot(view), 0, 1).pow(2)
     const shaftBands = sin(
       p
@@ -501,15 +528,17 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const shaftFlicker = contactNoise(p.mul(0.3).add(u.uTime.mul(0.12)))
       .mul(0.5)
       .add(0.75)
-    const shafts = shaftBands
-      .mul(downFace)
-      .mul(float(1).sub(u.uNight))
-      .mul(shaftDepth)
-      .mul(mix(0.35, 1, clarity))
-      .mul(u.uLightColor.rgb)
-      .mul(sunlit)
-      .mul(0.12)
-      .mul(shaftFlicker)
+    const shafts = off('shafts')
+      ? vec3(0)
+      : shaftBands
+          .mul(downFace)
+          .mul(float(1).sub(u.uNight))
+          .mul(shaftDepth)
+          .mul(mix(0.35, 1, clarity))
+          .mul(u.uLightColor.rgb)
+          .mul(sunlit)
+          .mul(0.12)
+          .mul(shaftFlicker)
     material.waterLighting.foamNode = foam
     material.waterLighting.roughnessNode = roughness
     material.waterLighting.worldNormalNode = normal
@@ -521,7 +550,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     )
       .mul(float(1).sub(foam))
       .add(
-        pointerLightAt(positionWorld, normal, u)
+        (off('pointer') ? vec3(0) : pointerLightAt(positionWorld, normal, u))
           .mul(fresnel.mul(0.035).add(0.006))
           .mul(float(1).sub(foam.mul(0.65))),
       )
