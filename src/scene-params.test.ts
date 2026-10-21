@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cleanSceneUrl, PARIS, sceneParams } from './scene-params'
+import { cleanSceneUrl, debugParams, PARIS, sceneParams } from './scene-params'
 
 describe('public scene URLs', () => {
   it('bounds the solar speed and rejects non-finite input', () => {
@@ -55,5 +55,16 @@ describe('public scene URLs', () => {
     )
     expect([...url.searchParams.keys()]).toEqual(['seed', 'coordinates', 'startTime', 'timeScale'])
     expect(url.hash).toBe('#about')
+  })
+  it('keeps diagnostics parameters and bounds the pixel-ratio override', () => {
+    const url = cleanSceneUrl(new URL('https://example.com/?seed=1&perf&dpr=0.75&rain=off'))
+    expect([...url.searchParams.keys()]).toEqual(['seed', 'perf', 'dpr'])
+    expect(debugParams(url.search)).toEqual({ perf: 'live', pixelRatio: 0.75 })
+    expect(debugParams('?perf=split').perf).toBe('split')
+    expect(debugParams('?dpr=0.1').pixelRatio).toBe(0.25)
+    expect(debugParams('?dpr=9').pixelRatio).toBe(3)
+    for (const dpr of ['', '0', '-1', 'NaN', 'high'])
+      expect(debugParams(`?dpr=${dpr}`).pixelRatio).toBeUndefined()
+    expect(debugParams('').perf).toBeNull()
   })
 })

@@ -8,6 +8,7 @@ import { preview } from 'vite'
 
 import { chromiumLaunchOptions } from '../e2e/browser-options.ts'
 import { availableBackend } from '../e2e/graphics-support.ts'
+import { quantile, targetsPerFrame } from '../src/scene/capture-stats.ts'
 import type { SceneGpuInfo, SceneRenderCapture } from '../src/scene/diagnostics.ts'
 import { parisWeatherFixture } from '../src/weather/paris.fixture.ts'
 
@@ -36,8 +37,6 @@ const server = process.env.BENCH_URL
   : await preview({ preview: { host: '127.0.0.1', port: 0 } })
 const baseURL = process.env.BENCH_URL ?? server?.resolvedUrls?.local[0]
 if (!baseURL) throw new Error('No preview URL available; build the site first')
-const quantile = (values: readonly number[], q: number) =>
-  values.toSorted((a, b) => a - b)[Math.floor((values.length - 1) * q)] ?? 0
 type GpuSnapshot = SceneGpuInfo | null
 function summarizeRender(capture: SceneRenderCapture) {
   return {
@@ -47,6 +46,7 @@ function summarizeRender(capture: SceneRenderCapture) {
     medianCpuMs: quantile(capture.frameCpuMs, 0.5),
     p95CpuMs: quantile(capture.frameCpuMs, 0.95),
     gpuAvailable: capture.gpuAvailable,
+    targetsGpuMsPerFrame: targetsPerFrame(capture),
     passes: Object.fromEntries(
       Object.entries(capture.passes).map(([name, samples]) => {
         const cpuMs = samples.map((sample) => sample.cpuMs)

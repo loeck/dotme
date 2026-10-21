@@ -56,6 +56,8 @@ import { contactNoise } from './water-noise'
 import {
   createWindNodes,
   fieldUvNode,
+  LOW_POWER_RIPPLE_SPECTRUM,
+  RIPPLE_SPECTRUM,
   rainRingsNode,
   rippleSlopeNode,
   windFieldNode,
@@ -134,12 +136,12 @@ export class LakeWaterMaterial extends NodeMaterial {
 
 export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
   readonly reflectorNode
-  constructor(geometry: BufferGeometry, mobile: boolean, inputs?: LakeInputs) {
+  constructor(geometry: BufferGeometry, lowPower: boolean, inputs?: LakeInputs) {
     const material = new LakeWaterMaterial()
     super(geometry, material)
     this.reflectorNode = reflector({
       target: this,
-      resolutionScale: mobile ? 0.35 : 0.62,
+      resolutionScale: lowPower ? 0.35 : 0.62,
       generateMipmaps: true,
       bounces: false,
       samples: 0,
@@ -200,7 +202,13 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       wetHeight(p.add(vec2(0, stepSize))).sub(wetHeight(p.sub(vec2(0, stepSize)))),
     ).div(stepSize.mul(2))
     const rain = u.uRainSlopeMap.sample(screenUV).mul(u.uRainSlopesEnabled)
-    const capillary = rippleSlopeNode(p, footprint, clamp(u.uWindResponse.y, 0, 1.6), u)
+    const capillary = rippleSlopeNode(
+      p,
+      footprint,
+      clamp(u.uWindResponse.y, 0, 1.6),
+      u,
+      lowPower ? LOW_POWER_RIPPLE_SPECTRUM : RIPPLE_SPECTRUM,
+    )
     const rings = rainRingsNode(p, footprint, u.uRainIntensity, u.uTime)
     const incidentSlope = field.yz
       .add(rippleSlope)
@@ -358,7 +366,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
         clamp(coordinate, u.uBedTexel, vec2(1).sub(u.uBedTexel)).mul(u.uBedAtlas.xy),
       )
     const chromaVec = slope.div(max(0.08, slope.length())).mul(u.uBedTexel.x).mul(1.5)
-    const bed = mobile
+    const bed = lowPower
       ? bedTap(bedUv)
           .rgb.mul(0.4)
           .add(bedTap(bedUv.add(bedBlur)).rgb.mul(0.3))
@@ -548,9 +556,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
 
 export function createLakeReflector(
   geometry: BufferGeometry,
-  mobile: boolean,
-  _filteredEnvironment = true,
+  lowPower: boolean,
   inputs?: LakeInputs,
 ) {
-  return new LakeReflector(geometry, mobile, inputs)
+  return new LakeReflector(geometry, lowPower, inputs)
 }

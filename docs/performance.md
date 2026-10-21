@@ -51,6 +51,19 @@ written under `artifacts/performance/` and are not functional-test pass/fail
 thresholds. Mobile browsers without a WebGPU adapter are recorded under
 `unsupportedProfiles` and produce no GPU frame-time measurements.
 
+On a physical device, add `?perf` to the URL: a panel refreshes every four seconds
+with the frame interval, frame CPU and the per-pass CPU and GPU time averaged over every
+frame, nested passes under their parent (`main` splits into `view`, `atmosphere` and
+`lens`). `dpr=<ratio>` overrides the pixel-ratio cap so the same build can be compared at
+several resolutions; both parameters survive URL cleaning. A second section sums GPU time
+by render target texture name (`ShadowMap`, `PointShadowMap`, `Lake reflection`, the main
+view's `Landscape lens color`, ...); the canvas and unnamed targets count toward their pass.
+Name new render targets to keep them separate there. `?perf=split`
+instead removes one scene group at a time (water, sky, terrain, details, waterfall, rain,
+lamps) and reports what each frees, pairing every removal with a fresh baseline because
+phone clocks drift with heat. WebGPU needs a secure context,
+so phones should open an HTTPS preview deployment, not a LAN or tailnet address.
+
 Loading responsiveness includes the largest animation-frame gap and the count/maximum
 duration of long tasks until the scene is ready or fails; unsupported long-task APIs report `null`.
 
@@ -163,9 +176,19 @@ surface keeps the full spectrum, and the tests hold the two within 4 mm.
 
 Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
 use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
-foreground cap, pixel ratio capped at 1.25, a 64 px environment probe with one face per 200 ms,
+foreground cap, pixel ratio capped at 1.25, a half-resolution fish capture, 8 capillary ripple
+components instead of 32, a 64 px environment probe with one face per 200 ms,
 one shadow-casting lantern, a third-resolution
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
+
+The ripple count is not a per-component saving. On an Arm Valhall phone (Chrome, dpr 1)
+the water surface took about 14.5 of the scene's 16 ms of GPU time, and removing any one
+large block of its shader (the wave field, the ripples or the foam) dropped the scene to
+3-6 ms while removing everything did no better: the full shader exceeds that compiler's
+budget. Desktop GPUs show no such cliff. With 8 components the scene takes about 9 ms at
+dpr 1.25 and the whole frame about 15 ms, against 21.5 ms at dpr 1 before; the image
+differs in 70 of 345k pixels. Keep new water-shader work measured on such a phone with
+`?perf`, since adding code can cross the cliff again.
 
 On these devices, leaning the phone left or right (gravity projected onto the screen,
 so an upright phone stays stable) drives the same camera parallax as the desktop mouse.

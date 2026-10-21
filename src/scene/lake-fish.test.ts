@@ -109,6 +109,8 @@ describe('submerged fish', () => {
       fish.dispose()
       physics.dispose()
     },
+    // Steps whole desktop passages through physics: about 2 s locally, 5 s on CI runners.
+    15_000,
   )
 
   it.each(cases)(

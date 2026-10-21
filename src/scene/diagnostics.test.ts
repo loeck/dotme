@@ -65,6 +65,39 @@ it('attributes gpu timestamps to the innermost open pass', async () => {
   expect(required(required(capture?.passes['waterfall'])[0]).gpuMs).toBe(2)
 })
 
+it('sums gpu time by target name, else by pass name, and records pass parents', async () => {
+  const { renderer, inspector } = createRenderer(
+    new Map([
+      ['u1', 1],
+      ['u2', 2],
+      ['u3', 4],
+      ['u4', 8],
+    ]),
+  )
+  const shadow = new RenderTarget(1, 1)
+  shadow.texture.name = 'shadow'
+  const diagnostics = new SceneRenderDiagnostics()
+  diagnostics.start(renderer)
+  const frame = diagnostics.frameStart(100)
+  const main = diagnostics.begin('main', 0)
+  inspector.beginRender('u1', new Scene(), new PerspectiveCamera(), shadow)
+  const inner = diagnostics.begin('view', 1)
+  renderInto(inspector, 'u2')
+  diagnostics.end(inner, 2)
+  diagnostics.end(main, 2)
+  const water = diagnostics.begin('water', 2)
+  inspector.beginRender('u3', new Scene(), new PerspectiveCamera(), shadow)
+  diagnostics.end(water, 3)
+  // Renders outside any pass are neither timed nor attributed.
+  renderInto(inspector, 'u4')
+  diagnostics.frameEnd(frame)
+  diagnostics.stop()
+  const capture = await diagnostics.resolveGpu()
+  expect(capture?.targets).toEqual({ shadow: 5, view: 2 })
+  expect(required(capture?.passes['view'])[0]?.parent).toBe('main')
+  expect(required(capture?.passes['main'])[0]?.parent).toBeNull()
+})
+
 it('restores timestamp tracking and unwraps hooks after the gpu resolve', async () => {
   const { renderer, inspector, backend } = createRenderer(new Map([['u1', 3]]))
   const diagnostics = new SceneRenderDiagnostics()

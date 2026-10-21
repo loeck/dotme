@@ -262,8 +262,9 @@ const RIPPLE_SLOPE_VARIANCE = 0.0015
 const RIPPLE_COUNT = 32
 
 /** Seeded downwind components with cos⁸ spreading and a near-saturated spectrum,
- * so no crossing pair dominates the slope and draws a lattice. */
-export const RIPPLE_SPECTRUM = (() => {
+ * so no crossing pair dominates the slope and draws a lattice. Every count keeps
+ * the same total slope variance. */
+function rippleSpectrum(count: number) {
   let state = 0x5f3759df
   const random = () => {
     state = (Math.imul(state, 1664525) + 1013904223) >>> 0
@@ -271,9 +272,9 @@ export const RIPPLE_SPECTRUM = (() => {
   }
   const longest = Math.log(1),
     shortest = Math.log(0.06)
-  const components = Array.from({ length: RIPPLE_COUNT }, (_, i) => {
+  const components = Array.from({ length: count }, (_, i) => {
     const wavelength = Math.exp(
-      longest + ((i + 0.2 + random() * 0.6) / RIPPLE_COUNT) * (shortest - longest),
+      longest + ((i + 0.2 + random() * 0.6) / count) * (shortest - longest),
     )
     let spread = 0
     do spread = (random() - 0.5) * Math.PI
@@ -294,7 +295,13 @@ export const RIPPLE_SPECTRUM = (() => {
   const scale = Math.sqrt(RIPPLE_SLOPE_VARIANCE / variance)
   for (const component of components) component.slope *= scale
   return components
-})()
+}
+
+export const RIPPLE_SPECTRUM = rippleSpectrum(RIPPLE_COUNT)
+// Arm Valhall phones fell from about 20 ms to 9 ms of scene GPU time with 8
+// components: the full water shader exceeds that compiler's budget, a cliff
+// rather than a per-component cost. The image differs in 70 of 345k pixels.
+export const LOW_POWER_RIPPLE_SPECTRUM = rippleSpectrum(8)
 
 /** Shading-only capillary slopes; heights stay with the shared spectrum. */
 export function rippleSlopeNode(
@@ -302,12 +309,13 @@ export function rippleSlopeNode(
   footprint: Node<'float'>,
   strength: Node<'float'>,
   u: ReturnType<typeof createWindNodes>,
+  spectrum: typeof RIPPLE_SPECTRUM,
 ) {
   return Fn(() => {
     const slope = vec2(0).toVar()
     const [c, s] = [u.uWindRotation.x, u.uWindRotation.y]
     const local = vec2(c.mul(p.x).add(s.mul(p.y)), c.mul(p.y).sub(s.mul(p.x))).toVar()
-    for (const w of RIPPLE_SPECTRUM)
+    for (const w of spectrum)
       If(footprint.lessThan(w.wavelength * 0.45), () => {
         const fade = float(1).sub(smoothstep(w.wavelength * 0.12, w.wavelength * 0.45, footprint))
         const phase = local.dot(vec2(w.dx, w.dz)).mul(w.k).sub(u.uTime.mul(w.omega)).add(w.phase)

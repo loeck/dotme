@@ -228,7 +228,8 @@ export class SubmergedScene {
 
   resize(mobile: boolean, width = 1280, height = 720) {
     this.bedSize = mobile ? 512 : 768
-    const scale = mobile ? Math.min(1, 960 / width) : Math.min(0.5, 800 / width)
+    // Half the drawing buffer on both profiles; phones used to capture at full size.
+    const scale = Math.min(0.5, (mobile ? 480 : 800) / width)
     this.fishWidth = Math.max(1, Math.round(width * scale))
     this.fishHeight = Math.max(1, Math.round(height * scale))
     const atlasWidth = Math.max(this.bedSize, this.fishWidth)

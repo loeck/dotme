@@ -1,6 +1,6 @@
 import type { WebGPURenderer } from 'three/webgpu'
 
-import { cleanSceneUrl, sceneParams } from '../scene-params'
+import { cleanSceneUrl, debugParams, sceneParams } from '../scene-params'
 import { loadPhysics } from '../scene/physics-world'
 import { prepareWorldAsync } from '../scene/prepare-world'
 import { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
@@ -96,6 +96,12 @@ export async function initLandscape(
     motion.addEventListener('change', () => engine?.setReducedMotion(motion.matches), { signal })
     observer = new ResizeObserver(engine.resize)
     observer.observe(host)
+    const { perf } = debugParams(location.search)
+    if (perf)
+      void import('./perf-overlay').then(({ initPerfOverlay }) => {
+        if (!signal.aborted) initPerfOverlay(renderer, signal, perf)
+        return undefined
+      })
     return dispose
   } catch (error) {
     dispose()

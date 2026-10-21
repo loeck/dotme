@@ -4,6 +4,8 @@ export const PARIS: GpsPosition = { latitude: 48.8566, longitude: 2.3522 }
 export const MIN_TIME_SCALE = 1
 export const MAX_TIME_SCALE = 100
 const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale'])
+// Diagnostics survive reloads on a phone but are not part of the public scene API.
+const DEBUG_KEYS = new Set(['perf', 'dpr'])
 
 /** The complete public URL API. Missing/invalid values use the scene defaults. */
 export function sceneParams(search: string) {
@@ -38,7 +40,23 @@ export function cleanSceneUrl(url: URL) {
     if (!url.searchParams.has(key) && url.searchParams.has(oldKey))
       url.searchParams.set(key, required(url.searchParams.get(oldKey)))
   }
-  const obsolete = [...url.searchParams.keys()].filter((key) => !KEYS.has(key))
+  const obsolete = [...url.searchParams.keys()].filter(
+    (key) => !KEYS.has(key) && !DEBUG_KEYS.has(key),
+  )
   for (const key of obsolete) url.searchParams.delete(key)
   return url
+}
+
+/** `?perf` shows per-pass timings on the device (`perf=split` prices scene groups); `dpr` overrides the pixel-ratio cap. */
+export function debugParams(search: string) {
+  const params = new URLSearchParams(search)
+  const rawRatio = Number(params.get('dpr') ?? Number.NaN)
+  const pixelRatio =
+    Number.isFinite(rawRatio) && rawRatio > 0 ? Math.min(3, Math.max(0.25, rawRatio)) : undefined
+  const perf: 'live' | 'split' | null = !params.has('perf')
+    ? null
+    : params.get('perf') === 'split'
+      ? 'split'
+      : 'live'
+  return { perf, pixelRatio }
 }

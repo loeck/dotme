@@ -3,7 +3,12 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { createCloudNoise, periodicNoise } from './cloud-noise'
-import { RIPPLE_SPECTRUM, sampleWindField, swellHeight } from './water-surface'
+import {
+  LOW_POWER_RIPPLE_SPECTRUM,
+  RIPPLE_SPECTRUM,
+  sampleWindField,
+  swellHeight,
+} from './water-surface'
 import { WIND_BEARING, WindModel } from './wind'
 import type { WindState } from './wind'
 
@@ -159,6 +164,16 @@ describe('shared atmospheric wind', () => {
     const offsets = RIPPLE_SPECTRUM.map(({ dx, dz }) => Math.atan2(dz, dx) - WIND_BEARING)
     expect(Math.max(...offsets.map(Math.abs))).toBeLessThan(Math.PI / 2)
     expect(Math.max(...offsets) - Math.min(...offsets)).toBeGreaterThan(0.5)
+  })
+
+  it('keeps the low-power capillary slope variance and its wavelength range', () => {
+    const variance = (spectrum: readonly { slope: number }[]) =>
+      spectrum.reduce((sum, { slope }) => sum + slope * slope, 0)
+    expect(LOW_POWER_RIPPLE_SPECTRUM).toHaveLength(8)
+    expect(variance(LOW_POWER_RIPPLE_SPECTRUM)).toBeCloseTo(variance(RIPPLE_SPECTRUM), 10)
+    const wavelengths = LOW_POWER_RIPPLE_SPECTRUM.map(({ wavelength }) => wavelength)
+    expect(Math.max(...wavelengths)).toBeGreaterThan(0.6)
+    expect(Math.min(...wavelengths)).toBeLessThan(0.1)
   })
 
   it('seeds independently moving small clouds and large banks', () => {
