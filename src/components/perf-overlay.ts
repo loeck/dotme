@@ -68,6 +68,12 @@ export function summarize(capture: SceneRenderCapture) {
   for (const name of children(undefined)) visit(name, 0)
   const gpuTotal = [...own.values()].reduce((total, pass) => total + (pass.gpuMs ?? 0), 0)
   lines.push(`${'gpu total'.padEnd(22)}       ${capture.gpuAvailable ? ms(gpuTotal) : '   -'}`)
+  const targets = Object.entries(capture.targets)
+    .map(([name, total]) => [name, total / frames] as const)
+    .filter(([, gpuMs]) => gpuMs >= 0.05)
+    .toSorted((a, b) => b[1] - a[1])
+  if (targets.length) lines.push('', 'gpu by target')
+  for (const [name, gpuMs] of targets) lines.push(`${name.slice(0, 26).padEnd(28)} ${ms(gpuMs)}`)
   return lines.join('\n')
 }
 

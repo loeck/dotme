@@ -47,6 +47,12 @@ function summarizeRender(capture: SceneRenderCapture) {
     medianCpuMs: quantile(capture.frameCpuMs, 0.5),
     p95CpuMs: quantile(capture.frameCpuMs, 0.95),
     gpuAvailable: capture.gpuAvailable,
+    targetsGpuMsPerFrame: Object.fromEntries(
+      Object.entries(capture.targets).map(([name, total]) => [
+        name,
+        total / Math.max(1, capture.frameCpuMs.length),
+      ]),
+    ),
     passes: Object.fromEntries(
       Object.entries(capture.passes).map(([name, samples]) => {
         const cpuMs = samples.map((sample) => sample.cpuMs)

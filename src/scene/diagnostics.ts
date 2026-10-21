@@ -15,8 +15,16 @@ export type SceneRenderCapture = {
   intervalsMs: number[]
   frameCpuMs: number[]
   passes: Record<string, ScenePassSample[]>
+  /** GPU time summed over the capture by render context: the labeler's name, else the pass's. */
+  targets: Record<string, number>
   gpuAvailable: boolean
 }
+
+export type RenderLabeler = (
+  scene: Scene,
+  camera: Camera,
+  renderTarget: RenderTarget | null,
+) => string | undefined
 
 type PassStart = { name: string; at: number; renderCalls: number }
 
@@ -37,6 +45,8 @@ type PendingGpuSample = { sample: ScenePassSample; uids: string[]; rounds: numbe
 
 type GpuSession = {
   renderer: GpuCaptureRenderer
+  capture: SceneRenderCapture
+  labels: Map<string, string>
   backend: TimestampBackend
   trackTimestampBefore: boolean
   beginRenderBefore: InspectorBase['beginRender']
@@ -64,16 +74,22 @@ export class SceneRenderDiagnostics {
   private capture: SceneRenderCapture | null = null
   private settled: SceneRenderCapture | null = null
   private gpu: GpuSession | null = null
-  private openPasses: string[][] = []
+  private openPasses: { name: string; uids: string[] }[] = []
   private previousFrameAt: number | null = null
 
-  start(renderer?: GpuCaptureRenderer) {
+  start(renderer?: GpuCaptureRenderer, labeler?: RenderLabeler) {
     this.teardownGpu()
-    this.capture = { intervalsMs: [], frameCpuMs: [], passes: {}, gpuAvailable: false }
+    this.capture = {
+      intervalsMs: [],
+      frameCpuMs: [],
+      passes: {},
+      targets: {},
+      gpuAvailable: false,
+    }
     this.settled = null
     this.openPasses = []
     this.previousFrameAt = null
-    if (renderer) this.setupGpu(renderer, this.capture)
+    if (renderer) this.setupGpu(renderer, this.capture, labeler)
   }
 
   stop(): SceneRenderCapture | null {
@@ -121,13 +137,13 @@ export class SceneRenderDiagnostics {
 
   begin(name: string, renderCalls: number): PassStart | null {
     if (!this.capture) return null
-    this.openPasses.push([])
+    this.openPasses.push({ name, uids: [] })
     return { name, at: performance.now(), renderCalls }
   }
 
   end(start: PassStart | null, renderCalls: number) {
     if (!start || !this.capture) return
-    const uids = this.openPasses.pop() ?? []
+    const uids = this.openPasses.pop()?.uids ?? []
     const sample: ScenePassSample = {
       cpuMs: performance.now() - start.at,
       renderCalls: renderCalls - start.renderCalls,
@@ -140,13 +156,19 @@ export class SceneRenderDiagnostics {
     }
   }
 
-  private setupGpu(renderer: GpuCaptureRenderer, capture: SceneRenderCapture) {
+  private setupGpu(
+    renderer: GpuCaptureRenderer,
+    capture: SceneRenderCapture,
+    labeler?: RenderLabeler,
+  ) {
     if (!renderer.hasFeature(TIMESTAMP_FEATURE)) return
     const backend = timestampBackend(renderer.backend)
     if (!backend) return
     const inspector = renderer.inspector
     const session: GpuSession = {
       renderer,
+      capture,
+      labels: new Map(),
       backend,
       trackTimestampBefore: backend.trackTimestamp,
       beginRenderBefore: inspector.beginRender.bind(inspector),
@@ -162,11 +184,19 @@ export class SceneRenderDiagnostics {
       camera: Camera,
       renderTarget: RenderTarget,
     ) => {
-      this.openPasses.at(-1)?.push(uid)
+      const open = this.openPasses.at(-1)
+      if (open) {
+        open.uids.push(uid)
+        session.labels.set(uid, labeler?.(scene, camera, renderTarget) ?? open.name)
+      }
       session.beginRenderBefore(uid, scene, camera, renderTarget)
     }
     inspector.beginCompute = (uid: string, computeNode: ComputeNode) => {
-      this.openPasses.at(-1)?.push(uid)
+      const open = this.openPasses.at(-1)
+      if (open) {
+        open.uids.push(uid)
+        session.labels.set(uid, `${open.name} compute`)
+      }
       session.computeSeen = true
       session.beginComputeBefore(uid, computeNode)
     }
@@ -208,9 +238,13 @@ export class SceneRenderDiagnostics {
     for (const pending of gpu.pending) {
       const missed: string[] = []
       for (const uid of pending.uids) {
-        if (gpu.backend.hasTimestampQuery(uid))
-          pending.sample.gpuMs = (pending.sample.gpuMs ?? 0) + (gpu.backend.getTimestamp(uid) ?? 0)
-        else missed.push(uid)
+        if (gpu.backend.hasTimestampQuery(uid)) {
+          const elapsed = gpu.backend.getTimestamp(uid) ?? 0
+          pending.sample.gpuMs = (pending.sample.gpuMs ?? 0) + elapsed
+          const label = gpu.labels.get(uid) ?? 'render'
+          gpu.capture.targets[label] = (gpu.capture.targets[label] ?? 0) + elapsed
+          gpu.labels.delete(uid)
+        } else missed.push(uid)
       }
       gpu.pendingUids -= pending.uids.length - missed.length
       pending.uids = missed

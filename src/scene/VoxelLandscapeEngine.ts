@@ -51,7 +51,7 @@ import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
 import { SceneRenderDiagnostics } from './diagnostics'
-import type { SceneGpuInfo } from './diagnostics'
+import type { RenderLabeler, SceneGpuInfo } from './diagnostics'
 import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -1293,6 +1293,16 @@ export class VoxelLandscapeEngine {
   private gpuInfo: (() => SceneGpuInfo) | undefined
   private renderCaptureHook: Window['sceneRenderCapture']
 
+  /** Names a render context for per-target GPU attribution while a capture records. */
+  private renderLabel: RenderLabeler = (_scene, camera, target) => {
+    if (camera === this.moon.shadow.camera) return 'moon shadow'
+    if (this.lampLights.some(({ light }) => light.shadow.camera === camera)) return 'lamp shadow'
+    if (camera === this.water.reflectorNode.reflector.getVirtualCamera(this.camera))
+      return 'reflection'
+    if (target === this.depthFocus.target && camera === this.camera) return 'scene'
+    return target?.texture.name || undefined
+  }
+
   /** Narrow benchmark hook; read by page.evaluate, never by the scene itself. */
   private publishDiagnostics() {
     this.gpuInfo = () => ({
@@ -1305,7 +1315,7 @@ export class VoxelLandscapeEngine {
     })
     window.sceneGpuInfo = this.gpuInfo
     this.renderCaptureHook = {
-      start: () => this.renderDiagnostics.start(this.renderer),
+      start: () => this.renderDiagnostics.start(this.renderer, this.renderLabel),
       stop: () => this.renderDiagnostics.stop(),
       resolveGpu: () => this.renderDiagnostics.resolveGpu(),
     }
