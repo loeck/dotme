@@ -60,6 +60,8 @@ export class SceneDetails {
   private readonly waterfall: LakeWaterfall | undefined
   private readonly wetness = this.resources.own(new ShoreWetness())
   private readonly sand: LakeSand
+  /** Roots left out of the lighting probe's compile pass. */
+  private readonly probeStates: Array<{ root: Object3D; visible: boolean }>
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
 
   private readonly reducedMotion: boolean
@@ -97,11 +99,23 @@ export class SceneDetails {
           mobile,
           reducedMotion,
           (jet) => this.splashes.emit(jet),
-          physics,
           (impact, wind) => this.splashes.waterfallImpact(impact, wind),
         ),
       )
     }
+    const roots: Object3D[] = [
+      ...this.fish.meshes,
+      this.ray.group,
+      this.fireflies.mesh,
+      this.splashes.mesh,
+      this.splashes.sheets,
+      this.splashes.impacts.mesh,
+      this.splashes.impacts.slopes,
+      this.floating.mesh,
+      this.foam.mesh,
+    ]
+    if (this.waterfall) roots.push(this.waterfall.group)
+    this.probeStates = roots.map((root) => ({ root, visible: root.visible }))
   }
 
   /** Called after global cloud hooks so every material retains all its effects. */
@@ -215,6 +229,22 @@ export class SceneDetails {
     const compileMaterials = () => (this.waterfall ? this.waterfall.compile(compile) : compile())
     if (this.reducedMotion) return compileMaterials()
     return this.withFirefliesVisible(() => this.splashes.compileAsync(compileMaterials))
+  }
+
+  /**
+   * The lake's indirect lighting ignores small details, so the probe compiles
+   * without them: their materials never mint cube-target shader variants.
+   */
+  probeHidden<T>(action: () => T): T {
+    for (const state of this.probeStates) {
+      state.visible = state.root.visible
+      state.root.visible = false
+    }
+    try {
+      return action()
+    } finally {
+      for (const state of this.probeStates) state.root.visible = state.visible
+    }
   }
 
   async prepareFluid(renderer: WebGPURenderer, camera: Camera) {

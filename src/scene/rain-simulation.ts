@@ -159,8 +159,9 @@ export class RainSimulation {
     let low = 0
     let high = 1
     let side = 0
-    // Illinois regula falsi: the surface is smooth, so it converges in a few samples.
-    for (let i = 0; i < 5; i++) {
+    // Illinois regula falsi: the surface is smooth, so three brackets pin the
+    // drop to well under a millimetre; further passes cost a full spectrum each.
+    for (let i = 0; i < 3; i++) {
       const fraction = low + ((high - low) * lowGap) / (lowGap - highGap)
       const x = a.x + (b.x - a.x) * fraction
       const z = a.z + (b.z - a.z) * fraction

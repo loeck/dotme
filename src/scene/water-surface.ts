@@ -65,13 +65,14 @@ export const WAVE_SPECTRUM = WIND_WAVES.map(([angle, wavelength, amplitude, phas
 
 /** Same height, spatial gradient and time derivative as the shader, including
  * the packet envelope and the changing wind amplitude. */
-export function sampleWindField(
+function sampleSpectrum(
+  spectrum: readonly (typeof WAVE_SPECTRUM)[number][],
   x: number,
   z: number,
   time: number,
-  wind?: WindState,
-  footprint = 0,
-) {
+  wind: WindState | undefined,
+  footprint: number,
+): [height: number, dx: number, dz: number, velocity: number] {
   const field: [height: number, dx: number, dz: number, velocity: number] = [0, 0, 0, 0]
   const [rotationX, rotationY] = wind?.rotation ?? [1, 0]
   const angularVelocity = wind?.rotationVelocity ?? 0
@@ -86,7 +87,7 @@ export function sampleWindField(
     small,
     sensitivity,
     crossScale,
-  } of WAVE_SPECTRUM) {
+  } of spectrum) {
     if (footprint >= wavelength * 0.5) continue
     const kx = baseX * rotationX - baseZ * rotationY
     const kz = baseZ * rotationX + baseX * rotationY
@@ -128,6 +129,35 @@ export function sampleWindField(
       base * (calm ? 1 : sensitivity) * velocity * sine * packet
   }
   return field
+}
+
+/** Every band at or above a metre: 1.5 mm of the total crest, minus the fastest phases. */
+const CONTACT_SPECTRUM = WAVE_SPECTRUM.filter((wave) => wave.wavelength >= 1)
+
+/** Full spectrum, matching the shaded surface to the last millimetre. */
+export function sampleWindField(
+  x: number,
+  z: number,
+  time: number,
+  wind?: WindState,
+  footprint = 0,
+) {
+  return sampleSpectrum(WAVE_SPECTRUM, x, z, time, wind, footprint)
+}
+
+/**
+ * Physics companion for contacts, buoyancy and rain landing searches. They only
+ * need the surface to a millimetre, so the sub-metre bands are skipped: they cost
+ * five twelfths of every query and are the ones whose phases change fastest.
+ */
+export function sampleWaterContact(
+  x: number,
+  z: number,
+  time: number,
+  wind?: WindState,
+  footprint = 0,
+) {
+  return sampleSpectrum(CONTACT_SPECTRUM, x, z, time, wind, footprint)
 }
 
 export function swellHeight(x: number, z: number, time: number, wind?: WindState) {

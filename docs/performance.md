@@ -90,7 +90,7 @@ canvas resolution; the fluid capture runs at 128 px with horizontal-only
 thickness filtering. Before/after pixel parity for these cuts holds to under
 0.5% of pixels, confined to the lake and the waterfall column.
 
-Load compiles about 100 shader programs (vertex plus fragment stages; a loader
+Load compiles about 107 shader programs (vertex plus fragment stages; a loader
 program count of 4 is included until the loader releases). The environment probe
 mints the most (+29), then the submerged capture (+18), the fluid pass (+10),
 the main view (+6, including the 241 KB water fragment shader) and the warmup
@@ -102,6 +102,22 @@ non-deterministic shader codegen and cannot be removed application-side; the
 per-stage program inventory exists to catch regressions of this shape. No
 programs are compiled after the first presented frame, so shader stutter does
 not occur at runtime.
+
+The probe, the shadow maps and every remaining scene pass compile in one batch
+(`compile:scene`). `compileAsync` walks its scene synchronously and only awaits
+the driver's pipeline promises at the end, so issuing the passes back to back
+lets the driver build pipelines in parallel; awaiting them one at a time made
+the loader pay their sum instead. The renderer keeps per-pass state on a stack,
+so the batch settles its promises in reverse order of issue. That stage costs
+about 1.5-2.1 s instead of the 2.2-2.5 s the separate stages took.
+
+The probe compiles and renders without the detail layer (fish, ray, fireflies,
+splashes, floating bodies, foam, waterfall). Those objects are a few pixels of
+the lake's indirect lighting, but compiling their materials against the cube
+target minted a variant per material: with them hidden the probe drops from
+about 1.4 s to 0.6 s on desktop. Shadows and the main view still compile them
+normally, and the probe's object set matches at compile and render time, so no
+variant is created lazily on the first runtime sweep.
 
 ## Frame budget
 
@@ -117,18 +133,38 @@ Greedy meshing was measured and rejected: neighbouring voxel colours differ, so 
 remove about a third of the faces while introducing T-junction pixel gaps.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
-the light direction moves by more than about half a texel. Drifting lanterns refresh their cube
-shadows in a three-frame round robin. The environment probe renders one cube face per frame and
-filters once all six are current; clock discontinuities, the intro and reduced motion refresh
-every face at once. Capillary ripples and rain rings branch past components the pixel footprint
-has already faded, and the rain simulation steps at the 60 Hz frame cap.
+the light direction moves by more than about half a texel. Only the two brightest lanterns cast
+cube shadows (one on low power): each cube costs six caster renders and a cube sample in every
+lit pixel, and unshadowed lanterns still light the bank. Those two refresh once their lantern has
+drifted 8 cm (12 cm on low power), at most one per frame. The environment probe renders one cube
+face per interval (about 90 ms on a focused desktop, 200 ms on low power) and filters once all
+six are current; clock discontinuities restart the sweep, and the intro refreshes one face per
+frame. Capillary ripples and rain rings branch past components the pixel footprint has already
+faded, and the rain simulation steps at the 60 Hz frame cap.
+
+The submerged lakebed capture renders on alternate frames, so its atlas is refreshed at 30 Hz:
+the captured bed is static and only fish and caustics move in it. The captured image feeds water
+refraction, so a frame of lag is invisible at these scales, and the pass costs about 1.2-1.8 ms
+of GPU time per frame.
+
+Falling water is analytic rather than rigid-body driven. The curtain parcels only ever collided
+with the cursor blocker, so they integrate at a fixed 60 Hz step with the same gravity, damping
+and wobble force, and resolve against the same capsule analytically. That removed 2200 Rapier
+bodies and colliders from the shared world step, which was the largest single CPU cost of the
+night and rain scenes.
+
+CPU contact sampling uses a shortened spectrum. Contacts, buoyancy, foam and the rain's landing
+search only need the surface to a millimetre, so the five bands shorter than a metre (1.5 mm of
+combined crest, and the fastest phases of all) are skipped there: they cost five twelfths of
+every query, and rain landing searches evaluate the surface five times per drop. The shaded
+surface keeps the full spectrum, and the tests hold the two within 4 mm.
 
 ## Low-power profile
 
 Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
 use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
-foreground cap, pixel ratio capped at 1.25, a 64 px environment probe refreshed at 4 Hz,
-one lamp shadow per frame, a third-resolution
+foreground cap, pixel ratio capped at 1.25, a 64 px environment probe with one face per 200 ms,
+one shadow-casting lantern, a third-resolution
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
 
 On these devices, leaning the phone left or right (gravity projected onto the screen,

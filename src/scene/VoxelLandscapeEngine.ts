@@ -127,13 +127,7 @@ const COMPILE_STAGES = [
   'simulation',
   'fluid',
   'environment',
-  'env-probe',
-  'env-shadows',
-  'submerged',
-  'view',
-  'atmosphere',
-  'depth',
-  'reflection',
+  'scene',
   'warmup',
 ] as const
 
@@ -233,6 +227,8 @@ export class VoxelLandscapeEngine {
     glow: Mesh<PlaneGeometry, MeshBasicNodeMaterial>
     color: Color
     glowStrength: { value: number }
+    /** Light position the current cube map was rendered from. */
+    shadowPosition: Vector3
   }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
@@ -277,6 +273,8 @@ export class VoxelLandscapeEngine {
   private readonly voxelGroup = new Group()
   private readonly shadowGroup = new Group()
   private frame = 0
+  /** Starts at one so the first presented frame renders the lakebed capture. */
+  private submergedFrame = 1
   private frameTimer = 0
   private nextFrameAt = 0
   private focused = document.hasFocus()
@@ -354,37 +352,7 @@ export class VoxelLandscapeEngine {
       await preparationFrame(signal)
       engine.snapshotPrograms('fluid')
       performance.mark('compile:environment')
-      await engine.prepareEnvironment(signal)
-      performance.mark('compile:submerged')
-      await engine.submerged.compileAsync(options.renderer, engine.scene, engine.camera)
-      engine.snapshotPrograms('submerged')
-      signal.throwIfAborted()
-      performance.mark('compile:view')
-      await engine.compileView(engine.camera, engine.depthFocus.target)
-      await preparationFrame(signal)
-      engine.snapshotPrograms('view')
-      performance.mark('compile:atmosphere')
-      await engine.atmosphere.compileAsync(engine.depthFocus.target, engine.camera, engine.moon)
-      engine.snapshotPrograms('atmosphere')
-      performance.mark('compile:depth')
-      await engine.depthFocus.compileAsync(options.renderer, engine.camera)
-      engine.snapshotPrograms('depth')
-      performance.mark('compile:reflection')
-      const reflected = engine.water.getReflectionCamera(engine.camera)
-      reflected.copy(engine.camera)
-      // The mirrored capture would rebuild the whole fluid pass for a view that
-      // the lake surface distorts beyond recognition. Curtains and splashes
-      // still reflect; only the fluid volume renders from the main camera.
-      reflected.layers.disable(WATERFALL_FLUID_LAYER)
-      engine.water.visible = false
-      try {
-        await engine.compileView(reflected, engine.water.getRenderTarget(reflected))
-      } finally {
-        engine.water.visible = true
-      }
-      await preparationFrame(signal)
-      engine.snapshotPrograms('reflection')
-      signal.throwIfAborted()
+      await engine.compileScene(signal, options.renderer)
       performance.mark('compile:warmup')
       engine.warmupScene()
       engine.snapshotPrograms('warmup')
@@ -696,7 +664,16 @@ export class VoxelLandscapeEngine {
     const bulbGeometry = new SphereGeometry(0.11, 6, 5)
     const glowGeometry = new PlaneGeometry(2.0, 2.0)
     this.geometries.push(this.resources.own(bulbGeometry), this.resources.own(glowGeometry))
-    world.lamps.forEach((lamp) => {
+    // Every cube shadow costs six caster renders plus a cube sample per lit pixel,
+    // so only the brightest lanterns cast; the rest still light the bank.
+    const shadowLamps = new Set(
+      world.lamps
+        .map((lamp, index) => ({ index, intensity: lamp.intensity }))
+        .toSorted((a, b) => b.intensity - a.intensity)
+        .slice(0, this.lowPower ? 1 : 2)
+        .map((entry) => entry.index),
+    )
+    world.lamps.forEach((lamp, index) => {
       const bulb = new Mesh(
         bulbGeometry,
         new MeshBasicNodeMaterial({
@@ -714,7 +691,7 @@ export class VoxelLandscapeEngine {
       this.materials.push(this.resources.own(bulb.material))
       const light = new PointLight(0xffab5e, 22 * lamp.intensity, 8, 2)
       light.position.copy(bulb.position)
-      this.configurePointShadow(light)
+      this.configurePointShadow(light, shadowLamps.has(index))
       this.scene.add(light)
       this.objects.push(light)
       const glowStrength = uniform(0)
@@ -752,6 +729,7 @@ export class VoxelLandscapeEngine {
         glow,
         color: bulb.material.color.clone(),
         glowStrength,
+        shadowPosition: light.position.clone(),
       })
     })
     this.buildTrees(world.trees)
@@ -919,7 +897,9 @@ export class VoxelLandscapeEngine {
     this.resources.own(mesh)
   }
 
-  private configurePointShadow(light: PointLight) {
+  /** A lantern only needs a cube map when it is one of the shadow casters. */
+  private configurePointShadow(light: PointLight, castsShadow: boolean) {
+    if (!castsShadow) return
     light.castShadow = true
     light.shadow.autoUpdate = false
     this.resources.own(light.shadow)
@@ -1338,6 +1318,7 @@ export class VoxelLandscapeEngine {
     target: RenderTarget | null,
     object: Object3D = this.scene,
     face = 0,
+    withDetails = true,
   ) {
     const previous = this.renderer.getRenderTarget()
     const previousFace = this.renderer.getActiveCubeFace(),
@@ -1345,7 +1326,7 @@ export class VoxelLandscapeEngine {
     try {
       this.renderer.setRenderTarget(target, face)
       const compile = () => this.renderer.compileAsync(object, camera, this.scene)
-      return this.details ? this.details.compileAsync(compile) : compile()
+      return withDetails && this.details ? this.details.compileAsync(compile) : compile()
     } finally {
       this.renderer.setRenderTarget(previous, previousFace, mip)
     }
@@ -1353,7 +1334,16 @@ export class VoxelLandscapeEngine {
 
   // These passes share one renderer; yield between them instead of competing for its state.
   /* eslint-disable no-await-in-loop */
-  private async prepareEnvironment(signal: AbortSignal) {
+  /**
+   * Compiles the environment probe, the shadow maps and every remaining scene
+   * pass. `compileAsync` walks its scene synchronously and only awaits the
+   * driver's pipeline promises at the end, so issuing the passes back to back
+   * lets the driver build their pipelines in parallel; awaiting each pass in
+   * turn made the loader pay the sum of them instead of the longest. The
+   * renderer keeps its per-pass state on a stack, so the promises have to
+   * settle in the reverse order they were issued.
+   */
+  private async compileScene(signal: AbortSignal, renderer: WebGPURenderer) {
     // Establish the final environment texture before building any lit material variant.
     this.renderer.initRenderTarget(this.environmentTarget)
     await this.environmentFilter.compileCubemapShader()
@@ -1365,60 +1355,60 @@ export class VoxelLandscapeEngine {
     this.environmentCamera.coordinateSystem = this.renderer.coordinateSystem
     this.environmentCamera.updateCoordinateSystem()
     this.environmentCamera.updateMatrixWorld()
+    this.snapshotPrograms('environment')
+
+    const pending: Promise<unknown>[] = []
+    const issue = (compile: () => Promise<unknown>) => pending.push(compile())
+
+    // The probe's own traversal, with the planar water and the detail layer out:
+    // those materials are invisible in the cube so compiling them would only mint
+    // variants the probe never draws.
+    performance.mark('compile:scene')
+    const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
+    if (!cubeCamera) throw new Error('Missing environment cube camera')
     this.water.visible = false
     try {
-      const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
-      if (!cubeCamera) throw new Error('Missing environment cube camera')
-      this.snapshotPrograms('environment')
       // All six faces use the same lighting, layers and attachment formats. Include
       // off-axis meshes once instead of compiling their cached variants on every face.
-      performance.mark('compile:env-probe')
-      await compileWithoutCulling(this.scene, () =>
-        this.compileView(cubeCamera, this.environmentTarget),
+      issue(() =>
+        compileWithoutCulling(this.scene, () => {
+          const compile = () =>
+            this.compileView(cubeCamera, this.environmentTarget, this.scene, 0, false)
+          return this.details ? this.details.probeHidden(compile) : compile()
+        }),
       )
-      await preparationFrame(signal)
-      this.snapshotPrograms('env-probe')
-      // The material used by the public shadow node is shared with the actual shadow pass.
-      performance.mark('compile:env-shadows')
-      for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
-        const map = light.shadow.map
-        if (!map) continue
-        if (light instanceof PointLight) {
-          // Point lights have no target; their shadow node orients each cube face.
-          const camera = light.shadow.camera
-          camera.position.setFromMatrixPosition(light.matrixWorld)
-          camera.up.set(0, -1, 0)
-          camera.lookAt(camera.position.clone().add(new Vector3(-1, 0, 0)))
-          camera.far = light.distance || camera.far
-          camera.updateProjectionMatrix()
-          camera.updateMatrixWorld()
-        } else light.shadow.updateMatrices(light)
-        const material = this.scene.overrideMaterial,
-          background = this.scene.background
-        let compiled: Promise<void>
-        try {
-          const shadowMaterial = shadow(light).getShadowMaterial()
-          // Shadow rendering flips front-sided casters. Keep that same variant while
-          // compileAsync yields, rather than restoring its default front side.
-          shadowMaterial.side = BackSide
-          this.scene.overrideMaterial = shadowMaterial
-          this.scene.background = null
-          compiled = this.compileView(light.shadow.camera, map, this.shadowGroup)
-        } finally {
-          this.scene.overrideMaterial = material
-          this.scene.background = background
-        }
-        await compiled
-      }
-      // One loader presentation covers the whole shadow batch, not one per light.
-      await preparationFrame(signal)
     } finally {
       this.water.visible = true
     }
+
+    this.compileShadowMaps(issue)
+
+    issue(() => this.submerged.compileAsync(renderer, this.scene, this.camera))
+    issue(() => this.compileView(this.camera, this.depthFocus.target))
+    issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
+    issue(() => this.depthFocus.compileAsync(renderer, this.camera))
+    const reflected = this.water.getReflectionCamera(this.camera)
+    reflected.copy(this.camera)
+    // The mirrored capture would rebuild the whole fluid pass for a view that
+    // the lake surface distorts beyond recognition. Curtains and splashes
+    // still reflect; only the fluid volume renders from the main camera.
+    reflected.layers.disable(WATERFALL_FLUID_LAYER)
+    this.water.visible = false
+    try {
+      issue(() => this.compileView(reflected, this.water.getRenderTarget(reflected)))
+    } finally {
+      this.water.visible = true
+    }
+
+    for (let index = pending.length - 1; index >= 0; index--) await pending[index]
+    this.snapshotPrograms('scene')
+    signal.throwIfAborted()
+
     this.moon.shadow.needsUpdate = true
     for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
-    this.updateEnvironment(performance.now(), 0)
-    this.snapshotPrograms('env-shadows')
+    this.renderEnvironmentFaces([0, 1, 2, 3, 4, 5])
+    this.environmentFace = 0
+    this.filterEnvironment()
     await preparationFrame(signal)
   }
 
@@ -1426,23 +1416,25 @@ export class VoxelLandscapeEngine {
 
   private updateEnvironment(now: number, atmosphereTime: number) {
     // Reuse broad indirect lighting; planar water reflections stay per-frame.
-    // Intro, still renders and clock discontinuities always refresh the probe.
-    const interval = 1000 / (this.focused ? (this.lowPower ? 4 : 15) : 3)
-    const continuous =
-      atmosphereTime >= this.environmentTime &&
-      atmosphereTime - this.environmentTime <= 1 &&
-      this.intro === 1 &&
-      !this.reducedMotion
-    let faces: readonly number[]
-    if (!continuous) faces = [0, 1, 2, 3, 4, 5]
-    else if (this.environmentFace < 6) faces = [this.environmentFace]
-    else if (now - this.environmentAt >= interval) faces = [0]
-    else return
-    if (faces[0] === 0) {
-      this.environmentAt = now
-      this.environmentTime = atmosphereTime
-    }
+    // Exactly one cube face renders per interval, so the cost per frame stays
+    // flat instead of spiking; a full refresh takes about half a second.
+    const interval = this.focused ? (this.lowPower ? 200 : 90) : 60
+    // A clock jump (time scrub, weather change) restarts the sweep immediately.
+    const jump = atmosphereTime < this.environmentTime || atmosphereTime - this.environmentTime > 1
+    if (jump) this.environmentFace = 0
+    if (!jump && this.intro === 1 && now - this.environmentAt < interval) return
+    const face = this.environmentFace
+    this.environmentAt = now
+    if (face === 0) this.environmentTime = atmosphereTime
 
+    this.renderEnvironmentFaces([face])
+    this.environmentFace = (face + 1) % 6
+    if (this.environmentFace !== 0) return
+    this.filterEnvironment()
+  }
+
+  /** Renders probe faces with the direct disc and planar water masked out. */
+  private renderEnvironmentFaces(faces: readonly number[]) {
     this.water.visible = false
     const environmentIntensity = this.scene.environmentIntensity
     this.scene.environmentIntensity = 0
@@ -1458,10 +1450,11 @@ export class VoxelLandscapeEngine {
       this.skyMaterial.uniforms.uShowSun.value = this.showSun ? 1 : 0
       this.skyMaterial.uniforms.uShowMoon.value = 1
     }
-    this.environmentFace = (faces.at(-1) ?? 5) + 1
-    if (this.environmentFace < 6) return
-    // Filter explicitly before the main render. Lazy filtering inside a
-    // material upload would nest renderer calls and disturb texture bindings.
+  }
+
+  /** Filter once per completed sweep, before the main render. Lazy filtering
+   *  inside a material upload would nest renderer calls and disturb bindings. */
+  private filterEnvironment() {
     if (this.simulation.available) {
       this.filteredEnvironment = this.environmentFilter.fromCubemap(
         this.environmentTarget.texture,
@@ -1489,7 +1482,10 @@ export class VoxelLandscapeEngine {
     try {
       this.renderer.setRenderTarget(target, face, camera.activeMipmapLevel)
       if (this.renderer.reversedDepthBuffer && !this.renderer.autoClear) this.renderer.clearDepth()
-      this.renderer.render(this.scene, faceCamera)
+      const render = () => this.renderer.render(this.scene, faceCamera)
+      // Same object set as the compile pass, so the probe never mints extra variants.
+      if (this.details) this.details.probeHidden(render)
+      else render()
     } finally {
       target.texture.generateMipmaps = generateMipmaps
       this.renderer.setRenderTarget(previous, previousFace, previousMip)
@@ -1497,10 +1493,40 @@ export class VoxelLandscapeEngine {
     if (face === 5) target.texture.needsPMREMUpdate = true
   }
 
-  /** Static casters: low-power devices refresh the slow sun and one moving lamp per frame. */
+  /** The material used by the public shadow node is shared with the actual shadow pass. */
+  private compileShadowMaps(issue: (compile: () => Promise<unknown>) => void) {
+    for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
+      const map = light.shadow.map
+      if (!map) continue
+      if (light instanceof PointLight) {
+        // Point lights have no target; their shadow node orients each cube face.
+        const camera = light.shadow.camera
+        camera.position.setFromMatrixPosition(light.matrixWorld)
+        camera.up.set(0, -1, 0)
+        camera.lookAt(camera.position.clone().add(new Vector3(-1, 0, 0)))
+        camera.far = light.distance || camera.far
+        camera.updateProjectionMatrix()
+        camera.updateMatrixWorld()
+      } else light.shadow.updateMatrices(light)
+      const material = this.scene.overrideMaterial,
+        background = this.scene.background
+      try {
+        const shadowMaterial = shadow(light).getShadowMaterial()
+        // Shadow rendering flips front-sided casters. Keep that same variant while
+        // compileAsync yields, rather than restoring its default front side.
+        shadowMaterial.side = BackSide
+        this.scene.overrideMaterial = shadowMaterial
+        this.scene.background = null
+        issue(() => this.compileView(light.shadow.camera, map, this.shadowGroup))
+      } finally {
+        this.scene.overrideMaterial = material
+        this.scene.background = background
+      }
+    }
+  }
+
   /** Shadow casters (layer 5) are static terrain, so maps only follow light motion. */
   private updateShadows() {
-    const throttle = this.lowPower && this.intro === 1 && !this.reducedMotion
     const direction = this.shadowProbe
       .copy(this.moon.position)
       .sub(this.moon.target.position)
@@ -1511,14 +1537,18 @@ export class VoxelLandscapeEngine {
       this.moonShadowDirection.copy(direction)
     }
     if (this.nightLightFade === 0 || !this.lampLights.length) return
-    // Lanterns drift slowly; a three-frame round robin keeps their cube shadows current.
-    let count = Math.ceil(this.lampLights.length / 3)
-    if (throttle) count = 1
-    else if (this.reducedMotion) count = this.lampLights.length
-    for (let i = 0; i < count; i++) {
+    // Lanterns sway slowly: refresh a cube map only once its lamp has drifted far
+    // enough to reshape shadows, at most one lamp per frame in round-robin order.
+    const threshold = this.lowPower ? 0.12 : 0.08
+    const limit = threshold * threshold
+    for (let i = 0; i < this.lampLights.length; i++) {
       this.lampShadowCursor = (this.lampShadowCursor + 1) % this.lampLights.length
       const lamp = this.lampLights[this.lampShadowCursor]
-      if (lamp) lamp.light.shadow.needsUpdate = true
+      if (!lamp?.light.castShadow) continue
+      if (lamp.shadowPosition.distanceToSquared(lamp.light.position) < limit) continue
+      lamp.shadowPosition.copy(lamp.light.position)
+      lamp.light.shadow.needsUpdate = true
+      break
     }
   }
 
@@ -1780,7 +1810,11 @@ export class VoxelLandscapeEngine {
     this.updateEnvironment(now, atmosphereTime)
     diagnostics.end(probe, renderInfo.calls)
     const submerged = diagnostics.begin('submerged', renderInfo.calls)
-    this.submerged.render(this.renderer, this.scene, this.camera)
+    // The captured lakebed is static; only fish and caustics move in it, so both
+    // halves refresh on alternate frames and the atlas persists in between.
+    this.submergedFrame = (this.submergedFrame + 1) % 2
+    if (this.reducedMotion || this.submergedFrame === 0)
+      this.submerged.render(this.renderer, this.scene, this.camera)
     diagnostics.end(submerged, renderInfo.calls)
     const main = diagnostics.begin('main', renderInfo.calls)
     this.depthFocus.render(this.renderer, this.scene, this.camera, this.atmosphere, this.moon)

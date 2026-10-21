@@ -17,7 +17,7 @@ import { FISH_LAYER } from './lake-fish'
 import type { LakeSplashes } from './lake-splashes'
 import type { PhysicsWorld } from './physics-world'
 import type { WaterContact } from './water-contact'
-import { sampleWindField } from './water-surface'
+import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
 /** Floaters strike terrain only: neither droplets, fish, nor each other. */
@@ -175,7 +175,7 @@ export class FloatingBodies {
 
   private surfaceAt(x: number, z: number, time: number, wind: WindState, footprint: number) {
     if (this.contact) return this.contact.sample(x, z, time, wind, footprint)
-    const [height, dx, dz, speed] = sampleWindField(x, z, time, wind, footprint)
+    const [height, dx, dz, speed] = sampleWaterContact(x, z, time, wind, footprint)
     return [WATER_LEVEL + height, dx, dz, speed] as const
   }
 

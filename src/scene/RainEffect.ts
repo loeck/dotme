@@ -41,7 +41,7 @@ import type { RainSurface } from './rain-shaders'
 import { IMPACT_LIFETIME, RainSimulation, WATER_Y } from './rain-simulation'
 import type { RainImpact, RainRepulsor, RainState, SegmentTrace } from './rain-simulation'
 import type { WaterContact } from './water-contact'
-import { sampleWindField } from './water-surface'
+import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
 /** Relative kinetic energy: volume scales with diameter cubed. */
@@ -112,7 +112,7 @@ export class RainEffect {
   private readonly sampleSurface = (x: number, z: number, time: number) =>
     this.waterContact
       ? this.waterContact.sample(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
-      : WATER_Y + sampleWindField(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
+      : WATER_Y + sampleWaterContact(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
 
   private readonly lamps: readonly PointLight[]
   private readonly moon: DirectionalLight
