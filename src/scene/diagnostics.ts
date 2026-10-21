@@ -257,8 +257,15 @@ export class SceneRenderDiagnostics {
   }
 }
 
+/** Debug-only scene groups that the perf panel removes one at a time to price them. */
+export type SceneElimination = {
+  groups: readonly string[]
+  hide: (group: string | null) => void
+}
+
 declare global {
   interface Window {
+    sceneElimination?: SceneElimination
     sceneGpuInfo?: () => SceneGpuInfo
     sceneRenderCapture?: {
       start: () => void

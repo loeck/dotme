@@ -96,9 +96,10 @@ export async function initLandscape(
     motion.addEventListener('change', () => engine?.setReducedMotion(motion.matches), { signal })
     observer = new ResizeObserver(engine.resize)
     observer.observe(host)
-    if (debugParams(location.search).perf)
+    const { perf } = debugParams(location.search)
+    if (perf)
       void import('./perf-overlay').then(({ initPerfOverlay }) => {
-        if (!signal.aborted) initPerfOverlay(renderer, signal)
+        if (!signal.aborted) initPerfOverlay(renderer, signal, perf)
         return undefined
       })
     return dispose

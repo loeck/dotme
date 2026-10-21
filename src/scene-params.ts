@@ -47,11 +47,13 @@ export function cleanSceneUrl(url: URL) {
   return url
 }
 
-/** `?perf` shows per-pass timings on the device; `dpr` overrides the pixel-ratio cap. */
+/** `?perf` shows per-pass timings on the device (`perf=split` prices scene groups); `dpr` overrides the pixel-ratio cap. */
 export function debugParams(search: string) {
   const params = new URLSearchParams(search)
   const rawRatio = Number(params.get('dpr') ?? Number.NaN)
   const pixelRatio =
     Number.isFinite(rawRatio) && rawRatio > 0 ? Math.min(3, Math.max(0.25, rawRatio)) : undefined
-  return { perf: params.has('perf'), pixelRatio }
+  const mode: 'live' | 'split' = params.get('perf') === 'split' ? 'split' : 'live'
+  const perf = params.has('perf') ? mode : null
+  return { perf, pixelRatio }
 }

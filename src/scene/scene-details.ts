@@ -118,6 +118,15 @@ export class SceneDetails {
     this.probeStates = roots.map((root) => ({ root, visible: root.visible }))
   }
 
+  /** Detail roots grouped for the perf panel's elimination pass. */
+  get debugGroups(): Record<string, readonly Object3D[]> {
+    const waterfall = this.waterfall?.group
+    return {
+      details: this.probeStates.map(({ root }) => root).filter((root) => root !== waterfall),
+      waterfall: waterfall ? [waterfall] : [],
+    }
+  }
+
   /** Called after global cloud hooks so every material retains all its effects. */
   attachMaterials(
     terrain: Object3D,

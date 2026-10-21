@@ -51,7 +51,7 @@ import { DepthFocus } from './depth-focus'
 import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
 import { DeviceTilt } from './device-tilt'
 import { SceneRenderDiagnostics } from './diagnostics'
-import type { RenderLabeler, SceneGpuInfo } from './diagnostics'
+import type { RenderLabeler, SceneElimination, SceneGpuInfo } from './diagnostics'
 import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -1320,6 +1320,42 @@ export class VoxelLandscapeEngine {
       resolveGpu: () => this.renderDiagnostics.resolveGpu(),
     }
     window.sceneRenderCapture = this.renderCaptureHook
+    this.eliminationHook = this.createElimination()
+    window.sceneElimination = this.eliminationHook
+  }
+
+  private eliminationHook: SceneElimination | undefined
+
+  /** Clearing layer masks removes a group from every camera without touching visibility state. */
+  private createElimination(): SceneElimination {
+    const groups: Record<string, readonly Object3D[]> = {
+      water: [this.water],
+      sky: [this.sky],
+      terrain: [this.voxelGroup],
+      ...this.details?.debugGroups,
+      rain: [this.rain.group],
+      lamps: [
+        ...this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
+        ...(this.moteMesh ? [this.moteMesh] : []),
+      ],
+    }
+    const saved = new Map<Object3D, number>()
+    const restore = () => {
+      for (const [object, mask] of saved) object.layers.mask = mask
+      saved.clear()
+    }
+    return {
+      groups: Object.keys(groups).filter((name) => groups[name]?.length),
+      hide: (name) => {
+        restore()
+        for (const root of (name && groups[name]) || [])
+          root.traverse((object) => {
+            saved.set(object, object.layers.mask)
+            object.layers.mask = 0
+          })
+        this.requestFrame()
+      },
+    }
   }
 
   /** Capture render state synchronously: the loader borrows this renderer between yields. */
@@ -1901,6 +1937,11 @@ export class VoxelLandscapeEngine {
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture
+    if (this.eliminationHook && window.sceneElimination === this.eliminationHook) {
+      this.eliminationHook.hide(null)
+      delete window.sceneElimination
+    }
+    this.eliminationHook = undefined
     this.renderCaptureHook = undefined
     this.gpuInfo = undefined
     this.cancelFrame()

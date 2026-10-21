@@ -1,8 +1,13 @@
+// Captures share one recorder and must run back to back.
+/* eslint-disable no-await-in-loop */
 import type { WebGPURenderer } from 'three/webgpu'
 
 import type { SceneRenderCapture } from '../scene/diagnostics'
 
 const WINDOW_MS = 4000
+const SPLIT_MS = 2500
+// Lets shadow and probe refreshes triggered by the removal leave the window.
+const SETTLE_MS = 800
 // Children run inside their parent's span: list them under it, never in the total.
 const NESTED: Record<string, string> = {
   submergedBed: 'submerged',
@@ -31,6 +36,14 @@ function adapterLabel(renderer: WebGPURenderer) {
   const info = device.adapterInfo
   return ['webgpu', info.vendor, info.architecture, info.description].filter(Boolean).join(' ')
 }
+
+const perFrame = (capture: SceneRenderCapture, total: number) =>
+  total / Math.max(1, capture.frameCpuMs.length)
+const gpuTotal = (capture: SceneRenderCapture) =>
+  perFrame(
+    capture,
+    Object.values(capture.targets).reduce((a, b) => a + b, 0),
+  )
 
 export function summarize(capture: SceneRenderCapture) {
   const interval = median(capture.intervalsMs)
@@ -66,8 +79,9 @@ export function summarize(capture: SceneRenderCapture) {
     for (const child of children(name)) visit(child, level + 1)
   }
   for (const name of children(undefined)) visit(name, 0)
-  const gpuTotal = [...own.values()].reduce((total, pass) => total + (pass.gpuMs ?? 0), 0)
-  lines.push(`${'gpu total'.padEnd(22)}       ${capture.gpuAvailable ? ms(gpuTotal) : '   -'}`)
+  lines.push(
+    `${'gpu total'.padEnd(22)}       ${capture.gpuAvailable ? ms(gpuTotal(capture)) : '   -'}`,
+  )
   const targets = Object.entries(capture.targets)
     .map(([name, total]) => [name, total / frames] as const)
     .filter(([, gpuMs]) => gpuMs >= 0.05)
@@ -78,7 +92,11 @@ export function summarize(capture: SceneRenderCapture) {
 }
 
 /** Rolling per-pass timings on the device itself, behind `?perf`. */
-export function initPerfOverlay(renderer: WebGPURenderer, signal: AbortSignal) {
+export function initPerfOverlay(
+  renderer: WebGPURenderer,
+  signal: AbortSignal,
+  mode: 'live' | 'split' = 'live',
+) {
   const panel = document.createElement('pre')
   panel.setAttribute('aria-hidden', 'true')
   Object.assign(panel.style, {
@@ -106,24 +124,67 @@ export function initPerfOverlay(renderer: WebGPURenderer, signal: AbortSignal) {
       `${canvas.width}x${canvas.height}  dpr ${ratio.toFixed(2)} (device ${devicePixelRatio.toFixed(2)})`,
     ].join('\n')
   }
-  let timer = 0
-  signal.addEventListener('abort', () => clearTimeout(timer), { once: true })
-  const schedule = (callback: () => void, delay: number) => {
-    if (!signal.aborted) timer = window.setTimeout(callback, delay)
-  }
-  const finish = async (hook: NonNullable<Window['sceneRenderCapture']>) => {
+  const wait = (delay: number) =>
+    new Promise<void>((resolve) => {
+      const cancel = () => clearTimeout(timer)
+      const timer = window.setTimeout(() => {
+        signal.removeEventListener('abort', cancel)
+        resolve()
+      }, delay)
+      signal.addEventListener('abort', cancel, { once: true })
+    })
+  const measure = async (duration: number) => {
+    const hook = window.sceneRenderCapture
+    if (!hook) return null
+    hook.start()
+    await wait(duration)
     hook.stop()
     const capture = await hook.resolveGpu()
-    if (signal.aborted) return
-    if (capture && capture.frameCpuMs.length > 1)
-      panel.textContent = `${header()}\n${summarize(capture)}`
-    begin()
+    return !signal.aborted && capture && capture.frameCpuMs.length > 1 ? capture : null
   }
-  const begin = () => {
-    const hook = window.sceneRenderCapture
-    if (!hook || document.hidden) return schedule(begin, 500)
-    hook.start()
-    schedule(() => void finish(hook), WINDOW_MS)
+
+  const live = async () => {
+    while (!signal.aborted) {
+      if (!window.sceneRenderCapture || document.hidden) {
+        await wait(500)
+        continue
+      }
+      const capture = await measure(WINDOW_MS)
+      if (capture) panel.textContent = `${header()}\n${summarize(capture)}`
+    }
   }
-  begin()
+
+  // Remove one group at a time from every camera and price it by the GPU time it frees.
+  const split = async () => {
+    while (!signal.aborted && (!window.sceneElimination || !window.sceneRenderCapture))
+      await wait(500)
+    const elimination = window.sceneElimination
+    if (!elimination) return
+    try {
+      // Clocks drift with load and heat: pair every removal with a fresh baseline.
+      const rows = [`${'removed'.padEnd(10)}  with  w/out  saves`]
+      let last: SceneRenderCapture | null = null
+      for (const group of elimination.groups) {
+        panel.textContent = `${header()}\nsplit: ${group}…\n\n${rows.join('\n')}`
+        await wait(SETTLE_MS)
+        const baseline = await measure(SPLIT_MS)
+        elimination.hide(group)
+        await wait(SETTLE_MS)
+        const without = await measure(SPLIT_MS)
+        elimination.hide(null)
+        if (!baseline || !without) return
+        last = baseline
+        const scene = (capture: SceneRenderCapture) =>
+          perFrame(capture, capture.targets['scene'] ?? 0)
+        rows.push(
+          `${group.padEnd(10)} ${ms(scene(baseline))}   ${ms(scene(without))}   ${ms(gpuTotal(baseline) - gpuTotal(without))}`,
+        )
+      }
+      if (last)
+        panel.textContent = `${header()}\n${summarize(last)}\n\nsplit: scene gpu ms, saves = total\n${rows.join('\n')}`
+    } finally {
+      elimination.hide(null)
+    }
+  }
+  void (mode === 'split' ? split() : live())
 }
