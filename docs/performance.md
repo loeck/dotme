@@ -51,6 +51,13 @@ written under `artifacts/performance/` and are not functional-test pass/fail
 thresholds. Mobile browsers without a WebGPU adapter are recorded under
 `unsupportedProfiles` and produce no GPU frame-time measurements.
 
+On a physical device, add `?perf` to the URL: a panel refreshes every four seconds
+with the frame interval, frame CPU and the per-pass CPU and GPU time averaged over every
+frame, nested passes under their parent (`main` splits into `view`, `atmosphere` and
+`lens`). `dpr=<ratio>` overrides the pixel-ratio cap so the same build can be compared at
+several resolutions; both parameters survive URL cleaning. WebGPU needs a secure context,
+so phones should open an HTTPS preview deployment, not a LAN or tailnet address.
+
 Loading responsiveness includes the largest animation-frame gap and the count/maximum
 duration of long tasks until the scene is ready or fails; unsupported long-task APIs report `null`.
 
@@ -163,7 +170,7 @@ surface keeps the full spectrum, and the tests hold the two within 4 mm.
 
 Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
 use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
-foreground cap, pixel ratio capped at 1.25, a 64 px environment probe with one face per 200 ms,
+foreground cap, pixel ratio capped at 1.25, a half-resolution fish capture, a 64 px environment probe with one face per 200 ms,
 one shadow-casting lantern, a third-resolution
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.
 
