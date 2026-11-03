@@ -38,13 +38,15 @@ import {
   DoubleSide,
   Matrix4,
   Mesh,
+  NodeFrame,
   NodeMaterial,
+  NodeUpdateType,
   RGBAFormat,
   Vector2,
   Vector3,
   Vector4,
 } from 'three/webgpu'
-import type { BufferGeometry, Camera, Node } from 'three/webgpu'
+import type { BufferGeometry, Camera, Node, Scene, WebGPURenderer } from 'three/webgpu'
 
 import { clipDepth } from './backend-nodes'
 import { cloudShadow } from './cloud-shadows'
@@ -146,6 +148,13 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       bounces: false,
       samples: 0,
     })
+    // `renderReflection` draws the mirror as a top-level pass before the main
+    // view. Nested inside it, three keys the render context by call depth, so
+    // every reflected material built a second node graph and program variant
+    // that `compileAsync` (always depth zero) could never prepare. At depth zero
+    // the mirror target's attachments match the main view's, so both passes
+    // share one render context and one set of node builders and pipelines.
+    this.reflectorNode.reflector.updateBeforeType = NodeUpdateType.NONE
     // Environment reflection is composed explicitly with scenery coverage.
     // The water lighting model needs no second IBL or BRDF lookup sampler.
     material.envNode = vec3(0)
@@ -538,6 +547,17 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .add(shafts.mul(float(1).sub(foam)).mul(lightGate))
   }
 
+  private readonly reflectionFrame = new NodeFrame()
+  /** Mirror pass for `camera`; call before the view that draws this surface. */
+  renderReflection(renderer: WebGPURenderer, scene: Scene, camera: Camera) {
+    if (!this.visible || !this.layers.test(camera.layers)) return
+    const frame = this.reflectionFrame
+    frame.renderer = renderer
+    frame.scene = scene
+    frame.camera = camera
+    frame.material = this.material
+    this.reflectorNode.reflector.updateBefore(frame)
+  }
   getReflectionCamera(camera: Camera) {
     return this.reflectorNode.reflector.getVirtualCamera(camera)
   }

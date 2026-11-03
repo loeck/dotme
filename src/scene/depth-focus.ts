@@ -24,6 +24,11 @@ import { FullscreenPass } from './fullscreen-pass'
 import type { SceneGrade } from './scene-grade'
 import type { VolumetricLight } from './volumetric-light'
 
+/** A surface whose planar reflection renders as its own pass ahead of the view. */
+export type PlanarMirror = Readonly<{
+  renderReflection: (renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera) => void
+}>
+
 /** Texture name of the main view's render target, which GPU captures attribute by. */
 export const LENS_TARGET = 'Landscape lens color'
 
@@ -105,12 +110,14 @@ export class DepthFocus {
     camera: PerspectiveCamera,
     atmosphere?: VolumetricLight,
     light?: DirectionalLight,
+    mirror?: PlanarMirror,
   ) {
     this.cameraRange.value.set(camera.near, camera.far)
     const previous = renderer.getRenderTarget()
     try {
       const info = renderer.info.render
       const view = SceneRenderDiagnostics.beginActive('view', info.calls)
+      mirror?.renderReflection(renderer, scene, camera)
       renderer.setRenderTarget(this.target)
       renderer.render(scene, camera)
       SceneRenderDiagnostics.endActive(view, info.calls)

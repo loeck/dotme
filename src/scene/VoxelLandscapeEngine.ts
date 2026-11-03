@@ -1252,10 +1252,14 @@ export class VoxelLandscapeEngine {
       face = this.renderer.getActiveCubeFace(),
       mip = this.renderer.getActiveMipmapLevel()
     try {
-      this.renderer.setRenderTarget(this.depthFocus.target)
-      const render = () => this.renderer.render(this.scene, this.camera)
-      // A real offscreen pass also prepares ReflectorNode's nested render context.
-      // No simulation step runs and the shared canvas continues to contain the loader.
+      const render = () => {
+        this.water.renderReflection(this.renderer, this.scene, this.camera)
+        this.renderer.setRenderTarget(this.depthFocus.target)
+        this.renderer.render(this.scene, this.camera)
+      }
+      // A real offscreen pass also prepares nested render contexts (the fluid
+      // capture inside the main view). No simulation step runs and the shared
+      // canvas continues to contain the loader.
       if (this.details) this.details.warmup(render)
       else render()
     } finally {
@@ -1403,20 +1407,26 @@ export class VoxelLandscapeEngine {
     issue(() => this.compileView(this.camera, this.depthFocus.target))
     issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
     issue(() => this.depthFocus.compileAsync(renderer, this.camera))
+    for (let index = pending.length - 1; index >= 0; index--) await pending[index]
+    signal.throwIfAborted()
+
     const reflected = this.water.getReflectionCamera(this.camera)
     reflected.copy(this.camera)
     // The mirrored capture would rebuild the whole fluid pass for a view that
     // the lake surface distorts beyond recognition. Curtains and splashes
     // still reflect; only the fluid volume renders from the main camera.
     reflected.layers.disable(WATERFALL_FLUID_LAYER)
+    // The mirror renders at the main view's depth and attachments, so it shares
+    // that render context: once the view's builds have settled, this only adds
+    // objects outside the main frustum and the mirrored pipelines.
     this.water.visible = false
+    let mirror: Promise<unknown>
     try {
-      issue(() => this.compileView(reflected, this.water.getRenderTarget(reflected)))
+      mirror = this.compileView(reflected, this.water.getRenderTarget(reflected))
     } finally {
       this.water.visible = true
     }
-
-    for (let index = pending.length - 1; index >= 0; index--) await pending[index]
+    await mirror
     this.snapshotPrograms('scene')
     signal.throwIfAborted()
 
@@ -1842,7 +1852,14 @@ export class VoxelLandscapeEngine {
       this.submerged.render(this.renderer, this.scene, this.camera)
     diagnostics.end(submerged, renderInfo.calls)
     const main = diagnostics.begin('main', renderInfo.calls)
-    this.depthFocus.render(this.renderer, this.scene, this.camera, this.atmosphere, this.moon)
+    this.depthFocus.render(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.atmosphere,
+      this.moon,
+      this.water,
+    )
     diagnostics.end(main, renderInfo.calls)
     const overlay = diagnostics.begin('rainOverlay', renderInfo.calls)
     this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture)
