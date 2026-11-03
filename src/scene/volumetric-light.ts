@@ -149,7 +149,9 @@ export class VolumetricLight {
               .mul(this.haze)
               .mul(exp(this.hazeFalloff.mul(height).negate()))
               .mul(smoothstep(this.hazeStart.mul(0.35), this.hazeStart, along))
-              .add(this.mist.mul(smoothstep(this.mistTop, this.mistTop.mul(0.35), height)))
+              .add(
+                this.mist.mul(smoothstep(this.mistTop.mul(0.35), this.mistTop, height).oneMinus()),
+              )
             const transmission = exp(stepExtinction.mul(stride).negate()),
               integral = segmentIntegral(stepExtinction, stride)
             const visible = float(0).toVar()
@@ -228,7 +230,7 @@ export class VolumetricLight {
       })(),
     )
   }
-  update(light: LightingState, look?: SceneLook) {
+  update(light: LightingState, look: SceneLook) {
     this.sunDirection.value.copy(light.direction)
     this.sunRadiance.value
       .copy(light.color)
@@ -236,15 +238,13 @@ export class VolumetricLight {
         light.intensity *
           airSunScale(light.daylight) *
           airElevationScale(light.direction.y, light.daylight) *
-          (look?.sunScattering ?? 1),
+          look.sunScattering,
       )
-    if (look) {
-      this.haze.value = look.haze
-      this.hazeStart.value = look.hazeStart
-      this.hazeFalloff.value = look.hazeFalloff
-      this.mist.value = look.mist
-      this.mistTop.value = look.mistTop
-    }
+    this.haze.value = look.haze
+    this.hazeStart.value = look.hazeStart
+    this.hazeFalloff.value = look.hazeFalloff
+    this.mist.value = look.mist
+    this.mistTop.value = look.mistTop
     const airDay = 1 - light.daylight * 0.7
     this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
     this.skyAir.value = 0.5 * airDay

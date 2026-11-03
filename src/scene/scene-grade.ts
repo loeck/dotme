@@ -56,7 +56,8 @@ export class SceneGrade {
   /** Linear HDR grade, shared by the lens and by the profile's contrast mask. */
   colour(radiance: Node<'vec3'>): Node<'vec3'> {
     const exposed = radiance.mul(this.tint).mul(this.exposure)
-    const luminance = max(dot(exposed, REC709), 0.00001)
+    // Bounded both ways: a half-float overflow (the sun disc) must not turn 0 × ∞ into NaN.
+    const luminance = clamp(dot(exposed, REC709), 0.00001, 65504)
     const contrasted = exposed.mul(pow(luminance.div(MIDDLE_GREY), this.contrast.sub(1)))
     const grey = dot(contrasted, REC709)
     return max(mix(vec3(grey), contrasted, this.saturation), vec3(0))
