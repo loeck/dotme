@@ -1,49 +1,54 @@
+import { CAMERA_REST } from './camera-rig'
+import { bakeFoliageAtlas } from './foliage-atlas'
+import type { FoliageAtlas } from './foliage-atlas'
 import { WATER_LEVEL } from './lake-bed'
 import {
+  appendClumps,
+  appendFern,
+  appendFlower,
+  appendTuft,
+  MeshBuilder,
+} from './vegetation-meshes'
+import type { MeshData } from './vegetation-meshes'
+import {
+  foliageSeeds,
   meshSculpt,
-  mulberry32,
+  mixRgb,
   sculptBirch,
   sculptBush,
-  sculptFern,
-  sculptFlower,
   sculptPine,
   sculptSpruce,
-  sculptTuft,
   VEGETATION_PALETTE,
 } from './vegetation-models'
-import type { VegetationGeometry, VoxelSculpt } from './vegetation-models'
+import type { FoliageSeed, VegetationGeometry, VoxelSculpt } from './vegetation-models'
 import type { TreeKind, VoxelWorld } from './voxel-world'
 
-/** One instanced draw: a meshed model and where it stands. */
-export type VegetationLayer = Readonly<{
-  name: string
-  geometry: VegetationGeometry
-  /** Column-major 4×4 matrices, 16 floats per instance. */
-  matrices: Float32Array
-  /** Per instance: yaw (radians) and sway phase. */
-  motion: Float32Array
-  /** Tip displacement at full wind, as a fraction of the model height. */
-  sway: number
-  castShadow: boolean
-  /** Foreground detail only the main view renders: no reflection, probe or shadow pass. */
-  mainViewOnly: boolean
+/**
+ * The forest as three merged world-space meshes, after Last Signal: voxel wood, foliage clump
+ * cards over the botanical atlas, and procedural undergrowth that only the main view draws.
+ */
+export type PreparedVegetation = Readonly<{
+  wood: MeshData
+  foliage: MeshData
+  undergrowth: MeshData
+  atlas: FoliageAtlas
 }>
-export type PreparedVegetation = Readonly<{ layers: VegetationLayer[] }>
 
 /**
- * Micro voxels only read where they build forms of a few pixels (Deadloop's lesson). Trees,
- * 15–60 m away, use about a third of the terrain voxel; the foreground undergrowth, a few
- * metres from the camera, a much finer grid. Phones use coarser grids.
+ * Micro voxels only read where they build forms of a few pixels (Deadloop's lesson): wood uses
+ * about a third of the 25 cm terrain voxel. Foliage clumps sit on a pitch of three cells.
  */
 const GRID = {
-  desktop: { tree: 0.08, ground: 0.035 },
-  mobile: { tree: 0.1, ground: 0.045 },
+  desktop: { tree: 0.08, tufts: 1500 },
+  mobile: { tree: 0.1, tufts: 420 },
 } as const
+const CLUMP_PITCH = 3
 const GROUND_COVER_Z = -1.5
 /** Furthest a companion bush stands from its tree: (0.6 + 0.7) × the largest tree scale. */
 const COMPANION_REACH = 2.4
 const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 3, pine: 2, birch: 2 }
-const TUFT_VARIANTS = 3
+/** Tip travel at full wind as a share of model height (Voxen's `maxTip`). */
+const TREE_SWAY: Record<TreeKind, number> = { spruce: 0.03, pine: 0.03, birch: 0.05 }
 
 type Column = { top: number; ground: boolean }
 const COLUMN = 0.125
@@ -105,19 +110,11 @@ function columnTops(world: VoxelWorld) {
   }
 }
 
-class LayerBuilder {
-  readonly matrices: number[] = []
-  readonly motion: number[] = []
-  place(x: number, y: number, z: number, yaw: number, scale: number, phase: number) {
-    const c = Math.cos(yaw) * scale,
-      s = Math.sin(yaw) * scale
-    this.matrices.push(c, 0, -s, 0, 0, scale, 0, 0, s, 0, c, 0, x, y, z, 1)
-    this.motion.push(yaw, phase)
-  }
-  get count() {
-    return this.motion.length / 2
-  }
-}
+type Model = Readonly<{
+  wood: VegetationGeometry
+  seeds: readonly FoliageSeed[]
+  height: number
+}>
 
 export function prepareVegetation(
   world: VoxelWorld,
@@ -125,66 +122,67 @@ export function prepareVegetation(
   mobile: boolean,
 ): PreparedVegetation {
   const grid = mobile ? GRID.mobile : GRID.desktop
-  const random = mulberry32(seed ^ 0x51ed27)
-  const layers: VegetationLayer[] = []
-  const models = new Map<
-    string,
-    {
-      geometry: VegetationGeometry
-      builder: LayerBuilder
-      sway: number
-      shadow: boolean
-      foreground: boolean
-    }
-  >()
-  const model = (
-    name: string,
-    build: () => VoxelSculpt,
-    options: Readonly<{
-      sway: number
-      shadow: boolean
-      relief: number
-      bendFrom: number
-      foreground?: boolean
-    }>,
-  ) => {
+  const camera = [CAMERA_REST.x, CAMERA_REST.y, CAMERA_REST.z] as const
+  const wood = new MeshBuilder(false)
+  const foliage = new MeshBuilder(true)
+  const undergrowth = new MeshBuilder(false)
+  const models = new Map<string, Model>()
+  const model = (name: string, build: () => VoxelSculpt) => {
     let entry = models.get(name)
     if (!entry) {
+      const sculpt = build()
       entry = {
-        geometry: meshSculpt(build(), {
-          seed: seed ^ name.length,
-          relief: options.relief,
-          bendFrom: options.bendFrom,
-        }),
-        builder: new LayerBuilder(),
-        sway: options.sway,
-        shadow: options.shadow,
-        foreground: options.foreground ?? false,
+        wood: meshSculpt(sculpt, { seed: seed ^ name.length, relief: 0.35, bendFrom: 0.4 }),
+        seeds: foliageSeeds(sculpt, CLUMP_PITCH),
+        height: Math.max(sculpt.height, 0.1),
       }
       models.set(name, entry)
     }
-    return entry.builder
+    return entry
   }
-  const sculptTree = (kind: TreeKind, variant: number, size: number) => {
+  const sculptTree = (kind: TreeKind, variant: number) => {
     const treeSeed = seed + variant * 7919 + kind.length * 104_729
-    if (kind === 'birch') return sculptBirch(treeSeed, size)
-    if (kind === 'pine') return sculptPine(treeSeed, size)
-    return sculptSpruce(treeSeed, size, variant === 2)
+    if (kind === 'birch') return sculptBirch(treeSeed, grid.tree)
+    if (kind === 'pine') return sculptPine(treeSeed, grid.tree)
+    return sculptSpruce(treeSeed, grid.tree, variant === 2)
+  }
+  const plant = (
+    entry: Model,
+    at: Readonly<{ x: number; y: number; z: number; yaw: number; scale: number }>,
+    sway: number,
+    salt: number,
+    leafy: boolean,
+  ) => {
+    const phase = hash(seed, salt, 7, 937) * Math.PI * 2
+    const omega = (2 * Math.PI * 1.2) / Math.sqrt(entry.height * at.scale)
+    const swayMetres = sway * entry.height * at.scale
+    wood.appendVoxels(entry.wood, at, { phase, omega }, swayMetres)
+    // Per-prop size factor and hue/value jitter (Last Signal: [0.85, 1.2]).
+    const jitter = hash(seed, salt, 11, 941)
+    appendClumps(foliage, entry.seeds, at, {
+      camera,
+      pitch: CLUMP_PITCH * grid.tree,
+      length: leafy ? 0.26 : 0.3,
+      propFactor: 0.85 + jitter * 0.35,
+      propTint: [
+        0.94 + jitter * 0.1,
+        0.97 + hash(seed, salt, 13, 947) * 0.06,
+        0.95 + (1 - jitter) * 0.08,
+      ],
+      modelHeight: entry.height,
+      sway: { phase, omega },
+      swayMetres,
+      salt,
+    })
   }
   const tops = columnTops(world)
 
-  for (const tree of world.trees) {
+  world.trees.forEach((tree, index) => {
     const xi = Math.round(tree.x * 10),
       zi = Math.round(tree.z * 10)
     const variant = Math.floor(hash(seed, xi, zi, 931) * TREE_VARIANTS[tree.kind])
-    const size = grid.tree
-    const name = `${tree.kind}-${variant}`
-    model(name, () => sculptTree(tree.kind, variant, size), {
-      sway: tree.kind === 'birch' ? 0.05 : 0.03,
-      shadow: true,
-      relief: 0.35,
-      bendFrom: 0.4,
-    }).place(tree.x, tree.y, tree.z, tree.yaw, tree.scale, hash(seed, xi, zi, 937) * Math.PI * 2)
+    const entry = model(`${tree.kind}-${variant}`, () => sculptTree(tree.kind, variant))
+    plant(entry, tree, TREE_SWAY[tree.kind], index * 2 + 1, tree.kind === 'birch')
     // Last Signal's companions: two slots per tree, a bush in about a third of them.
     for (let slot = 0; slot < 2; slot++) {
       if (hash(seed, xi, zi, 941 + slot) > 0.36) continue
@@ -194,26 +192,28 @@ export function prepareVegetation(
         bz = tree.z + Math.cos(angle) * distance
       const column = tops.at(bx, bz)
       if (!column?.ground || column.top < tree.y - 0.6 || column.top <= WATER_LEVEL + 0.1) continue
-      const bushVariant = slot
-      model(`bush-${bushVariant}`, () => sculptBush(seed + 31 + bushVariant, size), {
-        sway: 0.04,
-        shadow: false,
-        relief: 0.35,
-        bendFrom: 0,
-      }).place(
-        bx,
-        column.top - 0.04,
-        bz,
-        angle * 3,
-        0.8 + hash(seed, xi, zi, 959 + slot) * 0.5,
-        angle,
+      const bush = model(`bush-${slot}`, () => sculptBush(seed + 31 + slot, grid.tree))
+      plant(
+        bush,
+        {
+          x: bx,
+          y: column.top - 0.04,
+          z: bz,
+          yaw: angle * 3,
+          scale: 0.8 + hash(seed, xi, zi, 959 + slot) * 0.5,
+        },
+        0.04,
+        index * 2 + 2 + slot * 1000,
+        true,
       )
     }
-  }
+  })
 
-  // Foreground undergrowth: clumps of grass inside larger patches, a few ferns and flowers.
-  const coverCap = mobile ? 220 : 720
-  const undergrowth = [...tops.columns.entries()]
+  // Foreground undergrowth (ADR 0107/0112): Bézier grass fans in 1.6 m clumps inside 8 m
+  // patches, with a few fern crowns and flowers. Visit in a seeded scatter order so the cap
+  // thins the whole bank rather than cutting it.
+  const P = VEGETATION_PALETTE
+  const candidates = [...tops.columns.entries()]
     .map(([key, column]) => {
       const [cx, cz] = key.split(':').map(Number)
       return { x: ((cx ?? 0) + 0.5) * COLUMN, z: ((cz ?? 0) + 0.5) * COLUMN, column }
@@ -221,79 +221,69 @@ export function prepareVegetation(
     .filter(
       ({ z, column }) => column.ground && z > GROUND_COVER_Z && column.top > WATER_LEVEL + 0.05,
     )
-    // Visit in a seeded scatter order, so the cap thins the whole bank rather than cutting it.
     .map((cell) => ({
       ...cell,
       order: hash(seed, Math.round(cell.x / COLUMN), Math.round(cell.z / COLUMN), 1031),
     }))
     .sort((a, b) => a.order - b.order)
   let placed = 0
-  for (const { x, z, column } of undergrowth) {
-    if (placed >= coverCap) break
+  for (const { x, z, column } of candidates) {
+    if (placed >= grid.tufts) break
     const xi = Math.round(x / COLUMN),
       zi = Math.round(z / COLUMN)
     const clump = valueNoise(seed, x, z, 1.6, 961)
     const patch = valueNoise(seed, x, z, 8, 967)
-    const chance = Math.max(0, Math.min(0.75, (clump - 0.4) * 1.3 + (patch - 0.5) * 0.6))
+    const chance = Math.max(0, Math.min(0.85, (clump - 0.35) * 1.4 + (patch - 0.5) * 0.6))
     if (hash(seed, xi, zi, 971) >= chance) continue
     const pick = hash(seed, xi, zi, 977)
-    const px = x + (hash(seed, xi, zi, 983) - 0.5) * COLUMN * 0.8
-    const pz = z + (hash(seed, xi, zi, 991) - 0.5) * COLUMN * 0.8
-    const yaw = hash(seed, xi, zi, 997) * Math.PI * 2
-    const scale = 0.8 + hash(seed, xi, zi, 1009) * 0.5
-    const phase = random() * Math.PI * 2
-    // Sink everything slightly so nothing floats on the voxel tops.
-    const y = column.top - 0.015
-    if (pick < 0.07)
-      model('fern', () => sculptFern(seed + 101, grid.ground), {
-        sway: 0.12,
-        shadow: false,
-        relief: 0.3,
-        bendFrom: 0,
-        foreground: true,
-      }).place(px, y, pz, yaw, scale, phase)
-    else if (pick < 0.1) {
-      const yellow = hash(seed, xi, zi, 1013) < 0.3
-      model(
-        yellow ? 'flower-yellow' : 'flower-white',
-        () =>
-          sculptFlower(
-            seed + (yellow ? 211 : 223),
-            grid.ground,
-            yellow ? VEGETATION_PALETTE.flowerYellow : VEGETATION_PALETTE.flowerWhite,
-          ),
-        {
-          sway: 0.2,
-          shadow: false,
-          relief: 0.2,
-          bendFrom: 0,
-          foreground: true,
-        },
-      ).place(px, y, pz, yaw, scale, phase)
+    const root = [
+      x + (hash(seed, xi, zi, 983) - 0.5) * COLUMN * 0.9,
+      column.top - 0.01,
+      z + (hash(seed, xi, zi, 991) - 0.5) * COLUMN * 0.9,
+    ] as const
+    const salt = xi * 7919 + zi
+    const phase = hash(seed, xi, zi, 997) * Math.PI * 2
+    if (pick < 0.05)
+      appendFern(undergrowth, root, {
+        fronds: 5 + Math.floor(hash(seed, xi, zi, 1009) * 3),
+        length: 0.32 + hash(seed, xi, zi, 1013) * 0.14,
+        colour: P.fern,
+        tip: mixRgb(P.fern, P.grassTip, 0.35),
+        salt,
+        phase,
+      })
+    else if (pick < 0.08) {
+      const yellow = hash(seed, xi, zi, 1019) < 0.3
+      appendFlower(undergrowth, root, {
+        height: 0.14 + hash(seed, xi, zi, 1021) * 0.12,
+        petal: yellow ? P.flowerYellow : P.flowerWhite,
+        heart: P.flowerHeart,
+        stem: P.flowerStem,
+        salt,
+        phase,
+      })
     } else {
-      const variant = Math.floor(hash(seed, xi, zi, 1019) * TUFT_VARIANTS)
-      model(`tuft-${variant}`, () => sculptTuft(seed + 307 + variant, grid.ground), {
-        sway: 0.28,
-        shadow: false,
-        relief: 0.25,
-        bendFrom: 0,
-        foreground: true,
-      }).place(px, y, pz, yaw, scale, phase)
+      // Last Signal's patch dryness: some clumps lean toward straw.
+      const dryness = Math.max(0, valueNoise(seed, x, z, 8, 1033) - 0.45) * 0.9
+      appendTuft(undergrowth, root, {
+        blades: 6 + Math.floor(hash(seed, xi, zi, 1039) * 5),
+        height: 0.2 + hash(seed, xi, zi, 1049) * 0.14,
+        width: 0.016 + hash(seed, xi, zi, 1051) * 0.008,
+        colours: {
+          root: [P.grassBase[0] * 0.88, P.grassBase[1] * 0.88, P.grassBase[2] * 0.88],
+          tip: mixRgb(mixRgb(P.grassTip, P.grassDry, dryness), P.grassBase, 0.3),
+        },
+        salt,
+        phase,
+      })
     }
     placed++
   }
 
-  for (const [name, entry] of models) {
-    if (!entry.builder.count) continue
-    layers.push({
-      name,
-      geometry: entry.geometry,
-      matrices: new Float32Array(entry.builder.matrices),
-      motion: new Float32Array(entry.builder.motion),
-      sway: entry.sway,
-      castShadow: entry.shadow,
-      mainViewOnly: entry.foreground,
-    })
+  return {
+    wood: wood.build(),
+    foliage: foliage.build(),
+    undergrowth: undergrowth.build(),
+    atlas: bakeFoliageAtlas(seed),
   }
-  return { layers }
 }

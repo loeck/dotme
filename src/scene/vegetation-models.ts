@@ -4,8 +4,8 @@
  * then meshed once with per-corner ambient occlusion and per-voxel tone. Everything here is
  * pure and deterministic so the world worker can prepare it and transfer typed arrays.
  */
-type Rgb = readonly [number, number, number]
-type Point = readonly [number, number, number]
+export type Rgb = readonly [number, number, number]
+export type Point = readonly [number, number, number]
 
 /** Last Signal's linear albedos (`content/materials/resources.ts`, `forest.toml`). */
 export const VEGETATION_PALETTE = {
@@ -47,18 +47,23 @@ export function mulberry32(seed: number) {
   }
 }
 const between = (random: () => number, min: number, max: number) => min + (max - min) * random()
-const mixRgb = (a: Rgb, b: Rgb, t: number): Rgb => [
+export const mixRgb = (a: Rgb, b: Rgb, t: number): Rgb => [
   a[0] + (b[0] - a[0]) * t,
   a[1] + (b[1] - a[1]) * t,
   a[2] + (b[2] - a[2]) * t,
 ]
 
 type Colour = Rgb | ((y: number) => Rgb)
+/** Wood stays voxels; needles and leaves are foliage masks that cards replace (ADR 0114). */
+export type CellKind = 'wood' | 'needle' | 'leaf'
+type Cell = Readonly<{ colour: Rgb; kind: CellKind }>
 
 /** A sparse voxel model. Later operations overwrite earlier ones, as in Voxen's model ops. */
 export class VoxelSculpt {
   readonly size: number
-  readonly cells = new Map<number, Rgb>()
+  readonly cells = new Map<number, Cell>()
+  /** Material role of the cells the next operations fill. */
+  kind: CellKind = 'wood'
   private top = 0
   constructor(size: number) {
     this.size = size
@@ -68,6 +73,14 @@ export class VoxelSculpt {
   }
   has(ix: number, iy: number, iz: number) {
     return this.cells.has(this.key(ix, iy, iz))
+  }
+  isWood(ix: number, iy: number, iz: number) {
+    return this.cells.get(this.key(ix, iy, iz))?.kind === 'wood'
+  }
+  /** Any matter at a model-space point. */
+  occupied(point: Point) {
+    const s = this.size
+    return this.has(Math.floor(point[0] / s), Math.floor(point[1] / s), Math.floor(point[2] / s))
   }
   /** Fill every cell whose centre satisfies `inside`, within a world-space box. */
   private fill(
@@ -89,7 +102,10 @@ export class VoxelSculpt {
           if (!inside(x, y, z)) continue
           const key = this.key(ix, iy, iz)
           if (paint && !this.cells.has(key)) continue
-          this.cells.set(key, typeof colour === 'function' ? colour(y) : colour)
+          this.cells.set(key, {
+            colour: typeof colour === 'function' ? colour(y) : colour,
+            kind: this.kind,
+          })
           this.top = Math.max(this.top, (iy + 1) * s)
         }
   }
@@ -180,19 +196,19 @@ export class VoxelSculpt {
     const ix = Math.floor(point[0] / s),
       iy = Math.max(0, Math.floor(point[1] / s)),
       iz = Math.floor(point[2] / s)
-    this.cells.set(this.key(ix, iy, iz), colour)
+    this.cells.set(this.key(ix, iy, iz), { colour, kind: this.kind })
     this.top = Math.max(this.top, (iy + 1) * s)
   }
   get height() {
     return this.top
   }
   /** Iterate cells as integer coordinates. */
-  forEach(visit: (ix: number, iy: number, iz: number, colour: Rgb) => void) {
-    for (const [key, colour] of this.cells) {
+  forEach(visit: (ix: number, iy: number, iz: number, colour: Rgb, kind: CellKind) => void) {
+    for (const [key, cell] of this.cells) {
       const iz = (key % SPAN) - OFFSET
       const iy = (Math.floor(key / SPAN) % SPAN) - OFFSET
       const ix = Math.floor(key / (SPAN * SPAN)) - OFFSET
-      visit(ix, iy, iz, colour)
+      visit(ix, iy, iz, cell.colour, cell.kind)
     }
   }
 }
@@ -243,11 +259,12 @@ export function meshSculpt(
     indices: number[] = []
   const height = Math.max(sculpt.height, s)
   const span = Math.max(height - options.bendFrom, s)
-  sculpt.forEach((ix, iy, iz, colour) => {
+  sculpt.forEach((ix, iy, iz, colour, kind) => {
+    if (kind !== 'wood') return
     const tone = 1 + options.relief * (voxelHash(ix, iy, iz, options.seed) - 0.5)
     for (const face of FACES) {
       const [nx, ny, nz] = face.n
-      if (sculpt.has(ix + nx, iy + ny, iz + nz)) continue
+      if (sculpt.isWood(ix + nx, iy + ny, iz + nz)) continue
       const base = positions.length / 3
       // The face plane sits on the voxel's positive or negative side.
       const ox = ix + (nx > 0 ? 1 : 0),
@@ -269,9 +286,9 @@ export function meshSculpt(
         const fx = ix + nx,
           fy = iy + ny,
           fz = iz + nz
-        const side1 = sculpt.has(fx + face.u[0] * su, fy + face.u[1] * su, fz + face.u[2] * su)
-        const side2 = sculpt.has(fx + face.v[0] * sv, fy + face.v[1] * sv, fz + face.v[2] * sv)
-        const corner = sculpt.has(
+        const side1 = sculpt.isWood(fx + face.u[0] * su, fy + face.u[1] * su, fz + face.u[2] * su)
+        const side2 = sculpt.isWood(fx + face.v[0] * sv, fy + face.v[1] * sv, fz + face.v[2] * sv)
+        const corner = sculpt.isWood(
           fx + face.u[0] * su + face.v[0] * sv,
           fy + face.u[1] * su + face.v[1] * sv,
           fz + face.u[2] * su + face.v[2] * sv,
@@ -314,6 +331,7 @@ export function sculptSpruce(seed: number, size: number, spruce: boolean) {
   const needles = spruce ? P.spruce : P.needles
   sculpt.limb([0, -0.15, 0], [0, height * 0.9, 0], 0.07, P.bark, 0.03)
   const span = height - canopyBase
+  sculpt.kind = 'needle'
   sculpt.cone(canopyBase, span, canopyRadius * 0.2, needles)
   const step = span / (layers + 0.6)
   const phase = random() * TAU
@@ -372,6 +390,7 @@ export function sculptPine(seed: number, size: number) {
     bias = random() * TAU
   const span = height - canopyBase
   // A dense inner mass holds the crown together; the scaffold lobes break its outline.
+  sculpt.kind = 'needle'
   sculpt.ellipsoid(
     [0, canopyBase + span * 0.6, 0],
     [canopyRadius * 0.55, span * 0.34, canopyRadius * 0.55],
@@ -385,7 +404,9 @@ export function sculptPine(seed: number, size: number) {
     const top = canopyBase + span * (0.28 + 0.6 * share + between(random, -0.06, 0.06))
     const attach = canopyBase + (top - canopyBase) * 0.35
     const tip: Point = [Math.sin(heading) * out, top, Math.cos(heading) * out]
+    sculpt.kind = 'wood'
     sculpt.limb([0, attach, 0], tip, 0.035, P.barkUpper, size * 0.6)
+    sculpt.kind = 'needle'
     // Overlapping terminal masses: flat, wide, slightly lifted at the edges.
     for (let shoot = 0; shoot < 3; shoot++) {
       const yaw = heading + between(random, -0.7, 0.7)
@@ -402,6 +423,7 @@ export function sculptPine(seed: number, size: number) {
       )
     }
   }
+  sculpt.kind = 'needle'
   sculpt.ellipsoid([0, height - 0.12, 0], [0.3, 0.16, 0.3], P.needles)
   return sculpt
 }
@@ -428,6 +450,7 @@ export function sculptBirch(seed: number, size: number) {
   }
   const phase = random() * TAU
   // The deep inner crown keeps the sprays from reading as separate floating clouds.
+  sculpt.kind = 'leaf'
   sculpt.ellipsoid(
     [lean * height * 0.68, height * 0.68, 0],
     [height * 0.15, height * 0.22, height * 0.15],
@@ -444,7 +467,9 @@ export function sculptBirch(seed: number, size: number) {
       y + reach * 0.55,
       Math.cos(heading) * reach,
     ]
+    sculpt.kind = 'wood'
     sculpt.limb(from, fork, 0.025, P.birchBark, size * 0.5)
+    sculpt.kind = 'leaf'
     for (let spray = 0; spray < 4; spray++) {
       const yaw = heading + between(random, -0.9, 0.9)
       const r = between(random, 0.27, 0.38) * (1 - 0.25 * share)
@@ -467,6 +492,7 @@ export function sculptBirch(seed: number, size: number) {
 export function sculptBush(seed: number, size: number) {
   const random = mulberry32(seed)
   const sculpt = new VoxelSculpt(size)
+  sculpt.kind = 'leaf'
   const radius = between(random, 0.32, 0.45),
     height = radius * 0.65
   for (let clump = 0; clump < 12; clump++) {
@@ -482,84 +508,128 @@ export function sculptBush(seed: number, size: number) {
   return sculpt
 }
 
-/** A grass tuft: one-voxel blades leaning out of a clump, tinted from root to dry tip. */
-export function sculptTuft(seed: number, size: number) {
-  const random = mulberry32(seed)
-  const sculpt = new VoxelSculpt(size)
-  const blades = 7 + Math.floor(random() * 6)
-  const tallest = between(random, 0.2, 0.32)
-  const dryness = between(random, 0, 0.35)
-  const tip = mixRgb(P.grassTip, P.grassDry, dryness)
-  for (let blade = 0; blade < blades; blade++) {
-    const angle = random() * TAU
-    const root = between(random, 0, 0.05)
-    const h = tallest * between(random, 0.55, 1)
-    const leanOut = between(random, 0.06, 0.16)
-    const base: Point = [Math.sin(angle) * root, 0, Math.cos(angle) * root]
-    // Two segments make an arc: nearly upright at the root, bending out toward the tip.
-    const mid: Point = [
-      base[0] + Math.sin(angle) * leanOut * 0.3,
-      h * 0.6,
-      base[2] + Math.cos(angle) * leanOut * 0.3,
-    ]
-    const end: Point = [base[0] + Math.sin(angle) * leanOut, h, base[2] + Math.cos(angle) * leanOut]
-    // Groundtint at the root, brighter and drier toward the tip (`[[grass]]` in forest.toml).
-    const shade = (y: number) => mixRgb(P.grassBase, tip, Math.min(1, y / h) ** 0.8)
-    sculpt.limb(base, mid, size * 0.5, shade)
-    sculpt.limb(mid, end, size * 0.5, shade)
-  }
-  return sculpt
-}
+/** One foliage clump: Voxen's seed of a step-cube block of uncovered foliage cells. */
+export type FoliageSeed = Readonly<{
+  /** Model-space centroid, metres. */
+  center: Point
+  /** Unit direction toward open air, from probes 1–3 pitches out in 26 directions. */
+  open: Point
+  /** Share of empty probes: 1 at an isolated tuft, low deep inside a crown. */
+  openness: number
+  colour: Rgb
+  leaf: boolean
+  /** Hash shared by the clumps of a 3-pitch cluster, for a common scale and value. */
+  cluster: number
+  /** Height of the centroid as a share of the model height. */
+  height: number
+}>
 
-/** A fern: five arching fronds with alternating leaflets. */
-export function sculptFern(seed: number, size: number) {
-  const random = mulberry32(seed)
-  const sculpt = new VoxelSculpt(size)
-  const phase = random() * TAU
-  for (let frond = 0; frond < 5; frond++) {
-    const heading = phase + (frond / 5) * TAU + between(random, -0.2, 0.2)
-    const length = between(random, 0.3, 0.42)
-    const steps = Math.ceil(length / size)
-    for (let step = 0; step <= steps; step++) {
-      const t = step / steps
-      const along = length * t
-      const y = 0.03 + 0.2 * Math.sin(Math.PI * t * 0.85) - 0.05 * t
-      const cx = Math.sin(heading) * along,
-        cz = Math.cos(heading) * along
-      sculpt.voxel([cx, y, cz], P.fern)
-      if (step % 2 === 0 && t > 0.15 && t < 0.95) {
-        const leaf = (1 - t) * 0.09 + size
-        for (const side of [-1, 1]) {
-          const sx = Math.cos(heading) * side,
-            sz = -Math.sin(heading) * side
-          for (let k = 1; k * size <= leaf; k++)
-            sculpt.voxel([cx + sx * k * size, y - k * size * 0.3, cz + sz * k * size], P.fern)
-        }
-      }
+const NEIGHBOURS: Point[] = []
+for (let x = -1; x <= 1; x++)
+  for (let y = -1; y <= 1; y++)
+    for (let z = -1; z <= 1; z++) {
+      if (x === 0 && y === 0 && z === 0) continue
+      const length = Math.hypot(x, y, z)
+      NEIGHBOURS.push([x / length, y / length, z / length])
     }
-  }
-  return sculpt
-}
 
-/** A small flower: a stem and a petal cross around a warm heart. */
-export function sculptFlower(seed: number, size: number, petal: Rgb) {
-  const random = mulberry32(seed)
-  const sculpt = new VoxelSculpt(size)
-  const stems = 1 + Math.floor(random() * 3)
-  for (let stem = 0; stem < stems; stem++) {
-    const angle = random() * TAU,
-      out = stem === 0 ? 0 : between(random, 0.03, 0.07)
-    const h = between(random, 0.14, 0.26)
-    const top: Point = [Math.sin(angle) * out, h, Math.cos(angle) * out]
-    sculpt.limb([top[0] * 0.3, 0, top[2] * 0.3], top, size * 0.5, P.flowerStem)
-    for (const [dx, dz] of [
-      [1, 0],
-      [-1, 0],
-      [0, 1],
-      [0, -1],
-    ] as const)
-      sculpt.voxel([top[0] + dx * size, top[1] + size, top[2] + dz * size], petal)
-    sculpt.voxel([top[0], top[1] + size, top[2]], P.flowerHeart)
+/**
+ * Reduce foliage cells to one seed per `pitch`-cell block that has an exposed face, as Voxen's
+ * clump planner does: centroid, majority role, mean colour, and the local crown shape probed
+ * at the 26 neighbour directions one, two and three pitches out.
+ */
+export function foliageSeeds(sculpt: VoxelSculpt, pitch: number): FoliageSeed[] {
+  type Block = {
+    x: number
+    y: number
+    z: number
+    count: number
+    r: number
+    g: number
+    b: number
+    leaves: number
+    surface: boolean
+    key: readonly [number, number, number]
   }
-  return sculpt
+  const blocks = new Map<string, Block>()
+  sculpt.forEach((ix, iy, iz, colour, kind) => {
+    if (kind === 'wood') return
+    const bx = Math.floor(ix / pitch),
+      by = Math.floor(iy / pitch),
+      bz = Math.floor(iz / pitch)
+    const name = `${bx}:${by}:${bz}`
+    let block = blocks.get(name)
+    if (!block) {
+      block = {
+        x: 0,
+        y: 0,
+        z: 0,
+        count: 0,
+        r: 0,
+        g: 0,
+        b: 0,
+        leaves: 0,
+        surface: false,
+        key: [bx, by, bz],
+      }
+      blocks.set(name, block)
+    }
+    block.x += ix
+    block.y += iy
+    block.z += iz
+    block.count++
+    block.r += colour[0]
+    block.g += colour[1]
+    block.b += colour[2]
+    if (kind === 'leaf') block.leaves++
+    if (!block.surface)
+      for (const face of FACES)
+        if (!sculpt.has(ix + face.n[0], iy + face.n[1], iz + face.n[2])) {
+          block.surface = true
+          break
+        }
+  })
+  const s = sculpt.size,
+    step = pitch * s,
+    height = Math.max(sculpt.height, s)
+  const seeds: FoliageSeed[] = []
+  for (const block of blocks.values()) {
+    if (!block.surface) continue
+    const center: Point = [
+      (block.x / block.count + 0.5) * s,
+      (block.y / block.count + 0.5) * s,
+      (block.z / block.count + 0.5) * s,
+    ]
+    let ox = 0,
+      oy = 0,
+      oz = 0,
+      empty = 0
+    for (const d of NEIGHBOURS)
+      for (let k = 1; k <= 3; k++) {
+        if (
+          sculpt.occupied([
+            center[0] + d[0] * k * step,
+            center[1] + d[1] * k * step,
+            center[2] + d[2] * k * step,
+          ])
+        )
+          continue
+        empty++
+        ox += d[0] / k
+        oy += d[1] / k
+        oz += d[2] / k
+      }
+    const length = Math.hypot(ox, oy, oz)
+    const [cx, cy, cz] = block.key.map((v) => Math.floor(v / 3))
+    seeds.push({
+      center,
+      open: length > 1e-6 ? [ox / length, oy / length, oz / length] : [0, 1, 0],
+      openness: empty / (NEIGHBOURS.length * 3),
+      colour: [block.r / block.count, block.g / block.count, block.b / block.count],
+      leaf: block.leaves * 2 > block.count,
+      cluster: voxelHash(cx ?? 0, cy ?? 0, cz ?? 0, 0x5eed),
+      height: center[1] / height,
+    })
+  }
+  return seeds
 }

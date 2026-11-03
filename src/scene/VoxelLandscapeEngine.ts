@@ -1690,7 +1690,7 @@ export class VoxelLandscapeEngine {
       })
     }
     updateWindUniforms(this.windUniforms, wind)
-    this.vegetation?.update(this.elapsed, wind.direction, wind.speed)
+    this.vegetation?.update(this.elapsed, wind.direction, wind.speed, light)
     const optics = sampleWaterOptics(
       this.rain.simulation.state.intensity,
       wind.speed,

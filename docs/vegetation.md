@@ -1,40 +1,71 @@
 # Vegetation
 
-Trees, bushes and foreground undergrowth follow the art direction of Voxen's _Last Signal_
-(`pine.model.ts`, `undergrowth.model.ts`, `props.toml`, `forest.toml`). They are micro-voxel
-models: ellipsoid, cone and limb operations carve a fine grid, which is meshed once with
-exposed faces only, classic per-corner voxel occlusion and a small hashed tone per voxel.
-The world worker prepares everything (`vegetation-models.ts`, `vegetation-placement.ts`) and
-transfers typed arrays; the render thread only wraps them in instanced meshes (`vegetation.ts`).
+Trees, bushes and foreground undergrowth follow Voxen's _Last Signal_ (`pine.model.ts`,
+`undergrowth.model.ts`, `props.toml`, `forest.toml`) and the renderer decisions behind it:
+wood stays voxels, foliage masks become botanical cards (ADR 0114), and undergrowth is
+procedural geometry (ADR 0107 for grass blades, ADR 0112 for fern fronds). The world worker
+builds everything (`vegetation-models.ts`, `vegetation-meshes.ts`, `foliage-atlas.ts`,
+`vegetation-placement.ts`) and transfers typed arrays; the render thread only wraps them
+(`vegetation.ts`).
 
-## Forms
+## Models
 
-- Spruce: Last Signal's conical form, a core cone and seven boughs per tier, turned by the
-  golden angle, drooping 28°, tapering 84% toward the top; 15% of boughs use the pale needle
+Models are carved from ellipsoid, cone and limb operations on an 8 cm grid (10 cm on phones),
+about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or leaves.
+
+- Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
+  golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
   colour. One variant uses the darker spruce needles.
-- Pine: Last Signal's mature form, a tall trunk turning orange from 55% of the canopy base,
-  bark flakes below, and an uneven crown of scaffold lobes around a dense inner mass.
-- Birch: a pale trunk with rotated dark marks and forked leaf sprays. Its bark is the main
-  value break against the dark conifers.
-- Bush: a dozen overlapping clumps; tree companions in about a third of two slots per tree.
-- Grass tufts, ferns and small white or yellow flowers on the mossy foreground bank, in 1.6 m
-  clumps inside 8 m patches. Blades arc in two segments and dry toward their tips.
+- Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
+  below, and an uneven crown of scaffold lobes around a dense inner mass.
+- Birch: a pale trunk with rotated dark marks and forked leaf sprays, the main value break
+  against the dark conifers.
+- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree.
 
 Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band.
 
-## Scale and cost
+## Wood and foliage
 
-Micro voxels only read where they build forms of a few pixels. Trees use 8 cm voxels on
-desktop and 10 cm on phones, about a third of the 25 cm terrain voxel; the undergrowth, a few
-metres from the camera, uses 3.5 cm and 4.5 cm. Each model is one instanced draw: at most
-fifteen layers. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera
-enables, so the water reflection, the environment probe and the shadow pass never draw it.
-Trees cast shadows through the shadow layer. Unit tests bound the layer count and triangles.
+Wood cells are meshed once: exposed faces only, classic per-corner voxel occlusion and a small
+hashed tone per voxel. Foliage cells are never drawn as voxels. As in Voxen's clump planner,
+every three-cell block with an exposed foliage cell becomes one seed: its centroid, majority
+role, mean colour, and the crown shape probed in 26 directions one to three pitches out, which
+gives the open direction and openness. Each seed emits three to five cards from a small
+procedural atlas: drooping, serrated bough sprays for needles (0.6 as tall as wide, tipped
+upward) and hanging leaf clusters for leaves. The first card loosely faces the camera; seeds
+with openness under 0.6 add a dark core disc so gaps inside a crown show foliage, not sky.
+Cluster scales range over [0.85, 1.45], each tree takes a factor in [0.85, 1.2], isolated
+tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Card normals lean 90%
+toward the open direction. Albedo takes a cluster value hash, a per-tree hue and value jitter,
+a cool-underside to warm-top ramp and an openness and height shade.
+
+The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an
+alpha test with a mip-level coverage boost, so distant crowns do not thin out. Lighting adds
+Last Signal's sky-light rim and back-light translucency, strongest at the crown rim and against
+a low sun.
+
+## Undergrowth
+
+Grass, ferns and flowers grow on the mossy foreground bank, in 1.6 m clumps inside 8 m patches,
+with some patches drying toward straw. A grass tuft is a sparse fan of six to ten quadratic
+Bézier ribbons with four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from
+the ground to the tip. A fern crown is a ring of arching, drooping rachis strips cut into
+alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
+Thin blades pass some sunlight when the view faces a low sun.
+
+## Cost
+
+The forest is three merged world-space meshes, so three draws: wood, foliage cards and
+undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
+so the water reflection, the environment probe and the shadow pass never draw it. Wood and
+foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
+forest is about 156k triangles and the phone forest about 25k. Preparation adds about 10% to the
+world worker. Unit tests bound the triangle budget and check determinism.
 
 ## Wind
 
-Sway follows Voxen's ADR 0110: one shear per instance that grows with the square of height,
-a rest lean with the wind speed and three buffeting sines (rates 0.53, 0.97, 1.61; weights
-0.5, 0.3, 0.2) at 1.2/√H Hz. The world wind direction is rotated into each instance's yawed
-model space. Reduced motion freezes the time, keeping only the static lean.
+Sway follows Voxen's ADR 0110: a height-squared shear, a rest lean with the wind speed and three
+buffeting sines (rates 0.53, 0.97, 1.61; weights 0.5, 0.3, 0.2) at 1.2/√H Hz. Cards, blades and
+leaflets add a light flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
+angular frequency. Reduced motion freezes the time, keeping only the static lean.
