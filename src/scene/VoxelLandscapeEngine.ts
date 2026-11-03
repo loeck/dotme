@@ -122,17 +122,7 @@ const smooth = (a: number, b: number, value: number) => {
   return t * t * (3 - 2 * t)
 }
 
-const COMPILE_STAGES = [
-  'clouds',
-  'sky',
-  'rain',
-  'contrast',
-  'simulation',
-  'fluid',
-  'environment',
-  'scene',
-  'warmup',
-] as const
+const COMPILE_STAGES = ['passes', 'environment', 'scene', 'warmup'] as const
 
 function preparationFrame(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
@@ -336,33 +326,14 @@ export class VoxelLandscapeEngine {
       )
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
-      performance.mark('compile:clouds')
-      await engine.clouds.compileAsync()
-      engine.snapshotPrograms('clouds')
-      performance.mark('compile:sky')
-      await engine.skyAtmosphere.compileAsync()
-      engine.skyAtmosphere.update(initialLight.sunDirection, initialLight.skyExposure)
-      await preparationFrame(signal)
-      engine.snapshotPrograms('sky')
-      performance.mark('compile:rain')
-      await engine.compileRain()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('rain')
-      performance.mark('compile:contrast')
-      await engine.sceneContrast.compileAsync(options.renderer)
-      engine.snapshotPrograms('contrast')
-      performance.mark('compile:simulation')
-      await engine.simulation.compileAsync()
-      signal.throwIfAborted()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('simulation')
-      performance.mark('compile:fluid')
-      await engine.details?.prepareFluid(options.renderer, engine.camera)
-      signal.throwIfAborted()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('fluid')
+      // The offscreen passes do not depend on the lit scene: issue them before
+      // the environment so their pipelines compile alongside the scene batch.
+      performance.mark('compile:passes')
+      const passes = engine.compilePasses(options.renderer, initialLight)
+      // Settled with the scene batch; keep an early failure from going unhandled.
+      passes.catch(() => undefined)
       performance.mark('compile:environment')
-      await engine.compileScene(signal, options.renderer)
+      await engine.compileScene(signal, options.renderer, passes)
       performance.mark('compile:warmup')
       engine.warmupScene()
       engine.snapshotPrograms('warmup')
@@ -1279,6 +1250,20 @@ export class VoxelLandscapeEngine {
     }
   }
 
+  /** Clouds, sky, rain, contrast, water simulation and waterfall fluid. */
+  private compilePasses(renderer: WebGPURenderer, light: LightingState) {
+    return Promise.all([
+      this.clouds.compileAsync(),
+      this.skyAtmosphere
+        .compileAsync()
+        .then(() => this.skyAtmosphere.update(light.sunDirection, light.skyExposure)),
+      this.compileRain(),
+      this.sceneContrast.compileAsync(renderer),
+      this.simulation.compileAsync(),
+      this.details?.prepareFluid(renderer, this.camera),
+    ])
+  }
+
   private compileRain() {
     const compile = () => this.rain.compileAsync(this.renderer, this.camera)
     return this.details ? this.details.compileAsync(compile) : compile()
@@ -1364,18 +1349,20 @@ export class VoxelLandscapeEngine {
     }
   }
 
-  // These passes share one renderer; yield between them instead of competing for its state.
-  /* eslint-disable no-await-in-loop */
   /**
    * Compiles the environment probe, the shadow maps and every remaining scene
-   * pass. `compileAsync` walks its scene synchronously and only awaits the
-   * driver's pipeline promises at the end, so issuing the passes back to back
-   * lets the driver build their pipelines in parallel; awaiting each pass in
-   * turn made the loader pay the sum of them instead of the longest. The
-   * renderer keeps its per-pass state on a stack, so the promises have to
-   * settle in the reverse order they were issued.
+   * pass, together with the already issued offscreen `passes`. `compileAsync`
+   * collects its render objects and restores the renderer state synchronously,
+   * then builds node graphs and pipelines asynchronously, so issuing the passes
+   * back to back lets their builds interleave and the driver compile their
+   * pipelines in parallel; awaiting each pass in turn made the loader pay the
+   * sum of them instead of the longest.
    */
-  private async compileScene(signal: AbortSignal, renderer: WebGPURenderer) {
+  private async compileScene(
+    signal: AbortSignal,
+    renderer: WebGPURenderer,
+    passes: Promise<unknown>,
+  ) {
     // Establish the final environment texture before building any lit material variant.
     this.renderer.initRenderTarget(this.environmentTarget)
     await this.environmentFilter.compileCubemapShader()
@@ -1389,7 +1376,7 @@ export class VoxelLandscapeEngine {
     this.environmentCamera.updateMatrixWorld()
     this.snapshotPrograms('environment')
 
-    const pending: Promise<unknown>[] = []
+    const pending: Promise<unknown>[] = [passes]
     const issue = (compile: () => Promise<unknown>) => pending.push(compile())
 
     // The probe's own traversal, with the planar water and the detail layer out:
@@ -1419,7 +1406,7 @@ export class VoxelLandscapeEngine {
     issue(() => this.compileView(this.camera, this.depthFocus.target))
     issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
     issue(() => this.depthFocus.compileAsync(renderer, this.camera))
-    for (let index = pending.length - 1; index >= 0; index--) await pending[index]
+    await Promise.all(pending)
     signal.throwIfAborted()
 
     const reflected = this.water.getReflectionCamera(this.camera)
@@ -1449,8 +1436,6 @@ export class VoxelLandscapeEngine {
     this.filterEnvironment()
     await preparationFrame(signal)
   }
-
-  /* eslint-enable no-await-in-loop */
 
   private updateEnvironment(now: number, atmosphereTime: number) {
     // Reuse broad indirect lighting; planar water reflections stay per-frame.
