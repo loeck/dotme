@@ -81,10 +81,11 @@ import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
+import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
 import type { TerrainBatch } from './voxel-mesh'
-import type { VoxelLamp, VoxelMaterial, VoxelTree, VoxelWaterfall } from './voxel-world'
+import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
@@ -236,7 +237,7 @@ export class VoxelLandscapeEngine {
   }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
-  private readonly trees: InstancedMesh[] = []
+  private vegetation: Vegetation | undefined
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -512,6 +513,7 @@ export class VoxelLandscapeEngine {
     this.camera.layers.disable(FISH_LAYER)
     this.camera.layers.enable(SPLASH_IMPACT_LAYER)
     this.camera.layers.enable(WATERFALL_FLUID_LAYER)
+    this.camera.layers.enable(UNDERGROWTH_LAYER)
     this.submerged = this.resources.own(
       new SubmergedScene(
         this.scene,
@@ -740,7 +742,7 @@ export class VoxelLandscapeEngine {
         shadowPosition: light.position.clone(),
       })
     })
-    this.buildTrees(world.trees)
+    this.vegetation = this.resources.own(new Vegetation(this.scene, prepared.vegetation))
 
     // A few dim, square flecks drift in depth. They provide a living scale cue without
     // turning the open sky into a particle field.
@@ -823,35 +825,6 @@ export class VoxelLandscapeEngine {
     }
     this.details?.setEnvironment(environment)
     if (this.reducedMotion) this.requestFrame()
-  }
-
-  private buildTrees(trees: readonly VoxelTree[]) {
-    if (!trees.length) return
-    const parts = [
-      { geometry: new BoxGeometry(0.16, 0.62, 0.16), color: 0x55483c, dy: 0.31 },
-      { geometry: new BoxGeometry(0.72, 0.55, 0.72), color: 0x3c4d38, dy: 0.85 },
-      { geometry: new BoxGeometry(0.44, 0.38, 0.44), color: 0x4d5d3f, dy: 1.28 },
-    ] as const
-    const placement = new Object3D()
-    for (const part of parts) {
-      const material = new MeshStandardNodeMaterial({ color: part.color, roughness: 0.95 })
-      this.materials.push(this.resources.own(material))
-      this.geometries.push(this.resources.own(part.geometry))
-      const mesh = new InstancedMesh(part.geometry, material, trees.length)
-      trees.forEach((tree, index) => {
-        placement.position.set(tree.x, tree.y + part.dy * tree.scale, tree.z)
-        placement.scale.setScalar(tree.scale)
-        placement.updateMatrix()
-        mesh.setMatrixAt(index, placement.matrix)
-      })
-      mesh.instanceMatrix.needsUpdate = true
-      mesh.castShadow = true
-      mesh.frustumCulled = false
-      this.scene.add(mesh)
-      this.objects.push(mesh)
-      this.trees.push(mesh)
-      this.resources.own(mesh)
-    }
   }
 
   private buildShadowCasters(terrain: PreparedWorld['terrain']) {
@@ -1330,7 +1303,7 @@ export class VoxelLandscapeEngine {
       water: [this.water],
       sky: [this.sky],
       terrain: [this.voxelGroup, this.shadowGroup],
-      trees: this.trees,
+      trees: this.vegetation?.meshes ?? [],
       ...this.details?.debugGroups,
       rain: [this.rain.group],
       lamps: this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
@@ -1717,6 +1690,7 @@ export class VoxelLandscapeEngine {
       })
     }
     updateWindUniforms(this.windUniforms, wind)
+    this.vegetation?.update(this.elapsed, wind.direction, wind.speed)
     const optics = sampleWaterOptics(
       this.rain.simulation.state.intensity,
       wind.speed,

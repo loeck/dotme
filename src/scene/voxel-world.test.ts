@@ -5,7 +5,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { LAKE_BOUNDS, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
-import { createVoxelWorld } from './voxel-world'
+import { createVoxelWorld, TREE_SPACING } from './voxel-world'
 
 // All assertions read these worlds; determinism still uses a fresh second generation.
 const worlds = new Map<string, ReturnType<typeof createVoxelWorld>>()
@@ -110,21 +110,30 @@ describe('voxel lake world', () => {
     const second = createVoxelWorld(9182, false)
     expect(first.trees).toEqual(second.trees)
     expect(first.trees.length).toBeGreaterThan(0)
-    expect(first.trees.length).toBeLessThanOrEqual(14)
+    expect(first.trees.length).toBeLessThanOrEqual(30)
     expect(first.trees.some((tree) => tree.z < -3 && tree.z > -40)).toBe(true)
     for (const tree of first.trees) {
       expect(tree.y).toBeGreaterThan(0.4)
       expect(tree.z).toBeLessThan(0)
-      expect(tree.scale).toBeGreaterThanOrEqual(0.9)
-      expect(tree.scale).toBeLessThanOrEqual(1.7)
+      expect(tree.scale).toBeGreaterThanOrEqual(0.85)
+      expect(tree.scale).toBeLessThanOrEqual(1.3 * 1.35)
+      expect(['spruce', 'pine', 'birch']).toContain(tree.kind)
     }
     for (let a = 0; a < first.trees.length; a++)
       for (let b = a + 1; b < first.trees.length; b++) {
         const left = required(first.trees[a]),
           right = required(first.trees[b])
-        expect((left.x - right.x) ** 2 + (left.z - right.z) ** 2).toBeGreaterThanOrEqual(6.25)
+        expect((left.x - right.x) ** 2 + (left.z - right.z) ** 2).toBeGreaterThanOrEqual(
+          TREE_SPACING ** 2,
+        )
       }
-    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(7)
+    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(12)
+    // Birches stay in the mid-ground band, as in Last Signal's diorama.
+    expect(first.trees.filter((tree) => tree.kind === 'birch').every((tree) => tree.z > -40)).toBe(
+      true,
+    )
+    // Groves: both conifers and birches appear on the default seed.
+    expect(new Set(first.trees.map((tree) => tree.kind)).size).toBeGreaterThan(1)
   })
 
   it.each(cases)(

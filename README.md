@@ -77,7 +77,7 @@ validated `unknown` values at boundaries; casts, `any`, non-null assertions and 
 error suppressions are prohibited. Prefer minimal public interfaces for test doubles.
 Run `pnpm check`, `pnpm bundle:size` and the relevant browser suite before proposing a change.
 
-See [rendering architecture](docs/architecture.md), [verification](docs/performance.md),
+See [rendering architecture](docs/architecture.md), [vegetation](docs/vegetation.md), [verification](docs/performance.md),
 [weather integration](docs/paris-weather.md) and [audio provenance](docs/living-landscape.md).
 
 ## License and attribution

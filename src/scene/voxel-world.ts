@@ -28,11 +28,18 @@ export type VoxelLamp = Readonly<{
   driftRadius: number
 }>
 
+/** Last Signal's forest: dark conical spruces, Scots pines with an orange upper trunk, and
+ * pale birches as the main value break against the conifers. */
+export type TreeKind = 'spruce' | 'pine' | 'birch'
+
 export type VoxelTree = Readonly<{
   x: number
   y: number
   z: number
   scale: number
+  kind: TreeKind
+  /** Rotation about Y, radians. */
+  yaw: number
 }>
 
 export type VoxelWaterfall = Readonly<{
@@ -106,6 +113,8 @@ type TerrainShape = Readonly<{
 }>
 
 const MATERIALS: readonly VoxelMaterial[] = ['ground', 'shore', 'rock']
+/** Minimum distance between trunks, in metres. */
+export const TREE_SPACING = 1.6
 
 // Keep exposed footings below the lake trough: -0.035 level, up to 0.083 wind
 // displacement and 0.22 simulated displacement, plus a small immersion margin.
@@ -723,18 +732,33 @@ function placeTrees(
     .filter((cell) => cell.z < -3 && cell.z > -40)
     .sort((a, b) => spread(b) - spread(a))
   const ridges = clear.filter((cell) => cell.z >= -3 || cell.z <= -40).sort((a, b) => b.top - a.top)
-  const cap = mobile ? 7 : 14
+  const cap = mobile ? 12 : 30
   const trees: VoxelTree[] = []
   const plant = (cell: { x: number; top: number; z: number }, gate: number) => {
     if (trees.length >= cap) return
     const xi = Math.round(cell.x * 10),
       zi = Math.round(cell.z * 10)
-    if (hash(seed, xi, zi, 911) < gate) return
-    if (trees.some((tree) => (tree.x - cell.x) ** 2 + (tree.z - cell.z) ** 2 < 6.25)) return
-    trees.push({ x: cell.x, y: cell.top, z: cell.z, scale: 0.9 + hash(seed, xi, zi, 913) * 0.8 })
+    // Groves rather than an even sprinkle: a slow field opens clearings between stands.
+    const grove = smoothNoise(seed, cell.x, cell.z, 7, 917)
+    if (hash(seed, xi, zi, 911) < gate + (0.45 - grove) * 0.8) return
+    if (trees.some((tree) => (tree.x - cell.x) ** 2 + (tree.z - cell.z) ** 2 < TREE_SPACING ** 2))
+      return
+    // Trees grow toward the horizon, which deepens the layered forest (Last Signal's diorama).
+    const depth = clamp((-cell.z - 8) / 50, 0, 1)
+    const pick = hash(seed, xi, zi, 919)
+    const kind: TreeKind = cell.z > -40 && pick < 0.34 ? 'birch' : pick < 0.72 ? 'spruce' : 'pine'
+    trees.push({
+      x: cell.x,
+      y: cell.top,
+      z: cell.z,
+      scale: (0.85 + hash(seed, xi, zi, 913) * 0.45) * (1 + depth * 0.35),
+      kind,
+      yaw: hash(seed, xi, zi, 921) * Math.PI * 2,
+    })
   }
   for (const cell of midground) {
-    if (trees.length >= cap / 2) break
+    // Most trees go to the visible mid-ground islets; ridges take the rest.
+    if (trees.length >= cap * 0.7) break
     plant(cell, 0.3)
   }
   for (const cell of midground.concat(ridges)) plant(cell, 0.45)
