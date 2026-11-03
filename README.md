@@ -49,7 +49,7 @@ frame starts the dynamic landscape import. The loader and landscape share one ca
 one initialized `WebGPURenderer` and the same runtime. Browsers without a working WebGPU
 adapter render the same scene through the renderer’s WebGL 2 backend; only browsers
 without either display the static profile. Graphics failures also release the profile.
-World generation runs in its own worker; weather and audio remain independent resources.
+World generation runs on two seeded workers; weather and audio remain independent resources.
 
 `src/components/` owns page lifecycle and accessible controls. `src/scene/` contains
 world preparation, CPU simulation, TSL materials and composition. `src/weather/`

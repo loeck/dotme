@@ -103,26 +103,50 @@ canvas resolution; the fluid capture runs at 128 px with horizontal-only
 thickness filtering. Before/after pixel parity for these cuts holds to under
 0.5% of pixels, confined to the lake and the waterfall column.
 
-Load compiles about 107 shader programs (vertex plus fragment stages; a loader
-program count of 4 is included until the loader releases). The environment probe
-mints the most (+29), then the submerged capture (+18), the fluid pass (+10),
-the main view (+6, including the 241 KB water fragment shader) and the warmup
-render (+7). The warmup additions are vertex-stage duplicates of already
-compiled programs: the nested reflection render rebuilds instanced materials
-with fresh generated identifier suffixes, so their code misses the program
-cache. That duplication is inherent to multi-context rendering with
-non-deterministic shader codegen and cannot be removed application-side; the
-per-stage program inventory exists to catch regressions of this shape. No
-programs are compiled after the first presented frame, so shader stutter does
-not occur at runtime.
+## Loading
 
-The probe, the shadow maps and every remaining scene pass compile in one batch
-(`compile:scene`). `compileAsync` walks its scene synchronously and only awaits
-the driver's pipeline promises at the end, so issuing the passes back to back
-lets the driver build pipelines in parallel; awaiting them one at a time made
-the loader pay their sum instead. The renderer keeps per-pass state on a stack,
-so the batch settles its promises in reverse order of issue. That stage costs
-about 1.5-2.1 s instead of the 2.2-2.5 s the separate stages took.
+The first complete frame waits on three phases in turn: world data, collider and scene
+construction, then shader preparation. Each phase avoids work that another thread or
+pass already performs.
+
+World data is deterministic in its seed and layout, so two instances of the world worker
+each rebuild the voxel world and derive disjoint halves: terrain meshing on one, lake
+surfaces, cloud noise and merged collision boxes on the other. The slower half bounds the
+wait instead of their sum, and Rapier only creates colliders from boxes the worker merged.
+The waterfall search reads a lake footprint raster; only the final carved world builds the
+full lake bed with its shore distances and relief. The rasterization, BVH and face-coverage
+loops are allocation-free rewrites with unchanged evaluation order; prepared worlds hash
+identically to the earlier single-worker output for desktop and mobile seeds. A loader
+frame separates collider creation from scene construction so neither forms one long task.
+
+Shader preparation is one batch. `compile:passes` issues the clouds, sky, rain, contrast,
+water-simulation and waterfall-fluid compiles; `compile:environment` establishes the probe
+texture before any lit variant is built; `compile:scene` issues the probe, shadow maps,
+submerged capture, main view, atmosphere and lens and settles every pass together, then
+compiles the mirror view; `compile:warmup` renders once offscreen. Three's `compileAsync`
+collects its render objects and restores renderer state synchronously, then builds node
+graphs and driver pipelines asynchronously, so passes issued back to back interleave their
+builds and the driver compiles their pipelines in parallel; awaiting them one at a time made
+the loader pay their sum instead.
+
+The lake reflection renders as a top-level pass immediately before the main view
+(`LakeReflector.renderReflection`), not from inside it. Three keys render contexts by
+attachment state and call depth: nested inside the view, the mirror had a context of its own
+whose node graphs `compileAsync` (always at depth zero) could not prepare, so the warmup
+rebuilt about forty of them synchronously and minted vertex-stage duplicate programs. At depth
+zero the mirror target's attachments match the main view's, so both passes share one render
+context, node graphs and pipelines; the mirror compile runs after the batch and mostly hits
+the cache. Lantern glows likewise share one material with a per-object strength uniform;
+per-lamp node graphs produced identical shaders but each cost a build.
+
+Load compiles about 101 shader programs (110 in heavy rain; vertex plus fragment stages, a
+loader program count of 4 is included until the loader releases), and the warmup adds 2: the
+waterfall capture still renders nested inside the main view. On a desktop AMD GPU with the
+Dawn blob cache disabled, these changes took scene readiness from a median of about 5.8 s to
+3.9 s, the longest loading task from about 550 ms to 230 ms and the largest loader frame gap
+from about 620 ms to 220 ms, with unchanged steady-state frame and GPU pass times. The per-stage program inventory
+exists to catch regressions of the nested-context shape. No programs are compiled after the
+first presented frame, so shader stutter does not occur at runtime.
 
 The probe compiles and renders without the detail layer (fish, ray, fireflies,
 splashes, floating bodies, foam, waterfall). Those objects are a few pixels of

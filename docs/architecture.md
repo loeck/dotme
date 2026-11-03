@@ -7,7 +7,10 @@ can then proceed in parallel while the loader continues rendering. No minimum lo
 duration is imposed; reduced motion uses a static GPU image.
 
 The landscape shares the renderer and canvas. It prepares its materials asynchronously
-and presents its first complete frame before releasing the loader. Failure handling
+and presents its first complete frame before releasing the loader. Preparation runs in
+order: world data on two workers (Rapier loads and initializes meanwhile), collider
+creation, a loader frame, scene construction, then one compilation batch and a warmup
+render; [verification](performance.md#loading) describes the batch. Failure handling
 belongs to the page lifecycle: initialization is cancelled after 20 seconds, and an
 independent HTML deadline releases the profile even when the primary module fails.
 
@@ -17,10 +20,15 @@ device, the same renderer is created with its WebGL 2 backend, and the same TSL 
 compiled to GLSL; the page releases its static profile only when WebGL 2 is unavailable too.
 Device or context loss ends the graphics session and releases the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
 state. Rapier owns collision queries and stepped rigid-body dynamics over merged terrain
-colliders; analytic GPU flows and the wave solver stay custom. The world worker prepares terrain, shadow bounds, lake-bed geometry and normals,
-water geometry, the half-float depth/shore atlas and the simulation mask. It transfers
-typed buffers; the render thread wraps those buffers in GPU resources without repeating
-array generation or bounds scans. Audio has its own asynchronous resource lifetime.
+colliders; analytic GPU flows and the wave solver stay custom. World generation is
+deterministic in its seed and layout, so two instances of the world worker each rebuild
+the voxel world and prepare disjoint halves in parallel: one meshes terrain (batches,
+shadow matrices and the BVH), the other prepares lake-bed geometry and normals, water
+geometry, the half-float depth/shore atlas, the simulation mask, cloud noise and the
+merged static collision boxes. Both transfer typed buffers; the render thread combines
+them and wraps those buffers in GPU resources and Rapier colliders without repeating
+array generation, bounds scans or box merging. Audio has its own asynchronous resource
+lifetime.
 
 Terrain and shadow batches are geometries inside one `BatchedMesh` per material, so every
 batch shares one shader program and one render object regardless of its size. Environment materials are compiled once with all meshes
