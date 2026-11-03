@@ -4,29 +4,61 @@ import {
   prepareWaterSurface,
   prepareWaterMask,
 } from './lake-geometry-data'
+import { mergeStaticBoxes } from './static-boxes'
 import { prepareVegetation } from './vegetation-placement'
 import { prepareTerrain } from './voxel-mesh'
+import { voxelBoxes } from './voxel-spatial'
 import { createVoxelWorld } from './voxel-world'
+import type { VoxelWorld } from './voxel-world'
 
-export function prepareWorld(seed: number, mobile: boolean) {
-  const world = createVoxelWorld(seed, mobile)
+/** Terrain meshing and its BVH, the longest half of world preparation. */
+function terrainPart(world: VoxelWorld) {
   const terrain = prepareTerrain(world)
-  const vegetation = prepareVegetation(world, seed >>> 0, mobile)
   // The renderer needs typed mesh/BVH buffers, not 60k structured-cloned objects.
   const { voxels: _voxels, ...data } = world
+  return { world: data, terrain }
+}
+
+/** Lake surfaces, cloud noise, merged collision boxes and vegetation from the same seeded world. */
+function surfacePart(world: VoxelWorld, seed: number, mobile: boolean) {
   return {
-    world: data,
-    terrain,
-    vegetation,
+    // The shorter half also grows the forest, in parallel with terrain meshing.
+    vegetation: prepareVegetation(world, seed >>> 0, mobile),
     noise: createCloudNoiseData(seed),
     surfaces: {
       submerged: prepareSubmergedSurface(world.lakeBed),
       water: prepareWaterSurface(mobile),
       mask: prepareWaterMask(world.lakeBed),
     },
+    /** `mergeStaticBoxes` of the terrain index boxes, ready for Rapier colliders. */
+    staticBoxes: mergeStaticBoxes(voxelBoxes(world.voxels)),
   }
 }
-export type PreparedWorld = ReturnType<typeof prepareWorld>
+
+export type TerrainPart = ReturnType<typeof terrainPart>
+export type SurfacePart = ReturnType<typeof surfacePart>
+export type PreparedWorld = TerrainPart & SurfacePart
+export const WORLD_PARTS = ['terrain', 'surfaces'] as const
+export type WorldPart = (typeof WORLD_PARTS)[number]
+export type WorldPartMessage =
+  | { part: 'terrain'; data: TerrainPart }
+  | { part: 'surfaces'; data: SurfacePart }
+
+export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
+  const world = createVoxelWorld(seed, mobile)
+  return { ...terrainPart(world), ...surfacePart(world, seed, mobile) }
+}
+
+/**
+ * Generation is deterministic in (seed, mobile), so two workers each rebuild
+ * the voxel world and derive disjoint halves of the prepared data in parallel.
+ */
+export function prepareWorldPart(seed: number, mobile: boolean, part: WorldPart): WorldPartMessage {
+  const world = createVoxelWorld(seed, mobile)
+  return part === 'terrain'
+    ? { part, data: terrainPart(world) }
+    : { part, data: surfacePart(world, seed, mobile) }
+}
 
 /** Transfer ownership of every typed buffer, including bathymetry and BVH data. */
 export function worldTransfers(value: unknown): ArrayBuffer[] {

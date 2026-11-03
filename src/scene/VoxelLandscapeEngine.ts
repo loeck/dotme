@@ -321,8 +321,12 @@ export class VoxelLandscapeEngine {
       // Let the loader present between CPU preparation and material compilation.
       await preparationFrame(signal)
       signal.throwIfAborted()
-      const physics = createPhysicsWorld(await physicsModule, prepared.terrain.index)
-      signal.throwIfAborted()
+      // Owned before the next yield so cancellation also frees the Rapier world.
+      const physics = resources.own(
+        createPhysicsWorld(await physicsModule, prepared.terrain.index, prepared.staticBoxes),
+      )
+      // Collider creation and scene construction are separate tasks for the loader.
+      await preparationFrame(signal)
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
       const initialLight = sampleLighting(
         engine.solarClock.initialSeconds,
@@ -388,7 +392,8 @@ export class VoxelLandscapeEngine {
     this.resources = resources
     const { prepared, physics, ...configuration } = options
     this.options = configuration
-    this.physics = this.resources.own(physics)
+    // `create` already owns the physics world in this scope.
+    this.physics = physics
     this.reducedMotion = options.reducedMotion ?? false
     this.bed = options.prepared.world.lakeBed
     this.waterfall =

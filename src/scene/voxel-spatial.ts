@@ -9,8 +9,8 @@ export type VoxelIndex = {
   order: Uint32Array
 }
 
-/** A static BVH shared by conservative face removal and nearest solid picking. */
-export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
+/** Float32-snapped solid bounds, six values per voxel: min xyz then max xyz. */
+export function voxelBoxes(voxels: readonly Voxel[]): Float64Array {
   const boxes = new Float64Array(voxels.length * 6)
   for (let i = 0; i < voxels.length; i++) {
     const voxel = required(voxels[i])
@@ -25,6 +25,12 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
     boxes[i * 6 + 4] = y + half
     boxes[i * 6 + 5] = z + half
   }
+  return boxes
+}
+
+/** A static BVH shared by conservative face removal and nearest solid picking. */
+export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
+  const boxes = voxelBoxes(voxels)
   const order = Uint32Array.from(voxels, (_, i) => i)
   const bounds: number[] = []
   const nodes: number[] = []
