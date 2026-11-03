@@ -5,7 +5,7 @@ export const MIN_TIME_SCALE = 1
 export const MAX_TIME_SCALE = 100
 const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale'])
 // Diagnostics survive reloads on a phone but are not part of the public scene API.
-const DEBUG_KEYS = new Set(['perf', 'dpr'])
+const DEBUG_KEYS = new Set(['perf', 'dpr', 'backend'])
 
 /** The complete public URL API. Missing/invalid values use the scene defaults. */
 export function sceneParams(search: string) {
@@ -47,7 +47,11 @@ export function cleanSceneUrl(url: URL) {
   return url
 }
 
-/** `?perf` shows per-pass timings on the device (`perf=split` prices scene groups); `dpr` overrides the pixel-ratio cap. */
+/**
+ * `?perf` shows per-pass timings on the device (`perf=split` prices scene groups); `dpr` overrides
+ * the pixel-ratio cap; `backend=webgl` skips WebGPU so the WebGL 2 path can be compared or used
+ * where WebGPU is missing or broken (headless Linux hosts).
+ */
 export function debugParams(search: string) {
   const params = new URLSearchParams(search)
   const rawRatio = Number(params.get('dpr') ?? Number.NaN)
@@ -58,5 +62,6 @@ export function debugParams(search: string) {
     : params.get('perf') === 'split'
       ? 'split'
       : 'live'
-  return { perf, pixelRatio }
+  const backend: 'webgl' | 'auto' = params.get('backend') === 'webgl' ? 'webgl' : 'auto'
+  return { perf, pixelRatio, backend }
 }

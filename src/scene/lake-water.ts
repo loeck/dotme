@@ -358,7 +358,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(2.8, 6, depth))
       .mul(float(1).sub(smoothstep(24, 48, cameraPosition.xz.sub(p).length())))
     const clarity = max(u.uWaterClarity.mul(nearShallow.mul(0.1).add(0.9)), reveal)
-    const absorption = mix(vec3(0.8, 0.55, 0.45), vec3(0.5, 0.085, 0.04), clarity)
+    const absorption = mix(vec3(0.8, 0.55, 0.45), vec3(0.45, 0.16, 0.11), clarity)
     const transmission = exp(absorption.mul(path).negate())
     const bedBlur = u.uBedTexel.mul(mix(1.1, 0.18, clarity))
     const bedTap = (coordinate: typeof bedUv) =>

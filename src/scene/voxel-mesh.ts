@@ -91,7 +91,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   let offset = 0,
     exposedFaces = 0
   const color = new Color()
-  const moss = new Color(0x648052)
+  const moss = new Color(0x4f5d40)
   const topColor = new Color()
   const mossPatch = (id: number) => {
     let n = Math.imul(id + 1, 0x85ebca6b)
@@ -123,7 +123,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
         color.setHex(voxel.color)
         const mossy =
           material === 'ground' && voxel.y + voxel.size / 2 > WATER_LEVEL + 0.05
-            ? 0.65 + 0.3 * mossPatch(id)
+            ? 0.78 + 0.17 * mossPatch(id)
             : 0
         topColor.copy(color).lerp(moss, mossy)
         const visible = exposedVoxelFaces(index, id)

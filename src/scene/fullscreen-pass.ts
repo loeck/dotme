@@ -32,10 +32,17 @@ export class FullscreenPass {
   private readonly renderer: FullscreenRenderer
   private readonly output: Node<'vec4'>
   private readonly transformOutput: boolean
+  private readonly finish: ((display: Node<'vec4'>) => Node<'vec4'>) | undefined
   private toneMapping
   private outputColorSpace
 
-  constructor(renderer: FullscreenRenderer, output: Node<'vec4'>, transformOutput = false) {
+  /** `finish` runs after the output transform, in display space (grain, dither). */
+  constructor(
+    renderer: FullscreenRenderer,
+    output: Node<'vec4'>,
+    transformOutput = false,
+    finish?: (display: Node<'vec4'>) => Node<'vec4'>,
+  ) {
     this.renderer = renderer
     this.material.depthTest = false
     this.material.depthWrite = false
@@ -43,6 +50,7 @@ export class FullscreenPass {
     this.material.fog = false
     this.output = output
     this.transformOutput = transformOutput
+    this.finish = finish
     this.toneMapping = renderer.toneMapping
     this.outputColorSpace = renderer.outputColorSpace
     // One triangle, with canonical top-left texture coordinates on both backends.
@@ -59,9 +67,10 @@ export class FullscreenPass {
   }
 
   private updateOutput() {
-    this.material.fragmentNode = this.transformOutput
+    const output = this.transformOutput
       ? renderOutput(this.output, this.toneMapping, this.outputColorSpace)
       : this.output
+    this.material.fragmentNode = this.finish ? this.finish(output) : output
     this.material.needsUpdate = true
   }
 

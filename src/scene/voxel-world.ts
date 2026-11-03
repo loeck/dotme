@@ -72,10 +72,12 @@ export type Voxel = Readonly<{ x: number; y: number; z: number; size: number; co
 /** Compatibility-oriented public result: flat voxels for a simple renderer, plus grouped data. */
 export type VoxelWorld = VoxelWorldData & Readonly<{ voxels: Voxel[] }>
 
+// Last Signal's ground: peat, forest dirt and needle litter; wet mud banks; grey and
+// lichen stone. Variants stay within one value step so patches read as one material.
 const TERRAIN_VARIANTS = {
-  ground: [0x15212b, 0x1d2c36, 0x2b3b46],
-  shore: [0x1a2831, 0x293a45, 0x354955],
-  rock: [0x192630, 0x263742, 0x344955],
+  ground: [0x32352b, 0x3f3c32, 0x494235],
+  shore: [0x383732, 0x464540, 0x52514d],
+  rock: [0x3f403f, 0x4d4e4c, 0x595a56],
 } as const
 
 type MutableGroups = Record<VoxelMaterial, number[]>

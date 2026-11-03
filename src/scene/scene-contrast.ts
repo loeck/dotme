@@ -30,6 +30,8 @@ import {
 } from 'three/webgpu'
 import type { Texture, WebGPURenderer } from 'three/webgpu'
 
+import type { SceneGrade } from './scene-grade'
+
 /** Rasterize DOM glyph coverage only when layout changes; shade it on the GPU every frame. */
 export class SceneContrast {
   private readonly canvas = document.createElement('canvas')
@@ -59,7 +61,8 @@ export class SceneContrast {
 
   private readonly host: HTMLElement | null
   private readonly redraw: () => void
-  constructor(host: HTMLElement | null, redraw: () => void) {
+  /** `grade` lets the ink follow the graded image rather than raw scene radiance. */
+  constructor(host: HTMLElement | null, redraw: () => void, grade?: SceneGrade) {
     this.host = host
     this.redraw = redraw
     this.canvas.width = this.canvas.height = 1
@@ -80,9 +83,11 @@ export class SceneContrast {
         tap = vec2(1.5).div(this.size)
       for (let y = -1; y <= 1; y++)
         for (let x = -1; x <= 1; x++) {
-          const scene = this.backdrop
-            .sample(uv().flipY().add(vec2(x, y).mul(tap)))
-            .rgb.mul(this.exposure)
+          const coord = uv().flipY().add(vec2(x, y).mul(tap))
+          const radiance = this.backdrop.sample(coord).rgb
+          const scene = (grade ? grade.colour(radiance).mul(grade.frameEdge(coord)) : radiance).mul(
+            this.exposure,
+          )
           luminance.addAssign(
             scene
               .div(scene.add(1))

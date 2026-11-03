@@ -3,9 +3,10 @@
 Unit tests cover deterministic physics, wave stability, weather validation, audio
 scheduling, worker cancellation and resource lifecycle. The default browser suite uses
 observable loading states and public DOM behavior. It covers essential journeys on
-Chromium and mobile WebKit. Chromium exercises WebGPU rendering; mobile WebKit renders
-through WebGL 2 when a WebGPU adapter is unavailable, and checks the static profile when
-neither backend exists.
+desktop Chromium and a mobile-emulated Chromium (Pixel 7). Desktop exercises WebGPU
+rendering; the mobile project renders through WebGL 2 when a WebGPU adapter is
+unavailable, and checks the static profile when neither backend exists. WebKit is not
+tested.
 
 The default suite targets at most 60 seconds locally and 90 seconds in CI; those global
 limits are configured in Playwright. Record the actual duration from each validation run. Reuse the existing production
@@ -32,7 +33,7 @@ BENCH_SECONDS=30 BENCH_REPEATS=3 pnpm benchmark:scene
 ```
 
 The benchmark serves the production build and visits seeded day, night and heavy-rain
-scenes, sequentially on desktop Chromium and mobile WebKit. It discards a two-second
+scenes, sequentially on desktop Chromium and mobile-emulated Chromium. It discards a two-second
 warm-up, measures animation-frame intervals and records median/p95, loader readiness,
 scene readiness, selected backend and screenshots. `frames`, `medianMs` and `p95Ms`
 describe browser `requestAnimationFrame` callbacks. `sceneRender` separately records
@@ -74,8 +75,7 @@ SwiftShader measurements describe CPU software rendering, not hardware GPU perfo
 Set `BENCH_PROFILES=desktop` or `mobile`, `BENCH_OUTPUT` to change the output directory,
 or `BENCH_URL` to sample an already running build. Set `BENCH_COLD=1` to disable the
 Dawn blob cache so every Chromium repeat measures cold pipeline compilation; without
-it, repeat 0 is cold and later repeats in the same browser profile are warm. The flag
-has no effect on WebKit. Later repeats may still improve through profile-level caches
+it, repeat 0 is cold and later repeats in the same browser profile are warm. Later repeats may still improve through profile-level caches
 the flag does not clear, such as compiled JavaScript and driver pipeline caches.
 Compare reports generated on the same
 machine, browser version, viewport, device scale and workload. Avoid simultaneous GPU

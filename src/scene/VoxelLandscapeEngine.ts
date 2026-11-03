@@ -72,6 +72,8 @@ import { ResourceScope } from './resource-scope'
 import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
 import type { DetailEnvironment } from './scene-details'
+import { SceneGrade } from './scene-grade'
+import { sampleLook } from './scene-look'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { DEFAULT_SOLAR, SolarClock, parseInitialTime } from './solar-clock'
@@ -189,6 +191,8 @@ export class VoxelLandscapeEngine {
   private readonly atmosphere: VolumetricLight
   private readonly skyAtmosphere: SkyAtmosphere
   private readonly sceneContrast: SceneContrast
+  private readonly grade = new SceneGrade()
+  private gradeFrame = 0
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
   private solarClock: SolarClock
@@ -392,9 +396,13 @@ export class VoxelLandscapeEngine {
     this.container = options.container
     this.lightingHost = options.container.closest('main')
     this.sceneContrast = this.resources.own(
-      new SceneContrast(this.container.closest('main'), () => {
-        if (this.reducedMotion) this.requestFrame()
-      }),
+      new SceneContrast(
+        this.container.closest('main'),
+        () => {
+          if (this.reducedMotion) this.requestFrame()
+        },
+        this.grade,
+      ),
     )
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
@@ -430,7 +438,7 @@ export class VoxelLandscapeEngine {
       ENVIRONMENT_PROBE.y,
       ENVIRONMENT_PROBE.z,
     )
-    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower))
+    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower, this.grade))
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
@@ -820,9 +828,9 @@ export class VoxelLandscapeEngine {
   private buildTrees(trees: readonly VoxelTree[]) {
     if (!trees.length) return
     const parts = [
-      { geometry: new BoxGeometry(0.16, 0.62, 0.16), color: 0x4a3a2a, dy: 0.31 },
-      { geometry: new BoxGeometry(0.72, 0.55, 0.72), color: 0x3f6b3a, dy: 0.85 },
-      { geometry: new BoxGeometry(0.44, 0.38, 0.44), color: 0x4d7d46, dy: 1.28 },
+      { geometry: new BoxGeometry(0.16, 0.62, 0.16), color: 0x55483c, dy: 0.31 },
+      { geometry: new BoxGeometry(0.72, 0.55, 0.72), color: 0x3c4d38, dy: 0.85 },
+      { geometry: new BoxGeometry(0.44, 0.38, 0.44), color: 0x4d5d3f, dy: 1.28 },
     ] as const
     const placement = new Object3D()
     for (const part of parts) {
@@ -1671,9 +1679,17 @@ export class VoxelLandscapeEngine {
     uniforms.uDirectSun.value =
       Math.max(0, (WEATHER[this.weather].diffuse - 0.5) / 0.5) *
       (1 - 0.5 * this.rain.simulation.state.intensity)
-    this.fog.density =
-      this.baseFogDensity * (1 + mistFactor(light.sunDirection.y, light.weatherDiffuse) * 1.4)
-    this.atmosphere.update(light)
+    const morningMist = mistFactor(light.sunDirection.y, light.weatherDiffuse)
+    const look = sampleLook({
+      sunHeight: light.sunDirection.y,
+      daylight: light.daylight,
+      rain: this.rain.simulation.state.intensity,
+      mist: morningMist,
+    })
+    this.fog.density = this.baseFogDensity * (1 + morningMist * 1.4) * Math.sqrt(look.haze)
+    this.atmosphere.update(light, look)
+    if (!this.reducedMotion) this.gradeFrame++
+    this.grade.update(look, this.gradeFrame)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
     const wind = this.wind.sample(this.elapsed)
@@ -1889,6 +1905,7 @@ export class VoxelLandscapeEngine {
       this.height,
     )
     this.atmosphere.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
+    this.grade.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.sceneContrast.invalidate()
     this.submerged.resize(this.lowPower, this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.water.material.uniforms.uBedTexel.value.copy(this.submerged.bedTexel)

@@ -5,7 +5,9 @@ The profile, links and metadata are HTML and remain available without JavaScript
 
 ## Development
 
-Use Node.js 24 and pnpm 12.5.1. The exact runtime is pinned in `package.json`.
+Use Node.js 24.21.0 and pnpm 12.5.1, pinned in `mise.toml` and `package.json`. With
+[mise](https://mise.jdx.dev), `mise install` provides both and `mise run setup` installs
+dependencies and Playwright's Chromium.
 
 ```sh
 pnpm install
@@ -22,14 +24,23 @@ serve `404.html` with HTTP status 404 for unknown paths.
 | ---------------------- | -------------------------------------------------------------------------- |
 | `pnpm check`           | Strict types, typed lint, formatting, unit tests, build and loader budget  |
 | `pnpm bundle:size`     | Measure compressed JavaScript and enforce the initial loader budget        |
-| `pnpm e2e`             | Essential Chromium and mobile WebKit journeys against the existing build   |
+| `pnpm e2e`             | Essential desktop and mobile-emulated Chromium journeys on the build       |
 | `pnpm e2e:extended`    | Additional weather, cursor, audio and accessibility regressions            |
 | `pnpm e2e:gpu`         | Explicit GPU validation; WebGPU scenarios require an actual WebGPU backend |
 | `pnpm benchmark:scene` | Separate prolonged scene sampling and screenshots                          |
 
-Install browser binaries once with `pnpm exec playwright install chromium webkit`.
+Install the browser once with `pnpm exec playwright install chromium` (or `mise run setup`).
+The suites run on Chromium only; the mobile project emulates a Pixel 7 in Chromium.
 Build before browser tests and benchmarks. Failure traces and screenshots are retained
 in `test-results/`. Browser test time limits exclude dependency installation.
+
+Playwright's bundled headless Chromium has no GPU on Linux, so the scene cannot start
+there. `scripts/with-gpu-chromium.sh <command>` runs a command with
+`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` pointing at nixpkgs' Chromium, which renders
+WebGL 2 on the real GPU (`mise run e2e:local-gpu` runs `pnpm e2e` that way). Headless
+WebGPU has no adapter on those hosts, so WebGPU-only checks in `pnpm e2e:gpu` still need
+a machine with a real WebGPU backend. Append `?backend=webgl` to a URL to skip WebGPU
+and render with WebGL 2 in any browser.
 
 ## Architecture
 
