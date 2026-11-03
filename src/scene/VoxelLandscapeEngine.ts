@@ -688,6 +688,33 @@ export class VoxelLandscapeEngine {
         .slice(0, this.lowPower ? 1 : 2)
         .map((entry) => entry.index),
     )
+    // One glow material serves every lantern: its strength is a per-object
+    // uniform, so the node graph and pipeline are built once, not per lamp.
+    const glowStrengths = new WeakMap<Object3D, { value: number }>()
+    const glowMaterial = new MeshBasicNodeMaterial({
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      side: DoubleSide,
+      // Fog would mix the opaque additive quad toward the fog colour and light up its square.
+      fog: false,
+    })
+    const glowStrength = uniform(0).onObjectUpdate(({ object }) =>
+      object ? (glowStrengths.get(object)?.value ?? 0) : 0,
+    )
+    const p = uv().sub(0.5).mul(2)
+    const r = p.dot(p)
+    glowMaterial.fragmentNode = vec4(
+      uniform(new Color(0xffb46b))
+        .mul(
+          exp(r.mul(-39))
+            .mul(0.76)
+            .add(exp(r.mul(-5.5)).mul(0.095)),
+        )
+        .mul(glowStrength),
+      1,
+    )
+    this.materials.push(this.resources.own(glowMaterial))
     world.lamps.forEach((lamp, index) => {
       const bulb = new Mesh(
         bulbGeometry,
@@ -709,41 +736,21 @@ export class VoxelLandscapeEngine {
       this.configurePointShadow(light, shadowLamps.has(index))
       this.scene.add(light)
       this.objects.push(light)
-      const glowStrength = uniform(0)
-      const glowMaterial = new MeshBasicNodeMaterial({
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        side: DoubleSide,
-        // Fog would mix the opaque additive quad toward the fog colour and light up its square.
-        fog: false,
-      })
-      const p = uv().sub(0.5).mul(2)
-      const r = p.dot(p)
-      glowMaterial.fragmentNode = vec4(
-        uniform(new Color(0xffb46b))
-          .mul(
-            exp(r.mul(-39))
-              .mul(0.76)
-              .add(exp(r.mul(-5.5)).mul(0.095)),
-          )
-          .mul(glowStrength),
-        1,
-      )
+      const strength = { value: 0 }
       const glow = new Mesh(glowGeometry, glowMaterial)
+      glowStrengths.set(glow, strength)
       glow.renderOrder = 3
       glow.position.copy(bulb.position)
       glow.frustumCulled = false
       this.scene.add(glow)
       this.objects.push(glow)
-      this.materials.push(this.resources.own(glowMaterial))
       this.lampLights.push({
         source: lamp,
         light,
         bulb,
         glow,
         color: bulb.material.color.clone(),
-        glowStrength,
+        glowStrength: strength,
         shadowPosition: light.position.clone(),
       })
     })
