@@ -1,6 +1,6 @@
 import { required } from '../invariant'
-import { createLakeBed, lakeIndex, LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
-import type { LakeBed } from './lake-bed'
+import { createLakeBed, createLakeFootprint, lakeIndex, LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
+import type { LakeBed, LakeFootprint } from './lake-bed'
 
 /**
  * Deterministic, renderer-agnostic voxel data for the low lake composition. Coordinates are
@@ -347,7 +347,7 @@ function selectWaterfall(
   voxels: Voxel[],
   groups: MutableGroups,
   lamps: readonly VoxelLamp[],
-  lakeBed: LakeBed,
+  lakeBed: LakeFootprint,
   voxelSize: number,
   zNear: number,
   relaxed = false,
@@ -1128,12 +1128,11 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     return voxels
   }
   let voxels = buildVoxels()
-  let lakeBed = createLakeBed(
-    voxels,
-    root,
-    mobile,
-    resultGroups.ground.count + resultGroups.shore.count + resultGroups.rock.count,
-  )
+  const terrainCount =
+    resultGroups.ground.count + resultGroups.shore.count + resultGroups.rock.count
+  // Waterfall placement only reads the footprint raster. The full bed (shore
+  // distances, chamfer and relief) is built once, from the final solids.
+  const footprint = createLakeFootprint(voxels, mobile, terrainCount)
   const waterfall = selectWaterfall(
     root,
     mobile,
@@ -1142,17 +1141,18 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     voxels,
     groups,
     lamps,
-    lakeBed,
+    footprint,
     voxelSize,
     zNear,
   )
+  let lakeBed: LakeBed
   if (waterfall) {
     for (const material of MATERIALS) resultGroups[material] = freezeGroup(groups[material])
     voxels = buildVoxels()
     // Carving can lower obstacles as well as raise them. Rebuild from final solids;
     // the elevated pool remains land in the separate lake-level water mask.
     lakeBed = createLakeBed(voxels, root, mobile)
-  }
+  } else lakeBed = createLakeBed(voxels, root, mobile, terrainCount)
   const trees = placeTrees(voxels, resultGroups.ground.count, voxelSize, root, mobile, waterfall)
   return {
     version: 'lake-voxel-v1',
