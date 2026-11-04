@@ -15,14 +15,16 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 
 - Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
   golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles.
+  colour. One variant uses the darker spruce needles. Boughs start at 27–33% of the height so
+  a short dark trunk shows under the skirt.
 - Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
   below, and an uneven crown of scaffold lobes around a dense inner mass.
-- Birch: a pale trunk with rotated dark marks and forked leaf sprays, the main value break
-  against the dark conifers.
+- Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
+  main value break against the dark conifers.
 - Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree.
 
-Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
+Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
+the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band.
 
 ## Wood and foliage
@@ -36,8 +38,9 @@ procedural atlas: drooping, serrated bough sprays for needles (0.6 as tall as wi
 upward) and hanging leaf clusters for leaves. The first card loosely faces the camera; seeds
 with openness under 0.6 add a dark core disc so gaps inside a crown show foliage, not sky.
 Cluster scales range over [0.85, 1.45], each tree takes a factor in [0.85, 1.2], isolated
-tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Card normals lean 90%
-toward the open direction. Albedo takes a cluster value hash, a per-tree hue and value jitter,
+tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a crown's
+underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
+under the crown. Card normals lean 90% toward the open direction. Albedo takes a cluster value hash, a per-tree hue and value jitter,
 a cool-underside to warm-top ramp and an openness and height shade.
 
 The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an

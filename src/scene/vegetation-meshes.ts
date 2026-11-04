@@ -187,13 +187,17 @@ export function appendClumps(
     )
     const far = 1 + 0.25 * Math.max(0, Math.min(1, (distance - 15) / 40))
     const isolated = seed.openness > 0.8 ? 0.6 : 1
+    // Cards on a crown's underside stay small and do not drop below it, so trunks stay visible.
+    const under = Math.max(0, -open[1])
+    const outward: Point = [open[0], Math.max(open[1], -0.1), open[2]]
     const edge =
       Math.max(options.length, 2 * options.pitch) *
       at.scale *
       (0.85 + seed.cluster * 0.6) *
       options.propFactor *
       isolated *
-      far
+      far *
+      (1 - 0.4 * under)
     const ramp = mixRgb([0.88, 0.96, 1.04], [1.06, 1.02, 0.9], open[1] * 0.5 + 0.5)
     const value =
       (0.88 + seed.cluster * 0.24) * (0.62 + 0.38 * seed.openness) * (0.8 + 0.2 * seed.height)
@@ -248,7 +252,7 @@ export function appendClumps(
       const width = edge
       const height = seed.leaf ? edge * 0.85 : edge * 0.6
       const offset = add(
-        add(centre, open, options.pitch * at.scale * 0.35),
+        add(centre, outward, options.pitch * at.scale * 0.35),
         [random(40 + c) - 0.5, random(50 + c) - 0.5, random(60 + c) - 0.5],
         options.pitch * at.scale * 0.5,
       )
