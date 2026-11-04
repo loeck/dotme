@@ -6,6 +6,7 @@ import {
   dFdy,
   dot,
   float,
+  interleavedGradientNoise,
   log2,
   max,
   normalize,
@@ -13,6 +14,7 @@ import {
   positionWorld,
   pow,
   saturate,
+  screenCoordinate,
   sin,
   texture,
   transformNormalToView,
@@ -39,7 +41,7 @@ import {
   Vector2,
   Vector3,
 } from 'three/webgpu'
-import type { Node, Scene } from 'three/webgpu'
+import type { Node, Object3D } from 'three/webgpu'
 
 import type { LightingState } from './lighting'
 import type { MeshData } from './vegetation-meshes'
@@ -52,6 +54,8 @@ const SHADOW_LAYER = 5
 export const UNDERGROWTH_LAYER = 7
 /** Wind speed (m/s) at which vegetation reaches its full lean. */
 const FULL_LEAN_SPEED = 9
+/** The forest arrives after the first frame and dissolves in over this many milliseconds. */
+const APPEAR_MS = 700
 
 /**
  * Last Signal's vegetation as three draws: voxel wood, foliage clump cards and procedural
@@ -66,9 +70,12 @@ export class Vegetation {
   private readonly sunDirection = uniform(new Vector3(0, 1, 0))
   private readonly sunColour = uniform(new Color())
   private readonly ambient = uniform(new Color())
+  /** Dissolve-in share, 0 to 1; screen-space dither keeps it free of sorting. */
+  private readonly appear = uniform(1)
+  private appearFrom = 0
   private readonly disposables: Array<{ dispose(): void }> = []
 
-  constructor(scene: Scene, prepared: PreparedVegetation) {
+  constructor(parent: Object3D, prepared: PreparedVegetation) {
     const atlas = new DataTexture(
       prepared.atlas.data,
       prepared.atlas.width,
@@ -83,13 +90,31 @@ export class Vegetation {
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
-    this.add(scene, 'wood', prepared.wood, this.woodMaterial(), true, false)
-    this.add(scene, 'foliage', prepared.foliage, this.foliageMaterial(atlas, prepared), true, false)
-    this.add(scene, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
+    this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false)
+    this.add(
+      parent,
+      'foliage',
+      prepared.foliage,
+      this.foliageMaterial(atlas, prepared),
+      true,
+      false,
+    )
+    this.add(parent, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
+  }
+
+  /** Start the dissolve-in from `now` (ms); `instant` skips it, as for reduced motion. */
+  reveal(now: number, instant = false) {
+    this.appearFrom = now
+    this.appear.value = instant ? 1 : 0
+  }
+
+  /** True while the dissolve-in still needs frames. */
+  get appearing() {
+    return this.appear.value < 1
   }
 
   private add(
-    scene: Scene,
+    parent: Object3D,
     name: string,
     data: MeshData,
     material: MeshStandardNodeMaterial,
@@ -110,12 +135,13 @@ export class Vegetation {
     geometry.computeBoundingSphere()
     // Sway and flutter reach a little beyond the rest bounds.
     if (geometry.boundingSphere) geometry.boundingSphere.radius += 0.5
+    material.maskNode = interleavedGradientNoise(screenCoordinate.xy).lessThan(this.appear)
     const mesh = new Mesh(geometry, material)
     mesh.name = `Vegetation ${name}`
     mesh.castShadow = castShadow
     if (castShadow) mesh.layers.enable(SHADOW_LAYER)
     if (mainViewOnly) mesh.layers.set(UNDERGROWTH_LAYER)
-    scene.add(mesh)
+    parent.add(mesh)
     this.meshes.push(mesh)
     this.disposables.push(geometry, material)
   }
@@ -204,7 +230,10 @@ export class Vegetation {
     direction: readonly [number, number],
     speed: number,
     light: LightingState,
+    now = performance.now(),
   ) {
+    if (this.appear.value < 1)
+      this.appear.value = Math.min(1, Math.max(0, (now - this.appearFrom) / APPEAR_MS))
     this.time.value = elapsed
     this.wind.value.set(direction[0], direction[1])
     this.strength.value = Math.min(1.2, Math.max(0, speed) / FULL_LEAN_SPEED)

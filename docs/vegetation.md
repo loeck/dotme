@@ -60,14 +60,25 @@ the ground to the tip. A fern crown is a ring of arching, drooping rachis strips
 alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
 Thin blades pass some sunlight when the view faces a low sun.
 
+## Streaming
+
+The forest never holds up the first frame. The world worker that builds the lake surfaces
+posts them first, then grows the forest and posts it as its own message, also when it beats
+the terrain. Once the scene is presented, the engine builds the three meshes off-scene, gives
+their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles them
+for every view that draws them: main view, mirror, environment probe and shadow maps. Then
+they join the scene, the shadow maps refresh, and the forest dissolves in over 0.7 s through
+a screen-space interleaved-gradient mask (instant under reduced motion). On a failed or
+cancelled preparation the scene simply stays without vegetation.
+
 ## Cost
 
 The forest is three merged world-space meshes, so three draws: wood, foliage cards and
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 156k triangles and the phone forest about 25k. Preparation adds about 10% to the
-world worker. Unit tests bound the triangle budget and check determinism.
+forest is about 156k triangles and the phone forest about 25k. Preparation runs after the surfaces on the
+same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind
 

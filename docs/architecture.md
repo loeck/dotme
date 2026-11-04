@@ -25,7 +25,9 @@ deterministic in its seed and layout, so two instances of the world worker each 
 the voxel world and prepare disjoint halves in parallel: one meshes terrain (batches,
 shadow matrices and the BVH), the other prepares lake-bed geometry and normals, water
 geometry, the half-float depth/shore atlas, the simulation mask, cloud noise and the
-merged static collision boxes. Both transfer typed buffers; the render thread combines
+merged static collision boxes, and then grows the forest. The forest is a separate message:
+the world resolves without it, and the engine attaches it after the first frame (see
+[vegetation](vegetation.md#streaming)). Every part transfers typed buffers; the render thread combines
 them and wraps those buffers in GPU resources and Rapier colliders without repeating
 array generation, bounds scans or box merging. Audio has its own asynchronous resource
 lifetime.

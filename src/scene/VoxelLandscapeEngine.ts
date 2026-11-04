@@ -96,6 +96,7 @@ import type { WeatherPreset } from './weather'
 import { WindModel, updateWindUniforms } from './wind'
 import type { WindOptions } from './wind'
 import { createWindUniforms } from './wind-nodes'
+import type { VegetationPart } from './world-data'
 
 export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
@@ -228,6 +229,12 @@ export class VoxelLandscapeEngine {
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
   private vegetation: Vegetation | undefined
+  /** Holds the forest once it streams in after the first frame. */
+  private readonly vegetationGroup = new Group()
+  private markPresented: () => void = () => undefined
+  private readonly presented = new Promise<void>((resolve) => {
+    this.markPresented = resolve
+  })
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -344,6 +351,7 @@ export class VoxelLandscapeEngine {
       engine.initialized = true
       engine.lastFrameAt = performance.now()
       engine.requestFrame()
+      void engine.attachVegetation(prepared.vegetation)
       return engine
     } catch (error) {
       // Offscreen compiles may still run; let them settle before their owners are disposed.
@@ -514,10 +522,7 @@ export class VoxelLandscapeEngine {
       if (object instanceof Mesh && object.material instanceof MeshStandardNodeMaterial)
         cloudReceivers.add(object.material)
     })
-    for (const material of cloudReceivers) {
-      this.clouds.shadows.applyTo(material, this.camera)
-      this.pointerLight.applyTo(material)
-    }
+    for (const material of cloudReceivers) this.receiveSceneLight(material)
     this.details?.attachMaterials(
       this.voxelGroup,
       this.submerged.surfaceMaterials,
@@ -728,7 +733,9 @@ export class VoxelLandscapeEngine {
         shadowPosition: light.position.clone(),
       })
     })
-    this.vegetation = this.resources.own(new Vegetation(this.scene, prepared.vegetation))
+    // The forest streams in after the first frame; see `attachVegetation`.
+    this.vegetationGroup.name = 'Vegetation'
+    this.scene.add(this.vegetationGroup)
 
     // A few dim, square flecks drift in depth. They provide a living scale cue without
     // turning the open sky into a particle field.
@@ -1307,7 +1314,7 @@ export class VoxelLandscapeEngine {
       water: [this.water],
       sky: [this.sky],
       terrain: [this.voxelGroup, this.shadowGroup],
-      trees: this.vegetation?.meshes ?? [],
+      trees: [this.vegetationGroup],
       ...this.details?.debugGroups,
       rain: [this.rain.group],
       lamps: this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
@@ -1522,7 +1529,76 @@ export class VoxelLandscapeEngine {
   }
 
   /** The material used by the public shadow node is shared with the actual shadow pass. */
-  private compileShadowMaps(issue: (compile: () => Promise<unknown>) => void) {
+  /**
+   * Builds the forest after the first frame: its pipelines compile for every view that draws
+   * it (main, mirror, probe and shadows) while the meshes wait off-scene, then they join the
+   * scene and dissolve in, so neither the loader nor a frame waits on them.
+   */
+  private async attachVegetation(pending: Promise<VegetationPart>) {
+    let data: VegetationPart
+    try {
+      data = await pending
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === 'AbortError'))
+        console.warn('Vegetation preparation failed', error)
+      return
+    }
+    await this.presented
+    if (this.disposed) return
+    const staging = new Group()
+    const vegetation = this.resources.own(new Vegetation(staging, data))
+    this.vegetation = vegetation
+    for (const mesh of vegetation.meshes)
+      if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
+    staging.updateMatrixWorld(true)
+    try {
+      await this.compileVegetation(staging)
+    } catch (error) {
+      // Uncompiled pipelines still build on first draw; only a hitch is lost.
+      if (!this.disposed) console.warn('Vegetation precompile failed', error)
+    }
+    if (this.disposed) return
+    vegetation.reveal(performance.now(), this.reducedMotion)
+    this.vegetationGroup.add(...vegetation.meshes)
+    this.moon.shadow.needsUpdate = true
+    for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
+    this.snapshotPrograms('vegetation')
+    performance.mark('vegetation-presented')
+    this.requestFrame()
+  }
+
+  /**
+   * Cloud shadows, the pointer light and the main view's fog hand-off (volumetric air replaces
+   * material fog there) for a lit scene material, including ones that join after the build.
+   */
+  private receiveSceneLight(material: MeshStandardNodeMaterial) {
+    this.clouds.shadows.applyTo(material, this.camera)
+    this.pointerLight.applyTo(material)
+  }
+
+  private compileVegetation(staging: Group) {
+    const pending: Promise<unknown>[] = []
+    const issue = (compile: () => Promise<unknown>) => pending.push(compile())
+    const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
+    if (cubeCamera)
+      issue(() =>
+        compileWithoutCulling(staging, () =>
+          this.compileView(cubeCamera, this.environmentTarget, staging, 0, false),
+        ),
+      )
+    this.compileShadowMaps(issue, staging)
+    issue(() => this.compileView(this.camera, this.depthFocus.target, staging, 0, false))
+    const reflected = this.water.getReflectionCamera(this.camera)
+    issue(() =>
+      this.compileView(reflected, this.water.getRenderTarget(reflected), staging, 0, false),
+    )
+    return Promise.all(pending)
+  }
+
+  private compileShadowMaps(
+    issue: (compile: () => Promise<unknown>) => void,
+    casters: Object3D = this.shadowGroup,
+  ) {
     for (const light of [this.moon, ...this.lampLights.map((lamp) => lamp.light)]) {
       const map = light.shadow.map
       if (!map) continue
@@ -1545,7 +1621,7 @@ export class VoxelLandscapeEngine {
         shadowMaterial.side = BackSide
         this.scene.overrideMaterial = shadowMaterial
         this.scene.background = null
-        issue(() => this.compileView(light.shadow.camera, map, this.shadowGroup))
+        issue(() => this.compileView(light.shadow.camera, map, casters))
       } finally {
         this.scene.overrideMaterial = material
         this.scene.background = background
@@ -1874,6 +1950,7 @@ export class VoxelLandscapeEngine {
       this.renderer.domElement.dataset.sceneRendered = 'true'
       performance.mark('landscape-presented')
       this.options.onFirstFrame()
+      this.markPresented()
     }
   }
 
@@ -1933,6 +2010,7 @@ export class VoxelLandscapeEngine {
   dispose() {
     if (this.disposed) return
     this.disposed = true
+    this.markPresented()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

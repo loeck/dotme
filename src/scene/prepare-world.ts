@@ -1,13 +1,21 @@
 import { prepareWorld, WORLD_PARTS } from './world-data'
-import type { PreparedWorld, SurfacePart, TerrainPart, WorldPartMessage } from './world-data'
+import type {
+  PreparedWorld,
+  SurfacePart,
+  TerrainPart,
+  VegetationPart,
+  WorldPartMessage,
+} from './world-data'
 export type { PreparedWorld } from './world-data'
 
 const cancelled = () => new DOMException('World preparation cancelled', 'AbortError')
 
 /**
  * Prepares the world on two workers: one meshes terrain while the other builds
- * the lake surfaces, cloud noise and collision boxes from the same seed. Both
- * halves arrive as transferred buffers; the page only combines them.
+ * the lake surfaces, cloud noise and collision boxes from the same seed, then
+ * grows the forest. The world resolves with terrain and surfaces; the forest
+ * follows as `vegetation`, so it never delays the first frame. Every part
+ * arrives as transferred buffers; the page only combines them.
  */
 export function prepareWorldAsync(
   seed: number,
@@ -17,6 +25,7 @@ export function prepareWorldAsync(
   if (signal.aborted) return Promise.reject(cancelled())
   performance.clearMarks('worldprep-start')
   performance.clearMarks('worldprep-ready')
+  performance.clearMarks('vegetation-ready')
   performance.mark('worldprep-start')
   // Synchronous fallback is limited to platforms without Worker support.
   if (typeof Worker === 'undefined') {
@@ -24,20 +33,39 @@ export function prepareWorldAsync(
     performance.mark('worldprep-ready')
     return Promise.resolve(world)
   }
+  // The executor runs synchronously, so both settlers exist before any worker message.
+  const settleForest: {
+    resolve?: (data: VegetationPart) => void
+    reject?: (error: Error) => void
+  } = {}
+  const vegetation = new Promise<VegetationPart>((resolve, reject) => {
+    settleForest.resolve = resolve
+    settleForest.reject = reject
+  })
+  // The engine handles its own subscription; a world that never gets that far must not
+  // report an unhandled rejection.
+  vegetation.catch(() => undefined)
   return new Promise((resolve, reject) => {
     const workers: Worker[] = []
     let terrain: TerrainPart | undefined
     let surfaces: SurfacePart | undefined
-    let settled = false
+    let world = false,
+      forest = false
     const cleanup = () => {
-      settled = true
       for (const worker of workers) worker.terminate()
       signal.removeEventListener('abort', abort)
     }
     const fail = (error: Error) => {
-      if (settled) return
+      if (world && forest) return
       cleanup()
-      reject(error)
+      if (!forest) {
+        forest = true
+        settleForest.reject?.(error)
+      }
+      if (!world) {
+        world = true
+        reject(error)
+      }
     }
     const abort = () => fail(cancelled())
     signal.addEventListener('abort', abort, { once: true })
@@ -45,16 +73,28 @@ export function prepareWorldAsync(
       const worker = new Worker(new URL('./world.worker.ts', import.meta.url), { type: 'module' })
       workers.push(worker)
       worker.addEventListener('message', (event: MessageEvent<WorldPartMessage>) => {
-        if (settled) return
-        // Each worker delivers once; release its memory before the other finishes.
-        worker.terminate()
         const message = event.data
-        if (message.part === 'terrain') terrain = message.data
-        else surfaces = message.data
+        if (message.part === 'vegetation') {
+          if (forest) return
+          forest = true
+          // The forest can finish before the terrain; stop only its own worker.
+          worker.terminate()
+          if (world) cleanup()
+          performance.mark('vegetation-ready')
+          settleForest.resolve?.(message.data)
+          return
+        }
+        if (world) return
+        // The terrain worker delivers once; release its memory before the other finishes.
+        if (message.part === 'terrain') {
+          worker.terminate()
+          terrain = message.data
+        } else surfaces = message.data
         if (!terrain || !surfaces) return
-        cleanup()
+        world = true
+        if (forest) cleanup()
         performance.mark('worldprep-ready')
-        resolve({ ...terrain, ...surfaces })
+        resolve({ ...terrain, ...surfaces, vegetation })
       })
       worker.addEventListener('error', (event) => {
         fail(new Error(event.message || 'World preparation failed'))
