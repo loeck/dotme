@@ -291,6 +291,18 @@ function uprightCard(facing: Point, toCamera: Point): Point {
 /** Tuft palette after Last Signal's `[[grass]]` rows (forest.toml). */
 export type GrassColours = Readonly<{ root: Rgb; tip: Rgb }>
 
+/** Row positions along a blade and their width share (ADR 0107). */
+const BLADE_ROWS = [
+  [0, 0.55],
+  [0.33, 1],
+  [0.66, 0.5],
+  [0.9, 0.12],
+] as const
+const SHORT_BLADE_ROWS = [
+  [0, 0.7],
+  [0.5, 0.6],
+] as const
+
 /**
  * A sparse fan of pointed, arching ribbons (ADR 0107): each blade is a quadratic Bézier with
  * four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from the ground to a
@@ -306,8 +318,11 @@ export function appendTuft(
     colours: GrassColours
     salt: number
     phase: number
+    /** `short`: ground-cover blades of two rows and a tip, three triangles each. */
+    profile?: 'full' | 'short'
   }>,
 ) {
+  const rows = options.profile === 'short' ? SHORT_BLADE_ROWS : BLADE_ROWS
   const omega = ((2 * Math.PI * 1.2) / Math.sqrt(Math.max(options.height, 0.05))) * 2.2
   for (let blade = 0; blade < options.blades; blade++) {
     const r = (stream: number) => hash(blade, options.salt, stream)
@@ -336,12 +351,6 @@ export function appendTuft(
         2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1]),
         2 * (1 - t) * (p1[2] - p0[2]) + 2 * t * (p2[2] - p1[2]),
       ])
-    const rows = [
-      [0, 0.55],
-      [0.33, 1],
-      [0.66, 0.5],
-      [0.9, 0.12],
-    ] as const
     const ids: number[] = []
     for (const [t, w] of rows) {
       const p = at(t)
@@ -369,7 +378,8 @@ export function appendTuft(
       0.01,
       omega,
     ])
-    builder.triangle(ids[6] ?? 0, ids[7] ?? 0, tip)
+    const last = (rows.length - 1) * 2
+    builder.triangle(ids[last] ?? 0, ids[last + 1] ?? 0, tip)
   }
 }
 

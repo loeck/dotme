@@ -58,7 +58,10 @@ with some patches drying toward straw. A grass tuft is a sparse fan of six to te
 Bézier ribbons with four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from
 the ground to the tip. A fern crown is a ring of arching, drooping rachis strips cut into
 alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
-Thin blades pass some sunlight when the view faces a low sun.
+Under the clumps, a ground cover of short tufts (seven to ten blades of 6–13 cm, two rows
+and a tip, three triangles each) grows on most of the bank's columns, thinner on bare patches
+and drier where the clumps dry, so the soil between tall tufts reads as turf rather than bare
+voxels. Thin blades pass some sunlight when the view faces a low sun.
 
 ## Streaming
 
@@ -77,7 +80,7 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 156k triangles and the phone forest about 25k. Preparation runs after the surfaces on the
+forest is about 258k triangles (197k of them undergrowth) and the phone forest about 48k. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind

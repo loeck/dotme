@@ -39,8 +39,8 @@ export type PreparedVegetation = Readonly<{
  * about a third of the 25 cm terrain voxel. Foliage clumps sit on a pitch of three cells.
  */
 const GRID = {
-  desktop: { tree: 0.08, tufts: 1500 },
-  mobile: { tree: 0.1, tufts: 420 },
+  desktop: { tree: 0.08, tufts: 1500, cover: 6000 },
+  mobile: { tree: 0.1, tufts: 420, cover: 900 },
 } as const
 const CLUMP_PITCH = 3
 const GROUND_COVER_Z = -1.5
@@ -278,6 +278,38 @@ export function prepareVegetation(
       })
     }
     placed++
+  }
+
+  // Ground cover under the clumps: short three-triangle blades over most of the bank, so the
+  // soil between the tall tufts reads as turf rather than bare voxels. Thinner on bare patches,
+  // drier where the clumps dry.
+  let covered = 0
+  for (const { x, z, column } of candidates) {
+    if (covered >= grid.cover) break
+    const xi = Math.round(x / COLUMN),
+      zi = Math.round(z / COLUMN)
+    const patch = valueNoise(seed, x, z, 8, 967)
+    if (hash(seed, xi, zi, 1061) >= 0.7 + patch * 0.35) continue
+    const dryness = Math.max(0, valueNoise(seed, x, z, 8, 1033) - 0.45) * 0.9
+    const tone = 0.85 + hash(seed, xi, zi, 1063) * 0.3
+    const root = [
+      x + (hash(seed, xi, zi, 1069) - 0.5) * COLUMN,
+      column.top - 0.01,
+      z + (hash(seed, xi, zi, 1087) - 0.5) * COLUMN,
+    ] as const
+    appendTuft(undergrowth, root, {
+      blades: 7 + Math.floor(hash(seed, xi, zi, 1091) * 4),
+      height: 0.06 + hash(seed, xi, zi, 1093) * 0.07,
+      width: 0.022 + hash(seed, xi, zi, 1097) * 0.01,
+      colours: {
+        root: [P.grassBase[0] * tone, P.grassBase[1] * tone, P.grassBase[2] * tone],
+        tip: mixRgb(mixRgb(P.grassTip, P.grassDry, dryness), P.grassBase, 0.45),
+      },
+      salt: xi * 7919 + zi + 104_729,
+      phase: hash(seed, xi, zi, 1103) * Math.PI * 2,
+      profile: 'short',
+    })
+    covered++
   }
 
   return {
