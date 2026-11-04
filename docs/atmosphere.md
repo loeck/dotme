@@ -103,7 +103,8 @@ Every exposed top, whatever its material and distance, is also eroded into micro
 (`terrain-erosion.ts`). The top splits into a grid of 6 cm cells near the camera and in the
 foreground, 12.5 cm on the mid-ground hills (two per 25 cm voxel) and 12.5 cm on the far 50 cm
 voxels (four per side; two on phones). A column on the edge of a riser that drops away may sink
-by a cell, near the camera sometimes two, so the step edge wears into notches and short
+by a cell, on desktop sometimes two (mid-ground within 12 m of the camera and the far 50 cm
+voxels), so the step edge wears into notches and short
 micro-steps; a column at the foot of a riser that rises from the top may carry a cell or two of
 scree, so the inner corner fills in as the outer one wears away; and stone tops (shore, rock,
 the wet stones in the lake) carry the odd loose block. Turf lip cells and stones skip columns
@@ -112,7 +113,7 @@ camera, three fifths on the hills and far crests), because there a step is only 
 high and dense micro-steps are what stop a slope reading as a staircase of whole voxels; phones
 take about half. The mesher lowers the riser under each chip and closes the chip with a floor and
 walls; pieces of an eroded top overlap by a millimetre inside the solid so their T-junctions
-never open a crack. Chip floors keep 16 cm above the lake: lower chips on the shore steps showed
+never open a crack. Chip floors keep 20 cm above the lake: lower chips on the shore steps showed
 bright artifacts from the water at their floor. Two rules keep chips from reading as holes: neighbouring chips must open through a
 common side (two chips opening through opposite sides of a thin voxel form a slot through the
 hill), and below the camera's eye level a chip may not open through a side that faces away from

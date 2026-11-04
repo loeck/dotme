@@ -39,7 +39,10 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
   }
   const tick = (now: number) => {
     frame = 0
-    const moving = motion.step(now - frameTime)
+    // The first frame after a rest can carry a timestamp from before the waking event (frame
+    // callbacks share the frame's start time); step it as one nominal frame instead of none.
+    const dt = now - frameTime
+    const moving = motion.step(dt > 0 ? dt : 1000 / 60)
     frameTime = now
     draw()
     if (moving) frame = requestAnimationFrame(tick)

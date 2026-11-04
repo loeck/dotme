@@ -25,6 +25,8 @@ it('takes fresh passages of shorter loops and never repeats a call window', () =
         expect(phrase.offset).toBeGreaterThanOrEqual(0)
         expect(phrase.offset + phrase.duration).toBeLessThanOrEqual(duration + 1e-9)
         expect(phrase.fade).toBeLessThanOrEqual(phrase.duration / 4)
+        // Consecutive passages of one recording share a fade, so their crossfades line up.
+        expect(phrase.fade).toBe(loopPhrase(duration, previous, () => 0.5).fade)
       }
   const calls = ['a', 'b', 'c', 'd']
   for (const previous of [-1, 0, 1, 2, 3, 9])

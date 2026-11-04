@@ -6,14 +6,14 @@ export type WaterSoundEvent = Readonly<{
   /** -1 (left) to 1 (right). */
   pan: number
 }>
-export type WaterSoundKind = 'burst' | 'wave' | 'drop'
+type WaterSoundKind = 'burst' | 'wave' | 'drop'
 export type WaterSoundWindow = Readonly<{ kind: WaterSoundKind; offset: number; duration: number }>
 
 /**
  * Windows in splashes.ogg, a sprite of generated takes: pointer splashes, small waves
  * slapping the bank and single drops. Offsets and durations in seconds.
  */
-export const WATER_SOUNDS: readonly WaterSoundWindow[] = [
+const WATER_SOUNDS: readonly WaterSoundWindow[] = [
   { kind: 'burst', offset: 0, duration: 1.3 },
   { kind: 'burst', offset: 1.35, duration: 1.1 },
   { kind: 'wave', offset: 2.5, duration: 1.95 },

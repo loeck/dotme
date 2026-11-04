@@ -6,7 +6,7 @@ const unit = (n: number) => (Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 
 /** Music level under the shared master, about the loudness of the birds. */
 const LEVEL = 0.11
 
-export type MusicMood = 'day' | 'night'
+type MusicMood = 'day' | 'night'
 
 /** Day pieces in daylight without heavy rain; the night piece otherwise. */
 export function musicMood(environment: AmbientEnvironment): MusicMood {
@@ -29,7 +29,7 @@ export function musicGap(environment: AmbientEnvironment, random = Math.random) 
 export class AmbientMusic {
   private readonly gain: GainNode
   private readonly audio: AudioContext
-  private readonly format: AudioFormat
+  private readonly format: () => AudioFormat
   private readonly random: () => number
   private element: HTMLAudioElement | undefined
   private source: MediaElementAudioSourceNode | undefined
@@ -39,14 +39,16 @@ export class AmbientMusic {
     windSpeed: 0,
     rainIntensity: 0,
   }
-  private nextPiece: number
+  /** Set on the first tick, so the first delay counts from when sound actually starts. */
+  private nextPiece = NaN
+  private readonly firstPiece: number
   private playing = false
   private disposed = false
 
   constructor(
     audio: AudioContext,
     destination: AudioNode,
-    format: AudioFormat,
+    format: () => AudioFormat,
     random: () => number = Math.random,
     /** Delay before the first piece, so the landscape is heard alone first. */
     firstPiece = 30 + random() * 20,
@@ -57,7 +59,7 @@ export class AmbientMusic {
     this.gain = audio.createGain()
     this.gain.gain.value = LEVEL
     this.gain.connect(destination)
-    this.nextPiece = audio.currentTime + firstPiece
+    this.firstPiece = firstPiece
   }
 
   setEnvironment(environment: AmbientEnvironment) {
@@ -66,6 +68,7 @@ export class AmbientMusic {
 
   /** Called from the mixer's scheduler while playback is active. */
   tick() {
+    if (Number.isNaN(this.nextPiece)) this.nextPiece = this.audio.currentTime + this.firstPiece
     if (this.disposed || this.playing || this.audio.currentTime < this.nextPiece) return
     this.playing = true
     const element = this.element ?? new Audio()
@@ -77,7 +80,7 @@ export class AmbientMusic {
       this.source = this.audio.createMediaElementSource(element)
       this.source.connect(this.gain)
     }
-    element.src = `/audio/music-${musicMood(this.environment)}.${this.format}`
+    element.src = `/audio/music-${musicMood(this.environment)}.${this.format()}`
     element.currentTime = 0
     element.play().catch(() => this.finish())
   }

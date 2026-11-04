@@ -163,7 +163,10 @@ describe('terrain erosion', () => {
     }
     const { erosion } = erode(voxels, 1)
     expect(required(erosion).chips).toBeGreaterThan(0)
-    expect(uncoveredTop(world, required(voxels[1]))).toBe(0)
+    // The meshed top must itself be eroded, or a gap-free result would prove nothing.
+    const top = required(voxels[1])
+    expect(prepareTerrain(world, [[top.x, top.y + 20, top.z]]).chips).toBeGreaterThan(0)
+    expect(uncoveredTop(world, top)).toBe(0)
   })
 
   it.each([false, true])(

@@ -344,17 +344,17 @@ export class VoxelLandscapeEngine {
       )
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
-      // The forest is part of the first frame: wait for the worker's vegetation and compile it
-      // with the scene, so trees never pop in after the loader has gone.
-      const forest = (await engine.addVegetation(prepared.vegetation, signal))?.compiled
       // The offscreen passes do not depend on the lit scene: issue them before
       // the environment so their pipelines compile alongside the scene batch.
       performance.mark('compile:passes')
       passes = engine.compilePasses(options.renderer, initialLight)
       // Settled with the scene batch; keep an early failure from going unhandled.
       passes.catch(() => undefined)
+      // The forest is part of the first frame: wait for the worker's vegetation and add it
+      // before the scene compiles, so trees never pop in after the loader has gone.
+      await engine.addVegetation(prepared.vegetation, signal)
       performance.mark('compile:environment')
-      await Promise.all([engine.compileScene(signal, options.renderer, passes), forest])
+      await engine.compileScene(signal, options.renderer, passes)
       performance.mark('compile:warmup')
       engine.warmupScene()
       engine.snapshotPrograms('warmup')
@@ -977,6 +977,7 @@ export class VoxelLandscapeEngine {
       nightStrength * this.intro,
       dt,
       this.reducedMotion,
+      this.raycaster.ray.origin,
     )
   }
 
@@ -1440,6 +1441,8 @@ export class VoxelLandscapeEngine {
     }
 
     this.compileShadowMaps(issue)
+    // The forest casts its own shadows; every other view reaches it through the scene.
+    if (this.vegetation) this.compileShadowMaps(issue, this.vegetationGroup)
 
     issue(() => this.submerged.compileAsync(renderer, this.scene, this.camera))
     issue(() => this.compileView(this.camera, this.depthFocus.target))
@@ -1567,9 +1570,9 @@ export class VoxelLandscapeEngine {
 
   /** The material used by the public shadow node is shared with the actual shadow pass. */
   /**
-   * Builds the forest into the scene before the first frame and starts compiling it for every
-   * view that draws it (main, mirror, probe and shadows); `compiled` settles with those compiles.
-   * A failed preparation leaves the scene without vegetation rather than failing the load.
+   * Builds the forest into the scene before it compiles, so the scene batch covers it for
+   * every view (main, mirror, probe and its shadow maps). A failed preparation leaves the scene
+   * without vegetation rather than failing the load.
    */
   private async addVegetation(pending: Promise<VegetationPart>, signal: AbortSignal) {
     let data: VegetationPart
@@ -1588,14 +1591,6 @@ export class VoxelLandscapeEngine {
       if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
     this.vegetationGroup.updateMatrixWorld(true)
     performance.mark('vegetation-presented')
-    const compiled = this.compileVegetation(this.vegetationGroup).then(
-      () => undefined,
-      // Uncompiled pipelines still build on first draw; only a hitch is lost.
-      (error: unknown) => {
-        if (!this.disposed) console.warn('Vegetation precompile failed', error)
-      },
-    )
-    return { compiled }
   }
 
   /**
@@ -1605,25 +1600,6 @@ export class VoxelLandscapeEngine {
   private receiveSceneLight(material: MeshStandardNodeMaterial) {
     this.clouds.shadows.applyTo(material, this.camera)
     this.pointerLight.applyTo(material)
-  }
-
-  private compileVegetation(staging: Group) {
-    const pending: Promise<unknown>[] = []
-    const issue = (compile: () => Promise<unknown>) => pending.push(compile())
-    const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
-    if (cubeCamera)
-      issue(() =>
-        compileWithoutCulling(staging, () =>
-          this.compileView(cubeCamera, this.environmentTarget, staging, 0, false),
-        ),
-      )
-    this.compileShadowMaps(issue, staging)
-    issue(() => this.compileView(this.camera, this.depthFocus.target, staging, 0, false))
-    const reflected = this.water.getReflectionCamera(this.camera)
-    issue(() =>
-      this.compileView(reflected, this.water.getRenderTarget(reflected), staging, 0, false),
-    )
-    return Promise.all(pending)
   }
 
   private compileShadowMaps(

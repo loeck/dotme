@@ -50,7 +50,7 @@ export type ErosionDensity = {
 /** Last Signal's distant hills keep their micro-voxels: a far voxel (50 cm) still splits into
  * 12.5 cm columns, a few pixels each from the default camera, enough to notch the crests. A
  * phone's far voxel splits in two only: fewer, larger notches for the same silhouette. */
-export function erosionCellSize(size: number, z: number, desktop = true) {
+function erosionCellSize(size: number, z: number, desktop = true) {
   return size > 0.3 ? size / (desktop ? 4 : 2) : lipCellSize(size, z)
 }
 

@@ -37,8 +37,8 @@ export type TerrainPart = ReturnType<typeof terrainPart>
 export type SurfacePart = ReturnType<typeof surfacePart>
 export type VegetationPart = ReturnType<typeof prepareVegetation>
 /**
- * Everything the first frame needs, plus the forest, which follows on its own: the engine
- * presents the scene first and dissolves the vegetation in once it is compiled.
+ * Everything the scene needs, with the forest as its own message: physics and scene
+ * construction start without it, and the engine adds it before the scene compiles.
  */
 export type PreparedWorld = TerrainPart & SurfacePart & { vegetation: Promise<VegetationPart> }
 /** Worker requests; the `surfaces` worker also grows the forest afterwards. */

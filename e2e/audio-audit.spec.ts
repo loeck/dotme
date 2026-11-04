@@ -56,7 +56,7 @@ for (const format of ['ogg', 'mp3'] as const) {
     }
   })
 
-  test(`full production mix with wide beds, water sounds and music keeps headroom (${format})`, async ({
+  test(`production mix with wide beds, placed calls and splashes keeps headroom (${format})`, async ({
     page,
   }, info) => {
     const directory = await mkdtemp(join(tmpdir(), 'ambient-audit-'))

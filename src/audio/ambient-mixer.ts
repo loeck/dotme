@@ -145,7 +145,8 @@ export class AmbientMixer {
       this.mediaMaster = media.createGain()
       this.mediaMaster.gain.value = 0
       this.mediaMaster.connect(media.destination)
-      this.music = new AmbientMusic(media, this.mediaMaster, format)
+      // Music follows the clips' format, including a fallback to MP3 after an Ogg failure.
+      this.music = new AmbientMusic(media, this.mediaMaster, () => this.format)
     }
   }
 
@@ -230,16 +231,20 @@ export class AmbientMixer {
   waterSound(event: WaterSoundEvent) {
     if (this.disposed || !this.active || this.context.state !== 'running') return
     const take = this.splashes.pick(event, this.context.currentTime)
-    if (
-      !take ||
-      take.offset + take.duration * take.rate > (this.buffers.get('splashes')?.duration ?? 0)
+    if (!take || take.offset + take.duration > (this.buffers.get('splashes')?.duration ?? 0)) return
+    // A pitched take plays for duration / rate, so it reads exactly its own window of the sprite.
+    this.voice(
+      'splashes',
+      this.context.currentTime,
+      take.duration / take.rate,
+      take.offset,
+      0.005,
+      {
+        pan: take.pan,
+        rate: take.rate,
+        level: take.level,
+      },
     )
-      return
-    this.voice('splashes', this.context.currentTime, take.duration, take.offset, 0.005, {
-      pan: take.pan,
-      rate: take.rate,
-      level: take.level,
-    })
   }
 
   private updateMix() {

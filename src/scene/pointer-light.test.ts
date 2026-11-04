@@ -55,6 +55,25 @@ it('rekindles instead of teleporting when the surface under the cursor jumps in 
   expect(strength()).toBe(1)
 })
 
+it('keeps its strength while the cursor sweeps smoothly over distant water', () => {
+  const origin = new Vector3(0, 2.3, 10)
+  const light = new PointerLight()
+  const strength = () => light.uniforms.uPointerLightStrength.value
+  const point = new Vector3(0, 0, -30)
+  light.update(point, point.clone().sub(origin).normalize(), 1, 0, true, origin)
+  // About 0.6 m of depth per pixel at 40 m: a 5 px per frame sweep moves ~3 m a frame.
+  for (let frame = 0; frame < 60; frame++) {
+    point.z -= 3
+    light.update(point, point.clone().sub(origin).normalize(), 1, 1 / 60, false, origin)
+  }
+  expect(strength()).toBeGreaterThan(0.95)
+  // Crossing from the near bank to that far water still rekindles.
+  const bank = new Vector3(0, 0.5, -2)
+  light.update(bank, bank.clone().sub(origin).normalize(), 1, 0, true, origin)
+  light.update(point, point.clone().sub(origin).normalize(), 1, 1 / 60, false, origin)
+  expect(strength()).toBeLessThan(0.2)
+})
+
 it('uses elapsed time rather than frame count to fade', () => {
   const strengths = [30, 60, 144].map((fps) => {
     const light = new PointerLight()

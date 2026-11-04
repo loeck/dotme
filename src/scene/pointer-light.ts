@@ -19,8 +19,13 @@ export function createPointerLightUniforms() {
   }
 }
 
-/** Depth change along the view ray, in metres, that a moving cursor can make without a dip. */
+/**
+ * Depth change along the view ray that a moving cursor can make without a dip: at least a
+ * metre, and a share of the distance, because on a surface seen at a grazing angle far away
+ * one pixel of movement already spans tens of centimetres of depth.
+ */
 const POINTER_LIGHT_JUMP = 1
+const POINTER_LIGHT_JUMP_SHARE = 0.35
 
 export class PointerLight {
   readonly uniforms = createPointerLightUniforms()
@@ -31,6 +36,8 @@ export class PointerLight {
     nightStrength: number,
     dt: number,
     frozen = false,
+    /** The camera position; without it only the fixed one-metre threshold applies. */
+    rayOrigin?: Vector3,
   ) {
     const strength = this.uniforms.uPointerLightStrength
     if (contact && !frozen && strength.value > 0) {
@@ -42,7 +49,11 @@ export class PointerLight {
           (contact.y - previous.y) * rayDirection.y +
           (contact.z - previous.z) * rayDirection.z,
       )
-      if (jump > POINTER_LIGHT_JUMP) strength.value *= Math.exp((POINTER_LIGHT_JUMP - jump) / 6)
+      const near = rayOrigin
+        ? Math.min(rayOrigin.distanceTo(contact), rayOrigin.distanceTo(previous))
+        : 0
+      const threshold = Math.max(POINTER_LIGHT_JUMP, near * POINTER_LIGHT_JUMP_SHARE)
+      if (jump > threshold) strength.value *= Math.exp((threshold - jump) / 6)
     }
     if (contact) {
       this.uniforms.uPointerLightPosition.value.copy(contact)
@@ -83,7 +94,7 @@ export function pointerLightAt(world: Node<'vec3'>, normal: Node<'vec3'>, u: Poi
 }
 
 /** Height of the cursor's lantern above the surface it lights, in metres. */
-export const POINTER_LANTERN_HEIGHT = 0.35
+const POINTER_LANTERN_HEIGHT = 0.35
 
 /**
  * Specular reflection of the night cursor on water, as if a small lantern hung just

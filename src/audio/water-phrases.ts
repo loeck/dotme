@@ -20,7 +20,8 @@ export function loopPhrase(duration: number, previousOffset: number, random = Ma
   let offset = random() * available
   if (available >= 6 && Math.abs(offset - previousOffset) < 3)
     offset = previousOffset < available / 2 ? available - random() * 2 : random() * 2
-  return { offset, duration: length, fade: Math.min(3, length / 4) }
+  // One fade per recording: each passage fades in exactly as the previous one fades out.
+  return { offset, duration: length, fade: Math.min(3, duration / 8) }
 }
 
 /** One window of a recording that holds several separate calls; never the same one twice. */
