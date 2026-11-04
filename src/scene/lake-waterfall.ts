@@ -384,10 +384,7 @@ export class LakeWaterfall {
       )
       const drift = footZ.sub(t.mul(FOAM_DRIFT))
       const fan = footX.div(travel.mul(0.55).add(halfWidth + 0.25))
-      const scrolled = (scale: number): [number, number] => [
-        OPEN_AXIS,
-        loopCells(FOAM_DRIFT * scale),
-      ]
+      const scrolled = (scale: number): [null, number] => [OPEN_AXIS, loopCells(FOAM_DRIFT * scale)]
       const lines = loopNoise(vec2(fan.mul(5.5), drift.mul(1.1)), scrolled(1.1))
       const clump = loopNoise(vec2(footX.mul(2.4), drift.mul(2.4)).add(7.1), scrolled(2.4))
       const lace = loopNoise(vec2(footX.mul(9), drift.mul(9)).add(3.3), scrolled(9))

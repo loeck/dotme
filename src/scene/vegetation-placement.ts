@@ -179,6 +179,7 @@ export function prepareVegetation(
   }
   const tops = columnTops(world)
 
+  const companions: { x: number; z: number }[] = []
   world.trees.forEach((tree, index) => {
     const xi = Math.round(tree.x * 10),
       zi = Math.round(tree.z * 10)
@@ -195,6 +196,7 @@ export function prepareVegetation(
       const column = tops.at(bx, bz)
       if (!column?.ground || column.top < tree.y - 0.6 || column.top <= WATER_LEVEL + 0.1) continue
       const bush = model(`bush-${slot}`, () => sculptBush(seed + 31 + slot, grid.tree))
+      companions.push({ x: bx, z: bz })
       plant(
         bush,
         {
@@ -241,7 +243,8 @@ export function prepareVegetation(
 
   // Mid-ground shrubs (Last Signal's islet and bank cover): grass blades shrink below a pixel
   // past the foreground, so the turf there reads through scattered bush clumps instead. They
-  // gather in slow patches and keep off tree trunks and a step's last column.
+  // gather in slow patches and keep off tree trunks, the trees' companion bushes and a step's
+  // last column.
   const shrubSpots = [...tops.columns.entries()]
     .map(([key, column]) => {
       const [cx, cz] = key.split(':').map(Number)
@@ -272,6 +275,7 @@ export function prepareVegetation(
     const scale = 0.85 + hash(seed, cx, cz, 1213) * 0.6
     const r = 0.4 * scale
     if (world.trees.some((tree) => (tree.x - x) ** 2 + (tree.z - z) ** 2 < (0.7 + r) ** 2)) continue
+    if (companions.some((bush) => (bush.x - x) ** 2 + (bush.z - z) ** 2 < (0.5 + r) ** 2)) continue
     if (shrubs.some((other) => (other.x - x) ** 2 + (other.z - z) ** 2 < (other.r + r) ** 2))
       continue
     shrubs.push({ x, z, r })
