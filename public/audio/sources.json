@@ -152,35 +152,56 @@
     "generated": "2026-11-04",
     "takes": [
       {
-        "job": "281a1e3f2617493ab7fb1ca1614b5d34",
+        "job": "cb9055b51a474a05849a5a24f15a7e83",
         "model": "audio3-sfx-int8",
-        "prompt": "A small stone thrown into a calm lake, one clean splash followed by a few droplets falling back, then silence, close natural recording, no music",
-        "seed": 71,
+        "prompt": "Small rock dropped into a lake, deep plunk and water splash, close-up, clean",
+        "seed": 102,
+        "seconds": 2
+      },
+      {
+        "job": "c91c19f96823493f9a066f0d5c40e2f2",
+        "model": "audio3-sfx-int8",
+        "prompt": "Water splash in a lake, something small falling into the water, natural splash and ripples, close-up, clean",
+        "seed": 103,
+        "seconds": 2
+      },
+      {
+        "job": "7f471cee7c504baf8e40f365e8d98455",
+        "model": "audio3-sfx-int8",
+        "prompt": "Small waves washing onto a rocky lake shore, water swash and gurgle, close-up, clean",
+        "seed": 112,
         "seconds": 3
       },
       {
-        "job": "c26b4bff756a48b785d30e0e7e15f0ba",
+        "job": "0695c6a5c7fb43ff996592d57126b924",
         "model": "audio3-sfx-int8",
-        "prompt": "A single small lake wave slapping against a rocky shore, soft splash and gurgle, then quiet, close natural recording, no music, no wind",
-        "seed": 91,
+        "prompt": "One small lake wave breaking softly on a stony beach, close-up, clean",
+        "seed": 113,
         "seconds": 3
       },
       {
-        "job": "c577ca4b98924a5ab4f9e33cdb9d624c",
+        "job": "ef6c7cbd8cf74abd9093624af7655932",
         "model": "audio3-sfx-int8",
-        "prompt": "Single water droplets falling one at a time into a still lake, separate small plinks and bloops with short silences between, close natural recording, no music",
-        "seed": 81,
-        "seconds": 5
+        "prompt": "Single water drop falling into a pond, deep plop, close-up, clean",
+        "seed": 121,
+        "seconds": 2
+      },
+      {
+        "job": "aa878c8da8124b49ae147e51ef7fb25a",
+        "model": "audio3-sfx-int8",
+        "prompt": "A single drop of water falling into deep water, plip, close-up, clean",
+        "seed": 123,
+        "seconds": 2
       }
     ],
     "processing": [
-      "Sprite of takes separated by 50 ms: splash 0.15-1.35 s (burst), wave 0.08-1.63 s, seven 0.3 s drops from the drops take; windows in src/audio/water-sounds.ts.",
-      "Mono, 32000 Hz, high-pass 80 Hz, low-pass 11 kHz, 4 ms/40 ms edge fades, peaks normalized to -4 (burst), -6 (wave) and -8 dBFS (drops); MP3 80 kbit/s, Opus 64 kbit/s with matched loudness."
+      "Sprite of takes separated by 50 ms: splashes 0-1.3 s and 0-1.1 s, waves 0.05-2.0 s, drops 0-0.6 s and 0.05-0.85 s; windows in src/audio/water-sounds.ts.",
+      "Mono, 32000 Hz, high-pass 70 Hz, low-pass 12 kHz, 3 ms fade-in and 150 ms fade-out, peaks normalized to -4 (splashes), -7 (waves) and -9 dBFS (drops); MP3 80 kbit/s, Opus 64 kbit/s with matched loudness."
     ],
-    "duration": 5.3,
-    "sha256": "607ad83cd080492207c62b928687db3e002775125bc1faf40a972cee4d861f22",
+    "duration": 8,
+    "sha256": "9a909cd3c214bcefd57b96444f98c3ff82735f638681d29ecbd6edf1ff69d1fe",
     "opus": {
-      "sha256": "3cc4b7482fd11fc8ce280db2bb513319a9f37f434f4d7127ee01299fd92a2fa0"
+      "sha256": "e86c320f51fdd2577ec8d64652dd2c7fb5f90a12182a03b7d3cdff9686434cb7"
     }
   },
   {

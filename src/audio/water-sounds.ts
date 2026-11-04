@@ -14,18 +14,17 @@ export type WaterSoundWindow = Readonly<{ kind: WaterSoundKind; offset: number; 
  * slapping the bank and single drops. Offsets and durations in seconds.
  */
 export const WATER_SOUNDS: readonly WaterSoundWindow[] = [
-  { kind: 'burst', offset: 0, duration: 1.2 },
-  { kind: 'wave', offset: 1.25, duration: 1.55 },
-  ...[2.85, 3.2, 3.55, 3.9, 4.25, 4.6, 4.95].map((offset) => ({
-    kind: 'drop' as const,
-    offset,
-    duration: 0.3,
-  })),
+  { kind: 'burst', offset: 0, duration: 1.3 },
+  { kind: 'burst', offset: 1.35, duration: 1.1 },
+  { kind: 'wave', offset: 2.5, duration: 1.95 },
+  { kind: 'wave', offset: 4.5, duration: 1.95 },
+  { kind: 'drop', offset: 6.5, duration: 0.6 },
+  { kind: 'drop', offset: 7.15, duration: 0.8 },
 ]
 
 /** Drops are the most frequent event: cap their rate so a shower of returns stays a patter. */
-const DROP_GAP = 0.05
-const DROPS_PER_SECOND = 8
+const DROP_GAP = 0.2
+const DROPS_PER_SECOND = 3
 const finite = (n: number) => (Number.isFinite(n) ? n : 0)
 
 /**
@@ -73,7 +72,7 @@ export class WaterSoundPicker {
       level: intensity,
       pan: Math.max(-1, Math.min(1, finite(event.pan))),
       // Slight pitch variation keeps repeated takes from sounding identical.
-      rate: 0.92 + this.random() * 0.16,
+      rate: 0.96 + this.random() * 0.08,
     }
   }
 }

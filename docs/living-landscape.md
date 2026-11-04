@@ -44,7 +44,7 @@ The water therefore leaves room for the other layers instead of dominating rain.
 | ------------ | ----------------------------------------------------------------- | ------: |
 | Birds        | Northern pine forest birdsong by a lake, 24 s take                |    20 s |
 | Owls         | Two owl takes, three call groups transposed down to a tawny owl's |    14 s |
-| Splashes     | Stone splash, a wave on rocks, single drops (sprite of nine)      |   5.3 s |
+| Splashes     | Two stone splashes, two waves on a stony shore, two single drops  |     8 s |
 | Music, day   | Sparse solo felt piano, major key                                 |    90 s |
 | Music, night | Soft piano over a low pad, minor key                              |    90 s |
 
@@ -54,7 +54,7 @@ overlapping song while the morning light comes up, and briefly again at dusk. Ow
 every 35–95 s in a dry, dark night, one of three call groups, never the same twice. Pointer
 splashes, breaking waves and droplets falling back into the lake play takes from the splash
 sprite, attenuated by distance and panned to their place in the view; drops are thinned to
-eight a second. Music is occasional: a first piece 30–50 s after sound starts, then 2.5–5
+three a second. Music is occasional: a first piece 30–50 s after sound starts, then 2.5–5
 minutes of silence (half as long again in rain), the day piece in dry daylight and the night
 piece otherwise. It streams through a media element, so it adds nothing to the decoded
 budget and is requested only when due; hiding the page stops the piece. There is no thunder,
