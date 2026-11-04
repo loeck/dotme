@@ -31,9 +31,15 @@ patterns read the parcels' smooth grid position, not per-texel depth, and the th
 capture is linearly filtered, so neither shows the capture's texels.
 The cursor obstacle is narrow and moves without imparting its own velocity to the water, so quick
 gestures cannot launch individual parcels across the scene.
-Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile. Main and
-reflected views reuse those allocations; their crop follows the current parcel extents, including
-those displaced by the cursor. Environment probes omit the fluid to avoid self-refraction.
+Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile; their crop
+follows the current parcel extents, including those displaced by the cursor. Only the main view
+renders the fluid volume. Environment probes omit it to avoid self-refraction, and the lake mirror
+sees a reflection-only ribbon instead: one small blended draw that follows the sheet's mean
+trajectory (`waterfallDrift`) and widening and carries the same streaks and core colour without
+the fine grain, lit by the scene's lights with the same forward scatter. Running the capture and
+filters again for a view the waves distort beyond recognition would roughly double the
+waterfall's cost. The ribbon does not part around the cursor. Mist and spray stay out of the
+mirror as well; the plunge foam and the basin still reflect.
 This is an analytic flow representation, not a separate three-dimensional fluid solver.
 Grouped parcel arrivals feed the existing water-normal buffer, wave solver and recycled splash
 droplets. Cursor contact parts the curved flow and releases a few local fragments;
@@ -46,7 +52,13 @@ them. Mist puffs born in the plunge roll outward and upward while growing and th
 thinner veil hangs on the lower fall. Spray droplets use Last Signal's pale spray tone and
 gloss with a normal half towards the eye and half towards the sky, so they stay drops at night.
 From the default low camera the pool is seen almost edge-on, so the boil and mist carry the
-plunge; foam lines read as a bright band drifting downstream.
+plunge; foam lines read as a bright band drifting downstream. Up close, two finer octaves
+(about 3.5 and 1.5 cm cells, drifting with the foam and stirred by the boil) tear the lace edges
+into fingers, pit the boil and shade bubble crests. Each octave fades out once its cells shrink
+below about five pixels (`fwidth` of the pool coordinates), so at the default distance the foam
+is unchanged and cannot shimmer; the detail is zero-mean, so fading it leaves the coverage alone.
+It uses a lattice-periodic value noise (`tiledNoise`) so the fast-scrolling fine coordinates keep
+the hash's arguments small.
 
 Reduced motion keeps a quiet static composition. Disposal is idempotent and releases owned
 resources. Tests consume public behavior and narrow interfaces rather than casting into

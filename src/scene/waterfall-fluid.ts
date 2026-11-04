@@ -46,8 +46,48 @@ export function scatterPhase(cosine: Node<'float'>, g: number) {
     .mul((1 - g * g) / (4 * Math.PI))
 }
 
-/** Main and reflected views include the fluid; environment probes avoid self-refraction. */
+/**
+ * Main view only: the fluid volume, mist and spray. The mirror skips them (the
+ * fluid pass would rebuild for a view the lake distorts beyond recognition, and
+ * mist would only haze the reflection) and environment probes avoid self-refraction.
+ */
 export const WATERFALL_FLUID_LAYER = 6
+/** Mirror only: a cheap stand-in for the falling sheet in the lake reflection. */
+export const WATERFALL_REFLECTION_LAYER = 8
+
+/**
+ * Streaks carried by the falling water, in the fall's local frame: `across` the
+ * lip and `drop` below it. Each feature leaves the lip at one time and reaches
+ * `drop` after free-fall time, so it accelerates and stretches. A smooth glassy
+ * tongue at the lip breaks into streaks within half a metre, then aerated
+ * columns widen and merge towards the plunge. The reflection variant omits the
+ * fine grain, which its blurred, lower-resolution mirror could not resolve.
+ */
+export function fallStreaks(
+  across: Node<'float'>,
+  drop: Node<'float'>,
+  time: Node<'float'>,
+  sheetHeight: number,
+  fine = true,
+) {
+  const launched = time.sub(drop.mul(2 / GRAVITY).sqrt())
+  // Lip irregularities fix slowly wandering columns; packets slide within them.
+  const columns = contactNoise(vec2(across.mul(7.5), time.mul(0.11)))
+  const packets = contactNoise(vec2(across.mul(13), launched.mul(3.2)))
+  const grain = fine ? contactNoise(vec2(across.mul(31), launched.mul(9))) : float(0.5)
+  const breakup = smoothstep(0.12, Math.min(1.6, sheetHeight * 0.75), drop)
+  const streaks = columns.mul(0.55).add(packets.mul(0.3)).add(grain.mul(0.15))
+  const threshold = mix(0.8, 0.4, breakup)
+  const aerated = smoothstep(threshold, threshold.add(0.16), streaks).mul(
+    smoothstep(0.04, 0.45, drop),
+  )
+  return { launched, columns, packets, grain, breakup, aerated }
+}
+
+/** Last Signal's turbid water: a dark olive core that mirrors its sky. */
+export function fallCore(drop: Node<'float'>) {
+  return mix(vec3(0.045, 0.06, 0.052), vec3(0.09, 0.11, 0.095), smoothstep(0, 1.5, drop))
+}
 
 /** Reconstructs a lit water surface from particle depth and optical thickness. */
 export class WaterfallFluid {
@@ -123,23 +163,14 @@ export class WaterfallFluid {
     // keeps procedural patterns continuous across them.
     const local = varying(vertexLocal, 'waterfallLocal')
     const drop = float(sheetHeight).sub(local.y).max(0)
-    // A pattern carried by the water: each feature leaves the lip at one time
-    // and reaches `drop` after free-fall time, so it accelerates and stretches.
-    const launched = time.sub(drop.mul(2 / GRAVITY).sqrt())
     const across = local.x
-    // Lip irregularities fix slowly wandering columns; packets slide within them.
-    const columns = contactNoise(vec2(across.mul(7.5), time.mul(0.11)))
-    const packets = contactNoise(vec2(across.mul(13), launched.mul(3.2)))
-    const grain = contactNoise(vec2(across.mul(31), launched.mul(9)))
-    const fibres = contactNoise(vec2(across.mul(24), launched.mul(1.3)).add(5.7))
-    // Smooth glassy tongue at the lip, broken into streaks within half a metre,
-    // then aerated columns that widen and merge towards the plunge.
-    const breakup = smoothstep(0.12, Math.min(1.6, sheetHeight * 0.75), drop)
-    const streaks = columns.mul(0.55).add(packets.mul(0.3)).add(grain.mul(0.15))
-    const threshold = mix(0.8, 0.4, breakup)
-    const aerated = smoothstep(threshold, threshold.add(0.16), streaks).mul(
-      smoothstep(0.04, 0.45, drop),
+    const { launched, columns, packets, grain, breakup, aerated } = fallStreaks(
+      across,
+      drop,
+      time,
+      sheetHeight,
     )
+    const fibres = contactNoise(vec2(across.mul(24), launched.mul(1.3)).add(5.7))
     // Thin fringes along the sheet's edges and gaps fray into white spray.
     const fringe = smoothstep(0.03, 0.3, data.r).oneMinus().mul(breakup)
     const whitewater = aerated
@@ -147,9 +178,8 @@ export class WaterfallFluid {
       .add(fringe.mul(0.55))
       .add(parcelFoam.mul(smoothstep(0.35, 0.9, parcelFoam)))
       .clamp(0, 1)
-    // Last Signal's turbid water: a dark olive core that mirrors its sky, and a
-    // muted off-white foam rather than a paper-white one.
-    const core = mix(vec3(0.045, 0.06, 0.052), vec3(0.09, 0.11, 0.095), smoothstep(0, 1.5, drop))
+    // A muted off-white foam rather than a paper-white one over the dark core.
+    const core = fallCore(drop)
     const foam = mix(
       vec3(0.52, 0.56, 0.56),
       vec3(0.8, 0.82, 0.81),
