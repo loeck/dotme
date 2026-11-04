@@ -867,6 +867,10 @@ export class VoxelLandscapeEngine {
       mesh.addInstance(mesh.addGeometry(geometry))
       geometry.dispose()
     }
+    // Three's batching transforms normals in every shader, the depth-only shadow pass included,
+    // and warns when the attribute is missing. Depth never reads them, so the position buffer
+    // stands in: the same attribute binds twice with no extra memory or upload.
+    mesh.geometry.setAttribute('normal', mesh.geometry.getAttribute('position'))
     mesh.castShadow = true
     mesh.layers.set(5)
     mesh.updateMatrixWorld(true)

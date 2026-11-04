@@ -186,7 +186,9 @@ Greedy meshing was measured and rejected: neighbouring voxel colours differ, so 
 remove about a third of the faces while introducing T-junction pixel gaps.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
-the light direction moves by more than about half a texel. Only the two brightest lanterns cast
+the light direction moves by more than about half a texel. The caster cubes carry positions only;
+their batch binds the position buffer again as `normal`, because Three's batching transforms
+normals even in the depth-only pass and would warn about a missing attribute. Only the two brightest lanterns cast
 cube shadows (one on low power): each cube costs six caster renders and a cube sample in every
 lit pixel, and unshadowed lanterns still light the bank. Those two refresh once their lantern has
 drifted 8 cm (12 cm on low power), at most one per frame. The environment probe renders one cube
