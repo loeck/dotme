@@ -1,0 +1,289 @@
+import { CAMERA_REST } from './camera-rig'
+import { bakeFoliageAtlas } from './foliage-atlas'
+import type { FoliageAtlas } from './foliage-atlas'
+import { WATER_LEVEL } from './lake-bed'
+import {
+  appendClumps,
+  appendFern,
+  appendFlower,
+  appendTuft,
+  MeshBuilder,
+} from './vegetation-meshes'
+import type { MeshData } from './vegetation-meshes'
+import {
+  foliageSeeds,
+  meshSculpt,
+  mixRgb,
+  sculptBirch,
+  sculptBush,
+  sculptPine,
+  sculptSpruce,
+  VEGETATION_PALETTE,
+} from './vegetation-models'
+import type { FoliageSeed, VegetationGeometry, VoxelSculpt } from './vegetation-models'
+import type { TreeKind, VoxelWorld } from './voxel-world'
+
+/**
+ * The forest as three merged world-space meshes, after Last Signal: voxel wood, foliage clump
+ * cards over the botanical atlas, and procedural undergrowth that only the main view draws.
+ */
+export type PreparedVegetation = Readonly<{
+  wood: MeshData
+  foliage: MeshData
+  undergrowth: MeshData
+  atlas: FoliageAtlas
+}>
+
+/**
+ * Micro voxels only read where they build forms of a few pixels (Deadloop's lesson): wood uses
+ * about a third of the 25 cm terrain voxel. Foliage clumps sit on a pitch of three cells.
+ */
+const GRID = {
+  desktop: { tree: 0.08, tufts: 1500 },
+  mobile: { tree: 0.1, tufts: 420 },
+} as const
+const CLUMP_PITCH = 3
+const GROUND_COVER_Z = -1.5
+/** Furthest a companion bush stands from its tree: (0.6 + 0.7) × the largest tree scale. */
+const COMPANION_REACH = 2.4
+const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 3, pine: 2, birch: 2 }
+/** Tip travel at full wind as a share of model height (Voxen's `maxTip`). */
+const TREE_SWAY: Record<TreeKind, number> = { spruce: 0.03, pine: 0.03, birch: 0.05 }
+
+type Column = { top: number; ground: boolean }
+const COLUMN = 0.125
+
+function hash(seed: number, a: number, b: number, stream: number) {
+  let n = (seed ^ Math.imul(a, 0x9e3779b1) ^ Math.imul(b, 0x85ebca77) ^ stream) >>> 0
+  n ^= n >>> 16
+  n = Math.imul(n, 0x7feb352d)
+  n ^= n >>> 15
+  n = Math.imul(n, 0x846ca68b)
+  return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
+}
+/** Smooth value noise, used for Last Signal's clumps (1.6 m) and patches (8 m). */
+function valueNoise(seed: number, x: number, z: number, scale: number, stream: number) {
+  const px = x / scale,
+    pz = z / scale
+  const x0 = Math.floor(px),
+    z0 = Math.floor(pz)
+  const tx = px - x0,
+    tz = pz - z0
+  const sx = tx * tx * (3 - 2 * tx),
+    sz = tz * tz * (3 - 2 * tz)
+  const a = hash(seed, x0, z0, stream),
+    b = hash(seed, x0 + 1, z0, stream)
+  const c = hash(seed, x0, z0 + 1, stream),
+    d = hash(seed, x0 + 1, z0 + 1, stream)
+  return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz
+}
+
+/** Highest solid top per 12.5 cm column, and whether that top is mossy ground, limited to
+ * the foreground bank and the ground around trees: the whole lake would cost far more. */
+function columnTops(world: VoxelWorld) {
+  const columns = new Map<string, Column>()
+  const groundEnd = world.groups.ground.count
+  const needed = (x: number, z: number, margin: number) =>
+    z > GROUND_COVER_Z - margin ||
+    world.trees.some(
+      (tree) => (tree.x - x) ** 2 + (tree.z - z) ** 2 < (COMPANION_REACH + margin) ** 2,
+    )
+  world.voxels.forEach((voxel, index) => {
+    if (!needed(voxel.x, voxel.z, voxel.size)) return
+    const top = voxel.y + voxel.size / 2
+    const span = Math.max(1, Math.round(voxel.size / COLUMN))
+    const x0 = Math.round((voxel.x - voxel.size / 2) / COLUMN),
+      z0 = Math.round((voxel.z - voxel.size / 2) / COLUMN)
+    for (let i = 0; i < span; i++)
+      for (let k = 0; k < span; k++) {
+        const key = `${x0 + i}:${z0 + k}`
+        const previous = columns.get(key)
+        if (previous && previous.top >= top) continue
+        columns.set(key, { top, ground: index < groundEnd })
+      }
+  })
+  return {
+    columns,
+    at(x: number, z: number) {
+      return columns.get(`${Math.floor(x / COLUMN)}:${Math.floor(z / COLUMN)}`)
+    },
+  }
+}
+
+type Model = Readonly<{
+  wood: VegetationGeometry
+  seeds: readonly FoliageSeed[]
+  height: number
+}>
+
+export function prepareVegetation(
+  world: VoxelWorld,
+  seed: number,
+  mobile: boolean,
+): PreparedVegetation {
+  const grid = mobile ? GRID.mobile : GRID.desktop
+  const camera = [CAMERA_REST.x, CAMERA_REST.y, CAMERA_REST.z] as const
+  const wood = new MeshBuilder(false)
+  const foliage = new MeshBuilder(true)
+  const undergrowth = new MeshBuilder(false)
+  const models = new Map<string, Model>()
+  const model = (name: string, build: () => VoxelSculpt) => {
+    let entry = models.get(name)
+    if (!entry) {
+      const sculpt = build()
+      entry = {
+        wood: meshSculpt(sculpt, { seed: seed ^ name.length, relief: 0.35, bendFrom: 0.4 }),
+        seeds: foliageSeeds(sculpt, CLUMP_PITCH),
+        height: Math.max(sculpt.height, 0.1),
+      }
+      models.set(name, entry)
+    }
+    return entry
+  }
+  const sculptTree = (kind: TreeKind, variant: number) => {
+    const treeSeed = seed + variant * 7919 + kind.length * 104_729
+    if (kind === 'birch') return sculptBirch(treeSeed, grid.tree)
+    if (kind === 'pine') return sculptPine(treeSeed, grid.tree)
+    return sculptSpruce(treeSeed, grid.tree, variant === 2)
+  }
+  const plant = (
+    entry: Model,
+    at: Readonly<{ x: number; y: number; z: number; yaw: number; scale: number }>,
+    sway: number,
+    salt: number,
+    leafy: boolean,
+  ) => {
+    const phase = hash(seed, salt, 7, 937) * Math.PI * 2
+    const omega = (2 * Math.PI * 1.2) / Math.sqrt(entry.height * at.scale)
+    const swayMetres = sway * entry.height * at.scale
+    wood.appendVoxels(entry.wood, at, { phase, omega }, swayMetres)
+    // Per-prop size factor and hue/value jitter (Last Signal: [0.85, 1.2]).
+    const jitter = hash(seed, salt, 11, 941)
+    appendClumps(foliage, entry.seeds, at, {
+      camera,
+      pitch: CLUMP_PITCH * grid.tree,
+      length: leafy ? 0.26 : 0.3,
+      propFactor: 0.85 + jitter * 0.35,
+      propTint: [
+        0.94 + jitter * 0.1,
+        0.97 + hash(seed, salt, 13, 947) * 0.06,
+        0.95 + (1 - jitter) * 0.08,
+      ],
+      modelHeight: entry.height,
+      sway: { phase, omega },
+      swayMetres,
+      salt,
+    })
+  }
+  const tops = columnTops(world)
+
+  world.trees.forEach((tree, index) => {
+    const xi = Math.round(tree.x * 10),
+      zi = Math.round(tree.z * 10)
+    const variant = Math.floor(hash(seed, xi, zi, 931) * TREE_VARIANTS[tree.kind])
+    const entry = model(`${tree.kind}-${variant}`, () => sculptTree(tree.kind, variant))
+    plant(entry, tree, TREE_SWAY[tree.kind], index * 2 + 1, tree.kind === 'birch')
+    // Last Signal's companions: two slots per tree, a bush in about a third of them.
+    for (let slot = 0; slot < 2; slot++) {
+      if (hash(seed, xi, zi, 941 + slot) > 0.36) continue
+      const angle = hash(seed, xi, zi, 947 + slot) * Math.PI * 2
+      const distance = (0.6 + hash(seed, xi, zi, 953 + slot) * 0.7) * tree.scale
+      const bx = tree.x + Math.sin(angle) * distance,
+        bz = tree.z + Math.cos(angle) * distance
+      const column = tops.at(bx, bz)
+      if (!column?.ground || column.top < tree.y - 0.6 || column.top <= WATER_LEVEL + 0.1) continue
+      const bush = model(`bush-${slot}`, () => sculptBush(seed + 31 + slot, grid.tree))
+      plant(
+        bush,
+        {
+          x: bx,
+          y: column.top - 0.04,
+          z: bz,
+          yaw: angle * 3,
+          scale: 0.8 + hash(seed, xi, zi, 959 + slot) * 0.5,
+        },
+        0.04,
+        index * 2 + 2 + slot * 1000,
+        true,
+      )
+    }
+  })
+
+  // Foreground undergrowth (ADR 0107/0112): Bézier grass fans in 1.6 m clumps inside 8 m
+  // patches, with a few fern crowns and flowers. Visit in a seeded scatter order so the cap
+  // thins the whole bank rather than cutting it.
+  const P = VEGETATION_PALETTE
+  const candidates = [...tops.columns.entries()]
+    .map(([key, column]) => {
+      const [cx, cz] = key.split(':').map(Number)
+      return { x: ((cx ?? 0) + 0.5) * COLUMN, z: ((cz ?? 0) + 0.5) * COLUMN, column }
+    })
+    .filter(
+      ({ z, column }) => column.ground && z > GROUND_COVER_Z && column.top > WATER_LEVEL + 0.05,
+    )
+    .map((cell) => ({
+      ...cell,
+      order: hash(seed, Math.round(cell.x / COLUMN), Math.round(cell.z / COLUMN), 1031),
+    }))
+    .sort((a, b) => a.order - b.order)
+  let placed = 0
+  for (const { x, z, column } of candidates) {
+    if (placed >= grid.tufts) break
+    const xi = Math.round(x / COLUMN),
+      zi = Math.round(z / COLUMN)
+    const clump = valueNoise(seed, x, z, 1.6, 961)
+    const patch = valueNoise(seed, x, z, 8, 967)
+    const chance = Math.max(0, Math.min(0.85, (clump - 0.35) * 1.4 + (patch - 0.5) * 0.6))
+    if (hash(seed, xi, zi, 971) >= chance) continue
+    const pick = hash(seed, xi, zi, 977)
+    const root = [
+      x + (hash(seed, xi, zi, 983) - 0.5) * COLUMN * 0.9,
+      column.top - 0.01,
+      z + (hash(seed, xi, zi, 991) - 0.5) * COLUMN * 0.9,
+    ] as const
+    const salt = xi * 7919 + zi
+    const phase = hash(seed, xi, zi, 997) * Math.PI * 2
+    if (pick < 0.05)
+      appendFern(undergrowth, root, {
+        fronds: 5 + Math.floor(hash(seed, xi, zi, 1009) * 3),
+        length: 0.32 + hash(seed, xi, zi, 1013) * 0.14,
+        colour: P.fern,
+        tip: mixRgb(P.fern, P.grassTip, 0.35),
+        salt,
+        phase,
+      })
+    else if (pick < 0.08) {
+      const yellow = hash(seed, xi, zi, 1019) < 0.3
+      appendFlower(undergrowth, root, {
+        height: 0.14 + hash(seed, xi, zi, 1021) * 0.12,
+        petal: yellow ? P.flowerYellow : P.flowerWhite,
+        heart: P.flowerHeart,
+        stem: P.flowerStem,
+        salt,
+        phase,
+      })
+    } else {
+      // Last Signal's patch dryness: some clumps lean toward straw.
+      const dryness = Math.max(0, valueNoise(seed, x, z, 8, 1033) - 0.45) * 0.9
+      appendTuft(undergrowth, root, {
+        blades: 6 + Math.floor(hash(seed, xi, zi, 1039) * 5),
+        height: 0.2 + hash(seed, xi, zi, 1049) * 0.14,
+        width: 0.016 + hash(seed, xi, zi, 1051) * 0.008,
+        colours: {
+          root: [P.grassBase[0] * 0.88, P.grassBase[1] * 0.88, P.grassBase[2] * 0.88],
+          tip: mixRgb(mixRgb(P.grassTip, P.grassDry, dryness), P.grassBase, 0.3),
+        },
+        salt,
+        phase,
+      })
+    }
+    placed++
+  }
+
+  return {
+    wood: wood.build(),
+    foliage: foliage.build(),
+    undergrowth: undergrowth.build(),
+    atlas: bakeFoliageAtlas(seed),
+  }
+}

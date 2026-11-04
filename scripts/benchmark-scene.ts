@@ -3,7 +3,7 @@
 import { mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
-import { chromium, webkit, devices } from '@playwright/test'
+import { chromium, devices } from '@playwright/test'
 import { preview } from 'vite'
 
 import { chromiumLaunchOptions } from '../e2e/browser-options.ts'
@@ -95,12 +95,11 @@ await mkdir(output, { recursive: true })
 try {
   // Run sequentially: competing browser contexts distort GPU measurements.
   for (const profile of profiles) {
-    const browser =
-      profile === 'mobile' ? await webkit.launch() : await chromium.launch(chromiumLaunchOptions())
+    const browser = await chromium.launch(chromiumLaunchOptions())
     try {
       const context = await browser.newContext(
         profile === 'mobile'
-          ? { ...devices['iPhone 13'] }
+          ? { ...devices['Pixel 7'] }
           : { viewport: { width: 1280, height: 720 } },
       )
       for (const scenario of ['day', 'night', 'rain']) {

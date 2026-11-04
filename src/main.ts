@@ -1,5 +1,6 @@
 import { GpuRuntime } from './components/gpu-runtime'
 import { initSceneLoader } from './components/scene-loader'
+import { debugParams } from './scene-params'
 
 let cleanup: (() => void) | undefined
 let releasing = Promise.resolve()
@@ -71,7 +72,7 @@ function start(autoplay = true) {
     try {
       await releasing
       signal.throwIfAborted()
-      const creation = GpuRuntime.create(canvas, signal)
+      const creation = GpuRuntime.create(canvas, signal, debugParams(location.search).backend)
       pendingCreation = creation
       const instance = await creation
       const ownsCreation = pendingCreation === creation

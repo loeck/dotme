@@ -72,6 +72,8 @@ import { ResourceScope } from './resource-scope'
 import { SceneContrast } from './scene-contrast'
 import { SceneDetails } from './scene-details'
 import type { DetailEnvironment } from './scene-details'
+import { SceneGrade } from './scene-grade'
+import { sampleLook } from './scene-look'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
 import { DEFAULT_SOLAR, SolarClock, parseInitialTime } from './solar-clock'
@@ -79,10 +81,11 @@ import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
+import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
 import type { TerrainBatch } from './voxel-mesh'
-import type { VoxelLamp, VoxelMaterial, VoxelTree, VoxelWaterfall } from './voxel-world'
+import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
@@ -119,17 +122,7 @@ const smooth = (a: number, b: number, value: number) => {
   return t * t * (3 - 2 * t)
 }
 
-const COMPILE_STAGES = [
-  'clouds',
-  'sky',
-  'rain',
-  'contrast',
-  'simulation',
-  'fluid',
-  'environment',
-  'scene',
-  'warmup',
-] as const
+const COMPILE_STAGES = ['passes', 'environment', 'scene', 'warmup'] as const
 
 function preparationFrame(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
@@ -189,6 +182,8 @@ export class VoxelLandscapeEngine {
   private readonly atmosphere: VolumetricLight
   private readonly skyAtmosphere: SkyAtmosphere
   private readonly sceneContrast: SceneContrast
+  private readonly grade = new SceneGrade()
+  private gradeFrame = 0
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
   private solarClock: SolarClock
@@ -232,7 +227,7 @@ export class VoxelLandscapeEngine {
   }> = []
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
-  private readonly trees: InstancedMesh[] = []
+  private vegetation: Vegetation | undefined
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -307,6 +302,7 @@ export class VoxelLandscapeEngine {
     performance.clearMeasures()
     const releaseCompilationScheduler = installCompilationScheduler()
     let engine: VoxelLandscapeEngine | undefined
+    let passes: Promise<unknown> | undefined
     const abort = () => {
       engine?.dispose()
       resources.dispose()
@@ -316,8 +312,12 @@ export class VoxelLandscapeEngine {
       // Let the loader present between CPU preparation and material compilation.
       await preparationFrame(signal)
       signal.throwIfAborted()
-      const physics = createPhysicsWorld(await physicsModule, prepared.terrain.index)
-      signal.throwIfAborted()
+      // Owned before the next yield so cancellation also frees the Rapier world.
+      const physics = resources.own(
+        createPhysicsWorld(await physicsModule, prepared.terrain.index, prepared.staticBoxes),
+      )
+      // Collider creation and scene construction are separate tasks for the loader.
+      await preparationFrame(signal)
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
       const initialLight = sampleLighting(
         engine.solarClock.initialSeconds,
@@ -327,33 +327,14 @@ export class VoxelLandscapeEngine {
       )
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
-      performance.mark('compile:clouds')
-      await engine.clouds.compileAsync()
-      engine.snapshotPrograms('clouds')
-      performance.mark('compile:sky')
-      await engine.skyAtmosphere.compileAsync()
-      engine.skyAtmosphere.update(initialLight.sunDirection, initialLight.skyExposure)
-      await preparationFrame(signal)
-      engine.snapshotPrograms('sky')
-      performance.mark('compile:rain')
-      await engine.compileRain()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('rain')
-      performance.mark('compile:contrast')
-      await engine.sceneContrast.compileAsync(options.renderer)
-      engine.snapshotPrograms('contrast')
-      performance.mark('compile:simulation')
-      await engine.simulation.compileAsync()
-      signal.throwIfAborted()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('simulation')
-      performance.mark('compile:fluid')
-      await engine.details?.prepareFluid(options.renderer, engine.camera)
-      signal.throwIfAborted()
-      await preparationFrame(signal)
-      engine.snapshotPrograms('fluid')
+      // The offscreen passes do not depend on the lit scene: issue them before
+      // the environment so their pipelines compile alongside the scene batch.
+      performance.mark('compile:passes')
+      passes = engine.compilePasses(options.renderer, initialLight)
+      // Settled with the scene batch; keep an early failure from going unhandled.
+      passes.catch(() => undefined)
       performance.mark('compile:environment')
-      await engine.compileScene(signal, options.renderer)
+      await engine.compileScene(signal, options.renderer, passes)
       performance.mark('compile:warmup')
       engine.warmupScene()
       engine.snapshotPrograms('warmup')
@@ -365,6 +346,8 @@ export class VoxelLandscapeEngine {
       engine.requestFrame()
       return engine
     } catch (error) {
+      // Offscreen compiles may still run; let them settle before their owners are disposed.
+      await passes?.catch(() => undefined)
       engine?.dispose()
       resources.dispose()
       throw error
@@ -383,7 +366,8 @@ export class VoxelLandscapeEngine {
     this.resources = resources
     const { prepared, physics, ...configuration } = options
     this.options = configuration
-    this.physics = this.resources.own(physics)
+    // `create` already owns the physics world in this scope.
+    this.physics = physics
     this.reducedMotion = options.reducedMotion ?? false
     this.bed = options.prepared.world.lakeBed
     this.waterfall =
@@ -392,9 +376,13 @@ export class VoxelLandscapeEngine {
     this.container = options.container
     this.lightingHost = options.container.closest('main')
     this.sceneContrast = this.resources.own(
-      new SceneContrast(this.container.closest('main'), () => {
-        if (this.reducedMotion) this.requestFrame()
-      }),
+      new SceneContrast(
+        this.container.closest('main'),
+        () => {
+          if (this.reducedMotion) this.requestFrame()
+        },
+        this.grade,
+      ),
     )
     this.mobile = options.prepared
       ? options.prepared.world.variant === 'mobile'
@@ -430,7 +418,7 @@ export class VoxelLandscapeEngine {
       ENVIRONMENT_PROBE.y,
       ENVIRONMENT_PROBE.z,
     )
-    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower))
+    this.depthFocus = this.resources.own(new DepthFocus(this.renderer, this.lowPower, this.grade))
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
@@ -504,6 +492,7 @@ export class VoxelLandscapeEngine {
     this.camera.layers.disable(FISH_LAYER)
     this.camera.layers.enable(SPLASH_IMPACT_LAYER)
     this.camera.layers.enable(WATERFALL_FLUID_LAYER)
+    this.camera.layers.enable(UNDERGROWTH_LAYER)
     this.submerged = this.resources.own(
       new SubmergedScene(
         this.scene,
@@ -673,6 +662,33 @@ export class VoxelLandscapeEngine {
         .slice(0, this.lowPower ? 1 : 2)
         .map((entry) => entry.index),
     )
+    // One glow material serves every lantern: its strength is a per-object
+    // uniform, so the node graph and pipeline are built once, not per lamp.
+    const glowStrengths = new WeakMap<Object3D, { value: number }>()
+    const glowMaterial = new MeshBasicNodeMaterial({
+      transparent: true,
+      blending: AdditiveBlending,
+      depthWrite: false,
+      side: DoubleSide,
+      // Fog would mix the opaque additive quad toward the fog colour and light up its square.
+      fog: false,
+    })
+    const glowStrength = uniform(0).onObjectUpdate(({ object }) =>
+      object ? (glowStrengths.get(object)?.value ?? 0) : 0,
+    )
+    const p = uv().sub(0.5).mul(2)
+    const r = p.dot(p)
+    glowMaterial.fragmentNode = vec4(
+      uniform(new Color(0xffb46b))
+        .mul(
+          exp(r.mul(-39))
+            .mul(0.76)
+            .add(exp(r.mul(-5.5)).mul(0.095)),
+        )
+        .mul(glowStrength),
+      1,
+    )
+    this.materials.push(this.resources.own(glowMaterial))
     world.lamps.forEach((lamp, index) => {
       const bulb = new Mesh(
         bulbGeometry,
@@ -694,45 +710,25 @@ export class VoxelLandscapeEngine {
       this.configurePointShadow(light, shadowLamps.has(index))
       this.scene.add(light)
       this.objects.push(light)
-      const glowStrength = uniform(0)
-      const glowMaterial = new MeshBasicNodeMaterial({
-        transparent: true,
-        blending: AdditiveBlending,
-        depthWrite: false,
-        side: DoubleSide,
-        // Fog would mix the opaque additive quad toward the fog colour and light up its square.
-        fog: false,
-      })
-      const p = uv().sub(0.5).mul(2)
-      const r = p.dot(p)
-      glowMaterial.fragmentNode = vec4(
-        uniform(new Color(0xffb46b))
-          .mul(
-            exp(r.mul(-39))
-              .mul(0.76)
-              .add(exp(r.mul(-5.5)).mul(0.095)),
-          )
-          .mul(glowStrength),
-        1,
-      )
+      const strength = { value: 0 }
       const glow = new Mesh(glowGeometry, glowMaterial)
+      glowStrengths.set(glow, strength)
       glow.renderOrder = 3
       glow.position.copy(bulb.position)
       glow.frustumCulled = false
       this.scene.add(glow)
       this.objects.push(glow)
-      this.materials.push(this.resources.own(glowMaterial))
       this.lampLights.push({
         source: lamp,
         light,
         bulb,
         glow,
         color: bulb.material.color.clone(),
-        glowStrength,
+        glowStrength: strength,
         shadowPosition: light.position.clone(),
       })
     })
-    this.buildTrees(world.trees)
+    this.vegetation = this.resources.own(new Vegetation(this.scene, prepared.vegetation))
 
     // A few dim, square flecks drift in depth. They provide a living scale cue without
     // turning the open sky into a particle field.
@@ -815,35 +811,6 @@ export class VoxelLandscapeEngine {
     }
     this.details?.setEnvironment(environment)
     if (this.reducedMotion) this.requestFrame()
-  }
-
-  private buildTrees(trees: readonly VoxelTree[]) {
-    if (!trees.length) return
-    const parts = [
-      { geometry: new BoxGeometry(0.16, 0.62, 0.16), color: 0x4a3a2a, dy: 0.31 },
-      { geometry: new BoxGeometry(0.72, 0.55, 0.72), color: 0x3f6b3a, dy: 0.85 },
-      { geometry: new BoxGeometry(0.44, 0.38, 0.44), color: 0x4d7d46, dy: 1.28 },
-    ] as const
-    const placement = new Object3D()
-    for (const part of parts) {
-      const material = new MeshStandardNodeMaterial({ color: part.color, roughness: 0.95 })
-      this.materials.push(this.resources.own(material))
-      this.geometries.push(this.resources.own(part.geometry))
-      const mesh = new InstancedMesh(part.geometry, material, trees.length)
-      trees.forEach((tree, index) => {
-        placement.position.set(tree.x, tree.y + part.dy * tree.scale, tree.z)
-        placement.scale.setScalar(tree.scale)
-        placement.updateMatrix()
-        mesh.setMatrixAt(index, placement.matrix)
-      })
-      mesh.instanceMatrix.needsUpdate = true
-      mesh.castShadow = true
-      mesh.frustumCulled = false
-      this.scene.add(mesh)
-      this.objects.push(mesh)
-      this.trees.push(mesh)
-      this.resources.own(mesh)
-    }
   }
 
   private buildShadowCasters(terrain: PreparedWorld['terrain']) {
@@ -1271,15 +1238,33 @@ export class VoxelLandscapeEngine {
       face = this.renderer.getActiveCubeFace(),
       mip = this.renderer.getActiveMipmapLevel()
     try {
-      this.renderer.setRenderTarget(this.depthFocus.target)
-      const render = () => this.renderer.render(this.scene, this.camera)
-      // A real offscreen pass also prepares ReflectorNode's nested render context.
-      // No simulation step runs and the shared canvas continues to contain the loader.
+      const render = () => {
+        this.water.renderReflection(this.renderer, this.scene, this.camera)
+        this.renderer.setRenderTarget(this.depthFocus.target)
+        this.renderer.render(this.scene, this.camera)
+      }
+      // A real offscreen pass also prepares nested render contexts (the fluid
+      // capture inside the main view). No simulation step runs and the shared
+      // canvas continues to contain the loader.
       if (this.details) this.details.warmup(render)
       else render()
     } finally {
       this.renderer.setRenderTarget(target, face, mip)
     }
+  }
+
+  /** Clouds, sky, rain, contrast, water simulation and waterfall fluid. */
+  private compilePasses(renderer: WebGPURenderer, light: LightingState) {
+    return Promise.all([
+      this.clouds.compileAsync(),
+      this.skyAtmosphere
+        .compileAsync()
+        .then(() => this.skyAtmosphere.update(light.sunDirection, light.skyExposure)),
+      this.compileRain(),
+      this.sceneContrast.compileAsync(renderer),
+      this.simulation.compileAsync(),
+      this.details?.prepareFluid(renderer, this.camera),
+    ])
   }
 
   private compileRain() {
@@ -1322,7 +1307,7 @@ export class VoxelLandscapeEngine {
       water: [this.water],
       sky: [this.sky],
       terrain: [this.voxelGroup, this.shadowGroup],
-      trees: this.trees,
+      trees: this.vegetation?.meshes ?? [],
       ...this.details?.debugGroups,
       rain: [this.rain.group],
       lamps: this.lampLights.flatMap(({ bulb, glow }) => [bulb, glow]),
@@ -1367,18 +1352,20 @@ export class VoxelLandscapeEngine {
     }
   }
 
-  // These passes share one renderer; yield between them instead of competing for its state.
-  /* eslint-disable no-await-in-loop */
   /**
    * Compiles the environment probe, the shadow maps and every remaining scene
-   * pass. `compileAsync` walks its scene synchronously and only awaits the
-   * driver's pipeline promises at the end, so issuing the passes back to back
-   * lets the driver build their pipelines in parallel; awaiting each pass in
-   * turn made the loader pay the sum of them instead of the longest. The
-   * renderer keeps its per-pass state on a stack, so the promises have to
-   * settle in the reverse order they were issued.
+   * pass, together with the already issued offscreen `passes`. `compileAsync`
+   * collects its render objects and restores the renderer state synchronously,
+   * then builds node graphs and pipelines asynchronously, so issuing the passes
+   * back to back lets their builds interleave and the driver compile their
+   * pipelines in parallel; awaiting each pass in turn made the loader pay the
+   * sum of them instead of the longest.
    */
-  private async compileScene(signal: AbortSignal, renderer: WebGPURenderer) {
+  private async compileScene(
+    signal: AbortSignal,
+    renderer: WebGPURenderer,
+    passes: Promise<unknown>,
+  ) {
     // Establish the final environment texture before building any lit material variant.
     this.renderer.initRenderTarget(this.environmentTarget)
     await this.environmentFilter.compileCubemapShader()
@@ -1392,7 +1379,7 @@ export class VoxelLandscapeEngine {
     this.environmentCamera.updateMatrixWorld()
     this.snapshotPrograms('environment')
 
-    const pending: Promise<unknown>[] = []
+    const pending: Promise<unknown>[] = [passes]
     const issue = (compile: () => Promise<unknown>) => pending.push(compile())
 
     // The probe's own traversal, with the planar water and the detail layer out:
@@ -1422,20 +1409,28 @@ export class VoxelLandscapeEngine {
     issue(() => this.compileView(this.camera, this.depthFocus.target))
     issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
     issue(() => this.depthFocus.compileAsync(renderer, this.camera))
+    await Promise.all(pending)
+    signal.throwIfAborted()
+
     const reflected = this.water.getReflectionCamera(this.camera)
     reflected.copy(this.camera)
     // The mirrored capture would rebuild the whole fluid pass for a view that
     // the lake surface distorts beyond recognition. Curtains and splashes
     // still reflect; only the fluid volume renders from the main camera.
     reflected.layers.disable(WATERFALL_FLUID_LAYER)
+    // Foreground undergrowth sits below the mirror's useful detail; keep it main-view only.
+    reflected.layers.disable(UNDERGROWTH_LAYER)
+    // The mirror renders at the main view's depth and attachments, so it shares
+    // that render context: once the view's builds have settled, this only adds
+    // objects outside the main frustum and the mirrored pipelines.
     this.water.visible = false
+    let mirror: Promise<unknown>
     try {
-      issue(() => this.compileView(reflected, this.water.getRenderTarget(reflected)))
+      mirror = this.compileView(reflected, this.water.getRenderTarget(reflected))
     } finally {
       this.water.visible = true
     }
-
-    for (let index = pending.length - 1; index >= 0; index--) await pending[index]
+    await mirror
     this.snapshotPrograms('scene')
     signal.throwIfAborted()
 
@@ -1446,8 +1441,6 @@ export class VoxelLandscapeEngine {
     this.filterEnvironment()
     await preparationFrame(signal)
   }
-
-  /* eslint-enable no-await-in-loop */
 
   private updateEnvironment(now: number, atmosphereTime: number) {
     // Reuse broad indirect lighting; planar water reflections stay per-frame.
@@ -1671,9 +1664,17 @@ export class VoxelLandscapeEngine {
     uniforms.uDirectSun.value =
       Math.max(0, (WEATHER[this.weather].diffuse - 0.5) / 0.5) *
       (1 - 0.5 * this.rain.simulation.state.intensity)
-    this.fog.density =
-      this.baseFogDensity * (1 + mistFactor(light.sunDirection.y, light.weatherDiffuse) * 1.4)
-    this.atmosphere.update(light)
+    const morningMist = mistFactor(light.sunDirection.y, light.weatherDiffuse)
+    const look = sampleLook({
+      sunHeight: light.sunDirection.y,
+      daylight: light.daylight,
+      rain: this.rain.simulation.state.intensity,
+      mist: morningMist,
+    })
+    this.fog.density = this.baseFogDensity * (1 + morningMist * 1.4) * Math.sqrt(look.haze)
+    this.atmosphere.update(light, look)
+    if (!this.reducedMotion) this.gradeFrame++
+    this.grade.update(look, this.gradeFrame)
     uniforms.uBedInverseViewProjection.value.copy(this.submerged.inverseViewProjection)
     uniforms.uBedViewProjection.value.copy(this.submerged.viewProjection)
     const wind = this.wind.sample(this.elapsed)
@@ -1701,6 +1702,7 @@ export class VoxelLandscapeEngine {
       })
     }
     updateWindUniforms(this.windUniforms, wind)
+    this.vegetation?.update(this.elapsed, wind.direction, wind.speed, light)
     const optics = sampleWaterOptics(
       this.rain.simulation.state.intensity,
       wind.speed,
@@ -1852,7 +1854,14 @@ export class VoxelLandscapeEngine {
       this.submerged.render(this.renderer, this.scene, this.camera)
     diagnostics.end(submerged, renderInfo.calls)
     const main = diagnostics.begin('main', renderInfo.calls)
-    this.depthFocus.render(this.renderer, this.scene, this.camera, this.atmosphere, this.moon)
+    this.depthFocus.render(
+      this.renderer,
+      this.scene,
+      this.camera,
+      this.atmosphere,
+      this.moon,
+      this.water,
+    )
     diagnostics.end(main, renderInfo.calls)
     const overlay = diagnostics.begin('rainOverlay', renderInfo.calls)
     this.rain.renderOverlay(this.renderer, this.scene, this.camera, this.depthFocus.depthTexture)
@@ -1889,6 +1898,7 @@ export class VoxelLandscapeEngine {
       this.height,
     )
     this.atmosphere.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
+    this.grade.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.sceneContrast.invalidate()
     this.submerged.resize(this.lowPower, this.drawingBufferSize.x, this.drawingBufferSize.y)
     this.water.material.uniforms.uBedTexel.value.copy(this.submerged.bedTexel)

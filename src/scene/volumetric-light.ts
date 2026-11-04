@@ -14,6 +14,7 @@ import {
   min,
   mix,
   normalize,
+  smoothstep,
   sqrt,
   texture,
   uniform,
@@ -37,7 +38,10 @@ import type { DirectionalLight, Node, PerspectiveCamera, WebGPURenderer } from '
 import { celestialVisibility, cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
 import { FullscreenPass } from './fullscreen-pass'
+import { WATER_LEVEL } from './lake-bed'
 import type { LightingState } from './lighting'
+import { LAST_SIGNAL_LOOK } from './scene-look'
+import type { SceneLook } from './scene-look'
 import type { SkyAtmosphere } from './sky-atmosphere'
 
 export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float'>) {
@@ -87,6 +91,11 @@ export class VolumetricLight {
   private readonly sunRadiance = uniform(new Color())
   private readonly ambient = uniform(new Color())
   private readonly skyAir = uniform(0)
+  private readonly haze = uniform(LAST_SIGNAL_LOOK.base.haze)
+  private readonly hazeStart = uniform(LAST_SIGNAL_LOOK.base.hazeStart)
+  private readonly hazeFalloff = uniform(LAST_SIGNAL_LOOK.base.hazeFalloff)
+  private readonly mist = uniform(LAST_SIGNAL_LOOK.base.mist)
+  private readonly mistTop = uniform(LAST_SIGNAL_LOOK.base.mistTop)
   private readonly shadowBias = uniform(0)
   private readonly hasTerrain = uniform(false)
   private readonly airSize = uniform(new Vector2(1, 1))
@@ -127,13 +136,24 @@ export class VolumetricLight {
         const stride = max(0, distance.sub(entry)).div(steps),
           accumulated = float(1).toVar(),
           radiance = vec3(0).toVar()
-        const transmission = exp(sigma.mul(stride).negate()),
-          integral = segmentIntegral(sigma, stride),
-          phase = airPhase(ray.dot(this.sunDirection)),
+        const phase = airPhase(ray.dot(this.sunDirection)),
           ambient = this.ambient.rgb.add(sky.horizon(ray).mul(this.skyAir))
         If(stride.greaterThan(0).and(sigma.greaterThan(0)), () => {
           Loop(steps, ({ i }) => {
-            const world = this.eye.add(ray.mul(entry.add(float(i).add(0.5).mul(stride))))
+            const along = entry.add(float(i).add(0.5).mul(stride))
+            const world = this.eye.add(ray.mul(along))
+            // Height fog that thins upward and only starts past the foreground, plus a
+            // low mist layer resting on the water: Last Signal separates depth with air.
+            const height = max(world.y.sub(WATER_LEVEL), 0)
+            const stepExtinction = sigma
+              .mul(this.haze)
+              .mul(exp(this.hazeFalloff.mul(height).negate()))
+              .mul(smoothstep(this.hazeStart.mul(0.35), this.hazeStart, along))
+              .add(
+                this.mist.mul(smoothstep(this.mistTop.mul(0.35), this.mistTop, height).oneMinus()),
+              )
+            const transmission = exp(stepExtinction.mul(stride).negate()),
+              integral = segmentIntegral(stepExtinction, stride)
             const visible = float(0).toVar()
             If(this.sunDirection.y.greaterThan(0), () => {
               const projected = this.shadowMatrix.mul(vec4(world, 1)),
@@ -156,7 +176,7 @@ export class VolumetricLight {
             })
             const source = ambient
               .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(2))
-              .mul(sigma)
+              .mul(stepExtinction)
             radiance.addAssign(accumulated.mul(source).mul(integral))
             accumulated.mulAssign(transmission)
           })
@@ -210,15 +230,21 @@ export class VolumetricLight {
       })(),
     )
   }
-  update(light: LightingState) {
+  update(light: LightingState, look: SceneLook) {
     this.sunDirection.value.copy(light.direction)
     this.sunRadiance.value
       .copy(light.color)
       .multiplyScalar(
         light.intensity *
           airSunScale(light.daylight) *
-          airElevationScale(light.direction.y, light.daylight),
+          airElevationScale(light.direction.y, light.daylight) *
+          look.sunScattering,
       )
+    this.haze.value = look.haze
+    this.hazeStart.value = look.hazeStart
+    this.hazeFalloff.value = look.hazeFalloff
+    this.mist.value = look.mist
+    this.mistTop.value = look.mistTop
     const airDay = 1 - light.daylight * 0.7
     this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
     this.skyAir.value = 0.5 * airDay

@@ -68,7 +68,7 @@ export class SubmergedScene {
   private readonly group = new Group()
   private readonly geometry: BufferGeometry
   private readonly material = new MeshStandardNodeMaterial({
-    color: 0xf0e6cc,
+    color: 0x817967,
     roughness: 0.96,
     vertexColors: true,
     fog: false,
@@ -80,12 +80,12 @@ export class SubmergedScene {
     fog: false,
   })
   private readonly grassMaterial = new MeshStandardNodeMaterial({
-    color: 0x46a046,
+    color: 0x4b5938,
     roughness: 0.8,
     vertexColors: true,
     side: DoubleSide,
     fog: false,
-    emissive: 0x123013,
+    emissive: 0x161f12,
   })
   private readonly grassTime = uniform(0)
   private rockMesh: InstancedMesh | undefined

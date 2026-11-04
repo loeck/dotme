@@ -1,0 +1,12 @@
+# Keep these equal to `engines.node` and `packageManager` in package.json and to CI.
+[tools]
+node = "24.21.0"
+pnpm = "12.5.1"
+
+[tasks.setup]
+description = "Install dependencies and the Playwright browsers used by the test suites"
+run = ["pnpm install --frozen-lockfile", "pnpm exec playwright install chromium"]
+
+[tasks."e2e:local-gpu"]
+description = "Run the essential browser suite on a GPU-backed Chromium from nixpkgs (WebGL 2 on Linux hosts without headless WebGPU)"
+run = "scripts/with-gpu-chromium.sh pnpm e2e"

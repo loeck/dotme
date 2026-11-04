@@ -29,7 +29,8 @@ export default defineConfig({
     {
       name: 'mobile',
       testMatch: ['functional.spec.ts'],
-      use: { ...devices['iPhone 13'] },
+      // Chromium only: a phone viewport, touch and pixel ratio, on the same browser binary.
+      use: { ...devices['Pixel 7'], launchOptions: chromiumLaunchOptions() },
     },
   ],
   webServer: {

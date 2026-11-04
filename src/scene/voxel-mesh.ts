@@ -30,7 +30,8 @@ export type PreparedTerrain = {
 /** Only discard a whole face if the union of neighboring solid rectangles covers it.
  * Partial faces remain intact: no new seams, interpolated colors or changed normals. */
 export function exposedVoxelFaces(index: VoxelIndex, id: number): boolean[] {
-  const box = Array.from(index.boxes.subarray(id * 6, id * 6 + 6))
+  const boxes = index.boxes
+  const box = Array.from(boxes.subarray(id * 6, id * 6 + 6))
   // Float32 instance translations can leave sub-ULP gaps at nominal grid contacts.
   const epsilon = 1e-5
   const nearby: number[] = []
@@ -41,43 +42,63 @@ export function exposedVoxelFaces(index: VoxelIndex, id: number): boolean[] {
       if (other !== id) nearby.push(other)
     },
   )
-  return [0, 1, 2, 3, 4, 5].map((face) => {
+  const at = (offset: number) => boxes[offset] ?? 0
+  // Uncovered rectangles as flat [x0, y0, x1, y1] runs, split in the same order
+  // as before (left, right, below, above) so coverage decisions are unchanged.
+  let uncovered: number[] = []
+  let next: number[] = []
+  const visible: boolean[] = []
+  for (let face = 0; face < 6; face++) {
     const axis = face >>> 1,
       positive = face % 2 === 0
     const u = (axis + 1) % 3,
       v = (axis + 2) % 3
     const plane = required(box[axis + (positive ? 3 : 0)])
-    let uncovered: [number, number, number, number][] = [
-      [required(box[u]), required(box[v]), required(box[u + 3]), required(box[v + 3])],
-    ]
+    uncovered.length = 0
+    uncovered.push(required(box[u]), required(box[v]), required(box[u + 3]), required(box[v + 3]))
+    let exposed = true
     for (const other of nearby) {
-      const b = index.boxes.subarray(other * 6, other * 6 + 6)
+      const b = other * 6
       if (
         positive
-          ? required(b[axis]) > plane + epsilon || required(b[axis + 3]) <= plane + epsilon
-          : required(b[axis + 3]) < plane - epsilon || required(b[axis]) >= plane - epsilon
+          ? at(b + axis) > plane + epsilon || at(b + axis + 3) <= plane + epsilon
+          : at(b + axis + 3) < plane - epsilon || at(b + axis) >= plane - epsilon
       )
         continue
-      const next: [number, number, number, number][] = []
-      for (const [x0, y0, x1, y1] of uncovered) {
-        const loX = Math.max(x0, required(b[u])),
-          loY = Math.max(y0, required(b[v]))
-        const hiX = Math.min(x1, required(b[u + 3])),
-          hiY = Math.min(y1, required(b[v + 3]))
+      const bu0 = at(b + u),
+        bv0 = at(b + v),
+        bu1 = at(b + u + 3),
+        bv1 = at(b + v + 3)
+      next.length = 0
+      for (let r = 0; r < uncovered.length; r += 4) {
+        const x0 = uncovered[r] ?? 0,
+          y0 = uncovered[r + 1] ?? 0,
+          x1 = uncovered[r + 2] ?? 0,
+          y1 = uncovered[r + 3] ?? 0
+        const loX = Math.max(x0, bu0),
+          loY = Math.max(y0, bv0)
+        const hiX = Math.min(x1, bu1),
+          hiY = Math.min(y1, bv1)
         if (hiX <= loX || hiY <= loY) {
-          next.push([x0, y0, x1, y1])
+          next.push(x0, y0, x1, y1)
           continue
         }
-        if (loX - x0 > epsilon) next.push([x0, y0, loX, y1])
-        if (x1 - hiX > epsilon) next.push([hiX, y0, x1, y1])
-        if (loY - y0 > epsilon) next.push([loX, y0, hiX, loY])
-        if (y1 - hiY > epsilon) next.push([loX, hiY, hiX, y1])
+        if (loX - x0 > epsilon) next.push(x0, y0, loX, y1)
+        if (x1 - hiX > epsilon) next.push(hiX, y0, x1, y1)
+        if (loY - y0 > epsilon) next.push(loX, y0, hiX, loY)
+        if (y1 - hiY > epsilon) next.push(loX, hiY, hiX, y1)
       }
+      const swap = uncovered
       uncovered = next
-      if (!uncovered.length) return false
+      next = swap
+      if (!uncovered.length) {
+        exposed = false
+        break
+      }
     }
-    return true
-  })
+    visible.push(exposed)
+  }
+  return visible
 }
 
 export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): PreparedTerrain {
@@ -91,7 +112,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   let offset = 0,
     exposedFaces = 0
   const color = new Color()
-  const moss = new Color(0x648052)
+  const moss = new Color(0x4f5d40)
   const topColor = new Color()
   const mossPatch = (id: number) => {
     let n = Math.imul(id + 1, 0x85ebca6b)
@@ -123,7 +144,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
         color.setHex(voxel.color)
         const mossy =
           material === 'ground' && voxel.y + voxel.size / 2 > WATER_LEVEL + 0.05
-            ? 0.65 + 0.3 * mossPatch(id)
+            ? 0.78 + 0.17 * mossPatch(id)
             : 0
         topColor.copy(color).lerp(moss, mossy)
         const visible = exposedVoxelFaces(index, id)

@@ -9,43 +9,67 @@ export type VoxelIndex = {
   order: Uint32Array
 }
 
+/** Float32-snapped solid bounds, six values per voxel: min xyz then max xyz. */
+export function voxelBoxes(voxels: readonly Voxel[]): Float64Array {
+  const boxes = new Float64Array(voxels.length * 6)
+  for (let i = 0; i < voxels.length; i++) {
+    const voxel = required(voxels[i])
+    const half = Math.fround(voxel.size) / 2
+    const x = Math.fround(voxel.x),
+      y = Math.fround(voxel.y),
+      z = Math.fround(voxel.z)
+    boxes[i * 6] = x - half
+    boxes[i * 6 + 1] = y - half
+    boxes[i * 6 + 2] = z - half
+    boxes[i * 6 + 3] = x + half
+    boxes[i * 6 + 4] = y + half
+    boxes[i * 6 + 5] = z + half
+  }
+  return boxes
+}
+
 /** A static BVH shared by conservative face removal and nearest solid picking. */
 export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
-  const boxes = new Float64Array(voxels.length * 6)
-  voxels.forEach((voxel, i) => {
-    const half = Math.fround(voxel.size) / 2
-    const center = [voxel.x, voxel.y, voxel.z].map(Math.fround)
-    for (let axis = 0; axis < 3; axis++) {
-      boxes[i * 6 + axis] = required(center[axis]) - half
-      boxes[i * 6 + axis + 3] = required(center[axis]) + half
-    }
-  })
+  const boxes = voxelBoxes(voxels)
   const order = Uint32Array.from(voxels, (_, i) => i)
   const bounds: number[] = []
   const nodes: number[] = []
+  const at = (offset: number) => boxes[offset] ?? 0
   const build = (start: number, end: number): number => {
     const node = nodes.length / 4
     nodes.push(-1, -1, start, end)
     const box = [Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity]
-    for (let i = start; i < end; i++)
-      for (let a = 0; a < 3; a++) {
-        box[a] = Math.min(required(box[a]), required(boxes[required(order[i]) * 6 + a]))
-        box[a + 3] = Math.max(required(box[a + 3]), required(boxes[required(order[i]) * 6 + a + 3]))
-      }
+    let minX = Infinity,
+      minY = Infinity,
+      minZ = Infinity,
+      maxX = -Infinity,
+      maxY = -Infinity,
+      maxZ = -Infinity
+    for (let i = start; i < end; i++) {
+      const offset = (order[i] ?? 0) * 6
+      minX = Math.min(minX, at(offset))
+      minY = Math.min(minY, at(offset + 1))
+      minZ = Math.min(minZ, at(offset + 2))
+      maxX = Math.max(maxX, at(offset + 3))
+      maxY = Math.max(maxY, at(offset + 4))
+      maxZ = Math.max(maxZ, at(offset + 5))
+    }
+    box[0] = minX
+    box[1] = minY
+    box[2] = minZ
+    box[3] = maxX
+    box[4] = maxY
+    box[5] = maxZ
     bounds.push(...box)
     if (end - start > 8) {
+      const extent = [maxX - minX, maxY - minY, maxZ - minZ]
       let axis = 0
-      for (let a = 1; a < 3; a++)
-        if (required(box[a + 3]) - required(box[a]) > required(box[axis + 3]) - required(box[axis]))
-          axis = a
+      for (let a = 1; a < 3; a++) if (required(extent[a]) > required(extent[axis])) axis = a
       order
         .subarray(start, end)
         .sort(
           (a, b) =>
-            required(boxes[a * 6 + axis]) +
-            required(boxes[a * 6 + axis + 3]) -
-            required(boxes[b * 6 + axis]) -
-            required(boxes[b * 6 + axis + 3]),
+            at(a * 6 + axis) + at(a * 6 + axis + 3) - at(b * 6 + axis) - at(b * 6 + axis + 3),
         )
       const middle = (start + end) >>> 1
       nodes[node * 4] = build(start, middle)
@@ -68,8 +92,8 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
       z1 = Math.floor(required(boxes[i + 5]) / 2) - z
     for (let row = z0; row <= z1; row++)
       for (let column = x0; column <= x1; column++) {
-        const at = row * width + column
-        tops[at] = Math.max(required(tops[at]), required(boxes[i + 4]))
+        const cell = row * width + column
+        tops[cell] = Math.max(required(tops[cell]), required(boxes[i + 4]))
       }
   }
   return {
@@ -81,34 +105,42 @@ export function createVoxelIndex(voxels: readonly Voxel[]): VoxelIndex {
   }
 }
 
+/** Visits overlapping solids in depth-first order (left subtree first). */
 export function overlappingVoxels(
   index: VoxelIndex,
   box: readonly number[],
   visit: (id: number) => void,
 ) {
   const { bounds, boxes, nodes, order } = index
-  const overlaps = (data: Float64Array, offset: number) => {
-    for (let a = 0; a < 3; a++)
-      if (
-        required(data[offset + a]) > required(box[a + 3]) ||
-        required(data[offset + a + 3]) < required(box[a])
-      )
-        return false
-    return true
-  }
-  const walk = (node: number) => {
-    if (!overlaps(bounds, node * 6)) return
-    if (required(nodes[node * 4]) >= 0) {
-      walk(required(nodes[node * 4]))
-      walk(required(nodes[node * 4 + 1]))
-    } else {
-      for (let i = required(nodes[node * 4 + 2]); i < required(nodes[node * 4 + 3]); i++) {
-        const id = required(order[i])
-        if (overlaps(boxes, id * 6)) visit(id)
-      }
+  if (!nodes.length) return
+  const minX = required(box[0]),
+    minY = required(box[1]),
+    minZ = required(box[2]),
+    maxX = required(box[3]),
+    maxY = required(box[4]),
+    maxZ = required(box[5])
+  const overlaps = (data: Float64Array, offset: number) =>
+    (data[offset] ?? 0) <= maxX &&
+    (data[offset + 3] ?? 0) >= minX &&
+    (data[offset + 1] ?? 0) <= maxY &&
+    (data[offset + 4] ?? 0) >= minY &&
+    (data[offset + 2] ?? 0) <= maxZ &&
+    (data[offset + 5] ?? 0) >= minZ
+  const stack = [0]
+  while (stack.length) {
+    const node = stack.pop() ?? 0
+    if (!overlaps(bounds, node * 6)) continue
+    const left = nodes[node * 4] ?? -1
+    if (left >= 0) {
+      stack.push(nodes[node * 4 + 1] ?? 0, left)
+      continue
+    }
+    const end = nodes[node * 4 + 3] ?? 0
+    for (let i = nodes[node * 4 + 2] ?? 0; i < end; i++) {
+      const id = order[i] ?? 0
+      if (overlaps(boxes, id * 6)) visit(id)
     }
   }
-  if (nodes.length) walk(0)
 }
 
 /** Matches front-facing cube picking, including rays that start inside a solid. */

@@ -15,7 +15,20 @@ particles following ballistic trajectories with fresh seeded variation at each r
 animated lip overlaps their sources. The particles stretch along their velocity.
 Local GPU passes reconstruct their surface depth and integrate the optical thickness of the
 ellipsoids. A bounded bilateral filter smooths the surface while retaining gaps between streams.
-The reconstructed physical material uses the scene's lighting, refraction and environment.
+The reconstructed surface is a blended standard material lit by the scene's lights and
+environment; it does not use transmission, which would copy and mip the whole framebuffer
+every frame for a fall a few dozen pixels wide. Its look follows Last Signal's water and real
+falls rather than a uniform sheet. A procedural pattern carried by the water (each feature
+leaves the lip at one time and reaches a given drop after free-fall time, so it accelerates and
+stretches) keeps a smooth, dark, sky-mirroring tongue at the lip, breaks it into streaks within
+half a metre and widens them into aerated columns towards the plunge, with darker turbid gaps
+and frayed thin edges. Aerated water takes a smoothed, skyward-tilted sheet normal because
+foam scatters the whole sky; the glassy core keeps fine vertical ridges that stretch sky
+highlights into glints. The key directional light (sun by day, moon at night) also scatters
+forward through foam, spray and mist with a Henyey-Greenstein phase, so a low sun behind the
+fall lights its spray; lamps light all of it through the standard lighting. Procedural
+patterns read the parcels' smooth grid position, not per-texel depth, and the thickness
+capture is linearly filtered, so neither shows the capture's texels.
 The cursor obstacle is narrow and moves without imparting its own velocity to the water, so quick
 gestures cannot launch individual parcels across the scene.
 Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile. Main and
@@ -26,6 +39,14 @@ Grouped parcel arrivals feed the existing water-normal buffer, wave solver and r
 droplets. Cursor contact parts the curved flow and releases a few local fragments;
 they do not create another simulation. Reduced motion freezes the particles and stops impacts.
 Foam and spray at the foot sample the lake's shared wave field so the impact follows its surface.
+The plunge pool has a churning boil the width of the fall, foam lines that fan out downstream,
+tear into lace where two-scale clump and grain noise is low and decay with distance (after
+Last Signal's foam breakup and half-life), and a faint pale plume of entrained bubbles under
+them. Mist puffs born in the plunge roll outward and upward while growing and thinning, and a
+thinner veil hangs on the lower fall. Spray droplets use Last Signal's pale spray tone and
+gloss with a normal half towards the eye and half towards the sky, so they stay drops at night.
+From the default low camera the pool is seen almost edge-on, so the boil and mist carry the
+plunge; foam lines read as a bright band drifting downstream.
 
 Reduced motion keeps a quiet static composition. Disposal is idempotent and releases owned
 resources. Tests consume public behavior and narrow interfaces rather than casting into

@@ -110,7 +110,7 @@ export function sampleLighting(
   const color = height >= 0 ? sunColor : new Color(0xa3bfd6)
   const intensity = height >= 0 ? sunIntensity : moonIntensity
   const night = 1 - daylight
-  const dayWater = desaturate(new Color().setRGB(0.018, 0.21, 0.25), greyMix).multiplyScalar(
+  const dayWater = desaturate(new Color().setRGB(0.02, 0.075, 0.07), greyMix).multiplyScalar(
     0.35 + 0.65 * diffuse,
   )
   const irradiance = skyIrradiance(height)

@@ -1,6 +1,10 @@
-import { prepareWorld, worldTransfers } from './world-data'
+import { prepareWorldPart, worldTransfers } from './world-data'
+import type { WorldPart } from './world-data'
 
-self.addEventListener('message', (event: MessageEvent<{ seed: number; mobile: boolean }>) => {
-  const prepared = prepareWorld(event.data.seed, event.data.mobile)
-  self.postMessage(prepared, { transfer: worldTransfers(prepared) })
-})
+self.addEventListener(
+  'message',
+  (event: MessageEvent<{ seed: number; mobile: boolean; part: WorldPart }>) => {
+    const message = prepareWorldPart(event.data.seed, event.data.mobile, event.data.part)
+    self.postMessage(message, { transfer: worldTransfers(message) })
+  },
+)

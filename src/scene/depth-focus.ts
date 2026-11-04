@@ -21,7 +21,13 @@ import type { DirectionalLight, Node, PerspectiveCamera, Scene, WebGPURenderer }
 
 import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
+import type { SceneGrade } from './scene-grade'
 import type { VolumetricLight } from './volumetric-light'
+
+/** A surface whose planar reflection renders as its own pass ahead of the view. */
+export type PlanarMirror = Readonly<{
+  renderReflection: (renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera) => void
+}>
 
 /** Texture name of the main view's render target, which GPU captures attribute by. */
 export const LENS_TARGET = 'Landscape lens color'
@@ -38,7 +44,7 @@ export class DepthFocus {
   private readonly depth = texture(this.depthTexture)
   private readonly cssPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
-  constructor(renderer: WebGPURenderer, lowPower: boolean) {
+  constructor(renderer: WebGPURenderer, lowPower: boolean, grade: SceneGrade) {
     this.target.texture.name = LENS_TARGET
     const samples = lowPower ? 12 : 20
     const distance = (coord: Node<'vec2'>) => {
@@ -79,9 +85,10 @@ export class DepthFocus {
           })
           color.divAssign(weight)
         })
-        return vec4(color, 1)
+        return vec4(grade.colour(color).mul(grade.frameEdge(uv())), 1)
       })(),
       true,
+      (display) => grade.finish(display),
     )
   }
   resize(bufferWidth: number, bufferHeight: number, cssWidth: number, cssHeight: number) {
@@ -103,12 +110,14 @@ export class DepthFocus {
     camera: PerspectiveCamera,
     atmosphere?: VolumetricLight,
     light?: DirectionalLight,
+    mirror?: PlanarMirror,
   ) {
     this.cameraRange.value.set(camera.near, camera.far)
     const previous = renderer.getRenderTarget()
     try {
       const info = renderer.info.render
       const view = SceneRenderDiagnostics.beginActive('view', info.calls)
+      mirror?.renderReflection(renderer, scene, camera)
       renderer.setRenderTarget(this.target)
       renderer.render(scene, camera)
       SceneRenderDiagnostics.endActive(view, info.calls)

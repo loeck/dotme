@@ -3,6 +3,8 @@ import { WebGPURenderer } from 'three/webgpu'
 import { isLowPowerDevice, maxPixelRatio } from '../scene/device-profile'
 
 export type GraphicsBackend = 'webgpu' | 'webgl'
+/** `auto` prefers WebGPU and falls back to WebGL 2; `webgl` never requests an adapter. */
+export type BackendPreference = 'auto' | 'webgl'
 
 /** Owns the sole renderer; scenes only borrow it. */
 export class GpuRuntime {
@@ -42,9 +44,14 @@ export class GpuRuntime {
     void device?.lost.then(lost)
   }
 
-  static async create(canvas: HTMLCanvasElement, signal: AbortSignal) {
+  static async create(
+    canvas: HTMLCanvasElement,
+    signal: AbortSignal,
+    preference: BackendPreference = 'auto',
+  ) {
     signal.throwIfAborted()
-    const { device, fallback } = await requestDevice(signal)
+    const { device, fallback } =
+      preference === 'webgl' ? { device: undefined, fallback: false } : await requestDevice(signal)
     let context: WebGL2RenderingContext | undefined
     if (!device) {
       await restoreWebGLContext(canvas, signal)
