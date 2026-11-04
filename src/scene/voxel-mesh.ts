@@ -114,6 +114,13 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   const color = new Color()
   const moss = new Color(0x4f5d40)
   const topColor = new Color()
+  // Forest soil under the turf (Last Signal's peat and dirt), independent of the voxel's
+  // framing dim so risers keep a readable earth tone.
+  const soil = new Color(0x6e5c44)
+  // Wet stone for shore and rock risers, also independent of the framing dim.
+  const stone = new Color(0x5c5b55)
+  const lipColor = new Color()
+  const footColor = new Color()
   const mossPatch = (id: number) => {
     let n = Math.imul(id + 1, 0x85ebca6b)
     n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35)
@@ -147,6 +154,15 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
             ? 0.78 + 0.17 * mossPatch(id)
             : 0
         topColor.copy(color).lerp(moss, mossy)
+        // Mossy risers grade from a moss lip under the turf to darker soil at the foot, rather
+        // than one flat dark face.
+        if (mossy) {
+          lipColor.copy(soil).lerp(topColor, 0.55)
+          footColor.copy(soil).multiplyScalar(0.55)
+        } else {
+          lipColor.copy(color).lerp(stone, 0.5)
+          footColor.copy(lipColor).multiplyScalar(0.7)
+        }
         const visible = exposedVoxelFaces(index, id)
         for (let face = 0; face < 6; face++) {
           if (!visible[face]) continue
@@ -160,8 +176,16 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
             continue
           const { p, n, c, triangles } = required(faces[face])
           const base = p.length / 3
-          const faceColor = face === 2 ? topColor : color
+          const side = face !== 2 && face !== 3
           for (let vertex = face * 4; vertex < face * 4 + 4; vertex++) {
+            const faceColor =
+              face === 2
+                ? topColor
+                : side
+                  ? positions.getY(vertex) > 0
+                    ? lipColor
+                    : footColor
+                  : color
             p.push(
               Math.fround(voxel.x) + positions.getX(vertex) * Math.fround(voxel.size),
               Math.fround(voxel.y) + positions.getY(vertex) * Math.fround(voxel.size),
