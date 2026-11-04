@@ -53,14 +53,27 @@ retains text, links, keyboard focus and screen-reader semantics. Cursor light is
 nighttime effect; pointer interaction remains available in daylight.
 
 Terrain follows Last Signal's ground. Tops and sides break into square micro-voxels about 6 cm
-across (sides used to take horizontal strata, which drew every step as a line), each cell shifting value by ±12% and hue slightly between moss and soil, fading
-out once a cell spans under about two pixels (`terrain-detail.ts`). Mossy risers grade from a
-moss lip under the turf to darker soil at the foot; past the foreground (over 8 m from z = 2)
-the moss climbs over the whole riser, so distant hills read as continuous slopes rather than a
-staircase of dark stripes under green tops, and shore and rock risers toward wet stone,
+across (sides used to take horizontal strata, which drew every step as a line), each cell
+shifting value by ±12% and hue slightly between moss and soil, fading out once a cell spans
+under about two pixels (`terrain-detail.ts`). Mossy risers grade from a moss lip under the turf
+to darker soil at the foot; past the foreground (over 8 m from z = 2) the moss climbs over the
+whole riser, so distant hills read as continuous slopes rather than a staircase of dark stripes under green tops, and shore and rock risers toward wet stone,
 from colours independent of the foreground framing dim. The probe lights tops from the bright
 zenith, but a riser samples the dark horizon of islands and water, so a sky fill adds ambient-
 tinted irradiance, through the diffuse BRDF and occlusion, peaking on vertical faces.
+
+Step lips also carry real micro-voxels (`terrain-lips.ts`), so a step never ends on a ruled
+edge. On a mossy ground voxel whose top is exposed, turf cells overhang each riser that drops
+away by a third to three quarters of a cell, a third of them trailing a smaller cell one step
+lower, and the odd stone rests against the foot of a riser that rises from its top. Cells are
+about 6 cm near the camera; past z = -12 a 6 cm cell spans only a few pixels, so they take half a
+voxel (12.5 cm) at about a third of the density, which notches the mid-ground hill crests and
+breaks the lit lip lines. Their sides are earthier than their tops, like a clod's cut. They
+are render-only: no collision, no shadow casting, and they never reach into another solid.
+Mobile dresses only the foreground. On seed 9182 they add 18.5k cells and 120k triangles on
+desktop (terrain 309k to 429k) and 0.6k cells and 5k triangles on mobile, and about 60 ms to
+the desktop terrain preparation in the worker; dressing every lip at the near density would
+have added 550k triangles.
 
 The fixed camera faces the low sun at both ends of the day, so the golden-hour look
 (`scene-look.ts`) lifts saturation, contrast and warmth but keeps noon's exposure, haze

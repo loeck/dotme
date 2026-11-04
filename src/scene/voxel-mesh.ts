@@ -5,6 +5,7 @@ import { terrainEyes } from './camera-rig'
 import { prepareGeometryBounds } from './geometry-bounds'
 import type { PreparedBounds } from './geometry-bounds'
 import { WATER_LEVEL } from './lake-bed'
+import { lipCells } from './terrain-lips'
 import { createVoxelIndex, overlappingVoxels } from './voxel-spatial'
 import type { VoxelIndex } from './voxel-spatial'
 import type { VoxelMaterial, VoxelWorld } from './voxel-world'
@@ -25,6 +26,8 @@ export type PreparedTerrain = {
   index: VoxelIndex
   totalFaces: number
   exposedFaces: number
+  /** Render-only micro-voxels at step lips and feet (see terrain-lips.ts). */
+  lipCells: number
 }
 
 /** Only discard a whole face if the union of neighboring solid rectangles covers it.
@@ -110,7 +113,8 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
     normals = cube.getAttribute('normal')
   const batches: TerrainBatch[] = []
   let offset = 0,
-    exposedFaces = 0
+    exposedFaces = 0,
+    lipCount = 0
   const color = new Color()
   const moss = new Color(0x4f5d40)
   const topColor = new Color()
@@ -122,6 +126,10 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   const lipColor = new Color()
   const footColor = new Color()
   const mossFoot = new Color()
+  const pebble = new Color().copy(stone).lerp(soil, 0.35)
+  const cellTop = new Color()
+  const cellSide = new Color()
+  const cellUnder = new Color()
   const mossPatch = (id: number) => {
     let n = Math.imul(id + 1, 0x85ebca6b)
     n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35)
@@ -171,6 +179,50 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
           footColor.copy(lipColor).multiplyScalar(0.7)
         }
         const visible = exposedVoxelFaces(index, id)
+        if (mossy) {
+          for (const cell of lipCells(index, id, voxel, visible, world.variant === 'desktop')) {
+            lipCount++
+            if (cell.kind === 'turf') {
+              cellTop.copy(topColor).multiplyScalar(cell.shade)
+              cellSide.copy(lipColor).lerp(footColor, 0.5).multiplyScalar(cell.shade)
+              cellUnder.copy(lipColor).multiplyScalar(0.7 * cell.shade)
+            } else {
+              cellTop.copy(pebble).multiplyScalar(1.1 * cell.shade)
+              cellSide.copy(pebble).multiplyScalar(cell.shade)
+              cellUnder.copy(cellSide)
+            }
+            for (let face = 0; face < 6; face++) {
+              if (cell.hidden.includes(face)) continue
+              const axis = face >>> 1
+              const plane =
+                required(cell.center[axis]) +
+                (face % 2 === 0 ? 0.5 : -0.5) * required(cell.extent[axis])
+              if (
+                face % 2 === 0
+                  ? required(farthest[axis]) <= plane
+                  : required(nearest[axis]) >= plane
+              )
+                continue
+              const { p, n, c, triangles } = required(faces[face])
+              const base = p.length / 3
+              const faceColor = face === 2 ? cellTop : face === 3 ? cellUnder : cellSide
+              for (let vertex = face * 4; vertex < face * 4 + 4; vertex++) {
+                p.push(
+                  cell.center[0] + positions.getX(vertex) * cell.extent[0],
+                  cell.center[1] + positions.getY(vertex) * cell.extent[1],
+                  cell.center[2] + positions.getZ(vertex) * cell.extent[2],
+                )
+                n.push(
+                  normals.getX(vertex) * 127,
+                  normals.getY(vertex) * 127,
+                  normals.getZ(vertex) * 127,
+                )
+                c.push(faceColor.r, faceColor.g, faceColor.b)
+              }
+              triangles.push(base, base + 2, base + 1, base + 2, base + 3, base + 1)
+            }
+          }
+        }
         for (let face = 0; face < 6; face++) {
           if (!visible[face]) continue
           exposedFaces++
@@ -231,6 +283,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
     index,
     totalFaces: world.voxels.length * 6,
     exposedFaces,
+    lipCells: lipCount,
   }
 }
 

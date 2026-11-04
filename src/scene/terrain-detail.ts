@@ -22,7 +22,7 @@ const OFFSET = 4096
 
 /**
  * Last Signal's ground is never one flat colour per block: the top of a voxel breaks into
- * micro-voxels of moss, soil and litter, and its sides into thin strata. This multiplies the
+ * micro-voxels of moss, soil and litter, and its sides into square cells too. This multiplies the
  * vertex colour by a quantised world-space pattern (value ±12%, a slight moss/soil hue shift),
  * fading out where a cell shrinks below about a pixel so distant terrain does not shimmer.
  */
@@ -30,7 +30,7 @@ export function applyTerrainDetail(material: MeshStandardNodeMaterial, sky: Terr
   sky.applyTo(material)
   const cell = floor(positionWorld.mul(CELLS).add(OFFSET))
   const top = smoothstep(0.5, 0.8, normalWorld.y)
-  // Tops: one hash per XZ cell. Sides: horizontal strata, a few cells long along the face.
+  // Tops: one hash per XZ cell. Sides: one hash per square cell along the face and up it.
   // Seeds stay below 2^24 so float32 keeps every cell distinct before the unsigned hash.
   const topSeed = cell.x.add(cell.z.mul(613))
   const along = floor(positionWorld.x.add(positionWorld.z).mul(CELLS).add(OFFSET))
