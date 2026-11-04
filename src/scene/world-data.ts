@@ -19,11 +19,9 @@ function terrainPart(world: VoxelWorld) {
   return { world: data, terrain }
 }
 
-/** Lake surfaces, cloud noise, merged collision boxes and vegetation from the same seeded world. */
+/** Lake surfaces, cloud noise and merged collision boxes from the same seeded world. */
 function surfacePart(world: VoxelWorld, seed: number, mobile: boolean) {
   return {
-    // The shorter half also grows the forest, in parallel with terrain meshing.
-    vegetation: prepareVegetation(world, seed >>> 0, mobile),
     noise: createCloudNoiseData(seed),
     surfaces: {
       submerged: prepareSubmergedSurface(world.lakeBed),
@@ -37,27 +35,46 @@ function surfacePart(world: VoxelWorld, seed: number, mobile: boolean) {
 
 export type TerrainPart = ReturnType<typeof terrainPart>
 export type SurfacePart = ReturnType<typeof surfacePart>
-export type PreparedWorld = TerrainPart & SurfacePart
+export type VegetationPart = ReturnType<typeof prepareVegetation>
+/**
+ * Everything the first frame needs, plus the forest, which follows on its own: the engine
+ * presents the scene first and dissolves the vegetation in once it is compiled.
+ */
+export type PreparedWorld = TerrainPart & SurfacePart & { vegetation: Promise<VegetationPart> }
+/** Worker requests; the `surfaces` worker also grows the forest afterwards. */
 export const WORLD_PARTS = ['terrain', 'surfaces'] as const
 export type WorldPart = (typeof WORLD_PARTS)[number]
 export type WorldPartMessage =
   | { part: 'terrain'; data: TerrainPart }
   | { part: 'surfaces'; data: SurfacePart }
+  | { part: 'vegetation'; data: VegetationPart }
 
 export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
   const world = createVoxelWorld(seed, mobile)
-  return { ...terrainPart(world), ...surfacePart(world, seed, mobile) }
+  return {
+    ...terrainPart(world),
+    ...surfacePart(world, seed, mobile),
+    vegetation: Promise.resolve(prepareVegetation(world, seed >>> 0, mobile)),
+  }
 }
 
 /**
  * Generation is deterministic in (seed, mobile), so two workers each rebuild
  * the voxel world and derive disjoint halves of the prepared data in parallel.
  */
-export function prepareWorldPart(seed: number, mobile: boolean, part: WorldPart): WorldPartMessage {
+export function* prepareWorldParts(
+  seed: number,
+  mobile: boolean,
+  part: WorldPart,
+): Generator<WorldPartMessage> {
   const world = createVoxelWorld(seed, mobile)
-  return part === 'terrain'
-    ? { part, data: terrainPart(world) }
-    : { part, data: surfacePart(world, seed, mobile) }
+  if (part === 'terrain') {
+    yield { part, data: terrainPart(world) }
+    return
+  }
+  yield { part, data: surfacePart(world, seed, mobile) }
+  // The shorter half then grows the forest, after the first frame's data is on its way.
+  yield { part: 'vegetation', data: prepareVegetation(world, seed >>> 0, mobile) }
 }
 
 /** Transfer ownership of every typed buffer, including bathymetry and BVH data. */

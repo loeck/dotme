@@ -115,7 +115,10 @@ pass already performs.
 World data is deterministic in its seed and layout, so two instances of the world worker
 each rebuild the voxel world and derive disjoint halves: terrain meshing on one, lake
 surfaces, cloud noise and merged collision boxes on the other. The slower half bounds the
-wait instead of their sum, and Rapier only creates colliders from boxes the worker merged.
+wait instead of their sum. The second worker then grows the forest and posts it on its own,
+so neither world data nor the compile batch waits for vegetation; the engine compiles it for
+the main view, the mirror, the probe and the shadow maps after the first frame and dissolves
+it in (`vegetation-ready` and `vegetation-presented` marks), and Rapier only creates colliders from boxes the worker merged.
 The waterfall search reads a lake footprint raster; only the final carved world builds the
 full lake bed with its shore distances and relief. The rasterization, BVH and face-coverage
 loops are allocation-free rewrites with unchanged evaluation order; prepared worlds hash
