@@ -166,6 +166,11 @@ export class SceneDetails {
     else delete this.floating.onWake
   }
 
+  setSoundHandler(handler: LakeSplashes['onSound']) {
+    if (handler) this.splashes.onSound = handler
+    else delete this.splashes.onSound
+  }
+
   pointerBurst(x: number, z: number, energy: number, time: number, wind: WindState) {
     if (this.disposed || this.reducedMotion) return
     this.splashes.spawnBurst(x, z, energy, time, wind)

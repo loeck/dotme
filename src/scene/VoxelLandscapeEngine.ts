@@ -40,7 +40,8 @@ import {
 import type { RenderTarget } from 'three/webgpu'
 
 import type { AmbientEnvironment } from '../audio/environment'
-import { waterfallSound } from '../audio/environment'
+import { pointSound, waterfallSound } from '../audio/environment'
+import type { WaterSoundEvent } from '../audio/water-sounds'
 import { required } from '../invariant'
 import { sceneParams } from '../scene-params'
 import { CAMERA_IDLE_DRIFT, CAMERA_REST, cameraTarget, ENVIRONMENT_PROBE } from './camera-rig'
@@ -105,6 +106,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onContextFailure: () => void
   onFirstFrame: () => void
   onEnvironment?: (state: AmbientEnvironment) => void
+  /** Splashes, breaking waves and drops, attenuated by distance and placed in stereo. */
+  onWaterSound?: (event: WaterSoundEvent) => void
   reducedMotion?: boolean
   seed?: number
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
@@ -188,6 +191,7 @@ export class VoxelLandscapeEngine {
   private gradeFrame = 0
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
+  private readonly soundPosition = new Vector3()
   private solarClock: SolarClock
   private readonly solar: SolarEndpoints
   private reducedMotion: boolean
@@ -793,6 +797,15 @@ export class VoxelLandscapeEngine {
           this.options.detailEnvironment,
         ),
       )
+    const listener = this.options.onWaterSound
+    if (listener)
+      this.details?.setSoundHandler((kind, x, z, energy) => {
+        if (this.disposed) return
+        this.soundPosition.set(x, WATER_LEVEL, z)
+        const distance = this.soundPosition.distanceTo(this.camera.position)
+        const place = pointSound(distance, this.soundPosition.project(this.camera).x)
+        listener({ kind, intensity: energy * place.attenuation * this.intro, pan: place.pan })
+      })
   }
 
   setReducedMotion(value: boolean) {

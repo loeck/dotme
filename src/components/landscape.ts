@@ -82,6 +82,7 @@ export async function initLandscape(
             })
         },
         onEnvironment: (state) => sound.setEnvironment(state),
+        onWaterSound: (event) => sound.waterSound(event),
         reducedMotion: motion.matches,
         weather: snapshot.weather,
         wind: snapshot.wind,

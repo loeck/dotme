@@ -64,22 +64,6 @@
     }
   },
   {
-    "layer": "birds",
-    "author": "VKProduktion",
-    "source": "https://freesound.org/people/VKProduktion/sounds/231537/",
-    "preview": "https://cdn.freesound.org/previews/231/231537_4034520-hq.mp3",
-    "license": "CC0-1.0",
-    "verified": "2026-09-24",
-    "excerptStart": 4,
-    "duration": 6,
-    "sha256": "0bdc787ce089bef66c7ff1ce09aa09a022e6a6f727a4f3adc987c644673a7b69",
-    "opus": {
-      "bitrate": 56,
-      "gainDb": -0.27,
-      "sha256": "bd694c3322e90461fbd7b423f2897c52782d4ae0539f5a40e3eccf288e4842e8"
-    }
-  },
-  {
     "layer": "waterfall",
     "author": "Joseph SARDIN",
     "source": "https://bigsoundbank.com/mini-waterfall-s0996.html",
@@ -101,6 +85,150 @@
       "bitrate": 64,
       "gainDb": -0.4,
       "sha256": "51245e61de7f044d237db83d12c9493608aa6f10f705fb6527b552c74e651357"
+    }
+  },
+  {
+    "layer": "birds",
+    "generator": "devbox ai (Stable Audio 3, local CPU)",
+    "license": "Stability AI Community License",
+    "licenseSource": "https://stability.ai/community-license-agreement",
+    "generated": "2026-11-04",
+    "takes": [
+      {
+        "job": "5c593f8b66b9464b9fb1f27e7fd24893",
+        "model": "audio3-sfx-int8",
+        "prompt": "Birdsong in a northern pine forest beside a calm lake on a spring morning, chaffinch, robin and willow warbler singing at a distance, soft natural field recording, gentle air, no music, no voices, no wind noise",
+        "seed": 11,
+        "seconds": 24
+      }
+    ],
+    "processing": [
+      "First 20 s of the 24 s take.",
+      "Mono, 32000 Hz, high-pass 100 Hz, low-pass 11 kHz, loudnorm I=-27 TP=-9 LRA=7; MP3 80 kbit/s, Opus 56 kbit/s with matched loudness."
+    ],
+    "duration": 20,
+    "sha256": "46a7e8a9b7a36f00e0c4d22de99b6d50d78f918ad0b78f58a6eba2ef0a417b36",
+    "opus": {
+      "sha256": "1a4297cbb89bd525a5930b64342d3e2063ba8ac66b5db40178c29739684b667b"
+    }
+  },
+  {
+    "layer": "owls",
+    "generator": "devbox ai (Stable Audio 3, local CPU)",
+    "license": "Stability AI Community License",
+    "licenseSource": "https://stability.ai/community-license-agreement",
+    "generated": "2026-11-04",
+    "takes": [
+      {
+        "job": "c56fd5d2779942eb83f518912fb6c2ad",
+        "model": "audio3-sfx-int8",
+        "prompt": "Owl hooting at night, deep low hoo hoo hooo call of a tawny owl, slow and distant in a dark forest, quiet night ambience, nature field recording",
+        "seed": 52,
+        "seconds": 16
+      },
+      {
+        "job": "e95186c8eebc4668843e62eb46a675d7",
+        "model": "audio3-sfx-int8",
+        "prompt": "Low soft owl hoots echoing across a still forest lake at midnight, hoo hoo, sparse calls with silence between, nature recording",
+        "seed": 63,
+        "seconds": 16
+      }
+    ],
+    "processing": [
+      "Call groups 2.7-5.7 s and 7.5-10.5 s of the first take and 8.8-11.0 s of the second, concatenated.",
+      "Transposed down by a factor 0.6 (resampled) towards a tawny owl's register; mono, 32000 Hz, high-pass 150 Hz, low-pass 11 kHz, loudnorm I=-27 TP=-9 LRA=7; MP3 80 kbit/s, Opus 56 kbit/s with matched loudness."
+    ],
+    "duration": 13.67,
+    "sha256": "cf0aa45752e34246ea6f2225c8b73c02d5638fa95c4d33aa622cee5b5a436823",
+    "opus": {
+      "sha256": "e002d464bf8cd1af4457276394edf1998186c1094c5d7dbb94a6221d06a3030c"
+    }
+  },
+  {
+    "layer": "splashes",
+    "generator": "devbox ai (Stable Audio 3, local CPU)",
+    "license": "Stability AI Community License",
+    "licenseSource": "https://stability.ai/community-license-agreement",
+    "generated": "2026-11-04",
+    "takes": [
+      {
+        "job": "281a1e3f2617493ab7fb1ca1614b5d34",
+        "model": "audio3-sfx-int8",
+        "prompt": "A small stone thrown into a calm lake, one clean splash followed by a few droplets falling back, then silence, close natural recording, no music",
+        "seed": 71,
+        "seconds": 3
+      },
+      {
+        "job": "c26b4bff756a48b785d30e0e7e15f0ba",
+        "model": "audio3-sfx-int8",
+        "prompt": "A single small lake wave slapping against a rocky shore, soft splash and gurgle, then quiet, close natural recording, no music, no wind",
+        "seed": 91,
+        "seconds": 3
+      },
+      {
+        "job": "c577ca4b98924a5ab4f9e33cdb9d624c",
+        "model": "audio3-sfx-int8",
+        "prompt": "Single water droplets falling one at a time into a still lake, separate small plinks and bloops with short silences between, close natural recording, no music",
+        "seed": 81,
+        "seconds": 5
+      }
+    ],
+    "processing": [
+      "Sprite of takes separated by 50 ms: splash 0.15-1.35 s (burst), wave 0.08-1.63 s, seven 0.3 s drops from the drops take; windows in src/audio/water-sounds.ts.",
+      "Mono, 32000 Hz, high-pass 80 Hz, low-pass 11 kHz, 4 ms/40 ms edge fades, peaks normalized to -4 (burst), -6 (wave) and -8 dBFS (drops); MP3 80 kbit/s, Opus 64 kbit/s with matched loudness."
+    ],
+    "duration": 5.3,
+    "sha256": "607ad83cd080492207c62b928687db3e002775125bc1faf40a972cee4d861f22",
+    "opus": {
+      "sha256": "3cc4b7482fd11fc8ce280db2bb513319a9f37f434f4d7127ee01299fd92a2fa0"
+    }
+  },
+  {
+    "layer": "music-day",
+    "generator": "devbox ai (Stable Audio 3, local CPU)",
+    "license": "Stability AI Community License",
+    "licenseSource": "https://stability.ai/community-license-agreement",
+    "generated": "2026-11-04",
+    "takes": [
+      {
+        "job": "1dd27b352a7e451fb99277970e446901",
+        "model": "audio3-medium-hq-int8",
+        "prompt": "Solo felt piano, sparse gentle notes with long pauses, soft sustain pedal, warm room reverb, peaceful and hopeful, slow tempo, major key, ambient video game exploration music, instrumental, no strings, no drums",
+        "seed": 33,
+        "seconds": 90
+      }
+    ],
+    "processing": [
+      "Stereo, 32000 Hz, high-pass 50 Hz, loudnorm I=-27 TP=-9 LRA=11, 2 s fade-in and 6 s fade-out; MP3 96 kbit/s, Opus 64 kbit/s with matched loudness. Streamed, not decoded."
+    ],
+    "duration": 90,
+    "sha256": "50b228c0c9a7edf0130b27b643e62b566f10d76befb66fdb6365ff9d39e9566a",
+    "opus": {
+      "sha256": "c7e7fe749730e7bb455cabdcf74ec374a912d4031815bc5986ff8c0a45c14518"
+    }
+  },
+  {
+    "layer": "music-night",
+    "generator": "devbox ai (Stable Audio 3, local CPU)",
+    "license": "Stability AI Community License",
+    "licenseSource": "https://stability.ai/community-license-agreement",
+    "generated": "2026-11-04",
+    "takes": [
+      {
+        "job": "7f18e42bea58410ca720ca23163e30b3",
+        "model": "audio3-medium-hq-int8",
+        "prompt": "Calm ambient game soundtrack at night, soft felt piano with low warm pad and faint shimmer, slow, sparse, minor key, contemplative and quiet, starry sky over a still lake, lots of space and reverb, instrumental, no drums, no percussion",
+        "seed": 41,
+        "seconds": 90
+      }
+    ],
+    "processing": [
+      "Stereo, 32000 Hz, high-pass 50 Hz, loudnorm I=-27 TP=-9 LRA=11, 2 s fade-in and 6 s fade-out; MP3 96 kbit/s, Opus 64 kbit/s with matched loudness. Streamed, not decoded."
+    ],
+    "duration": 90,
+    "sha256": "4ee30e2ef18535a6e815edae0ce03790807c587d2fb7c42f774aeaa2664560b1",
+    "opus": {
+      "sha256": "0698fd6363c8808631c629847b9a4e0cd78b39aebf1cc4ac5c6a5df6289a8782"
     }
   }
 ]

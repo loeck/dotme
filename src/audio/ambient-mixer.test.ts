@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 
 import { required } from '../invariant'
 import { AUDIO_LAYERS, AmbientMixer } from './ambient-mixer'
-import type { AudioFormat, AudioSample } from './ambient-mixer'
+import type { AmbientMixerOptions, AudioFormat, AudioSample } from './ambient-mixer'
 
 class Param {
   value = 0
@@ -21,6 +21,10 @@ class Param {
     this.events.push([value, at, constant])
     return this
   }
+  setValueCurveAtTime(values: Float32Array, at: number, duration: number) {
+    this.events.push([values[0] ?? 0, at], [values.at(-1) ?? 0, at + duration])
+    return this
+  }
 }
 class Node {
   gain = new Param()
@@ -35,6 +39,7 @@ class Panner extends Node {
 }
 class Source extends Node {
   buffer: AudioSample | null = null
+  playbackRate = new Param()
   at = -1
   end = -1
   offset = 0
@@ -47,7 +52,7 @@ class Source extends Node {
   }
   addEventListener() {}
 }
-function fixture(format?: AudioFormat) {
+function fixture(format?: AudioFormat, options: AmbientMixerOptions = { wide: false }) {
   const voices: Source[] = [],
     gains: Node[] = [],
     panners: Panner[] = [],
@@ -74,7 +79,7 @@ function fixture(format?: AudioFormat) {
       return panner
     },
     decodeAudioData: async () => {
-      const duration = decoded++ === 0 ? 60 : 19
+      const duration = decoded++ === 0 ? 60 : 16
       const sample = { duration, length: duration * 32000, numberOfChannels: 1 }
       samples.push(sample)
       return sample
@@ -82,8 +87,8 @@ function fixture(format?: AudioFormat) {
   }
   vi.stubGlobal(
     'fetch',
-    vi.fn(async (url: string, options?: RequestInit) => {
-      requests.push({ url, signal: options?.signal })
+    vi.fn(async (url: string, init?: RequestInit) => {
+      requests.push({ url, signal: init?.signal })
       return { ok: true, arrayBuffer: async () => new ArrayBuffer(0) }
     }),
   )
@@ -94,7 +99,7 @@ function fixture(format?: AudioFormat) {
     panners,
     samples,
     requests,
-    mixer: new AmbientMixer(context, format),
+    mixer: new AmbientMixer(context, format, options),
   }
 }
 afterEach(() => {
@@ -124,7 +129,7 @@ it('schedules three minutes with overlap, bounded envelopes, spaced birds and no
       required(water[i]).offset + required(water[i]).end - required(water[i]).at,
     ).toBeLessThanOrEqual(60.001)
   }
-  for (const gain of gains.slice(6))
+  for (const gain of gains.slice(1 + AUDIO_LAYERS.length))
     for (const event of gain.gain.events) expect(event[0]).toBeGreaterThanOrEqual(0)
   const count = voices.length
   mixer.pause()
@@ -220,11 +225,11 @@ it('loads waterfall only when present, smooths its pan and stops scheduling it w
   mixer.setEnvironment(quietEnvironment)
   await mixer.load()
   mixer.resume()
-  expect(requests).toHaveLength(5)
+  expect(requests).toHaveLength(AUDIO_LAYERS.length)
   expect(panners).toHaveLength(0)
   mixer.setEnvironment({ ...quietEnvironment, waterfall: { intensity: 1, pan: -0.65 } })
-  await vi.waitFor(() => expect(samples).toHaveLength(6))
-  const sample = required(samples[5])
+  await vi.waitFor(() => expect(samples).toHaveLength(AUDIO_LAYERS.length + 1))
+  const sample = required(samples[AUDIO_LAYERS.length])
   await vi.waitFor(() => expect(voices.some((voice) => voice.buffer === sample)).toBe(true))
   const panner = required(panners[0])
   expect(panner.connections).toEqual([gains[0]])
@@ -376,4 +381,39 @@ it('registers a decoded waterfall atomically when playback resumes between load 
   } finally {
     mixer.dispose()
   }
+})
+
+it('spreads each bed over two decorrelated passages, places calls and keeps owls to the night', async () => {
+  vi.useFakeTimers()
+  const { context, voices, panners, mixer } = fixture('mp3', {})
+  mixer.setEnvironment({ solarHour: 12, daylight: 1, windSpeed: 3, rainIntensity: 0 })
+  await mixer.load()
+  mixer.resume()
+  // Two passages per bed, each through its own panner on opposite sides.
+  expect(voices).toHaveLength(8)
+  expect(panners.map((panner) => panner.pan.value)).toEqual([
+    -0.65, 0.65, -0.65, 0.65, -0.65, 0.65, -0.65, 0.65,
+  ])
+  const water = voices.slice(0, 2)
+  expect(required(water[0]).buffer).toBe(required(water[1]).buffer)
+  for (let i = 0; i < 480; i++) {
+    context.currentTime += 0.25
+    vi.advanceTimersByTime(250)
+  }
+  // Birds sing by day with varied pitch; no owl calls in daylight.
+  const rates = voices.map((voice) => voice.playbackRate.value).filter((rate) => rate !== 0)
+  expect(rates.length).toBeGreaterThan(2)
+  expect(rates.every((rate) => rate >= 0.96 && rate <= 1.04)).toBe(true)
+  const dayCount = voices.length
+  const owlStarts = () => voices.slice(dayCount).filter((voice) => voice.playbackRate.value === 0)
+  mixer.setEnvironment({ solarHour: 1, daylight: 0, windSpeed: 0, rainIntensity: 0 })
+  for (let i = 0; i < 1200; i++) {
+    context.currentTime += 0.25
+    vi.advanceTimersByTime(250)
+  }
+  // At night, the only short unpitched voices are owl windows (bed passages last over 8 s).
+  const calls = owlStarts().filter((voice) => voice.end - voice.at < 8)
+  expect(calls.length).toBeGreaterThan(1)
+  expect(calls.every((voice) => voice.offset + voice.end - voice.at <= 16)).toBe(true)
+  mixer.dispose()
 })

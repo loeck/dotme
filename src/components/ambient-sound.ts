@@ -1,5 +1,6 @@
 import type { AmbientMixer } from '../audio/ambient-mixer'
 import type { AmbientEnvironment } from '../audio/environment'
+import type { WaterSoundEvent } from '../audio/water-sounds'
 
 export function initAmbientSound(autoplay = true) {
   const button = document.querySelector<HTMLButtonElement>('.scene-sound-trigger')
@@ -80,7 +81,7 @@ export function initAmbientSound(autoplay = true) {
       const { AmbientMixer } = await import('../audio/ambient-mixer')
       if (!isCurrent()) return
       const format = new Audio().canPlayType('audio/ogg; codecs="opus"') ? 'ogg' : 'mp3'
-      const instance = new AmbientMixer(audioContext, format)
+      const instance = new AmbientMixer(audioContext, format, { media: audioContext })
       mixer = instance
       instance.setEnvironment(environment)
       await instance.load()
@@ -158,6 +159,9 @@ export function initAmbientSound(autoplay = true) {
     setEnvironment(state: AmbientEnvironment) {
       environment = state
       mixer?.setEnvironment(state)
+    },
+    waterSound(event: WaterSoundEvent) {
+      mixer?.waterSound(event)
     },
     dispose() {
       lifetime.abort()

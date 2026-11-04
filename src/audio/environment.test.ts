@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 
-import { ambientMix, waterfallSound } from './environment'
+import { ambientMix, birdChorus, waterfallSound } from './environment'
 
 it('follows day, rain and wind while keeping a conservative combined gain ceiling', () => {
   for (const daylight of [-1, 0, 0.5, 1, 2, NaN])
@@ -53,4 +53,28 @@ it('attenuates a distant waterfall and places it on the same side as its visible
   expect(waterfallSound(1.8, 2, 10, 0.5).pan).toBeGreaterThan(0)
   expect(waterfallSound(0, 0, 10, 0).intensity).toBe(0)
   expect(waterfallSound(NaN, Infinity, Infinity, NaN)).toEqual({ intensity: 0, pan: 0 })
+})
+
+const at = (daylight: number, solarHour: number, rainIntensity = 0, windSpeed = 0) => ({
+  daylight,
+  solarHour,
+  rainIntensity,
+  windSpeed,
+})
+
+it('sings a dawn chorus at morning twilight and keeps owls to a dry, dark night', () => {
+  expect(birdChorus(at(0.4, 6))).toBe(1)
+  expect(birdChorus(at(0.4, 19))).toBeCloseTo(0.45)
+  expect(birdChorus(at(1, 12))).toBe(0)
+  expect(birdChorus(at(0, 2))).toBe(0)
+  expect(birdChorus(at(0.4, 6, 1))).toBe(0)
+  expect(birdChorus(at(NaN, NaN, NaN))).toBe(0)
+  const dawn = ambientMix(at(0.4, 6))
+  const noon = ambientMix(at(1, 12))
+  expect(dawn.birds).toBeGreaterThan(noon.birds)
+  expect(ambientMix(at(0.1, 6)).birds).toBeLessThan(dawn.birds)
+  expect(noon.owls).toBe(0)
+  expect(ambientMix(at(0, 1)).owls).toBeGreaterThan(0.1)
+  expect(ambientMix(at(0, 1, 1)).owls).toBe(0)
+  expect(ambientMix(at(0, 1, 0, 12)).owls).toBeLessThan(ambientMix(at(0, 1)).owls)
 })

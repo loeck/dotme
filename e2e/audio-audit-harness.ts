@@ -3,8 +3,13 @@ import type { AudioFormat } from '../src/audio/ambient-mixer'
 import { required } from '../src/invariant'
 import { deferred } from './deferred'
 
-/** Render three minutes with the actual decoded clips, mixer and scheduling code. */
-export async function auditAudio(format: AudioFormat) {
+/**
+ * Render three minutes with the actual decoded clips, mixer and scheduling code. The isolated
+ * mode keeps the beds mono and centered so the panned waterfall can be measured in L-R; the
+ * full mode is production (wide beds, placed calls and splash takes) minus the streamed music,
+ * which an offline context cannot play.
+ */
+export async function auditAudio(format: AudioFormat, full = false) {
   const offline = new OfflineAudioContext(2, 180 * 32000, 32000)
   let time = 0
   const { promise: waterfallReady, resolve: waterfallConnected } = deferred()
@@ -23,9 +28,10 @@ export async function auditAudio(format: AudioFormat) {
     createBufferSource: () => offline.createBufferSource(),
     decodeAudioData: (data: ArrayBuffer) => offline.decodeAudioData(data),
   }
-  const mixer = new AmbientMixer(clock, format)
+  const mixer = new AmbientMixer(clock, format, full ? {} : { wide: false })
   const daylight = { solarHour: 12, daylight: 1, rainIntensity: 0, windSpeed: 2 }
-  mixer.setEnvironment({ ...daylight, waterfall: { intensity: 1, pan: -0.7 } })
+  if (full) waterfallConnected()
+  else mixer.setEnvironment({ ...daylight, waterfall: { intensity: 1, pan: -0.7 } })
   let deadline: ReturnType<typeof setTimeout> | undefined
   try {
     await mixer.load()
@@ -55,13 +61,20 @@ export async function auditAudio(format: AudioFormat) {
           : time < 120
             ? { solarHour: 18, daylight: 0.5, rainIntensity: 1, windSpeed: 12 }
             : { solarHour: 0, daylight: 0, rainIntensity: 0.2, windSpeed: 3 }
-      const waterfall =
-        time >= 30 && time < 90
+      const waterfall = full
+        ? undefined
+        : time >= 30 && time < 90
           ? { intensity: 1, pan: -0.7 }
           : time >= 120 && time < 150
             ? { intensity: 1, pan: 0.7 }
             : undefined
       mixer.setEnvironment(waterfall ? { ...environment, waterfall } : environment)
+    }
+    // Production also hears the lake: a pointer splash every 20 s, waves and a patter of drops.
+    if (full) {
+      if (i % 80 === 0) mixer.waterSound({ kind: 'burst', intensity: 1, pan: 0.3 })
+      if (i % 52 === 0) mixer.waterSound({ kind: 'wave', intensity: 0.8, pan: -0.6 })
+      if (i % 3 === 0) mixer.waterSound({ kind: 'drop', intensity: 0.6, pan: 0 })
     }
     mixer.resume()
   }
