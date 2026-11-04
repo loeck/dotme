@@ -21,15 +21,16 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 - Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
   below, and an uneven crown of scaffold lobes around a dense inner mass.
 - Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
-  main value break against the dark conifers.
+  main value break against the dark conifers. A deep hanging curtain under each of the four
+  lower forks rounds the crown's underside, which otherwise sat flat like an umbrella.
 - Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree,
   and mid-ground cover (below).
 
 Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
 the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
-crown (its highest ground cell, nearest the centre on a tie), so no mound reads as a bare
-stone pyramid.
+crown (its highest ground cell, nearest the centre on a tie) at three quarters of the usual
+size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
 
 Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
 through scattered bushes instead (Last Signal's islet and bank cover): one candidate per 3 × 3
@@ -51,7 +52,9 @@ tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a
 underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
 under the crown. Cards stay within about 30° of vertical, so a low camera never sees a crown's top
 cards edge-on as pale slivers. Card normals lean toward the open direction, with its upward
-part damped so sunlit crown tops do not read as a pale lid. Albedo takes a cluster value hash, a per-tree hue and value jitter,
+part damped so sunlit crown tops do not read as a pale lid. Clumps opening nearly straight up
+(a spire's tip) are not pushed above the crown and lose up to 20% of their value, so the tip
+stays attached to the tree. Albedo takes a cluster value hash, a per-tree hue and value jitter,
 a cool-underside to warm-top ramp and an openness and height shade.
 
 The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an

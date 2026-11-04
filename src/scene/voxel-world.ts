@@ -115,6 +115,8 @@ type TerrainShape = Readonly<{
 const MATERIALS: readonly VoxelMaterial[] = ['ground', 'shore', 'rock']
 /** Minimum distance between trunks, in metres. */
 export const TREE_SPACING = 1.6
+/** An islet's crown tree stays in proportion to a mound a few metres across. */
+const ISLET_TREE_SCALE = 0.75
 
 // Keep exposed footings below the lake trough: -0.035 level, up to 0.083 wind
 // displacement and 0.22 simulated displacement, plus a small immersion margin.
@@ -735,7 +737,7 @@ function placeTrees(
   const ridges = clear.filter((cell) => cell.z >= -3 || cell.z <= -40).sort((a, b) => b.top - a.top)
   const cap = mobile ? 12 : 30
   const trees: VoxelTree[] = []
-  const plant = (cell: { x: number; top: number; z: number }, gate: number) => {
+  const plant = (cell: { x: number; top: number; z: number }, gate: number, size = 1) => {
     if (trees.length >= cap) return
     const xi = Math.round(cell.x * 10),
       zi = Math.round(cell.z * 10)
@@ -752,7 +754,7 @@ function placeTrees(
       x: cell.x,
       y: cell.top,
       z: cell.z,
-      scale: (0.85 + hash(seed, xi, zi, 913) * 0.45) * (1 + depth * 0.35),
+      scale: (0.85 + hash(seed, xi, zi, 913) * 0.45) * (1 + depth * 0.35) * size,
       kind,
       yaw: hash(seed, xi, zi, 921) * Math.PI * 2,
     })
@@ -772,7 +774,7 @@ function placeTrees(
           Math.hypot(profileX(a.x, mobile) - islet.x, a.z - islet.z) -
             Math.hypot(profileX(b.x, mobile) - islet.x, b.z - islet.z),
       )[0]
-    if (crown) plant(crown, -Infinity)
+    if (crown) plant(crown, -Infinity, ISLET_TREE_SCALE)
   }
   for (const cell of midground) {
     // Most trees go to the visible mid-ground islets; ridges take the rest.

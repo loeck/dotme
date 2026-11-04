@@ -485,6 +485,21 @@ export function sculptBirch(seed: number, size: number) {
         yaw,
       )
     }
+    // Birch twigs hang: a deep curtain under each lower fork rounds the crown's underside,
+    // which otherwise sits flat on the scaffolds like an umbrella.
+    if (scaffold < 4) {
+      const r = height * 0.1 * between(random, 0.9, 1.15)
+      sculpt.ellipsoid(
+        [
+          fork[0] + Math.sin(heading) * r * 0.6,
+          fork[1] - r * 0.9,
+          fork[2] + Math.cos(heading) * r * 0.6,
+        ],
+        [r * 0.8, r * 1.1, r * 0.8],
+        P.birchLeavesDeep,
+        heading,
+      )
+    }
   }
   return sculpt
 }
