@@ -712,6 +712,7 @@ function placeTrees(
   seed: number,
   mobile: boolean,
   waterfall: VoxelWaterfall | null,
+  islets: readonly Islet[],
 ): VoxelTree[] {
   const tops = new Map<string, { x: number; top: number; z: number }>()
   for (let index = 0; index < groundCount; index++) {
@@ -755,6 +756,23 @@ function placeTrees(
       kind,
       yaw: hash(seed, xi, zi, 921) * Math.PI * 2,
     })
+  }
+  // Last Signal's islets each carry a tree on their crown: the highest ground cell, nearest
+  // the centre on a tie, so a bare stepped mound never reads as a stone pyramid.
+  for (const islet of islets) {
+    const crown = clear
+      .filter(
+        (cell) =>
+          Math.abs(profileX(cell.x, mobile) - islet.x) < islet.width &&
+          Math.abs(cell.z - islet.z) < islet.depth,
+      )
+      .sort(
+        (a, b) =>
+          b.top - a.top ||
+          Math.hypot(profileX(a.x, mobile) - islet.x, a.z - islet.z) -
+            Math.hypot(profileX(b.x, mobile) - islet.x, b.z - islet.z),
+      )[0]
+    if (crown) plant(crown, -Infinity)
   }
   for (const cell of midground) {
     // Most trees go to the visible mid-ground islets; ridges take the rest.
@@ -1153,7 +1171,15 @@ export function createVoxelWorld(seed: number, mobile: boolean): VoxelWorld {
     // the elevated pool remains land in the separate lake-level water mask.
     lakeBed = createLakeBed(voxels, root, mobile)
   } else lakeBed = createLakeBed(voxels, root, mobile, terrainCount)
-  const trees = placeTrees(voxels, resultGroups.ground.count, voxelSize, root, mobile, waterfall)
+  const trees = placeTrees(
+    voxels,
+    resultGroups.ground.count,
+    voxelSize,
+    root,
+    mobile,
+    waterfall,
+    shape.islets,
+  )
   return {
     version: 'lake-voxel-v1',
     variant,

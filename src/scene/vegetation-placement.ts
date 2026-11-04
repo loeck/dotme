@@ -39,11 +39,13 @@ export type PreparedVegetation = Readonly<{
  * about a third of the 25 cm terrain voxel. Foliage clumps sit on a pitch of three cells.
  */
 const GRID = {
-  desktop: { tree: 0.08, tufts: 1500, cover: 6000 },
-  mobile: { tree: 0.1, tufts: 420, cover: 900 },
+  desktop: { tree: 0.08, tufts: 1500, cover: 6000, shrubs: 180 },
+  mobile: { tree: 0.1, tufts: 420, cover: 900, shrubs: 32 },
 } as const
 const CLUMP_PITCH = 3
 const GROUND_COVER_Z = -1.5
+/** Mid-ground shrubs: beyond the undergrowth, up to the far shore's haze. */
+const SHRUB_FAR_Z = -46
 /** Furthest a companion bush stands from its tree: (0.6 + 0.7) × the largest tree scale. */
 const COMPANION_REACH = 2.4
 const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 3, pine: 2, birch: 2 }
@@ -235,6 +237,53 @@ export function prepareVegetation(
       near,
       toward: length > 1e-6 ? ([ex / length, ez / length] as const) : undefined,
     }
+  }
+
+  // Mid-ground shrubs (Last Signal's islet and bank cover): grass blades shrink below a pixel
+  // past the foreground, so the turf there reads through scattered bush clumps instead. They
+  // gather in slow patches and keep off tree trunks and a step's last column.
+  const shrubSpots = [...tops.columns.entries()]
+    .map(([key, column]) => {
+      const [cx, cz] = key.split(':').map(Number)
+      return { cx: cx ?? 0, cz: cz ?? 0, column }
+    })
+    .filter(
+      ({ cx, cz, column }) =>
+        column.ground &&
+        column.top > WATER_LEVEL + 0.15 &&
+        (cz + 0.5) * COLUMN < GROUND_COVER_Z &&
+        (cz + 0.5) * COLUMN > SHRUB_FAR_Z &&
+        // One candidate per 3 × 3 columns, jittered below, keeps the scan short.
+        (((cx % 3) + 3) % 3) + (((cz % 3) + 3) % 3) === 0,
+    )
+    .map((spot) => ({
+      ...spot,
+      order: hash(seed, spot.cx, spot.cz, 1201),
+    }))
+    .sort((a, b) => a.order - b.order)
+  const shrubs: { x: number; z: number; r: number }[] = []
+  for (const { cx, cz, column } of shrubSpots) {
+    if (shrubs.length >= grid.shrubs) break
+    const x = (cx + 0.5) * COLUMN + (hash(seed, cx, cz, 1203) - 0.5) * COLUMN * 2,
+      z = (cz + 0.5) * COLUMN + (hash(seed, cx, cz, 1207) - 0.5) * COLUMN * 2
+    const patch = valueNoise(seed, x, z, 5, 1209)
+    if (hash(seed, cx, cz, 1211) > (patch - 0.2) * 1.8) continue
+    if (edgeAt(x, z, column.top, 1).near) continue
+    const scale = 0.85 + hash(seed, cx, cz, 1213) * 0.6
+    const r = 0.4 * scale
+    if (world.trees.some((tree) => (tree.x - x) ** 2 + (tree.z - z) ** 2 < (0.7 + r) ** 2)) continue
+    if (shrubs.some((other) => (other.x - x) ** 2 + (other.z - z) ** 2 < (other.r + r) ** 2))
+      continue
+    shrubs.push({ x, z, r })
+    const slot = hash(seed, cx, cz, 1217) < 0.5 ? 0 : 1
+    const bush = model(`bush-${slot}`, () => sculptBush(seed + 31 + slot, grid.tree))
+    plant(
+      bush,
+      { x, y: column.top - 0.04, z, yaw: hash(seed, cx, cz, 1219) * Math.PI * 2, scale },
+      0.04,
+      500_000 + shrubs.length,
+      true,
+    )
   }
 
   // Foreground undergrowth (ADR 0107/0112): Bézier grass fans in 1.6 m clumps inside 8 m

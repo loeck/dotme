@@ -22,11 +22,19 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
   below, and an uneven crown of scaffold lobes around a dense inner mass.
 - Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
   main value break against the dark conifers.
-- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree.
+- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree,
+  and mid-ground cover (below).
 
 Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
 the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
-toward the horizon. Birches stay in the mid-ground band.
+toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
+crown (its highest ground cell, nearest the centre on a tie), so no mound reads as a bare
+stone pyramid.
+
+Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
+through scattered bushes instead (Last Signal's islet and bank cover): one candidate per 3 × 3
+columns between the undergrowth and the far shore, jittered, gathered into 5 m patches, off
+tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 on phones.
 
 ## Wood and foliage
 
@@ -83,7 +91,8 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 188k triangles (127k of them undergrowth) and the phone forest about 40k. Preparation runs after the surfaces on the
+forest is about 202k triangles (127k of them undergrowth, 116 mid-ground bushes and the islet
+trees about 14k) and the phone forest about 41k. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind
