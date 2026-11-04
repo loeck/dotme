@@ -4,6 +4,7 @@ import {
   BufferGeometry,
   BufferAttribute,
   InstancedBufferAttribute,
+  Layers,
 } from 'three/webgpu'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
@@ -15,6 +16,8 @@ import { LakeWaterfall } from './lake-waterfall'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
 import type { Voxel, VoxelWaterfall } from './voxel-world'
+import { waterfallDrift } from './waterfall-flow'
+import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
 import { WindModel } from './wind'
 import type { WindState } from './wind'
 
@@ -139,6 +142,48 @@ describe('lake waterfall lifecycle', () => {
       if (y > fall.top - 0.16 - waterfall.group.position.y && z > 0.02 && z < 0.2) connected++
     }
     expect(connected).toBeGreaterThan(0)
+    waterfall.dispose()
+  })
+
+  it('shows the mirror a ribbon along the sheet instead of the fluid, mist and spray', () => {
+    const waterfall = new LakeWaterfall(
+      new Scene(),
+      fall,
+      false,
+      false,
+      () => {},
+      () => {},
+    )
+    // The engine's cameras: the main view adds the fluid layer, the mirror
+    // swaps it for the reflection layer.
+    const main = new Layers()
+    main.enable(WATERFALL_FLUID_LAYER)
+    const mirror = new Layers()
+    mirror.enable(WATERFALL_REFLECTION_LAYER)
+    const seenBy = (layers: Layers) =>
+      waterfall.group.children.filter((child) => child.layers.test(layers)).map(({ name }) => name)
+    expect(seenBy(main)).toEqual(
+      expect.arrayContaining(['waterfall-fluid', 'waterfall-mist', 'waterfall-droplets']),
+    )
+    expect(seenBy(main)).not.toContain('waterfall-reflection')
+    expect(seenBy(mirror)).toEqual(
+      expect.arrayContaining(['waterfall-reflection', 'waterfall-foot', 'waterfall-basin']),
+    )
+    for (const name of ['waterfall-fluid', 'waterfall-mist', 'waterfall-droplets'])
+      expect(seenBy(mirror)).not.toContain(name)
+    const ribbon = waterfall.group.getObjectByName('waterfall-reflection')
+    if (!(ribbon instanceof Mesh) || !(ribbon.geometry instanceof BufferGeometry))
+      throw new Error('Missing reflection ribbon')
+    const positions: unknown = ribbon.geometry.getAttribute('position')
+    if (!(positions instanceof BufferAttribute)) throw new Error('Missing ribbon positions')
+    const height = fall.top - waterfall.group.position.y
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i)
+      expect(y).toBeGreaterThanOrEqual(-1e-6)
+      expect(y).toBeLessThanOrEqual(height + 1e-6)
+      expect(positions.getZ(i)).toBeCloseTo(waterfallDrift(height, y), 5)
+      expect(Math.abs(positions.getX(i))).toBeLessThan(fall.width / 2 + 0.2)
+    }
     waterfall.dispose()
   })
 

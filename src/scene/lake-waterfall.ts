@@ -7,6 +7,7 @@ import {
   float,
   fract,
   Fn,
+  fwidth,
   mix,
   normalize,
   normalView,
@@ -47,10 +48,17 @@ import type { LakeWaterMaterial } from './lake-water'
 import { ResourceScope } from './resource-scope'
 import type { VoxelWaterfall } from './voxel-world'
 import type { WaterContact } from './water-contact'
-import { contactNoise } from './water-noise'
+import { contactNoise, tiledNoise } from './water-noise'
 import { fieldUvNode, sampleWaterContact, windFieldNode } from './water-surface'
 import { waterfallDrift } from './waterfall-flow'
-import { scatterPhase, WaterfallFluid } from './waterfall-fluid'
+import {
+  fallCore,
+  fallStreaks,
+  scatterPhase,
+  WATERFALL_FLUID_LAYER,
+  WATERFALL_REFLECTION_LAYER,
+  WaterfallFluid,
+} from './waterfall-fluid'
 import type { WindState } from './wind'
 
 const GRAVITY = 9.81
@@ -197,11 +205,12 @@ export class LakeWaterfall {
       const foam = this.resources.own(createMaterial()),
         spray = this.resources.own(createMaterial()),
         basin = this.resources.own(createMaterial()),
-        mist = this.resources.own(createMaterial())
+        mist = this.resources.own(createMaterial()),
+        sheet = this.resources.own(createMaterial())
       this.fluid = this.resources.own(
         new WaterfallFluid(fall, mobile, this.opacity, this.patternTime),
       )
-      this.materials = [this.fluid.material, foam, spray, basin, mist]
+      this.materials = [this.fluid.material, foam, spray, basin, mist, sheet]
       const parcels = this.fluid.particles
       this.parcelExtent = parcels.extent
       this.nominalBounds = parcels.bounds.clone()
@@ -364,13 +373,40 @@ export class LakeWaterfall {
       const lines = contactNoise(vec2(fan.mul(5.5), drift.mul(1.1)))
       const clump = contactNoise(vec2(footX.mul(2.4), drift.mul(2.4)).add(7.1))
       const lace = contactNoise(vec2(footX.mul(9), drift.mul(9)).add(3.3))
-      const held = smoothstep(0.3, 0.55, mix(clump, lace, 0.6))
+      // Close up, bubbles and torn fingers a few centimetres across break the
+      // lace edges and pit the boil. Each octave fades out as its cells shrink
+      // below a few pixels, so distant foam keeps the smooth look and cannot
+      // shimmer; the zero-mean detail leaves the faded foam unchanged.
+      const footprint = fwidth(vec2(footX, footZ)).length()
+      const octave = (frequency: number) =>
+        float(1).sub(smoothstep(0.2, 0.4, footprint.mul(frequency)))
+      const bubbleSpace = vec2(footX, drift).add(
+        vec2(churn.sub(0.5), churn.sub(0.5).negate()).mul(boil.mul(0.12)),
+      )
+      const coarseFade = octave(28)
+      const fineFade = octave(64)
+      const fine = tiledNoise(bubbleSpace.mul(28).add(vec2(13.7, 4.1)), 128)
+        .sub(0.5)
+        .mul(coarseFade.mul(0.62))
+        .add(
+          tiledNoise(
+            vec2(
+              bubbleSpace.x.mul(0.8).sub(bubbleSpace.y.mul(0.6)),
+              bubbleSpace.x.mul(0.6).add(bubbleSpace.y.mul(0.8)),
+            ).mul(64),
+            128,
+          )
+            .sub(0.5)
+            .mul(fineFade.mul(0.38)),
+        )
       const fanMask = float(1).sub(smoothstep(0.55, 1, fan.abs()))
-      const streakFoam = smoothstep(0.36, 0.64, lines)
-        .mul(held)
-        .mul(travel.div(-2.4).exp())
-        .mul(smoothstep(-0.1, 0.3, downstream))
-        .mul(fanMask)
+      const streak = (detail: Node<'float'>) =>
+        smoothstep(0.36, 0.64, lines.add(detail.mul(0.22)))
+          .mul(smoothstep(0.3, 0.55, mix(clump, lace, 0.6).add(detail.mul(0.42))))
+          .mul(travel.div(-2.4).exp())
+          .mul(smoothstep(-0.1, 0.3, downstream))
+          .mul(fanMask)
+      const streakFoam = streak(fine)
       // Entrained bubbles lighten the pool under the foam as they rise and drift.
       const plume = travel
         .div(-1.3)
@@ -379,7 +415,7 @@ export class LakeWaterfall {
         .mul(smoothstep(-0.3, 0.1, downstream))
         .mul(mix(0.6, 1, clump))
       const boilFoam = boil
-        .mul(mix(0.5, 1, smoothstep(0.25, 0.7, churn)))
+        .mul(mix(0.5, 1, smoothstep(0.25, 0.7, churn.add(fine.mul(0.5)))))
         .mul(mix(0.45, 1, this.impactPulse))
       const footFoam = boilFoam.max(streakFoam.mul(0.92))
       const border = float(1)
@@ -390,14 +426,23 @@ export class LakeWaterfall {
         footX,
         boil
           .mul(mix(0.04, 0.16, churn))
-          .add(streakFoam.mul(0.008))
+          // Derivatives exist only in fragments: the height uses the smooth lace.
+          .add(streak(float(0)).mul(0.008))
           .add(0.016),
         footZ,
       )
       foam.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
-      foam.colorNode = mix(vec3(0.34, 0.39, 0.38), vec3(0.8, 0.82, 0.8), footFoam)
+      // Bubble crests catch more light than the pits between them.
+      foam.colorNode = mix(vec3(0.34, 0.39, 0.38), vec3(0.8, 0.82, 0.8), footFoam).mul(
+        fine.mul(0.3).add(1),
+      )
       foam.roughness = 0.82
-      foam.opacityNode = footFoam.max(plume.mul(0.3)).mul(border).mul(this.opacity)
+      foam.opacityNode = footFoam
+        .mul(fine.mul(0.35).add(1))
+        .clamp(0, 1)
+        .max(plume.mul(0.3))
+        .mul(border)
+        .mul(this.opacity)
       foam.emissiveNode = this.forwardGlow(0.5, vec3(0.16, 0.165, 0.16)).mul(boilFoam)
       const foamGeometry = this.resources.own(
         new PlaneGeometry(1, 1, mobile ? 12 : 20, mobile ? 12 : 18),
@@ -474,7 +519,7 @@ export class LakeWaterfall {
         .mul(motion.w.mul(0.75))
         .mul(float(1).sub(smoothstep(0.3, 1, p.sub(0.5).mul(2).length())))
         .mul(this.opacity)
-      this.add(sprayGeometry, spray, 'waterfall-droplets')
+      const sprayMesh = this.add(sprayGeometry, spray, 'waterfall-droplets')
 
       // Spray mist: puffs born in the plunge roll outward and up, growing and
       // thinning, while a thinner veil hangs on the lower fall. Smooth sphere
@@ -526,7 +571,11 @@ export class LakeWaterfall {
         .mul(mix(0.5, 1, mistDensity))
         .mul(atFoot.select(this.impactPulse.mul(0.08).add(0.15), 0.12))
         .mul(this.opacity)
-      this.add(mistGeometry, mist, 'waterfall-mist')
+      // Mist and spray stay out of the mirror: there they would only haze the
+      // reflected fall and cost blended fragments in another pass.
+      this.add(mistGeometry, mist, 'waterfall-mist').layers.set(WATERFALL_FLUID_LAYER)
+      sprayMesh.layers.set(WATERFALL_FLUID_LAYER)
+      this.addReflectionSheet(sheet, mobile)
       scene.add(this.group)
     } catch (error) {
       this.resources.dispose()
@@ -534,6 +583,72 @@ export class LakeWaterfall {
       this.group.clear()
       throw error
     }
+  }
+
+  /**
+   * The lake mirror sees this ribbon instead of the fluid volume: the fluid's
+   * capture and filter passes would have to run again for a view the waves
+   * distort beyond recognition. The ribbon follows the sheet's mean trajectory
+   * and widening and carries the same streaks without the fine grain, so the
+   * reflection costs one small blended draw.
+   */
+  private addReflectionSheet(material: MeshStandardNodeMaterial, mobile: boolean) {
+    const columns = mobile ? 4 : 6
+    const rows = mobile ? 8 : 12
+    const height = this.sheetHeight
+    const halfWidth = (drop: number) =>
+      this.fall.width / 2 + 0.02 + 0.16 * Math.sqrt((2 * drop) / GRAVITY)
+    const positions: number[] = [],
+      normals: number[] = [],
+      indices: number[] = []
+    // Tilted skyward like the aerated sheet, which scatters the whole sky.
+    const tilt = Math.hypot(0.75, 1)
+    for (let row = 0; row <= rows; row++) {
+      const drop = (row / rows) * height
+      const y = height - drop
+      const z = waterfallDrift(height, y)
+      const half = halfWidth(drop)
+      for (let column = 0; column <= columns; column++) {
+        positions.push((column / columns - 0.5) * 2 * half, y, z)
+        normals.push(0, 0.75 / tilt, 1 / tilt)
+      }
+    }
+    for (let row = 0; row < rows; row++)
+      for (let column = 0; column < columns; column++) {
+        const a = row * (columns + 1) + column
+        const b = a + columns + 1
+        indices.push(a, b, a + 1, a + 1, b, b + 1)
+      }
+    const geometry = this.resources.own(new BufferGeometry())
+    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
+    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3))
+    geometry.setIndex(indices)
+    const drop = float(height).sub(positionLocal.y).max(0)
+    const across = positionLocal.x
+    const { breakup, aerated } = fallStreaks(across, drop, this.patternTime, height, false)
+    const half = drop
+      .mul(2 / GRAVITY)
+      .sqrt()
+      .mul(0.16)
+      .add(this.fall.width / 2 + 0.02)
+    const inset = half.sub(across.abs())
+    const fringe = float(1)
+      .sub(smoothstep(0, 0.12, inset))
+      .mul(breakup)
+    const whitewater = aerated.mul(0.86).add(fringe.mul(0.55)).clamp(0, 1)
+    material.colorNode = mix(fallCore(drop), vec3(0.68, 0.71, 0.7), whitewater)
+    material.roughnessNode = mix(0.05, 0.38, whitewater)
+    material.envMapIntensity = 1.6
+    material.opacityNode = smoothstep(0, 0.05, inset)
+      .mul(mix(0.66, 0.97, whitewater))
+      .mul(this.opacity)
+    material.emissiveNode = this.forwardGlow(
+      0.55,
+      mix(vec3(0.03, 0.04, 0.03), vec3(0.32, 0.33, 0.32), whitewater),
+    )
+    const mesh = this.add(geometry, material, 'waterfall-reflection')
+    mesh.renderOrder = 1
+    mesh.layers.set(WATERFALL_REFLECTION_LAYER)
   }
 
   /** Key light scattered forward through aerated water and spray, in view space. */

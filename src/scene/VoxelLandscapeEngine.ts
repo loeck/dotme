@@ -91,7 +91,7 @@ import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry } from './water-surface'
-import { WATERFALL_FLUID_LAYER } from './waterfall-fluid'
+import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 import { WindModel, updateWindUniforms } from './wind'
@@ -539,6 +539,7 @@ export class VoxelLandscapeEngine {
       }),
     )
     const reflectedCamera = this.water.getReflectionCamera(this.camera)
+    this.setReflectionLayers(reflectedCamera)
     const reflection = this.water.getRenderTarget(reflectedCamera).texture
     reflection.anisotropy = Math.min(this.lowPower ? 4 : 8, this.renderer.getMaxAnisotropy())
     reflection.name = 'Lake reflection'
@@ -1424,12 +1425,7 @@ export class VoxelLandscapeEngine {
 
     const reflected = this.water.getReflectionCamera(this.camera)
     reflected.copy(this.camera)
-    // The mirrored capture would rebuild the whole fluid pass for a view that
-    // the lake surface distorts beyond recognition. Curtains and splashes
-    // still reflect; only the fluid volume renders from the main camera.
-    reflected.layers.disable(WATERFALL_FLUID_LAYER)
-    // Foreground undergrowth sits below the mirror's useful detail; keep it main-view only.
-    reflected.layers.disable(UNDERGROWTH_LAYER)
+    this.setReflectionLayers(reflected)
     // The mirror renders at the main view's depth and attachments, so it shares
     // that render context: once the view's builds have settled, this only adds
     // objects outside the main frustum and the mirrored pipelines.
@@ -1450,6 +1446,19 @@ export class VoxelLandscapeEngine {
     this.environmentFace = 0
     this.filterEnvironment()
     await preparationFrame(signal)
+  }
+
+  /**
+   * The mirror sees the main view's layers except the waterfall's fluid volume,
+   * mist and spray, which would rebuild the fluid pass and haze a view the lake
+   * distorts beyond recognition; a cheap ribbon stands in for the falling sheet.
+   * Foreground undergrowth sits below the mirror's useful detail.
+   */
+  private setReflectionLayers(reflected: Camera) {
+    reflected.layers.mask = this.camera.layers.mask
+    reflected.layers.disable(WATERFALL_FLUID_LAYER)
+    reflected.layers.disable(UNDERGROWTH_LAYER)
+    reflected.layers.enable(WATERFALL_REFLECTION_LAYER)
   }
 
   private updateEnvironment(now: number, atmosphereTime: number) {
