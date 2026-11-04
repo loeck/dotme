@@ -15,7 +15,8 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 
 - Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
   golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles. Boughs start at 27–33% of the height so
+  colour. One variant uses the darker spruce needles. A solid needle spire over the top third
+  carries the crown to its tip, so the small top tiers do not float apart. Boughs start at 27–33% of the height so
   a short dark trunk shows under the skirt.
 - Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
   below, and an uneven crown of scaffold lobes around a dense inner mass.
@@ -40,7 +41,9 @@ with openness under 0.6 add a dark core disc so gaps inside a crown show foliage
 Cluster scales range over [0.85, 1.45], each tree takes a factor in [0.85, 1.2], isolated
 tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a crown's
 underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
-under the crown. Card normals lean 90% toward the open direction. Albedo takes a cluster value hash, a per-tree hue and value jitter,
+under the crown. Cards stay within about 30° of vertical, so a low camera never sees a crown's top
+cards edge-on as pale slivers. Card normals lean toward the open direction, with its upward
+part damped so sunlit crown tops do not read as a pale lid. Albedo takes a cluster value hash, a per-tree hue and value jitter,
 a cool-underside to warm-top ramp and an openness and height shade.
 
 The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an

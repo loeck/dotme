@@ -238,6 +238,9 @@ export function appendClumps(
         const sideways = rotateY(open, turn)
         facing = normalize([sideways[0], sideways[1] + 0.2 + random(20 + c) * 0.3, sideways[2]])
       }
+      // Keep cards near vertical: a low camera sees flat cards on a crown's top edge-on, as
+      // pale slivers floating over a gap instead of foliage.
+      facing = uprightCard(facing, toCamera)
       let t = cross(UP, facing)
       if (Math.hypot(t[0], t[1], t[2]) < 1e-3) t = [1, 0, 0]
       t = normalize(t)
@@ -264,10 +267,25 @@ export function appendClumps(
         : random(70 + c) < 0.5
           ? ATLAS_TILES.needleA
           : ATLAS_TILES.needleB
-      const normal = normalize(add([open[0] * 0.9, open[1] * 0.9, open[2] * 0.9], facing, 0.1))
+      // Normals lean toward the open direction, with its upward part damped: crown tops lit
+      // straight from above read as a pale lid over the crown.
+      const normal = normalize(
+        add([open[0] * 0.9, open[1] * (open[1] > 0 ? 0.55 : 0.9), open[2] * 0.9], facing, 0.25),
+      )
       card(builder, centreOfCard, t, b, width, height, normal, colour, tile, wind)
     }
   })
+}
+
+/** Limits a card's tilt to about 30° from vertical, turning flat-facing cards toward the camera. */
+function uprightCard(facing: Point, toCamera: Point): Point {
+  const flat = Math.hypot(facing[0], facing[2])
+  const lift = Math.max(-0.5, Math.min(0.5, facing[1]))
+  const horizontal: Point =
+    flat > 0.35
+      ? [facing[0] / flat, 0, facing[2] / flat]
+      : normalize([toCamera[0] + facing[0], 0, toCamera[2] + facing[2]])
+  return normalize([horizontal[0], lift, horizontal[2]])
 }
 
 /** Tuft palette after Last Signal's `[[grass]]` rows (forest.toml). */
