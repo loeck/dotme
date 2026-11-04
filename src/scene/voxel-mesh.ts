@@ -121,6 +121,7 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
   const stone = new Color(0x5c5b55)
   const lipColor = new Color()
   const footColor = new Color()
+  const mossFoot = new Color()
   const mossPatch = (id: number) => {
     let n = Math.imul(id + 1, 0x85ebca6b)
     n = Math.imul(n ^ (n >>> 13), 0xc2b2ae35)
@@ -155,10 +156,16 @@ export function prepareTerrain(world: VoxelWorld, eyes = terrainEyes()): Prepare
             : 0
         topColor.copy(color).lerp(moss, mossy)
         // Mossy risers grade from a moss lip under the turf to darker soil at the foot, rather
-        // than one flat dark face.
+        // than one flat dark face. Past the foreground the moss climbs over the whole riser: seen
+        // from afar, brown risers under green tops stack into a staircase of dark stripes, while
+        // mossy ones read as one continuous slope.
         if (mossy) {
-          lipColor.copy(soil).lerp(topColor, 0.55)
-          footColor.copy(soil).multiplyScalar(0.55)
+          const distant = Math.min(1, Math.max(0, (2 - voxel.z) / 8))
+          lipColor.copy(soil).lerp(topColor, 0.55 + 0.45 * distant)
+          footColor
+            .copy(soil)
+            .multiplyScalar(0.55)
+            .lerp(mossFoot.copy(soil).lerp(topColor, 0.45).multiplyScalar(0.8), distant)
         } else {
           lipColor.copy(color).lerp(stone, 0.5)
           footColor.copy(lipColor).multiplyScalar(0.7)

@@ -15,8 +15,9 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 
 - Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
   golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles. A solid needle spire over the top third
-  carries the crown to its tip, so the small top tiers do not float apart. Boughs start at 27–33% of the height so
+  colour. One variant uses the darker spruce needles. A needle core a third of the crown radius,
+  upper tiers that thicken toward the top and a solid spire over the top 42% keep the silhouette
+  one continuous cone, so the sky never shows between the small top tiers. Boughs start at 27–33% of the height so
   a short dark trunk shows under the skirt.
 - Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
   below, and an uneven crown of scaffold lobes around a dense inner mass.

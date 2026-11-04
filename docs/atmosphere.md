@@ -52,10 +52,12 @@ Profile contrast samples the rendered backdrop through the composition pipeline.
 retains text, links, keyboard focus and screen-reader semantics. Cursor light is a subtle
 nighttime effect; pointer interaction remains available in daylight.
 
-Terrain follows Last Signal's ground. Tops break into micro-voxels about 6 cm across and sides
-into thin strata, each cell shifting value by ±12% and hue slightly between moss and soil, fading
+Terrain follows Last Signal's ground. Tops and sides break into square micro-voxels about 6 cm
+across (sides used to take horizontal strata, which drew every step as a line), each cell shifting value by ±12% and hue slightly between moss and soil, fading
 out once a cell spans under about two pixels (`terrain-detail.ts`). Mossy risers grade from a
-moss lip under the turf to darker soil at the foot, and shore and rock risers toward wet stone,
+moss lip under the turf to darker soil at the foot; past the foreground (over 8 m from z = 2)
+the moss climbs over the whole riser, so distant hills read as continuous slopes rather than a
+staircase of dark stripes under green tops, and shore and rock risers toward wet stone,
 from colours independent of the foreground framing dim. The probe lights tops from the bright
 zenith, but a riser samples the dark horizon of islands and water, so a sky fill adds ambient-
 tinted irradiance, through the diffuse BRDF and occlusion, peaking on vertical faces.

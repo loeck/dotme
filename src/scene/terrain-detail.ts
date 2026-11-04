@@ -33,12 +33,7 @@ export function applyTerrainDetail(material: MeshStandardNodeMaterial, sky: Terr
   // Tops: one hash per XZ cell. Sides: horizontal strata, a few cells long along the face.
   // Seeds stay below 2^24 so float32 keeps every cell distinct before the unsigned hash.
   const topSeed = cell.x.add(cell.z.mul(613))
-  const along = floor(
-    positionWorld.x
-      .add(positionWorld.z)
-      .mul(CELLS / 3)
-      .add(OFFSET),
-  )
+  const along = floor(positionWorld.x.add(positionWorld.z).mul(CELLS).add(OFFSET))
   const sideSeed = cell.y.mul(911).add(along.mul(7)).add(1_000_003)
   const value = mix(hash(sideSeed), hash(topSeed), top)
   const hue = mix(hash(sideSeed.add(1)), hash(topSeed.add(7)), top)
