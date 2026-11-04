@@ -358,7 +358,8 @@ export function sculptSpruce(seed: number, size: number, spruce: boolean) {
       )
     }
   }
-  sculpt.limb([0, height * 0.85, 0], [0, height, 0], size, needles)
+  // A solid spire carries the crown to its tip, so the top tiers do not float apart.
+  sculpt.cone(height * 0.66, height * 0.34, canopyRadius * 0.36, needles)
   return sculpt
 }
 
