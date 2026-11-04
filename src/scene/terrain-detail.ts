@@ -17,38 +17,52 @@ import type { MeshStandardNodeMaterial } from 'three/webgpu'
 
 /** Micro-voxel cells per metre: four per 25 cm terrain voxel, about 6 cm each. */
 const CELLS = 16
+/** The coarser octave matches the 12.5 cm micro-columns the far terrain erodes into. */
+const COARSE_CELLS = 8
 /** Keeps world coordinates positive before the unsigned hash. */
 const OFFSET = 4096
 
 /**
- * Last Signal's ground is never one flat colour per block: the top of a voxel breaks into
- * micro-voxels of moss, soil and litter, and its sides into square cells too. This multiplies the
- * vertex colour by a quantised world-space pattern (value ±12%, a slight moss/soil hue shift),
- * fading out where a cell shrinks below about a pixel so distant terrain does not shimmer.
+ * One octave of the micro-cell pattern: a value and hue per square cell (one hash per XZ cell on
+ * tops, per cell along and up the face on sides), faded out where a cell spans under about two
+ * pixels so it never shimmers.
  */
-export function applyTerrainDetail(material: MeshStandardNodeMaterial, sky: TerrainSkyFill) {
-  sky.applyTo(material)
-  const cell = floor(positionWorld.mul(CELLS).add(OFFSET))
+function microCells(cells: number, salt: number, value: number) {
+  const cell = floor(positionWorld.mul(cells).add(OFFSET))
   const top = smoothstep(0.5, 0.8, normalWorld.y)
-  // Tops: one hash per XZ cell. Sides: one hash per square cell along the face and up it.
   // Seeds stay below 2^24 so float32 keeps every cell distinct before the unsigned hash.
-  const topSeed = cell.x.add(cell.z.mul(613))
-  const along = floor(positionWorld.x.add(positionWorld.z).mul(CELLS).add(OFFSET))
-  const sideSeed = cell.y.mul(911).add(along.mul(7)).add(1_000_003)
-  const value = mix(hash(sideSeed), hash(topSeed), top)
+  const topSeed = cell.x.add(cell.z.mul(613)).add(salt)
+  const along = floor(positionWorld.x.add(positionWorld.z).mul(cells).add(OFFSET))
+  const sideSeed = cell.y
+    .mul(911)
+    .add(along.mul(7))
+    .add(1_000_003 + salt)
+  const shade = mix(hash(sideSeed), hash(topSeed), top)
   const hue = mix(hash(sideSeed.add(1)), hash(topSeed.add(7)), top)
   // Moss cells lean green, soil cells warm; both stay within the vertex colour's value.
   const tint = mix(vec3(1.06, 0.97, 0.88), vec3(0.94, 1.05, 0.9), hue)
-  const shade = float(0.88).add(value.mul(0.24))
-  // Fade by on-screen cell size: full detail while a cell spans more than about two pixels.
+  const factor = tint.mul(float(1 - value).add(shade.mul(2 * value)))
+  // Fade by on-screen cell size: full detail while a cell spans more than about four pixels.
   const footprint = max(
     fwidth(positionWorld.x),
     max(fwidth(positionWorld.y), fwidth(positionWorld.z)),
   )
-  const detail = smoothstep(0.25, 0.5, footprint.mul(CELLS)).oneMinus()
-  const strength = detail.mul(mix(0.7, 1, top))
-  const factor = mix(vec3(1), tint.mul(shade), strength)
-  material.colorNode = vec4(factor, 1)
+  const detail = smoothstep(0.25, 0.5, footprint.mul(cells)).oneMinus()
+  return mix(vec3(1), factor, detail.mul(mix(0.7, 1, top)))
+}
+
+/**
+ * Last Signal's ground is never one flat colour per block: the top of a voxel breaks into
+ * micro-voxels of moss, soil and litter, and its sides into square cells too. This multiplies the
+ * vertex colour by two quantised world-space octaves: 6 cm cells (value ±12%, a slight moss/soil
+ * hue shift) near the camera, and 12.5 cm cells (±8%) that carry on where the fine ones fade, so
+ * the mid-ground and far hills still break into cells instead of flat faces.
+ */
+export function applyTerrainDetail(material: MeshStandardNodeMaterial, sky: TerrainSkyFill) {
+  sky.applyTo(material)
+  const fine = microCells(CELLS, 0, 0.12)
+  const coarse = microCells(COARSE_CELLS, 5_003_009, 0.08)
+  material.colorNode = vec4(fine.mul(coarse), 1)
 }
 
 /** Share of the ambient colour added as sky light on a vertical face. */

@@ -81,7 +81,9 @@ instructions in the existing water material, with no extra pass.
 Terrain follows Last Signal's ground. Tops and sides break into square micro-voxels about 6 cm
 across (sides used to take horizontal strata, which drew every step as a line), each cell
 shifting value by ±12% and hue slightly between moss and soil, fading out once a cell spans
-under about two pixels (`terrain-detail.ts`). Mossy risers grade from a moss lip under the turf
+under about two pixels (`terrain-detail.ts`). A second octave of 12.5 cm cells (±8%) carries on
+where the fine one fades, on the same lattice as the far terrain's micro-columns, so mid-ground
+and distant hills still break into cells instead of flat faces. Mossy risers grade from a moss lip under the turf
 to darker soil at the foot; past the foreground (over 8 m from z = 2) the moss climbs over the
 whole riser, so distant hills read as continuous slopes rather than a staircase of dark stripes under green tops, and shore and rock risers toward wet stone,
 from colours independent of the foreground framing dim. The probe lights tops from the bright
