@@ -52,6 +52,32 @@ Profile contrast samples the rendered backdrop through the composition pipeline.
 retains text, links, keyboard focus and screen-reader semantics. Cursor light is a subtle
 nighttime effect; pointer interaction remains available in daylight.
 
+## Cursor
+
+With a fine hovering mouse the native cursor gives way, once the landscape is ready, to a
+6 px light point with an ink edge (`scene-cursor.ts`); the same point is drawn by an inline
+native cursor until then, and on blur, so the hand-off is invisible. Its position is applied on
+every event and never eased. Only its shape moves: a trailing point follows the pointer with a
+42 ms exponential lag (`cursor-motion.ts`), and their separation stretches the point into a
+tail behind the motion, up to 2.1 times its length at area-preserving width, while its leading
+edge stays on the hit point. The stretch grows with speed rather than snapping on at a crawl,
+eases back by itself when the mouse stops and turns continuously when it reverses. Frames
+advance the trail, taking the pointer to move linearly between them, so neither the event rate
+nor the display rate changes the shape. Over links and buttons the point shrinks and opens into
+a hollow 22 px ring that drifts at most 4 px behind it, so the label under the cursor stays
+legible. A press tightens the point (and the ring), and a press on the landscape releases one
+faint echo ring that widens and fades in 0.6 s, like the ripple the water answers with.
+Reduced motion keeps the hit point and the ring state but drops the stretch, the drift and the
+echo; touch and coarse pointers keep their native behaviour.
+
+At night the cursor carries a lantern. The surface under it receives a soft pool of
+irradiance (`pointer-light.ts`); when the cursor crosses a silhouette and the surface beneath
+jumps in depth, the pool rekindles there instead of teleporting at full strength. Water is
+almost purely specular and barely shows that diffuse pool, so the lake shader also reflects a
+small lantern hanging 35 cm above the point: a glint just below it on screen that the waves
+break into a short shimmering streak, the way the bank's lamps reflect. It is a few
+instructions in the existing water material, with no extra pass.
+
 Terrain follows Last Signal's ground. Tops and sides break into square micro-voxels about 6 cm
 across (sides used to take horizontal strata, which drew every step as a line), each cell
 shifting value by ±12% and hue slightly between moss and soil, fading out once a cell spans

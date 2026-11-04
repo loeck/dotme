@@ -208,6 +208,14 @@ export class VoxelLandscapeEngine {
   private readonly rayNdc = new Vector2()
   private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
+  // Separate targets: processPointer() runs inside render() and must not overwrite the
+  // frame's water point, nor a stroke's endpoints while it samples between them.
+  private readonly frameWaterPoint = new Vector3()
+  private readonly pressPoint = new Vector3()
+  private readonly strokeStart = new Vector3()
+  private readonly strokeEnd = new Vector3()
+  private readonly strokeSample = new Vector3()
+  private readonly strokeContact = new Vector3()
   private readonly pointerLight = new PointerLight()
   private readonly lightHit = new Vector3()
   private readonly pointer = new Vector2(0, 0)
@@ -917,11 +925,12 @@ export class VoxelLandscapeEngine {
     return true
   }
 
-  private hitWater(clientX: number, clientY: number): Vector3 | null {
-    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay() : null
+  /** Writes the water point under a client position into `target`, which it returns. */
+  private hitWater(clientX: number, clientY: number, target: Vector3): Vector3 | null {
+    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay(target) : null
   }
 
-  private waterPointOnRay(): Vector3 | null {
+  private waterPointOnRay(target: Vector3): Vector3 | null {
     const ray = this.raycaster.ray
     this.waterPlane.constant = -WATER_LEVEL
     if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
@@ -945,7 +954,7 @@ export class VoxelLandscapeEngine {
       if (i >= 0 && (this.bed.obstacle[i] ?? -Infinity) >= ray.origin.y + ray.direction.y * d)
         return null
     }
-    return this.waterHit.clone()
+    return target.copy(this.waterHit)
   }
 
   private updatePointerLight(
@@ -1032,14 +1041,14 @@ export class VoxelLandscapeEngine {
     this.pointerBusy = true
     const revision = this.pointerRevision
     try {
-      let point = this.hitWater(event.x, event.y)
+      let point = this.hitWater(event.x, event.y, this.strokeEnd)
       if (!point) {
         this.previousPointer = null
         return
       }
       this.pointerHeight = await this.simulation.heightAt(point.x, point.z)
       if (this.disposed || revision !== this.pointerRevision) return
-      point = this.hitWater(event.x, event.y)
+      point = this.hitWater(event.x, event.y, this.strokeEnd)
       if (!point) {
         this.previousPointer = null
         return
@@ -1047,7 +1056,7 @@ export class VoxelLandscapeEngine {
       const previous = this.previousPointer
       if (previous && (event.x !== previous.x || event.y !== previous.y)) {
         // Reproject both client positions with the SAME camera. Parallax is never input energy.
-        const start = this.hitWater(previous.x, previous.y)
+        const start = this.hitWater(previous.x, previous.y, this.strokeStart)
         if (start) {
           const distance = start.distanceTo(point)
           const pixels = Math.hypot(event.x - previous.x, event.y - previous.y)
@@ -1057,7 +1066,7 @@ export class VoxelLandscapeEngine {
             distance,
             this.dragging,
           )
-          const projected = start.clone()
+          const projected = this.strokeSample
           const bounds = this.canvasBounds ?? this.renderer.domElement.getBoundingClientRect()
           for (let i = 1; i <= samples; i++) {
             // Equal world spacing avoids bunching pressure samples at the near
@@ -1069,6 +1078,7 @@ export class VoxelLandscapeEngine {
             const contact = this.hitWater(
               bounds.left + (projected.x + 1) * bounds.width * 0.5,
               bounds.top + (1 - projected.y) * bounds.height * 0.5,
+              this.strokeContact,
             )
             if (contact) this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
           }
@@ -1094,7 +1104,7 @@ export class VoxelLandscapeEngine {
       this.requestFrame()
       return
     }
-    const point = this.hitWater(event.clientX, event.clientY)
+    const point = this.hitWater(event.clientX, event.clientY, this.pressPoint)
     if (!point) {
       if (event.pointerType === 'touch') {
         this.skyPointerId = event.pointerId
@@ -1729,7 +1739,7 @@ export class VoxelLandscapeEngine {
     this.camera.updateMatrixWorld()
     const pointerOnScene =
       this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
-    const waterPoint = pointerOnScene ? this.waterPointOnRay() : null
+    const waterPoint = pointerOnScene ? this.waterPointOnRay(this.frameWaterPoint) : null
     // Snapshot before processPointer() reprojects pending events into the same scratch vector.
     if (pointerOnScene) this.detailPointerNdc.copy(this.rayNdc)
     if (waterPoint)

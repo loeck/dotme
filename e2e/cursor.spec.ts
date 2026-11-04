@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import type { Page } from '@playwright/test'
 
 import { deferred } from './deferred'
 import { mockParisWeather } from './weather-fixture'
@@ -17,7 +18,10 @@ test('outlined point stays on controls and grows above the dialog', async ({ pag
   await trigger.hover()
   await expect(trigger).toHaveCSS('cursor', 'none')
   await expect(page.locator('.scene-cursor')).toHaveAttribute('data-interactive', 'true')
-  await expect(page.locator('.scene-cursor > span')).toHaveCSS('scale', '1.65')
+  // The point opens into a hollow ring so the label under it stays legible.
+  await expect(page.locator('.scene-cursor-ring')).toHaveCSS('opacity', '1')
+  await expect(page.locator('.scene-cursor-ring')).toHaveCSS('scale', '1')
+  await expect(page.locator('.scene-cursor-point')).toHaveCSS('scale', '0.5')
   await expect(trigger.locator('svg')).toHaveCSS('cursor', 'none')
   await trigger.click()
   const dialog = page.getByRole('dialog')
@@ -67,70 +71,109 @@ test('native point remains during landscape loading and returns after blur', asy
   await expect(canvas).toHaveCSS('cursor', nativePoint)
 })
 
-test('strain follows movement without shifting the hit point and settles at rest', async ({
-  page,
-}) => {
-  await page.goto('/?seed=42')
-  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  const cursor = page.locator('.scene-cursor')
-  const shape = cursor.locator('span')
-  const measure = async (deltaX: number, deltaY: number) =>
-    page.evaluate(
-      ({ dx, dy }) => {
-        const target = document.querySelector('main')
-        const point = document.querySelector<HTMLElement>('.scene-cursor > span')
-        if (!target || !point) throw new Error('Cursor elements are missing')
-        window.dispatchEvent(new Event('blur'))
-        for (const [x, y, time] of [
-          [400, 400, 1000],
-          [400 + dx, 400 + dy, 1016],
-        ] as const) {
-          const event = new PointerEvent('pointermove', {
+/** Dispatches mouse moves on `main`, one batch per animation frame, and reads the point. */
+const strainAfter = (page: Page, frames: (readonly (readonly [number, number])[])[]) =>
+  page.evaluate(async (batches) => {
+    const target = document.querySelector('main')
+    const point = document.querySelector<HTMLElement>('.scene-cursor-point')
+    if (!target || !point) throw new Error('Cursor elements are missing')
+    window.dispatchEvent(new Event('blur'))
+    for (const batch of batches) {
+      for (const [x, y] of batch) {
+        target.dispatchEvent(
+          new PointerEvent('pointermove', {
             bubbles: true,
             pointerType: 'mouse',
             clientX: x,
             clientY: y,
-          })
-          Object.defineProperty(event, 'timeStamp', { value: time })
-          target.dispatchEvent(event)
-        }
-        const rect = point.getBoundingClientRect()
-        const strain = new DOMMatrixReadOnly(point.style.transform)
-        return {
-          width: rect.width,
-          height: rect.height,
-          x: rect.x + rect.width / 2,
-          y: rect.y + rect.height / 2,
-          stretchX: strain.a,
-          stretchY: strain.d,
-        }
-      },
-      { dx: deltaX, dy: deltaY },
-    )
+          }),
+        )
+      }
+      // eslint-disable-next-line no-await-in-loop -- one batch per rendered frame
+      await new Promise(requestAnimationFrame)
+    }
+    const rect = point.getBoundingClientRect()
+    return {
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      transform: point.style.transform,
+      strain: new DOMMatrixReadOnly(point.style.transform),
+    }
+  }, frames)
+
+test('the point trails a tail behind its motion and settles at rest', async ({ page }) => {
+  await page.goto('/?seed=42')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  const point = page.locator('.scene-cursor-point')
   // Each direction starts after the previous deformation has visibly settled.
   /* eslint-disable no-await-in-loop */
   for (const [dx, dy] of [
-    [80, 0],
-    [-80, 0],
-    [0, 80],
-    [0, -80],
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
   ] as const) {
-    const rect = await measure(dx, dy)
-    expect(rect.x).toBeCloseTo(400 + dx, 2)
-    expect(rect.y).toBeCloseTo(400 + dy, 2)
-    expect(dx ? rect.stretchX : rect.stretchY).toBeGreaterThan(2)
-    expect(Math.max(rect.stretchX, rect.stretchY)).toBeLessThanOrEqual(2.8)
-    await expect(shape).toHaveCSS('transform', 'none')
+    const path = [0, 1, 2, 3].map((step) => [[400 + dx * 24 * step, 400 + dy * 24 * step]] as const)
+    const shape = await strainAfter(page, path)
+    const x = 400 + dx * 72
+    const y = 400 + dy * 72
+    // The hit point stays inside the drawn shape, at its leading edge.
+    expect(shape.left).toBeLessThanOrEqual(x + 3.01)
+    expect(shape.right).toBeGreaterThanOrEqual(x - 3.01)
+    expect(shape.top).toBeLessThanOrEqual(y + 3.01)
+    expect(shape.bottom).toBeGreaterThanOrEqual(y - 3.01)
+    if (dx > 0) expect(shape.right).toBeCloseTo(x + 3, 0)
+    if (dx < 0) expect(shape.left).toBeCloseTo(x - 3, 0)
+    if (dy > 0) expect(shape.bottom).toBeCloseTo(y + 3, 0)
+    if (dy < 0) expect(shape.top).toBeCloseTo(y - 3, 0)
+    // Proportional to speed, so slow frames on a busy GPU still give a visible tail.
+    const stretch = dx ? shape.strain.a : shape.strain.d
+    expect(stretch).toBeGreaterThan(1.2)
+    expect(stretch).toBeLessThanOrEqual(2.1)
+    await expect(point).toHaveCSS('transform', 'none')
   }
   /* eslint-enable no-await-in-loop */
   await page.emulateMedia({ reducedMotion: 'reduce' })
-  const still = await measure(80, 0)
-  expect(still.width).toBeCloseTo(6, 2)
-  expect(still.height).toBeCloseTo(6, 2)
+  const still = await strainAfter(page, [[[400, 400]], [[480, 400]], [[560, 400]]])
+  expect(still.right - still.left).toBeCloseTo(6, 2)
+  expect(still.bottom - still.top).toBeCloseTo(6, 2)
+  expect(still.transform).toBe('none')
   await page.getByRole('link', { name: /GitHub/ }).hover()
-  await expect(cursor).toBeVisible()
-  await expect(cursor).toHaveAttribute('data-interactive', 'true')
+  await expect(page.locator('.scene-cursor')).toBeVisible()
+  await expect(page.locator('.scene-cursor')).toHaveAttribute('data-interactive', 'true')
   await expect(page.getByRole('link', { name: /GitHub/ })).toHaveCSS('cursor', 'none')
+})
+
+test('a press tightens the point and only the landscape releases an echo', async ({ page }) => {
+  await page.goto('/?seed=42')
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
+  const cursor = page.locator('.scene-cursor')
+  const echoes = () =>
+    page.evaluate(() => document.querySelector('.scene-cursor-echo')?.getAnimations().length)
+  await page.mouse.move(640, 160)
+  await page.mouse.down()
+  await expect(cursor).toHaveAttribute('data-pressed', '')
+  await expect(page.locator('.scene-cursor-point')).toHaveCSS('scale', '0.72')
+  expect(await echoes()).toBe(1)
+  await page.mouse.up()
+  await expect(cursor).not.toHaveAttribute('data-pressed')
+  await expect.poll(echoes).toBe(0)
+  const trigger = page.getByRole('button', { name: 'About this landscape' })
+  await trigger.hover()
+  await page.mouse.down()
+  await expect(page.locator('.scene-cursor-ring')).toHaveCSS('scale', '0.84')
+  expect(await echoes()).toBe(0)
+  await page.mouse.up()
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.mouse.move(640, 160)
+  await page.mouse.down()
+  await expect(cursor).toHaveAttribute('data-pressed', '')
+  expect(await echoes()).toBe(0)
+  await page.mouse.up()
 })
 
 test('native point is available before the main JavaScript starts', async ({ page }) => {
@@ -144,36 +187,4 @@ test('native point is available before the main JavaScript starts', async ({ pag
   await expect(page.locator('html')).not.toHaveAttribute('data-cursor-active')
   await expect(page.locator('#scene-canvas')).toHaveCSS('cursor', nativePoint)
   await expect(page.locator('.scene-cursor')).toBeHidden()
-})
-
-test('equal pointer speeds produce equal strain at different event rates', async ({ page }) => {
-  await page.goto('/?seed=42')
-  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  const strains = await page.evaluate(() => {
-    const target = document.querySelector('main')
-    const shape = document.querySelector<HTMLElement>('.scene-cursor > span')
-    if (!target || !shape) throw new Error('Cursor elements are missing')
-    const sample = (interval: number) => {
-      window.dispatchEvent(new Event('blur'))
-      for (const [x, time] of [
-        [400, 1000],
-        [400 + interval * 0.2, 1000 + interval],
-      ] as const) {
-        const event = new PointerEvent('pointermove', {
-          bubbles: true,
-          pointerType: 'mouse',
-          clientX: x,
-          clientY: 400,
-        })
-        Object.defineProperty(event, 'timeStamp', { value: time })
-        target.dispatchEvent(event)
-      }
-      return new DOMMatrixReadOnly(shape.style.transform).a
-    }
-    return [sample(16), sample(8), sample(4), sample(2)]
-  })
-  const baseline = strains[0]
-  if (baseline === undefined) throw new Error('No cursor strain samples were recorded')
-  expect(baseline).toBeGreaterThan(1.5)
-  for (const strain of strains) expect(strain).toBeCloseTo(baseline, 4)
 })
