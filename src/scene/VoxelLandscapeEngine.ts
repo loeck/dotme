@@ -302,6 +302,7 @@ export class VoxelLandscapeEngine {
     performance.clearMeasures()
     const releaseCompilationScheduler = installCompilationScheduler()
     let engine: VoxelLandscapeEngine | undefined
+    let passes: Promise<unknown> | undefined
     const abort = () => {
       engine?.dispose()
       resources.dispose()
@@ -329,7 +330,7 @@ export class VoxelLandscapeEngine {
       // The offscreen passes do not depend on the lit scene: issue them before
       // the environment so their pipelines compile alongside the scene batch.
       performance.mark('compile:passes')
-      const passes = engine.compilePasses(options.renderer, initialLight)
+      passes = engine.compilePasses(options.renderer, initialLight)
       // Settled with the scene batch; keep an early failure from going unhandled.
       passes.catch(() => undefined)
       performance.mark('compile:environment')
@@ -345,6 +346,8 @@ export class VoxelLandscapeEngine {
       engine.requestFrame()
       return engine
     } catch (error) {
+      // Offscreen compiles may still run; let them settle before their owners are disposed.
+      await passes?.catch(() => undefined)
       engine?.dispose()
       resources.dispose()
       throw error
@@ -1415,6 +1418,8 @@ export class VoxelLandscapeEngine {
     // the lake surface distorts beyond recognition. Curtains and splashes
     // still reflect; only the fluid volume renders from the main camera.
     reflected.layers.disable(WATERFALL_FLUID_LAYER)
+    // Foreground undergrowth sits below the mirror's useful detail; keep it main-view only.
+    reflected.layers.disable(UNDERGROWTH_LAYER)
     // The mirror renders at the main view's depth and attachments, so it shares
     // that render context: once the view's builds have settled, this only adds
     // objects outside the main frustum and the mirrored pipelines.
