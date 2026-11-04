@@ -325,11 +325,11 @@ export function sculptSpruce(seed: number, size: number, spruce: boolean) {
   const random = mulberry32(seed)
   const sculpt = new VoxelSculpt(size)
   const height = between(random, 2.7, 3.4),
-    canopyBase = height * between(random, 0.1, 0.16),
+    canopyBase = height * between(random, 0.27, 0.33),
     canopyRadius = height * between(random, 0.26, 0.3),
     layers = 6
   const needles = spruce ? P.spruce : P.needles
-  sculpt.limb([0, -0.15, 0], [0, height * 0.9, 0], 0.07, P.bark, 0.03)
+  sculpt.limb([0, -0.15, 0], [0, height * 0.9, 0], 0.105, P.bark, 0.035)
   const span = height - canopyBase
   sculpt.kind = 'needle'
   sculpt.cone(canopyBase, span, canopyRadius * 0.2, needles)
@@ -370,14 +370,14 @@ export function sculptPine(seed: number, size: number) {
     canopyBase = height * 0.48,
     canopyRadius = height * 0.21
   const orange = canopyBase * 0.55
-  sculpt.limb([0, -0.15, 0], [0, orange, 0], 0.11, P.bark, 0.095)
-  sculpt.limb([0, orange, 0], [0, height * 0.92, 0], 0.095, P.barkUpper, 0.045)
+  sculpt.limb([0, -0.15, 0], [0, orange, 0], 0.18, P.bark, 0.14)
+  sculpt.limb([0, orange, 0], [0, height * 0.92, 0], 0.14, P.barkUpper, 0.05)
   // Bark flakes: orange patches scattered over the darker lower trunk.
   for (let flake = 0; flake < 6; flake++) {
     const angle = random() * TAU,
       y = between(random, 0.2, orange)
     sculpt.ellipsoid(
-      [Math.sin(angle) * 0.08, y, Math.cos(angle) * 0.08],
+      [Math.sin(angle) * 0.12, y, Math.cos(angle) * 0.12],
       [0.04, between(random, 0.05, 0.1), 0.04],
       P.barkUpper,
       0,
@@ -435,12 +435,12 @@ export function sculptBirch(seed: number, size: number) {
   const height = between(random, 2.6, 3.3)
   const lean = between(random, -0.08, 0.08)
   const top: Point = [lean * height, height * 0.95, 0]
-  sculpt.limb([0, -0.15, 0], top, 0.06, P.birchBark, 0.025)
+  sculpt.limb([0, -0.15, 0], top, 0.09, P.birchBark, 0.03)
   for (let mark = 0; mark < 9; mark++) {
     const y = between(random, 0.15, height * 0.7)
     const angle = mark * ((47 * Math.PI) / 180) + random()
     sculpt.ellipsoid(
-      [lean * y + Math.sin(angle) * 0.05, y, Math.cos(angle) * 0.05],
+      [lean * y + Math.sin(angle) * 0.08, y, Math.cos(angle) * 0.08],
       [0.05, size * 0.6, 0.03],
       P.birchMark,
       angle,
@@ -452,13 +452,13 @@ export function sculptBirch(seed: number, size: number) {
   // The deep inner crown keeps the sprays from reading as separate floating clouds.
   sculpt.kind = 'leaf'
   sculpt.ellipsoid(
-    [lean * height * 0.68, height * 0.68, 0],
-    [height * 0.15, height * 0.22, height * 0.15],
+    [lean * height * 0.72, height * 0.72, 0],
+    [height * 0.15, height * 0.19, height * 0.15],
     P.birchLeavesDeep,
   )
   for (let scaffold = 0; scaffold < 5; scaffold++) {
     const share = scaffold / 4
-    const y = height * (0.42 + 0.4 * share)
+    const y = height * (0.5 + 0.34 * share)
     const heading = phase + scaffold * TAU * GOLDEN_TURN
     const reach = height * (0.2 - 0.08 * share) * between(random, 0.85, 1.1)
     const from: Point = [lean * y, y, 0]
