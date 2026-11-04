@@ -60,6 +60,11 @@ from colours independent of the foreground framing dim. The probe lights tops fr
 zenith, but a riser samples the dark horizon of islands and water, so a sky fill adds ambient-
 tinted irradiance, through the diffuse BRDF and occlusion, peaking on vertical faces.
 
+The fixed camera faces the low sun at both ends of the day, so the golden-hour look
+(`scene-look.ts`) lifts saturation, contrast and warmth but keeps noon's exposure, haze
+start and air density (5% thinner), with only a 10% lift of the forward glow. A thicker,
+nearer haze there washed the islands and banks into one milky plane against the light.
+
 Indirect terrain light, local reflections and weather remain artistic approximations.
 Validate changes with seeded clear/cloudy captures at noon, sunrise (`startTime=06:00`),
 civil twilight (`05:45`, `18:10`) and night, plus reduced motion and resize. See
