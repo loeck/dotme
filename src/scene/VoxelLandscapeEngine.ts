@@ -81,6 +81,7 @@ import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
+import { applyTerrainDetail, TerrainSkyFill } from './terrain-detail'
 import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
@@ -194,6 +195,7 @@ export class VoxelLandscapeEngine {
   private readonly weather
   private readonly showSun: boolean
   private readonly ambient = new AmbientLight()
+  private readonly terrainSky = new TerrainSkyFill()
   private readonly baseFogDensity = 0.0105
   private readonly fog = new FogExp2(0x14202a, this.baseFogDensity)
   private readonly scene = new Scene()
@@ -626,6 +628,7 @@ export class VoxelLandscapeEngine {
         flatShading: true,
         vertexColors: true,
       })
+      applyTerrainDetail(material, this.terrainSky)
       this.materials.push(this.resources.own(material))
       const batches = terrain.batches.filter((batch) => batch.material === kind)
       if (!batches.length) continue
@@ -1670,6 +1673,7 @@ export class VoxelLandscapeEngine {
     this.moon.intensity = light.intensity
     this.moon.color.copy(light.color)
     this.ambient.color.copy(light.ambient)
+    this.terrainSky.update(light.ambient)
     this.ambient.intensity = 1
     this.fog.color.copy(light.haze)
     this.fog.density = Math.sqrt(WEATHER[this.weather].extinction / 100)

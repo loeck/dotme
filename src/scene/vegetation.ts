@@ -9,6 +9,7 @@ import {
   interleavedGradientNoise,
   log2,
   max,
+  min,
   normalize,
   positionLocal,
   positionWorld,
@@ -54,6 +55,8 @@ const SHADOW_LAYER = 5
 export const UNDERGROWTH_LAYER = 7
 /** Wind speed (m/s) at which vegetation reaches its full lean. */
 const FULL_LEAN_SPEED = 9
+/** Fastest flutter, about 1.1 Hz. */
+const MAX_FLUTTER_OMEGA = 7
 /** The forest arrives after the first frame and dissolves in over this many milliseconds. */
 const APPEAR_MS = 700
 
@@ -158,9 +161,12 @@ export class Vegetation {
       .mul(0.5)
       .add(sin(t.mul(0.97).add(phase.mul(1.7))).mul(0.3))
       .add(sin(t.mul(1.61).add(phase.mul(2.3))).mul(0.2))
-    const lean = this.strength.mul(this.strength.mul(0.6).add(buffet.mul(0.4)).add(0.1))
+    const lean = this.strength.mul(this.strength.mul(0.6).add(buffet.mul(0.25)).add(0.1))
+    // Flutter moves each card, blade or leaflet as one piece (its vertices share the phase) at a
+    // bounded rate. Varying it per vertex deformed cards, and tying it to fast natural rates made
+    // the vegetation tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter.
     const shiver = sin(
-      t.mul(2.9).add(phase.mul(5.3)).add(positionLocal.x.mul(7)).add(positionLocal.z.mul(5)),
+      this.time.mul(min(omega.mul(1.7), MAX_FLUTTER_OMEGA)).add(phase.mul(5.3)),
     ).mul(flutter.mul(this.strength.add(0.15)))
     const direction = vec3(this.wind.x, float(0), this.wind.y)
     return direction.mul(lean.mul(bend).add(shiver)).add(vec3(0, shiver.mul(0.5), 0))

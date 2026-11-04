@@ -58,7 +58,13 @@ with some patches drying toward straw. A grass tuft is a sparse fan of six to te
 Bézier ribbons with four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from
 the ground to the tip. A fern crown is a ring of arching, drooping rachis strips cut into
 alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
-Thin blades pass some sunlight when the view faces a low sun.
+Under the clumps, a ground cover of short tufts (seven to ten blades of 6–13 cm, two rows
+and a tip, three triangles each) grows on most of the bank's columns, thinner on bare patches
+and drier where the clumps dry, so the soil between tall tufts reads as turf rather than bare
+voxels. Placement reads the neighbouring columns: tall clumps keep off a step's last column,
+and blades near a step or a wall turn away from it and lean less, while ground cover there moves
+inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
+view faces a low sun.
 
 ## Streaming
 
@@ -77,12 +83,14 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 156k triangles and the phone forest about 25k. Preparation runs after the surfaces on the
+forest is about 188k triangles (127k of them undergrowth) and the phone forest about 40k. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind
 
 Sway follows Voxen's ADR 0110: a height-squared shear, a rest lean with the wind speed and three
 buffeting sines (rates 0.53, 0.97, 1.61; weights 0.5, 0.3, 0.2) at 1.2/√H Hz. Cards, blades and
-leaflets add a light flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
+leaflets add a light flutter that moves each piece rigidly at no more than about 1.1 Hz; blades
+sway at most about 1.3 Hz. A per-vertex flutter at the plants' natural rates made the vegetation
+tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
 angular frequency. Reduced motion freezes the time, keeping only the static lean.

@@ -94,6 +94,23 @@ describe('Last Signal vegetation', () => {
     expect(Math.max(...heights)).toBeLessThanOrEqual(0.3)
   })
 
+  it('builds ground-cover blades as two rows and a tip', () => {
+    const builder = new MeshBuilder(false)
+    appendTuft(builder, [0, 0, 0], {
+      blades: 5,
+      height: 0.1,
+      width: 0.02,
+      colours: { root: [0.07, 0.1, 0.05], tip: [0.2, 0.26, 0.09] },
+      salt: 2,
+      phase: 0,
+      profile: 'short',
+    })
+    const mesh = builder.build()
+    // Two rows of two vertices plus a tip per blade; one quad and a tip triangle.
+    expect(mesh.positions.length / 3).toBe(5 * 5)
+    expect(mesh.indices.length / 3).toBe(5 * 3)
+  })
+
   it('is deterministic and stays within a triangle budget', () => {
     for (const mobile of [false, true]) {
       const world = createVoxelWorld(9182, mobile)

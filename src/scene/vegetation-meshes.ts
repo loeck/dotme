@@ -210,7 +210,7 @@ export function appendClumps(
       const lift = Math.max(0, Math.min(1, (p[1] - at.y) / (options.modelHeight * at.scale)))
       return lift * lift * options.swayMetres
     }
-    const flutter = edge * 0.08
+    const flutter = edge * 0.035
     const wind = (p: Point) =>
       [bendAt(p), options.sway.phase + random(9) * 2, flutter, options.sway.omega] as const
     if (seed.openness < 0.6) {
@@ -291,6 +291,21 @@ function uprightCard(facing: Point, toCamera: Point): Point {
 /** Tuft palette after Last Signal's `[[grass]]` rows (forest.toml). */
 export type GrassColours = Readonly<{ root: Rgb; tip: Rgb }>
 
+/** Blades sway at most about 1.3 Hz, the buffet's fastest sine then near 2 Hz. */
+const MAX_BLADE_OMEGA = 2 * Math.PI * 1.3
+
+/** Row positions along a blade and their width share (ADR 0107). */
+const BLADE_ROWS = [
+  [0, 0.55],
+  [0.33, 1],
+  [0.66, 0.5],
+  [0.9, 0.12],
+] as const
+const SHORT_BLADE_ROWS = [
+  [0, 0.7],
+  [0.5, 0.6],
+] as const
+
 /**
  * A sparse fan of pointed, arching ribbons (ADR 0107): each blade is a quadratic Bézier with
  * four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from the ground to a
@@ -306,16 +321,29 @@ export function appendTuft(
     colours: GrassColours
     salt: number
     phase: number
+    /** `short`: ground-cover blades of two rows and a tip, three triangles each. */
+    profile?: 'full' | 'short'
+    /** Unit XZ direction toward a nearby step edge or wall: blades turn away from it and lean less. */
+    edge?: readonly [number, number]
   }>,
 ) {
-  const omega = ((2 * Math.PI * 1.2) / Math.sqrt(Math.max(options.height, 0.05))) * 2.2
+  const rows = options.profile === 'short' ? SHORT_BLADE_ROWS : BLADE_ROWS
+  // 1.2/√H Hz, capped: a short blade's true rate (4 Hz at 10 cm) reads as trembling on screen.
+  const omega = Math.min(
+    (2 * Math.PI * 1.2) / Math.sqrt(Math.max(options.height, 0.05)),
+    MAX_BLADE_OMEGA,
+  )
   for (let blade = 0; blade < options.blades; blade++) {
     const r = (stream: number) => hash(blade, options.salt, stream)
     const angle = r(1) * Math.PI * 2
     const spread = r(2) * 0.04
     const h = options.height * (0.55 + r(3) * 0.45)
-    const lean = 0.25 + r(4) * 0.55
-    const dir: Point = [Math.sin(angle), 0, Math.cos(angle)]
+    let dir: Point = [Math.sin(angle), 0, Math.cos(angle)]
+    const edge = options.edge
+    // Mirror blades heading toward an edge so none hangs over a drop or into a wall.
+    const toward = edge ? dir[0] * edge[0] + dir[2] * edge[1] : 0
+    if (edge && toward > 0) dir = [dir[0] - 2 * toward * edge[0], 0, dir[2] - 2 * toward * edge[1]]
+    const lean = (0.25 + r(4) * 0.55) * (edge ? 0.6 : 1)
     const side: Point = [Math.cos(angle + r(5) * 0.6), 0, -Math.sin(angle + r(5) * 0.6)]
     const p0 = add(root, dir, spread)
     const p1 = add(add(p0, UP, h * 0.55), dir, lean * h * 0.25)
@@ -336,12 +364,6 @@ export function appendTuft(
         2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1]),
         2 * (1 - t) * (p1[2] - p0[2]) + 2 * t * (p2[2] - p1[2]),
       ])
-    const rows = [
-      [0, 0.55],
-      [0.33, 1],
-      [0.66, 0.5],
-      [0.9, 0.12],
-    ] as const
     const ids: number[] = []
     for (const [t, w] of rows) {
       const p = at(t)
@@ -369,7 +391,8 @@ export function appendTuft(
       0.01,
       omega,
     ])
-    builder.triangle(ids[6] ?? 0, ids[7] ?? 0, tip)
+    const last = (rows.length - 1) * 2
+    builder.triangle(ids[last] ?? 0, ids[last + 1] ?? 0, tip)
   }
 }
 
