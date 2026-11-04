@@ -5,6 +5,7 @@ import {
   Color,
   FloatType,
   HalfFloatType,
+  LinearFilter,
   LinearSRGBColorSpace,
   Matrix4,
   Mesh,
@@ -80,6 +81,10 @@ export class WaterfallFluidPass {
     // Streams are vertically continuous from overlapping parcels, so thickness
     // stops after the horizontal pass; only depth needs the vertical bridge.
     this.thicknessTexture = this.horizontalThickness.texture
+    // Only the reconstruction reads it: half floats filter on both backends, so
+    // silhouettes and the aerated share stay smooth between capture texels.
+    this.thicknessTexture.minFilter = LinearFilter
+    this.thicknessTexture.magFilter = LinearFilter
     this.targets = [
       this.rawDepth,
       this.rawThickness,

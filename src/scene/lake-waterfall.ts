@@ -1,5 +1,6 @@
 import {
   attribute,
+  cameraViewMatrix,
   cross,
   dFdx,
   dFdy,
@@ -8,19 +9,24 @@ import {
   Fn,
   mix,
   normalize,
+  normalView,
   positionLocal,
   positionView,
+  positionViewDirection,
   sin,
   smoothstep,
   uniform,
   uv,
   vec2,
   vec3,
+  vec4,
 } from 'three/tsl'
 import {
   Box3,
   BufferAttribute,
   BufferGeometry,
+  Color,
+  DirectionalLight,
   DoubleSide,
   FrontSide,
   Group,
@@ -30,6 +36,7 @@ import {
   MeshStandardNodeMaterial,
   PlaneGeometry,
   SphereGeometry,
+  Vector3,
 } from 'three/webgpu'
 import type { Camera, Node, NodeBuilder, Scene, WebGPURenderer } from 'three/webgpu'
 
@@ -43,7 +50,7 @@ import type { WaterContact } from './water-contact'
 import { contactNoise } from './water-noise'
 import { fieldUvNode, sampleWaterContact, windFieldNode } from './water-surface'
 import { waterfallDrift } from './waterfall-flow'
-import { WaterfallFluid } from './waterfall-fluid'
+import { scatterPhase, WaterfallFluid } from './waterfall-fluid'
 import type { WindState } from './wind'
 
 const GRAVITY = 9.81
@@ -59,6 +66,10 @@ const MAX_CURTAIN_STEPS = 4
 const WOBBLE_FORCE = 0.2
 const PARCEL_DENSITY = 1000
 const PARCEL_VOLUME = (4 / 3) * Math.PI
+/** Procedural patterns wrap their clock so hashed noise keeps its float precision. */
+const PATTERN_PERIOD = 600
+
+const scratchTarget = new Vector3()
 
 function smoothstepCpu(edge0: number, edge1: number, x: number) {
   const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
@@ -96,6 +107,12 @@ export class LakeWaterfall {
   }
   private readonly resources = new ResourceScope()
   private readonly time = uniform(0)
+  private readonly patternTime = uniform(0)
+  /** World direction towards the scene's key light and its colour times intensity. */
+  private readonly lightDirection = uniform(new Vector3(0, 1, 0))
+  private readonly lightRadiance = uniform(new Color(0, 0, 0))
+  private readonly scene: Scene
+  private keyLight: DirectionalLight | undefined
   private readonly opacity = uniform(0)
   private readonly fall: VoxelWaterfall
   private readonly emitJet: (jet: SplashJet) => void
@@ -158,6 +175,7 @@ export class LakeWaterfall {
     emitImpact: (impact: WaterfallImpact, wind: WindState) => void,
   ) {
     this.fall = fall
+    this.scene = scene
     this.reducedMotion = reducedMotion
     this.emitJet = emitJet
     this.emitImpact = emitImpact
@@ -180,7 +198,9 @@ export class LakeWaterfall {
         spray = this.resources.own(createMaterial()),
         basin = this.resources.own(createMaterial()),
         mist = this.resources.own(createMaterial())
-      this.fluid = this.resources.own(new WaterfallFluid(fall, mobile, this.opacity))
+      this.fluid = this.resources.own(
+        new WaterfallFluid(fall, mobile, this.opacity, this.patternTime),
+      )
       this.materials = [this.fluid.material, foam, spray, basin, mist]
       const parcels = this.fluid.particles
       this.parcelExtent = parcels.extent
@@ -306,36 +326,81 @@ export class LakeWaterfall {
         .mul(0.006)
       basin.flowPosition = positionLocal.add(vec3(0, ripple.add(lipMotion), 0))
       basin.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
-      basin.colorNode = mix(vec3(0.3, 0.43, 0.44), vec3(0.55, 0.66, 0.67), filament.mul(0.4))
-      basin.roughnessNode = mix(0.08, 0.2, filament)
-      basin.opacityNode = mix(0.76, 0.9, filament).mul(this.opacity)
+      // Dark, turbid pool water that mirrors the sky, with pale filaments drawn
+      // towards the lip.
+      basin.colorNode = mix(vec3(0.05, 0.065, 0.058), vec3(0.42, 0.46, 0.44), filament.mul(0.45))
+      basin.roughnessNode = mix(0.04, 0.3, filament)
+      basin.opacityNode = mix(0.86, 0.94, filament).mul(this.opacity)
       this.add(basinGeometry, basin, 'waterfall-basin')
       const exitSpeed = 0.35
       const duration =
         (Math.sqrt(exitSpeed * exitSpeed + 2 * GRAVITY * height) - exitSpeed) / GRAVITY
       const p = uv()
 
-      const foamPoint = p.sub(vec2(0.5, 0.38)).mul(vec2(2, 2.2))
-      const foamRadius = foamPoint.length()
-      const foamNoise = contactNoise(
-        p.mul(vec2(fall.width * 10, 12)).add(vec2(this.time.mul(0.32), this.time.mul(-1.4))),
+      const t = this.patternTime
+      // The plunge pool: a boil of aerated water the width of the fall, then foam
+      // lines fanning out downstream that tear into lace and decay as they drift,
+      // after Last Signal's foam (clump and grain breakup, a half-life per metre).
+      const halfWidth = fall.width / 2
+      const spanX = fall.width + 2.4
+      const spanZ = 3.6
+      const footX = p.x.sub(0.5).mul(spanX)
+      const footZ = p.y.mul(spanZ).add(IMPACT_OFFSET - 0.6)
+      const downstream = footZ.sub(IMPACT_OFFSET)
+      const travel = downstream.max(0)
+      const boilRadius = vec2(
+        footX
+          .abs()
+          .sub(halfWidth * 0.8)
+          .max(0),
+        downstream.mul(downstream.lessThan(0).select(1.6, 1.1)),
+      ).length()
+      const boil = float(1).sub(smoothstep(0.06, 0.6, boilRadius))
+      const churn = contactNoise(
+        vec2(footX.mul(11), footZ.mul(11)).add(vec2(t.mul(0.9), t.mul(-1.9))),
       )
-      const churn = float(1).sub(smoothstep(0.1, 0.85, foamRadius))
+      const drift = footZ.sub(t.mul(0.32))
+      const fan = footX.div(travel.mul(0.55).add(halfWidth + 0.25))
+      const lines = contactNoise(vec2(fan.mul(5.5), drift.mul(1.1)))
+      const clump = contactNoise(vec2(footX.mul(2.4), drift.mul(2.4)).add(7.1))
+      const lace = contactNoise(vec2(footX.mul(9), drift.mul(9)).add(3.3))
+      const held = smoothstep(0.3, 0.55, mix(clump, lace, 0.6))
+      const fanMask = float(1).sub(smoothstep(0.55, 1, fan.abs()))
+      const streakFoam = smoothstep(0.36, 0.64, lines)
+        .mul(held)
+        .mul(travel.div(-2.4).exp())
+        .mul(smoothstep(-0.1, 0.3, downstream))
+        .mul(fanMask)
+      // Entrained bubbles lighten the pool under the foam as they rise and drift.
+      const plume = travel
+        .div(-1.3)
+        .exp()
+        .mul(fanMask)
+        .mul(smoothstep(-0.3, 0.1, downstream))
+        .mul(mix(0.6, 1, clump))
+      const boilFoam = boil
+        .mul(mix(0.5, 1, smoothstep(0.25, 0.7, churn)))
+        .mul(mix(0.45, 1, this.impactPulse))
+      const footFoam = boilFoam.max(streakFoam.mul(0.92))
+      const border = float(1)
+        .sub(smoothstep(0.4, 0.5, p.x.sub(0.5).abs()))
+        .mul(smoothstep(0, 0.1, p.y))
+        .mul(float(1).sub(smoothstep(0.8, 1, p.y)))
       foam.flowPosition = vec3(
-        p.x.sub(0.5).mul(fall.width * 1.9),
-        churn.mul(mix(0.04, 0.14, foamNoise)).add(0.018),
-        p.y.sub(0.38).mul(1.9).add(IMPACT_OFFSET),
+        footX,
+        boil
+          .mul(mix(0.04, 0.16, churn))
+          .add(streakFoam.mul(0.008))
+          .add(0.016),
+        footZ,
       )
       foam.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
-      foam.colorNode = mix(vec3(0.68, 0.8, 0.8), vec3(0.94, 0.98, 0.97), foamNoise)
-      foam.roughness = 0.6
-      foam.opacityNode = churn
-        .mul(mix(0.55, 1, smoothstep(0.2, 0.7, foamNoise)))
-        .mul(mix(0.28, 1, this.impactPulse))
-        .mul(float(1).sub(smoothstep(0.85, 1.05, foamRadius)))
-        .mul(this.opacity)
+      foam.colorNode = mix(vec3(0.34, 0.39, 0.38), vec3(0.8, 0.82, 0.8), footFoam)
+      foam.roughness = 0.82
+      foam.opacityNode = footFoam.max(plume.mul(0.3)).mul(border).mul(this.opacity)
+      foam.emissiveNode = this.forwardGlow(0.5, vec3(0.16, 0.165, 0.16)).mul(boilFoam)
       const foamGeometry = this.resources.own(
-        new PlaneGeometry(1, 1, mobile ? 12 : 20, mobile ? 10 : 16),
+        new PlaneGeometry(1, 1, mobile ? 12 : 20, mobile ? 12 : 18),
       )
       this.add(foamGeometry, foam, 'waterfall-foot')
 
@@ -392,7 +457,13 @@ export class LakeWaterfall {
       spray.flowPosition = center.add(
         positionLocal.mul(vec3(source.z, source.z.mul(1.8), source.z)),
       )
-      spray.colorNode = vec3(0.9, 0.96, 0.96)
+      spray.colorNode = vec3(0.62, 0.7, 0.75)
+      spray.roughness = 0.08
+      // Drops are tiny lenses: shade them half towards the eye, half towards the sky.
+      spray.normalNode = normalize(
+        positionViewDirection.add(cameraViewMatrix.mul(vec4(0, 1, 0, 0)).xyz),
+      )
+      spray.emissiveNode = this.forwardGlow(0.6, vec3(0.45, 0.47, 0.48))
       const footFade = smoothstep(0, 0.025, dropAge).mul(
         float(1).sub(smoothstep(life.mul(0.75), life, dropAge)),
       )
@@ -400,35 +471,33 @@ export class LakeWaterfall {
         float(1).sub(smoothstep(0.86, 1, edgeDown)),
       )
       spray.opacityNode = mix(footFade, edgeFade, edge.abs())
-        .mul(motion.w)
+        .mul(motion.w.mul(0.75))
         .mul(float(1).sub(smoothstep(0.3, 1, p.sub(0.5).mul(2).length())))
         .mul(this.opacity)
       this.add(sprayGeometry, spray, 'waterfall-droplets')
 
-      // Soft, spatial puffs surround the lower flow and impact. Spherical geometry
-      // and a view-dependent chord fade give depth without a fullscreen fog pass.
-      const mistCount = mobile ? 12 : 22
+      // Spray mist: puffs born in the plunge roll outward and up, growing and
+      // thinning, while a thinner veil hangs on the lower fall. Smooth sphere
+      // normals and a chord fade keep them soft without a fullscreen fog pass.
+      const mistCount = mobile ? 14 : 24
       const mistSeeds = new Float32Array(mistCount * 4)
       for (let i = 0; i < mistCount; i++)
-        mistSeeds.set([(random() - 0.5) * fall.width * 1.25, random(), random(), random()], i * 4)
+        mistSeeds.set([(random() - 0.5) * fall.width * 1.1, random(), random(), random()], i * 4)
       const mistGeometry = this.instanced(new SphereGeometry(1, mobile ? 8 : 12, mobile ? 6 : 8))
       mistGeometry.setAttribute('aMist', new InstancedBufferAttribute(mistSeeds, 4))
       mistGeometry.instanceCount = mistCount
       const puff = attribute('aMist', 'vec4')
-      const puffAge = fract(this.time.mul(0.42).add(puff.y))
-      const atFoot = puff.z.lessThan(0.65)
+      const atFoot = puff.z.lessThan(0.75)
+      const puffAge = fract(this.patternTime.mul(atFoot.select(0.19, 0.4)).add(puff.y))
       const puffY = atFoot.select(
-        puffAge.mul(0.45).add(0.06),
+        puffAge.mul(0.7).add(puff.w.mul(0.15)).add(0.08),
         puff.z
-          .mul(height * 0.65)
-          .add(0.1)
-          .sub(puffAge.mul(0.22)),
+          .mul(height * 0.6)
+          .add(0.12)
+          .sub(puffAge.mul(0.25)),
       )
       const puffZ = atFoot.select(
-        puff.w
-          .mul(0.5)
-          .add(IMPACT_OFFSET - 0.05)
-          .add(puffAge.mul(0.15)),
+        puffAge.mul(puff.w.mul(0.6).add(0.8)).add(IMPACT_OFFSET - 0.3),
         float(1)
           .sub(puffY.div(height))
           .max(0)
@@ -436,22 +505,26 @@ export class LakeWaterfall {
           .mul(IMPACT_OFFSET)
           .add(puff.w.sub(0.5).mul(0.3)),
       )
-      const puffSize = atFoot.select(puffAge.mul(0.22).add(0.16), puffAge.mul(0.08).add(0.12))
-      mist.flowPosition = positionLocal
-        .mul(puffSize)
-        .add(vec3(puff.x.add(sin(this.time.mul(0.7).add(puff.w.mul(8))).mul(0.05)), puffY, puffZ))
-      const mistNormal = normalize(cross(dFdx(positionView), dFdy(positionView)))
-      const chord = mistNormal.dot(normalize(positionView.negate())).abs()
-      const mistDensity = contactNoise(positionLocal.xz.mul(12).add(positionLocal.y.mul(7)))
-      mist.normalNode = mistNormal
+      const puffX = puff.x
+        .mul(atFoot.select(puffAge.mul(0.6).add(1), 1))
+        .add(sin(this.patternTime.mul(0.6).add(puff.w.mul(8))).mul(0.06))
+      const puffSize = atFoot.select(puffAge.mul(0.5).add(0.24), puffAge.mul(0.1).add(0.14))
+      mist.flowPosition = positionLocal.mul(puffSize).add(vec3(puffX, puffY, puffZ))
+      const chord = normalView.dot(positionViewDirection).abs()
+      const mistDensity = contactNoise(positionLocal.xz.mul(5).add(positionLocal.y.mul(3)))
       mist.side = FrontSide
-      mist.colorNode = vec3(0.88, 0.94, 0.94)
-      mist.roughness = 0.85
+      mist.colorNode = vec3(0.74, 0.78, 0.8)
+      mist.roughness = 1
+      mist.emissiveNode = this.forwardGlow(0.62, vec3(0.5, 0.52, 0.53))
+      const puffLife = atFoot.select(
+        smoothstep(0, 0.14, puffAge).mul(float(1).sub(smoothstep(0.45, 1, puffAge))),
+        sin(puffAge.mul(Math.PI)),
+      )
       mist.opacityNode = chord
         .mul(chord)
-        .mul(sin(puffAge.mul(Math.PI)))
-        .mul(mix(0.45, 1, mistDensity))
-        .mul(atFoot.select(this.impactPulse.mul(0.18).add(0.08), 0.11))
+        .mul(puffLife)
+        .mul(mix(0.5, 1, mistDensity))
+        .mul(atFoot.select(this.impactPulse.mul(0.08).add(0.15), 0.12))
         .mul(this.opacity)
       this.add(mistGeometry, mist, 'waterfall-mist')
       scene.add(this.group)
@@ -461,6 +534,28 @@ export class LakeWaterfall {
       this.group.clear()
       throw error
     }
+  }
+
+  /** Key light scattered forward through aerated water and spray, in view space. */
+  private forwardGlow(g: number, albedo: Node<'vec3'>) {
+    const towardsLight = normalize(cameraViewMatrix.mul(vec4(this.lightDirection, 0)).xyz)
+    return this.lightRadiance
+      .mul(scatterPhase(positionViewDirection.dot(towardsLight).negate(), g))
+      .mul(albedo)
+  }
+
+  /** Follows the scene's directional light: the sun by day, the moon at night. */
+  private updateLight() {
+    this.keyLight ??= this.scene.children.find((child) => child instanceof DirectionalLight)
+    const light = this.keyLight
+    if (!light) return
+    const direction = this.lightDirection.value
+      .copy(light.position)
+      .sub(light.target.getWorldPosition(scratchTarget))
+    if (direction.lengthSq() < 1e-8) direction.set(0, 1, 0)
+    direction.normalize()
+    this.lightRadiance.value.copy(light.color).multiplyScalar(light.intensity)
+    this.fluid.setLight(direction, this.lightRadiance.value)
   }
 
   /** Cursor blocker in the waterfall group's local frame; strength 0 releases it. */
@@ -805,6 +900,8 @@ export class LakeWaterfall {
   update(time: number, _daylight: number, intro: number, wind: WindState) {
     if (this.disposed) return
     this.time.value = this.reducedMotion ? 0 : time
+    this.patternTime.value = this.reducedMotion ? 0 : time % PATTERN_PERIOD
+    this.updateLight()
     this.opacity.value = Math.max(0, Math.min(1, intro))
     const elapsed = this.lastTime === undefined ? 0 : time - this.lastTime
     const dt = Math.min(0.1, Math.max(0, elapsed))

@@ -101,7 +101,10 @@ because the lake surface distorts it beyond recognition, which halved the
 waterfall cost. The lakebed capture runs at 768 px and the fish region at half
 canvas resolution; the fluid capture runs at 128 px with horizontal-only
 thickness filtering. Before/after pixel parity for these cuts holds to under
-0.5% of pixels, confined to the lake and the waterfall column.
+0.5% of pixels, confined to the lake and the waterfall column. The fluid surface later dropped
+physical transmission: it was the scene's only transmissive material, so it alone forced a
+full-viewport framebuffer copy, a mip chain and bicubic backdrop taps every frame. Blending
+over the backdrop pays for the procedural streaks, plunge foam and mist that replaced it.
 
 ## Loading
 
