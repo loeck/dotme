@@ -60,6 +60,11 @@ is unchanged and cannot shimmer; the detail is zero-mean, so fading it leaves th
 It uses a lattice-periodic value noise (`tiledNoise`) so the fast-scrolling fine coordinates keep
 the hash's arguments small.
 
+The fall's pattern clock wraps every 600 s for the same reason. Each scrolled pattern repeats
+after exactly the distance it travels in one period (`loopNoise` wraps the time axis of the
+lattice, and `loopCells` rejects a scroll rate that would not loop), so the foam, streaks and
+mist continue across the wrap instead of jumping.
+
 Reduced motion keeps a quiet static composition. Disposal is idempotent and releases owned
 resources. Tests consume public behavior and narrow interfaces rather than casting into
 engine implementation fields. Deterministic motion, anatomy, collision and environment
