@@ -235,12 +235,8 @@ export class VoxelLandscapeEngine {
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
   private vegetation: Vegetation | undefined
-  /** Holds the forest once it streams in after the first frame. */
+  /** Holds the forest, built before the first frame. */
   private readonly vegetationGroup = new Group()
-  private markPresented: () => void = () => undefined
-  private readonly presented = new Promise<void>((resolve) => {
-    this.markPresented = resolve
-  })
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -340,6 +336,9 @@ export class VoxelLandscapeEngine {
       )
       engine.applyLighting(initialLight)
       engine.nightLightFade = initialLight.localLightStrength
+      // The forest is part of the first frame: wait for the worker's vegetation and compile it
+      // with the scene, so trees never pop in after the loader has gone.
+      const forest = (await engine.addVegetation(prepared.vegetation, signal))?.compiled
       // The offscreen passes do not depend on the lit scene: issue them before
       // the environment so their pipelines compile alongside the scene batch.
       performance.mark('compile:passes')
@@ -347,7 +346,7 @@ export class VoxelLandscapeEngine {
       // Settled with the scene batch; keep an early failure from going unhandled.
       passes.catch(() => undefined)
       performance.mark('compile:environment')
-      await engine.compileScene(signal, options.renderer, passes)
+      await Promise.all([engine.compileScene(signal, options.renderer, passes), forest])
       performance.mark('compile:warmup')
       engine.warmupScene()
       engine.snapshotPrograms('warmup')
@@ -357,7 +356,6 @@ export class VoxelLandscapeEngine {
       engine.initialized = true
       engine.lastFrameAt = performance.now()
       engine.requestFrame()
-      void engine.attachVegetation(prepared.vegetation)
       return engine
     } catch (error) {
       // Offscreen compiles may still run; let them settle before their owners are disposed.
@@ -741,7 +739,7 @@ export class VoxelLandscapeEngine {
         shadowPosition: light.position.clone(),
       })
     })
-    // The forest streams in after the first frame; see `attachVegetation`.
+    // The forest joins before the first frame; see `addVegetation`.
     this.vegetationGroup.name = 'Vegetation'
     this.scene.add(this.vegetationGroup)
 
@@ -1559,41 +1557,35 @@ export class VoxelLandscapeEngine {
 
   /** The material used by the public shadow node is shared with the actual shadow pass. */
   /**
-   * Builds the forest after the first frame: its pipelines compile for every view that draws
-   * it (main, mirror, probe and shadows) while the meshes wait off-scene, then they join the
-   * scene and dissolve in, so neither the loader nor a frame waits on them.
+   * Builds the forest into the scene before the first frame and starts compiling it for every
+   * view that draws it (main, mirror, probe and shadows); `compiled` settles with those compiles.
+   * A failed preparation leaves the scene without vegetation rather than failing the load.
    */
-  private async attachVegetation(pending: Promise<VegetationPart>) {
+  private async addVegetation(pending: Promise<VegetationPart>, signal: AbortSignal) {
     let data: VegetationPart
     try {
       data = await pending
     } catch (error) {
+      signal.throwIfAborted()
       if (!(error instanceof DOMException && error.name === 'AbortError'))
         console.warn('Vegetation preparation failed', error)
       return
     }
-    await this.presented
-    if (this.disposed) return
-    const staging = new Group()
-    const vegetation = this.resources.own(new Vegetation(staging, data))
+    signal.throwIfAborted()
+    const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
     this.vegetation = vegetation
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
-    staging.updateMatrixWorld(true)
-    try {
-      await this.compileVegetation(staging)
-    } catch (error) {
-      // Uncompiled pipelines still build on first draw; only a hitch is lost.
-      if (!this.disposed) console.warn('Vegetation precompile failed', error)
-    }
-    if (this.disposed) return
-    vegetation.reveal(performance.now(), this.reducedMotion)
-    this.vegetationGroup.add(...vegetation.meshes)
-    this.moon.shadow.needsUpdate = true
-    for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
-    this.snapshotPrograms('vegetation')
+    this.vegetationGroup.updateMatrixWorld(true)
     performance.mark('vegetation-presented')
-    this.requestFrame()
+    const compiled = this.compileVegetation(this.vegetationGroup).then(
+      () => undefined,
+      // Uncompiled pipelines still build on first draw; only a hitch is lost.
+      (error: unknown) => {
+        if (!this.disposed) console.warn('Vegetation precompile failed', error)
+      },
+    )
+    return { compiled }
   }
 
   /**
@@ -1980,7 +1972,6 @@ export class VoxelLandscapeEngine {
       this.renderer.domElement.dataset.sceneRendered = 'true'
       performance.mark('landscape-presented')
       this.options.onFirstFrame()
-      this.markPresented()
     }
   }
 
@@ -2040,7 +2031,6 @@ export class VoxelLandscapeEngine {
   dispose() {
     if (this.disposed) return
     this.disposed = true
-    this.markPresented()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

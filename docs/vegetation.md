@@ -78,16 +78,16 @@ and blades near a step or a wall turn away from it and lean less, while ground c
 inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
 view faces a low sun.
 
-## Streaming
+## Loading
 
-The forest never holds up the first frame. The world worker that builds the lake surfaces
-posts them first, then grows the forest and posts it as its own message, also when it beats
-the terrain. Once the scene is presented, the engine builds the three meshes off-scene, gives
-their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles them
-for every view that draws them: main view, mirror, environment probe and shadow maps. Then
-they join the scene, the shadow maps refresh, and the forest dissolves in over 0.7 s through
-a screen-space interleaved-gradient mask (instant under reduced motion). On a failed or
-cancelled preparation the scene simply stays without vegetation.
+The forest is part of the first frame, so trees never pop in after the loader. The world
+worker that builds the lake surfaces posts them first, then grows the forest and posts it as
+its own message; the engine waits for it after building the scene, adds the three meshes,
+gives their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles
+them for every view that draws them (main view, mirror, environment probe and shadow maps) in
+the same batch as the scene's shaders. The forest message usually lands about 0.1 s after the
+world data, and its compiles run alongside the scene's, so the wait is short. On a failed
+preparation the scene simply loads without vegetation.
 
 ## Cost
 

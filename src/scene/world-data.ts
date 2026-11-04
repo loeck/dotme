@@ -73,7 +73,7 @@ export function* prepareWorldParts(
     return
   }
   yield { part, data: surfacePart(world, seed, mobile) }
-  // The shorter half then grows the forest, after the first frame's data is on its way.
+  // The shorter half then grows the forest, once the world data is on its way.
   yield { part: 'vegetation', data: prepareVegetation(world, seed >>> 0, mobile) }
 }
 
