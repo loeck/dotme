@@ -30,7 +30,7 @@ import { fragmentDepth, screenLinearVarying } from './backend-nodes'
 import { WATER_LEVEL } from './lake-bed'
 import type { LakeWaterMaterial } from './lake-water'
 import type { VoxelWaterfall } from './voxel-world'
-import { contactNoise } from './water-noise'
+import { loopCells, loopNoise, OPEN_AXIS } from './water-noise'
 import { fieldUvNode, windFieldNode } from './water-surface'
 import { WaterfallFluidPass } from './waterfall-fluid-pass'
 import { createWaterfallParticles } from './waterfall-particles'
@@ -72,9 +72,12 @@ export function fallStreaks(
 ) {
   const launched = time.sub(drop.mul(2 / GRAVITY).sqrt())
   // Lip irregularities fix slowly wandering columns; packets slide within them.
-  const columns = contactNoise(vec2(across.mul(7.5), time.mul(0.11)))
-  const packets = contactNoise(vec2(across.mul(13), launched.mul(3.2)))
-  const grain = fine ? contactNoise(vec2(across.mul(31), launched.mul(9))) : float(0.5)
+  // Each time axis repeats after one pattern period, so the wrapped clock never jumps.
+  const columns = loopNoise(vec2(across.mul(7.5), time.mul(0.11)), [OPEN_AXIS, loopCells(0.11)])
+  const packets = loopNoise(vec2(across.mul(13), launched.mul(3.2)), [OPEN_AXIS, loopCells(3.2)])
+  const grain = fine
+    ? loopNoise(vec2(across.mul(31), launched.mul(9)), [OPEN_AXIS, loopCells(9)])
+    : float(0.5)
   const breakup = smoothstep(0.12, Math.min(1.6, sheetHeight * 0.75), drop)
   const streaks = columns.mul(0.55).add(packets.mul(0.3)).add(grain.mul(0.15))
   const threshold = mix(0.8, 0.4, breakup)
@@ -170,7 +173,10 @@ export class WaterfallFluid {
       time,
       sheetHeight,
     )
-    const fibres = contactNoise(vec2(across.mul(24), launched.mul(1.3)).add(5.7))
+    const fibres = loopNoise(vec2(across.mul(24), launched.mul(1.3)).add(5.7), [
+      OPEN_AXIS,
+      loopCells(1.3),
+    ])
     // Thin fringes along the sheet's edges and gaps fray into white spray.
     const fringe = smoothstep(0.03, 0.3, data.r).oneMinus().mul(breakup)
     const whitewater = aerated

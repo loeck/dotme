@@ -21,10 +21,22 @@ export function contactNoise(p: Node<'vec2'>) {
  * its precision on GPUs whose `sin` loses accuracy for large arguments.
  */
 export function tiledNoise(p: Node<'vec2'>, period: number) {
+  return loopNoise(p, [period, period])
+}
+
+/**
+ * Value noise whose lattice repeats every `period[0]` cells across and `period[1]`
+ * cells down. A pattern scrolled by a wrapped clock stays seamless when each axis
+ * repeats after exactly the distance it scrolls in one clock period. An `OPEN_AXIS`
+ * does not scroll and keeps its raw, small lattice index.
+ */
+export function loopNoise(p: Node<'vec2'>, period: readonly [number | null, number | null]) {
   const cell = floor(p),
     f0 = fract(p),
     f = f0.mul(f0).mul(vec2(3).sub(f0.mul(2)))
-  const wrap = (index: Node<'vec2'>) => index.sub(floor(index.div(period)).mul(period))
+  const axis = (index: Node<'float'>, size: number | null) =>
+    size === null ? index : index.sub(floor(index.div(size)).mul(size))
+  const wrap = (index: Node<'vec2'>) => vec2(axis(index.x, period[0]), axis(index.y, period[1]))
   const i0 = wrap(cell),
     i1 = wrap(cell.add(1))
   const key = vec2(127.1, 311.7)
@@ -37,3 +49,16 @@ export function tiledNoise(p: Node<'vec2'>, period: number) {
   const values = fract(sin(corners).mul(43758.5453))
   return mix(mix(values.x, values.y, f.x), mix(values.z, values.w, f.x), f.y)
 }
+
+/** Procedural waterfall patterns wrap their clock so hashed noise keeps its float precision. */
+export const PATTERN_PERIOD = 600
+/** Lattice cells a pattern scrolling at `rate` cells per second covers in one clock period. */
+export function loopCells(rate: number) {
+  const cells = rate * PATTERN_PERIOD
+  const whole = Math.round(cells)
+  if (Math.abs(cells - whole) > 1e-6)
+    throw new Error(`pattern rate ${rate} does not loop in ${PATTERN_PERIOD} s`)
+  return whole
+}
+/** A lattice axis that does not scroll with the clock and so never wraps. */
+export const OPEN_AXIS = null

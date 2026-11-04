@@ -136,18 +136,29 @@ describe('static terrain', () => {
 
   it('mosses upward ground faces above the waterline', () => {
     const terrain = prepareTerrain(createVoxelWorld(42, false))
+    // Weighted by area: eroded edges split risers and tops into many small quads near the lip.
     const greenExcess = (face: number) => {
       let total = 0,
-        count = 0
+        area = 0
       for (const batch of terrain.batches) {
         if (batch.material !== 'ground' || batch.face !== face) continue
-        for (let i = 0; i < batch.colors.length; i += 3)
-          total += required(batch.colors[i + 1]) - required(batch.colors[i])
-        count += batch.colors.length / 3
+        const p = batch.positions
+        for (let q = 0; q < p.length; q += 12) {
+          const span = (a: number) =>
+            Math.max(p[q + a] ?? 0, p[q + 3 + a] ?? 0, p[q + 6 + a] ?? 0, p[q + 9 + a] ?? 0) -
+            Math.min(p[q + a] ?? 0, p[q + 3 + a] ?? 0, p[q + 6 + a] ?? 0, p[q + 9 + a] ?? 0)
+          const extents = [span(0), span(1), span(2)].filter((e) => e > 0)
+          const weight = (extents[0] ?? 0) * (extents[1] ?? 0)
+          for (let i = q; i < q + 12; i += 3)
+            total += (weight / 4) * (required(batch.colors[i + 1]) - required(batch.colors[i]))
+          area += weight
+        }
       }
-      return count > 0 ? total / count : 0
+      return area > 0 ? total / area : 0
     }
-    expect(greenExcess(2)).toBeGreaterThan(greenExcess(0) + 0.02)
-    expect(greenExcess(2)).toBeGreaterThan(greenExcess(4) + 0.02)
+    // Area weighting counts the riser's whole soil gradient, so the margin is smaller than the
+    // per-vertex one it replaces; tops still carry about three times the sides' green.
+    expect(greenExcess(2)).toBeGreaterThan(greenExcess(0) + 0.015)
+    expect(greenExcess(2)).toBeGreaterThan(greenExcess(4) + 0.015)
   }, 30_000)
 })

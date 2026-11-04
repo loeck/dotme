@@ -1,67 +1,115 @@
-const interactive = (target: EventTarget | null) =>
-  target instanceof Element && Boolean(target.closest('a[href], button, [role="button"]'))
+import { CursorMotion } from './cursor-motion'
 
-/** The position is immediate; only the point's shape deforms with pointer speed. */
+const CONTROLS = 'a[href], button, [role="button"]'
+/** Same rule as the engine's `seesWorld`: only controls and dialogs hide the landscape. */
+const SCENE_BLOCKERS = `dialog, ${CONTROLS}`
+/** Radius of the resting point, in CSS pixels (`.scene-cursor-point`). */
+const POINT_RADIUS = 3
+/** Longest drift of the hover ring behind the point, in CSS pixels. */
+const RING_LAG = 4
+
+const closest = (target: EventTarget | null, selector: string) =>
+  target instanceof Element && target.closest(selector) !== null
+
+/**
+ * The position is immediate and never eased; only the point's shape trails behind
+ * the motion. Over controls the point opens into a ring, a press tightens it, and a
+ * press on the landscape releases a faint echo.
+ */
 export function initSceneCursor(element: HTMLDivElement): () => void {
-  const shape = element.firstElementChild
-  if (!(shape instanceof HTMLElement) || typeof element.showPopover !== 'function') return () => {}
+  const point = element.querySelector<HTMLElement>('.scene-cursor-point')
+  const ring = element.querySelector<HTMLElement>('.scene-cursor-ring')
+  const echo = element.querySelector<HTMLElement>('.scene-cursor-echo')
+  if (!point || !ring || !echo || typeof element.showPopover !== 'function') return () => {}
   const root = document.documentElement
   const finePointer = matchMedia('(hover: hover) and (pointer: fine)')
   const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)')
   const lifetime = new AbortController()
   const { signal } = lifetime
-  let previous: { x: number; y: number; time: number } | undefined
-  let releaseTimer = 0
+  const motion = new CursorMotion()
+  let frame = 0
+  let frameTime = 0
+  let target: EventTarget | null = null
+  let interactive = false
+  let echoAnimation: Animation | undefined
 
-  const relax = () => {
-    delete element.dataset.stretched
-    shape.style.transform = 'none'
+  const draw = () => {
+    point.style.transform = motion.strain(POINT_RADIUS)
+    ring.style.translate = interactive ? motion.lag(RING_LAG) : ''
+  }
+  const tick = (now: number) => {
+    frame = 0
+    // The first frame after a rest can carry a timestamp from before the waking event (frame
+    // callbacks share the frame's start time); step it as one nominal frame instead of none.
+    const dt = now - frameTime
+    const moving = motion.step(dt > 0 ? dt : 1000 / 60)
+    frameTime = now
+    draw()
+    if (moving) frame = requestAnimationFrame(tick)
+  }
+  const animate = () => {
+    if (frame || reducedMotion.matches) return
+    frameTime = performance.now()
+    frame = requestAnimationFrame(tick)
+  }
+  const release = () => {
+    delete element.dataset.pressed
   }
   const hide = () => {
-    clearTimeout(releaseTimer)
-    previous = undefined
+    cancelAnimationFrame(frame)
+    frame = 0
+    target = null
+    interactive = false
+    motion.reset()
+    release()
+    echoAnimation?.cancel()
     delete root.dataset.cursorActive
     delete element.dataset.interactive
     if (element.matches(':popover-open')) element.hidePopover()
-    relax()
+    draw()
   }
   const move = (event: PointerEvent) => {
     if (!finePointer.matches || event.pointerType !== 'mouse') {
       hide()
       return
     }
-    const { clientX: x, clientY: y, timeStamp: time } = event
+    const { clientX: x, clientY: y } = event
     // Never interpolate the position or put a transition on this outer element.
     element.style.transform = `translate3d(${x}px, ${y}px, 0) translate(-50%, -50%)`
     if (!element.matches(':popover-open')) element.showPopover()
     root.dataset.cursorActive = 'true'
-    element.dataset.interactive = String(interactive(event.target))
-    // Boundary events can repeat a move at the same position and timestamp.
-    // Keep them from resetting the velocity sample or delaying the return to rest.
-    if (previous?.x === x && previous.y === y) return
-    const last = previous
-    previous = { x, y, time }
-    if (!last || reducedMotion.matches) return
-    const dt = time - last.time
-    if (dt <= 0 || dt >= 100) return
-    const dx = x - last.x
-    const dy = y - last.y
-    const distance = Math.hypot(dx, dy)
-    const stretch = 1 + 1.8 * (1 - Math.exp(-distance / dt / 0.35))
-    const squash = 1 / Math.sqrt(stretch)
-    const ux = dx / distance
-    const uy = dy / distance
-    // Symmetric strain: no rotation flip when the pointer reverses direction.
-    const a = stretch * ux * ux + squash * uy * uy
-    const b = (stretch - squash) * ux * uy
-    const d = stretch * uy * uy + squash * ux * ux
-    element.dataset.stretched = ''
-    shape.style.transform = `matrix(${a}, ${b}, ${b}, ${d}, 0, 0)`
-    clearTimeout(releaseTimer)
-    releaseTimer = window.setTimeout(relax, 65)
+    if (event.target !== target) {
+      target = event.target
+      interactive = closest(target, CONTROLS)
+      element.dataset.interactive = String(interactive)
+      if (!interactive) ring.style.translate = ''
+    }
+    // A press ending outside the window never reports its pointerup here.
+    if (element.dataset.pressed !== undefined && (event.buttons & 1) === 0) release()
+    if (reducedMotion.matches) return
+    motion.moveTo(x, y)
+    animate()
+  }
+  const press = (event: PointerEvent) => {
+    if (event.button !== 0 || event.pointerType !== 'mouse' || !finePointer.matches) return
+    move(event)
+    element.dataset.pressed = ''
+    if (reducedMotion.matches || closest(event.target, SCENE_BLOCKERS)) return
+    echoAnimation?.cancel()
+    echoAnimation = echo.animate(
+      [
+        { opacity: 0.55, scale: 0.15 },
+        { opacity: 0, scale: 1 },
+      ],
+      { duration: 620, easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)' },
+    )
+  }
+  const lift = (event: PointerEvent) => {
+    if (event.button === 0) release()
   }
   // Keep the point above the native dialog when it opens under a resting mouse.
   const observer = new MutationObserver(() => {
+    target = null
     if (element.matches(':popover-open')) {
       element.hidePopover()
       element.showPopover()
@@ -71,6 +119,8 @@ export function initSceneCursor(element: HTMLDivElement): () => void {
   if (dialog) observer.observe(dialog, { attributes: true, attributeFilter: ['open'] })
   window.addEventListener('pointermove', move, { passive: true, signal })
   window.addEventListener('pointerover', move, { passive: true, signal })
+  window.addEventListener('pointerdown', press, { passive: true, signal })
+  window.addEventListener('pointerup', lift, { passive: true, signal })
   window.addEventListener('pointercancel', hide, { signal })
   window.addEventListener('blur', hide, { signal })
   document.addEventListener('visibilitychange', hide, { signal })

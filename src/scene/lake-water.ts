@@ -51,7 +51,7 @@ import type { BufferGeometry, Camera, Node, Scene, WebGPURenderer } from 'three/
 import { clipDepth } from './backend-nodes'
 import { cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
-import { pointerLightAt } from './pointer-light'
+import { pointerLanternGlint, pointerLightAt } from './pointer-light'
 import type { PointerLightUniforms } from './pointer-light'
 import { WATER_IOR, WaterLightingModel } from './water-lighting'
 import { contactNoise } from './water-noise'
@@ -542,6 +542,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
           .mul(fresnel.mul(0.035).add(0.006))
           .mul(float(1).sub(foam.mul(0.65))),
       )
+      .add(pointerLanternGlint(positionWorld, normal, view, u).mul(fresnel).mul(float(1).sub(foam)))
       .add(glitter.mul(float(1).sub(foam)).mul(lightGate))
       .add(sss.mul(float(1).sub(foam)).mul(lightGate))
       .add(shafts.mul(float(1).sub(foam)).mul(lightGate))

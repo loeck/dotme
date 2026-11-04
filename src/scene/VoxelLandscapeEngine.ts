@@ -40,7 +40,8 @@ import {
 import type { RenderTarget } from 'three/webgpu'
 
 import type { AmbientEnvironment } from '../audio/environment'
-import { waterfallSound } from '../audio/environment'
+import { pointSound, waterfallSound } from '../audio/environment'
+import type { WaterSoundEvent } from '../audio/water-sounds'
 import { required } from '../invariant'
 import { sceneParams } from '../scene-params'
 import { CAMERA_IDLE_DRIFT, CAMERA_REST, cameraTarget, ENVIRONMENT_PROBE } from './camera-rig'
@@ -105,6 +106,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onContextFailure: () => void
   onFirstFrame: () => void
   onEnvironment?: (state: AmbientEnvironment) => void
+  /** Splashes, breaking waves and drops, attenuated by distance and placed in stereo. */
+  onWaterSound?: (event: WaterSoundEvent) => void
   reducedMotion?: boolean
   seed?: number
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
@@ -188,6 +191,7 @@ export class VoxelLandscapeEngine {
   private gradeFrame = 0
   private readonly waterfall: VoxelWaterfall | undefined
   private readonly waterfallAudioPosition = new Vector3()
+  private readonly soundPosition = new Vector3()
   private solarClock: SolarClock
   private readonly solar: SolarEndpoints
   private reducedMotion: boolean
@@ -204,6 +208,14 @@ export class VoxelLandscapeEngine {
   private readonly rayNdc = new Vector2()
   private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
+  // Separate targets: processPointer() runs inside render() and must not overwrite the
+  // frame's water point, nor a stroke's endpoints while it samples between them.
+  private readonly frameWaterPoint = new Vector3()
+  private readonly pressPoint = new Vector3()
+  private readonly strokeStart = new Vector3()
+  private readonly strokeEnd = new Vector3()
+  private readonly strokeSample = new Vector3()
+  private readonly strokeContact = new Vector3()
   private readonly pointerLight = new PointerLight()
   private readonly lightHit = new Vector3()
   private readonly pointer = new Vector2(0, 0)
@@ -231,12 +243,8 @@ export class VoxelLandscapeEngine {
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
   private vegetation: Vegetation | undefined
-  /** Holds the forest once it streams in after the first frame. */
+  /** Holds the forest, built before the first frame. */
   private readonly vegetationGroup = new Group()
-  private markPresented: () => void = () => undefined
-  private readonly presented = new Promise<void>((resolve) => {
-    this.markPresented = resolve
-  })
   private readonly moteTransform = new Object3D()
   private readonly moon = new DirectionalLight(0xa3bfd6, 1.5)
   private readonly environmentTarget: CubeRenderTarget
@@ -342,6 +350,9 @@ export class VoxelLandscapeEngine {
       passes = engine.compilePasses(options.renderer, initialLight)
       // Settled with the scene batch; keep an early failure from going unhandled.
       passes.catch(() => undefined)
+      // The forest is part of the first frame: wait for the worker's vegetation and add it
+      // before the scene compiles, so trees never pop in after the loader has gone.
+      await engine.addVegetation(prepared.vegetation, signal)
       performance.mark('compile:environment')
       await engine.compileScene(signal, options.renderer, passes)
       performance.mark('compile:warmup')
@@ -353,7 +364,6 @@ export class VoxelLandscapeEngine {
       engine.initialized = true
       engine.lastFrameAt = performance.now()
       engine.requestFrame()
-      void engine.attachVegetation(prepared.vegetation)
       return engine
     } catch (error) {
       // Offscreen compiles may still run; let them settle before their owners are disposed.
@@ -737,7 +747,7 @@ export class VoxelLandscapeEngine {
         shadowPosition: light.position.clone(),
       })
     })
-    // The forest streams in after the first frame; see `attachVegetation`.
+    // The forest joins before the first frame; see `addVegetation`.
     this.vegetationGroup.name = 'Vegetation'
     this.scene.add(this.vegetationGroup)
 
@@ -793,6 +803,15 @@ export class VoxelLandscapeEngine {
           this.options.detailEnvironment,
         ),
       )
+    const listener = this.options.onWaterSound
+    if (listener)
+      this.details?.setSoundHandler((kind, x, z, energy) => {
+        if (this.disposed) return
+        this.soundPosition.set(x, WATER_LEVEL, z)
+        const distance = this.soundPosition.distanceTo(this.camera.position)
+        const place = pointSound(distance, this.soundPosition.project(this.camera).x)
+        listener({ kind, intensity: energy * place.attenuation * this.intro, pan: place.pan })
+      })
   }
 
   setReducedMotion(value: boolean) {
@@ -867,6 +886,10 @@ export class VoxelLandscapeEngine {
       mesh.addInstance(mesh.addGeometry(geometry))
       geometry.dispose()
     }
+    // Three's batching transforms normals in every shader, the depth-only shadow pass included,
+    // and warns when the attribute is missing. Depth never reads them, so the position buffer
+    // stands in: the same attribute binds twice with no extra memory or upload.
+    mesh.geometry.setAttribute('normal', mesh.geometry.getAttribute('position'))
     mesh.castShadow = true
     mesh.layers.set(5)
     mesh.updateMatrixWorld(true)
@@ -902,11 +925,12 @@ export class VoxelLandscapeEngine {
     return true
   }
 
-  private hitWater(clientX: number, clientY: number): Vector3 | null {
-    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay() : null
+  /** Writes the water point under a client position into `target`, which it returns. */
+  private hitWater(clientX: number, clientY: number, target: Vector3): Vector3 | null {
+    return this.projectPointer(clientX, clientY) ? this.waterPointOnRay(target) : null
   }
 
-  private waterPointOnRay(): Vector3 | null {
+  private waterPointOnRay(target: Vector3): Vector3 | null {
     const ray = this.raycaster.ray
     this.waterPlane.constant = -WATER_LEVEL
     if (!ray.intersectPlane(this.waterPlane, this.waterHit)) return null
@@ -930,7 +954,7 @@ export class VoxelLandscapeEngine {
       if (i >= 0 && (this.bed.obstacle[i] ?? -Infinity) >= ray.origin.y + ray.direction.y * d)
         return null
     }
-    return this.waterHit.clone()
+    return target.copy(this.waterHit)
   }
 
   private updatePointerLight(
@@ -953,6 +977,7 @@ export class VoxelLandscapeEngine {
       nightStrength * this.intro,
       dt,
       this.reducedMotion,
+      this.raycaster.ray.origin,
     )
   }
 
@@ -1017,14 +1042,14 @@ export class VoxelLandscapeEngine {
     this.pointerBusy = true
     const revision = this.pointerRevision
     try {
-      let point = this.hitWater(event.x, event.y)
+      let point = this.hitWater(event.x, event.y, this.strokeEnd)
       if (!point) {
         this.previousPointer = null
         return
       }
       this.pointerHeight = await this.simulation.heightAt(point.x, point.z)
       if (this.disposed || revision !== this.pointerRevision) return
-      point = this.hitWater(event.x, event.y)
+      point = this.hitWater(event.x, event.y, this.strokeEnd)
       if (!point) {
         this.previousPointer = null
         return
@@ -1032,7 +1057,7 @@ export class VoxelLandscapeEngine {
       const previous = this.previousPointer
       if (previous && (event.x !== previous.x || event.y !== previous.y)) {
         // Reproject both client positions with the SAME camera. Parallax is never input energy.
-        const start = this.hitWater(previous.x, previous.y)
+        const start = this.hitWater(previous.x, previous.y, this.strokeStart)
         if (start) {
           const distance = start.distanceTo(point)
           const pixels = Math.hypot(event.x - previous.x, event.y - previous.y)
@@ -1042,7 +1067,7 @@ export class VoxelLandscapeEngine {
             distance,
             this.dragging,
           )
-          const projected = start.clone()
+          const projected = this.strokeSample
           const bounds = this.canvasBounds ?? this.renderer.domElement.getBoundingClientRect()
           for (let i = 1; i <= samples; i++) {
             // Equal world spacing avoids bunching pressure samples at the near
@@ -1054,6 +1079,7 @@ export class VoxelLandscapeEngine {
             const contact = this.hitWater(
               bounds.left + (projected.x + 1) * bounds.width * 0.5,
               bounds.top + (1 - projected.y) * bounds.height * 0.5,
+              this.strokeContact,
             )
             if (contact) this.simulation.addImpulse(contact.x, contact.z, radius, velocity)
           }
@@ -1079,7 +1105,7 @@ export class VoxelLandscapeEngine {
       this.requestFrame()
       return
     }
-    const point = this.hitWater(event.clientX, event.clientY)
+    const point = this.hitWater(event.clientX, event.clientY, this.pressPoint)
     if (!point) {
       if (event.pointerType === 'touch') {
         this.skyPointerId = event.pointerId
@@ -1415,6 +1441,8 @@ export class VoxelLandscapeEngine {
     }
 
     this.compileShadowMaps(issue)
+    // The forest casts its own shadows; every other view reaches it through the scene.
+    if (this.vegetation) this.compileShadowMaps(issue, this.vegetationGroup)
 
     issue(() => this.submerged.compileAsync(renderer, this.scene, this.camera))
     issue(() => this.compileView(this.camera, this.depthFocus.target))
@@ -1542,41 +1570,27 @@ export class VoxelLandscapeEngine {
 
   /** The material used by the public shadow node is shared with the actual shadow pass. */
   /**
-   * Builds the forest after the first frame: its pipelines compile for every view that draws
-   * it (main, mirror, probe and shadows) while the meshes wait off-scene, then they join the
-   * scene and dissolve in, so neither the loader nor a frame waits on them.
+   * Builds the forest into the scene before it compiles, so the scene batch covers it for
+   * every view (main, mirror, probe and its shadow maps). A failed preparation leaves the scene
+   * without vegetation rather than failing the load.
    */
-  private async attachVegetation(pending: Promise<VegetationPart>) {
+  private async addVegetation(pending: Promise<VegetationPart>, signal: AbortSignal) {
     let data: VegetationPart
     try {
       data = await pending
     } catch (error) {
+      signal.throwIfAborted()
       if (!(error instanceof DOMException && error.name === 'AbortError'))
         console.warn('Vegetation preparation failed', error)
       return
     }
-    await this.presented
-    if (this.disposed) return
-    const staging = new Group()
-    const vegetation = this.resources.own(new Vegetation(staging, data))
+    signal.throwIfAborted()
+    const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
     this.vegetation = vegetation
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
-    staging.updateMatrixWorld(true)
-    try {
-      await this.compileVegetation(staging)
-    } catch (error) {
-      // Uncompiled pipelines still build on first draw; only a hitch is lost.
-      if (!this.disposed) console.warn('Vegetation precompile failed', error)
-    }
-    if (this.disposed) return
-    vegetation.reveal(performance.now(), this.reducedMotion)
-    this.vegetationGroup.add(...vegetation.meshes)
-    this.moon.shadow.needsUpdate = true
-    for (const lamp of this.lampLights) lamp.light.shadow.needsUpdate = true
-    this.snapshotPrograms('vegetation')
+    this.vegetationGroup.updateMatrixWorld(true)
     performance.mark('vegetation-presented')
-    this.requestFrame()
   }
 
   /**
@@ -1586,25 +1600,6 @@ export class VoxelLandscapeEngine {
   private receiveSceneLight(material: MeshStandardNodeMaterial) {
     this.clouds.shadows.applyTo(material, this.camera)
     this.pointerLight.applyTo(material)
-  }
-
-  private compileVegetation(staging: Group) {
-    const pending: Promise<unknown>[] = []
-    const issue = (compile: () => Promise<unknown>) => pending.push(compile())
-    const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
-    if (cubeCamera)
-      issue(() =>
-        compileWithoutCulling(staging, () =>
-          this.compileView(cubeCamera, this.environmentTarget, staging, 0, false),
-        ),
-      )
-    this.compileShadowMaps(issue, staging)
-    issue(() => this.compileView(this.camera, this.depthFocus.target, staging, 0, false))
-    const reflected = this.water.getReflectionCamera(this.camera)
-    issue(() =>
-      this.compileView(reflected, this.water.getRenderTarget(reflected), staging, 0, false),
-    )
-    return Promise.all(pending)
   }
 
   private compileShadowMaps(
@@ -1720,7 +1715,7 @@ export class VoxelLandscapeEngine {
     this.camera.updateMatrixWorld()
     const pointerOnScene =
       this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
-    const waterPoint = pointerOnScene ? this.waterPointOnRay() : null
+    const waterPoint = pointerOnScene ? this.waterPointOnRay(this.frameWaterPoint) : null
     // Snapshot before processPointer() reprojects pending events into the same scratch vector.
     if (pointerOnScene) this.detailPointerNdc.copy(this.rayNdc)
     if (waterPoint)
@@ -1963,7 +1958,6 @@ export class VoxelLandscapeEngine {
       this.renderer.domElement.dataset.sceneRendered = 'true'
       performance.mark('landscape-presented')
       this.options.onFirstFrame()
-      this.markPresented()
     }
   }
 
@@ -2023,7 +2017,6 @@ export class VoxelLandscapeEngine {
   dispose() {
     if (this.disposed) return
     this.disposed = true
-    this.markPresented()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

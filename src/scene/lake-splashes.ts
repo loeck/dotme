@@ -147,6 +147,8 @@ export class LakeSplashes {
   private readonly sheetsState: Array<Sheet | null> = Array.from({ length: 24 }, () => null)
   private sheetCursor = 0
   onReturn?: (x: number, z: number, radius: number, velocity: number) => void
+  /** Audible events: pointer bursts, breaking waves and droplets falling back. */
+  onSound?: (kind: 'burst' | 'wave' | 'drop', x: number, z: number, energy: number) => void
   private state: number
   private nextCheck = 0
   private cursor = 0
@@ -528,6 +530,7 @@ export class LakeSplashes {
       const energy = Math.min(1, Math.max(0.08, ((drop.size / 0.045) ** 2 * speed) / 3))
       this.impacts.add(hitX, hitZ, time, energy)
       this.onReturn?.(hitX, hitZ, 0.15 + energy * 0.2, -(0.012 + energy * 0.05))
+      this.onSound?.('drop', hitX, hitZ, energy)
     }
     this.kill(drop)
   }
@@ -623,6 +626,7 @@ export class LakeSplashes {
     this.emitted++
     this.impacts.add(x, z, time, strength)
     this.onReturn?.(x, z, 0.15 + strength * 0.2, -(0.012 + strength * 0.05))
+    this.onSound?.('burst', x, z, strength)
     const surface = WATER_LEVEL + this.sampleField(x, z, time, wind, 0.08)[0]
     const { count } = profile
     for (let i = 0; i < count; i++) {
@@ -698,6 +702,7 @@ export class LakeSplashes {
         const { count } = profile
         this.emitted++
         bursts++
+        this.onSound?.('wave', origin.x, origin.z, energy)
         this.sheetsState[this.sheetCursor] = {
           x: origin.x,
           y: WATER_LEVEL + this.sampleField(origin.x, origin.z, time, wind, 0.08)[0],
@@ -763,6 +768,7 @@ export class LakeSplashes {
         if (energy > 0.04) {
           this.impacts.add(position.x, position.z, this.stepTime, energy)
           this.onReturn?.(position.x, position.z, 0.12 + energy * 0.15, -energy * 0.035)
+          this.onSound?.('drop', position.x, position.z, energy)
         }
       })
       this.stepTime += SPLASH_STEP

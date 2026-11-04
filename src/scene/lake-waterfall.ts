@@ -48,7 +48,14 @@ import type { LakeWaterMaterial } from './lake-water'
 import { ResourceScope } from './resource-scope'
 import type { VoxelWaterfall } from './voxel-world'
 import type { WaterContact } from './water-contact'
-import { contactNoise, tiledNoise } from './water-noise'
+import {
+  contactNoise,
+  loopCells,
+  loopNoise,
+  OPEN_AXIS,
+  PATTERN_PERIOD,
+  tiledNoise,
+} from './water-noise'
 import { fieldUvNode, sampleWaterContact, windFieldNode } from './water-surface'
 import { waterfallDrift } from './waterfall-flow'
 import {
@@ -74,8 +81,12 @@ const MAX_CURTAIN_STEPS = 4
 const WOBBLE_FORCE = 0.2
 const PARCEL_DENSITY = 1000
 const PARCEL_VOLUME = (4 / 3) * Math.PI
-/** Procedural patterns wrap their clock so hashed noise keeps its float precision. */
-const PATTERN_PERIOD = 600
+/** Foam drift downstream, in metres per second: a third, so every octave loops in a period. */
+const FOAM_DRIFT = 1 / 3
+/** Bubble lattice repeat: divides each bubble octave's drift over one pattern period. */
+const BUBBLE_TILE = 160
+/** Mist sway: a whole number of cycles per pattern period. */
+const MIST_SWAY = (2 * Math.PI * 57) / PATTERN_PERIOD
 
 const scratchTarget = new Vector3()
 
@@ -365,14 +376,18 @@ export class LakeWaterfall {
         downstream.mul(downstream.lessThan(0).select(1.6, 1.1)),
       ).length()
       const boil = float(1).sub(smoothstep(0.06, 0.6, boilRadius))
-      const churn = contactNoise(
+      // Every scrolled lattice repeats after the distance it travels in one pattern
+      // period, so the wrapped clock never makes the foam jump.
+      const churn = loopNoise(
         vec2(footX.mul(11), footZ.mul(11)).add(vec2(t.mul(0.9), t.mul(-1.9))),
+        [loopCells(0.9), loopCells(1.9)],
       )
-      const drift = footZ.sub(t.mul(0.32))
+      const drift = footZ.sub(t.mul(FOAM_DRIFT))
       const fan = footX.div(travel.mul(0.55).add(halfWidth + 0.25))
-      const lines = contactNoise(vec2(fan.mul(5.5), drift.mul(1.1)))
-      const clump = contactNoise(vec2(footX.mul(2.4), drift.mul(2.4)).add(7.1))
-      const lace = contactNoise(vec2(footX.mul(9), drift.mul(9)).add(3.3))
+      const scrolled = (scale: number): [null, number] => [OPEN_AXIS, loopCells(FOAM_DRIFT * scale)]
+      const lines = loopNoise(vec2(fan.mul(5.5), drift.mul(1.1)), scrolled(1.1))
+      const clump = loopNoise(vec2(footX.mul(2.4), drift.mul(2.4)).add(7.1), scrolled(2.4))
+      const lace = loopNoise(vec2(footX.mul(9), drift.mul(9)).add(3.3), scrolled(9))
       // Close up, bubbles and torn fingers a few centimetres across break the
       // lace edges and pit the boil. Each octave fades out as its cells shrink
       // below a few pixels, so distant foam keeps the smooth look and cannot
@@ -385,7 +400,7 @@ export class LakeWaterfall {
       )
       const coarseFade = octave(28)
       const fineFade = octave(64)
-      const fine = tiledNoise(bubbleSpace.mul(28).add(vec2(13.7, 4.1)), 128)
+      const fine = tiledNoise(bubbleSpace.mul(28).add(vec2(13.7, 4.1)), BUBBLE_TILE)
         .sub(0.5)
         .mul(coarseFade.mul(0.62))
         .add(
@@ -394,7 +409,7 @@ export class LakeWaterfall {
               bubbleSpace.x.mul(0.8).sub(bubbleSpace.y.mul(0.6)),
               bubbleSpace.x.mul(0.6).add(bubbleSpace.y.mul(0.8)),
             ).mul(64),
-            128,
+            BUBBLE_TILE,
           )
             .sub(0.5)
             .mul(fineFade.mul(0.38)),
@@ -552,7 +567,7 @@ export class LakeWaterfall {
       )
       const puffX = puff.x
         .mul(atFoot.select(puffAge.mul(0.6).add(1), 1))
-        .add(sin(this.patternTime.mul(0.6).add(puff.w.mul(8))).mul(0.06))
+        .add(sin(this.patternTime.mul(MIST_SWAY).add(puff.w.mul(8))).mul(0.06))
       const puffSize = atFoot.select(puffAge.mul(0.5).add(0.24), puffAge.mul(0.1).add(0.14))
       mist.flowPosition = positionLocal.mul(puffSize).add(vec3(puffX, puffY, puffZ))
       const chord = normalView.dot(positionViewDirection).abs()

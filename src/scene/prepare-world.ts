@@ -14,7 +14,7 @@ const cancelled = () => new DOMException('World preparation cancelled', 'AbortEr
  * Prepares the world on two workers: one meshes terrain while the other builds
  * the lake surfaces, cloud noise and collision boxes from the same seed, then
  * grows the forest. The world resolves with terrain and surfaces; the forest
- * follows as `vegetation`, so it never delays the first frame. Every part
+ * follows as `vegetation`, so physics and scene construction start without it. Every part
  * arrives as transferred buffers; the page only combines them.
  */
 export function prepareWorldAsync(

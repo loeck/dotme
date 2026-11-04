@@ -332,14 +332,17 @@ export function sculptSpruce(seed: number, size: number, spruce: boolean) {
   sculpt.limb([0, -0.15, 0], [0, height * 0.9, 0], 0.105, P.bark, 0.035)
   const span = height - canopyBase
   sculpt.kind = 'needle'
-  sculpt.cone(canopyBase, span, canopyRadius * 0.2, needles)
+  // A needle core wide enough to bridge the tiers: without it the sky shows between the small
+  // upper tiers and they read as discs floating over the crown.
+  sculpt.cone(canopyBase, span, canopyRadius * 0.34, needles)
   const step = span / (layers + 0.6)
   const phase = random() * TAU
   for (let tier = 0; tier < layers; tier++) {
     const share = tier / (layers - 1)
     const bottom = canopyBase + tier * step
     const radius = canopyRadius * (1 - 0.84 * share)
-    const rise = Math.max(step * 0.16, size)
+    // Upper tiers thicken so each one touches the next instead of hovering above it.
+    const rise = Math.max(step * (0.16 + 0.22 * share), size)
     for (let bough = 0; bough < 7; bough++) {
       const heading = phase + TAU * (tier * GOLDEN_TURN + bough / 7) + between(random, -0.12, 0.12)
       const reach = radius * between(random, 0.9, 1)
@@ -359,7 +362,7 @@ export function sculptSpruce(seed: number, size: number, spruce: boolean) {
     }
   }
   // A solid spire carries the crown to its tip, so the top tiers do not float apart.
-  sculpt.cone(height * 0.66, height * 0.34, canopyRadius * 0.36, needles)
+  sculpt.cone(height * 0.58, height * 0.42, canopyRadius * 0.44, needles)
   return sculpt
 }
 
@@ -483,6 +486,21 @@ export function sculptBirch(seed: number, size: number) {
         [r, r * 0.7, r * 0.9],
         random() < 0.35 ? P.birchLeavesDeep : P.birchLeaves,
         yaw,
+      )
+    }
+    // Birch twigs hang: a deep curtain under each lower fork rounds the crown's underside,
+    // which otherwise sits flat on the scaffolds like an umbrella.
+    if (scaffold < 4) {
+      const r = height * 0.1 * between(random, 0.9, 1.15)
+      sculpt.ellipsoid(
+        [
+          fork[0] + Math.sin(heading) * r * 0.6,
+          fork[1] - r * 0.9,
+          fork[2] + Math.cos(heading) * r * 0.6,
+        ],
+        [r * 0.8, r * 1.1, r * 0.8],
+        P.birchLeavesDeep,
+        heading,
       )
     }
   }

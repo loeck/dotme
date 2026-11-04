@@ -35,7 +35,8 @@ test('starts by default when browser autoplay is allowed, with a working stop bu
     const button = page.locator('.scene-sound-trigger')
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(button).toHaveAttribute('aria-busy', 'false')
-    expect(requests).toHaveLength(5)
+    // Seven base clips, then the waterfall every generated world now has; music streams later.
+    await expect.poll(() => requests.length).toBe(8)
     expect(
       await page.evaluate(() => {
         const contexts = window.testAudioContexts ?? []

@@ -126,9 +126,10 @@ World data is deterministic in its seed and layout, so two instances of the worl
 each rebuild the voxel world and derive disjoint halves: terrain meshing on one, lake
 surfaces, cloud noise and merged collision boxes on the other. The slower half bounds the
 wait instead of their sum. The second worker then grows the forest and posts it on its own,
-so neither world data nor the compile batch waits for vegetation; the engine compiles it for
-the main view, the mirror, the probe and the shadow maps after the first frame and dissolves
-it in (`vegetation-ready` and `vegetation-presented` marks), and Rapier only creates colliders from boxes the worker merged.
+so world data does not wait for vegetation. The forest is still part of the first frame: the
+engine adds it after building the scene and compiles it for the main view, the mirror, the
+probe and the shadow maps in the same batch as the scene (`vegetation-ready` and
+`vegetation-presented` marks). Rapier only creates colliders from boxes the worker merged.
 The waterfall search reads a lake footprint raster; only the final carved world builds the
 full lake bed with its shore distances and relief. The rasterization, BVH and face-coverage
 loops are allocation-free rewrites with unchanged evaluation order; prepared worlds hash
@@ -184,9 +185,20 @@ back-facing to that box, its mirror image under the reflection plane and the env
 are dropped when the terrain is prepared, about 37% of the exposed faces.
 Greedy meshing was measured and rejected: neighbouring voxel colours differ, so it would only
 remove about a third of the faces while introducing T-junction pixel gaps.
+The render-only micro-voxels (`terrain-lips.ts`, `terrain-erosion.ts`, see
+[atmosphere](atmosphere.md)) nearly double the desktop terrain, from 429k to 798k triangles on seed
+9182, and add half to the mobile one (98k to 146k). In the scene benchmark on the desktop AMD GPU
+(1280 × 720, two interleaved before/after runs per scenario, shared and noisy host) the summed GPU
+time per frame rose by about 0.6-0.9 ms with WebGPU (night 7.97 to 8.63-8.64 ms, rain 7.48-7.50 to
+8.10-8.35 ms) and about 1 ms on the WebGL fallback at noon, mostly in the main view (+0.4 ms) and the
+lake reflection (+0.3 ms); the frame interval stayed at the 16.7 ms cap and scene readiness moved
+from about 3.4-3.7 s to 3.6-3.9 s. A chip costs about six triangles after eye culling, scree and loose
+blocks about three, so the densities in `erosionDensity` are the knob if a device needs it.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
-the light direction moves by more than about half a texel. Only the two brightest lanterns cast
+the light direction moves by more than about half a texel. The caster cubes carry positions only;
+their batch binds the position buffer again as `normal`, because Three's batching transforms
+normals even in the depth-only pass and would warn about a missing attribute. Only the two brightest lanterns cast
 cube shadows (one on low power): each cube costs six caster renders and a cube sample in every
 lit pixel, and unshadowed lanterns still light the bank. Those two refresh once their lantern has
 drifted 8 cm (12 cm on low power), at most one per frame. The environment probe renders one cube

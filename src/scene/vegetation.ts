@@ -6,7 +6,6 @@ import {
   dFdy,
   dot,
   float,
-  interleavedGradientNoise,
   log2,
   max,
   min,
@@ -15,7 +14,6 @@ import {
   positionWorld,
   pow,
   saturate,
-  screenCoordinate,
   sin,
   texture,
   transformNormalToView,
@@ -57,8 +55,6 @@ export const UNDERGROWTH_LAYER = 7
 const FULL_LEAN_SPEED = 9
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
-/** The forest arrives after the first frame and dissolves in over this many milliseconds. */
-const APPEAR_MS = 700
 
 /**
  * Last Signal's vegetation as three draws: voxel wood, foliage clump cards and procedural
@@ -73,9 +69,6 @@ export class Vegetation {
   private readonly sunDirection = uniform(new Vector3(0, 1, 0))
   private readonly sunColour = uniform(new Color())
   private readonly ambient = uniform(new Color())
-  /** Dissolve-in share, 0 to 1; screen-space dither keeps it free of sorting. */
-  private readonly appear = uniform(1)
-  private appearFrom = 0
   private readonly disposables: Array<{ dispose(): void }> = []
 
   constructor(parent: Object3D, prepared: PreparedVegetation) {
@@ -105,17 +98,6 @@ export class Vegetation {
     this.add(parent, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
   }
 
-  /** Start the dissolve-in from `now` (ms); `instant` skips it, as for reduced motion. */
-  reveal(now: number, instant = false) {
-    this.appearFrom = now
-    this.appear.value = instant ? 1 : 0
-  }
-
-  /** True while the dissolve-in still needs frames. */
-  get appearing() {
-    return this.appear.value < 1
-  }
-
   private add(
     parent: Object3D,
     name: string,
@@ -138,7 +120,6 @@ export class Vegetation {
     geometry.computeBoundingSphere()
     // Sway and flutter reach a little beyond the rest bounds.
     if (geometry.boundingSphere) geometry.boundingSphere.radius += 0.5
-    material.maskNode = interleavedGradientNoise(screenCoordinate.xy).lessThan(this.appear)
     const mesh = new Mesh(geometry, material)
     mesh.name = `Vegetation ${name}`
     mesh.castShadow = castShadow
@@ -236,10 +217,7 @@ export class Vegetation {
     direction: readonly [number, number],
     speed: number,
     light: LightingState,
-    now = performance.now(),
   ) {
-    if (this.appear.value < 1)
-      this.appear.value = Math.min(1, Math.max(0, (now - this.appearFrom) / APPEAR_MS))
     this.time.value = elapsed
     this.wind.value.set(direction[0], direction[1])
     this.strength.value = Math.min(1.2, Math.max(0, speed) / FULL_LEAN_SPEED)

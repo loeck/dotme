@@ -15,18 +15,28 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 
 - Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
   golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles. A solid needle spire over the top third
-  carries the crown to its tip, so the small top tiers do not float apart. Boughs start at 27–33% of the height so
+  colour. One variant uses the darker spruce needles. A needle core a third of the crown radius,
+  upper tiers that thicken toward the top and a solid spire over the top 42% keep the silhouette
+  one continuous cone, so the sky never shows between the small top tiers. Boughs start at 27–33% of the height so
   a short dark trunk shows under the skirt.
 - Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
   below, and an uneven crown of scaffold lobes around a dense inner mass.
 - Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
-  main value break against the dark conifers.
-- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree.
+  main value break against the dark conifers. A deep hanging curtain under each of the four
+  lower forks rounds the crown's underside, which otherwise sat flat like an umbrella.
+- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree,
+  and mid-ground cover (below).
 
 Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
 the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
-toward the horizon. Birches stay in the mid-ground band.
+toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
+crown (its highest ground cell, nearest the centre on a tie) at three quarters of the usual
+size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
+
+Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
+through scattered bushes instead (Last Signal's islet and bank cover): one candidate per 3 × 3
+columns between the undergrowth and the far shore, jittered, gathered into 5 m patches, off
+tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 on phones.
 
 ## Wood and foliage
 
@@ -43,7 +53,9 @@ tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a
 underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
 under the crown. Cards stay within about 30° of vertical, so a low camera never sees a crown's top
 cards edge-on as pale slivers. Card normals lean toward the open direction, with its upward
-part damped so sunlit crown tops do not read as a pale lid. Albedo takes a cluster value hash, a per-tree hue and value jitter,
+part damped so sunlit crown tops do not read as a pale lid. Clumps opening nearly straight up
+(a spire's tip) are not pushed above the crown and lose up to 20% of their value, so the tip
+stays attached to the tree. Albedo takes a cluster value hash, a per-tree hue and value jitter,
 a cool-underside to warm-top ramp and an openness and height shade.
 
 The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an
@@ -66,16 +78,16 @@ and blades near a step or a wall turn away from it and lean less, while ground c
 inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
 view faces a low sun.
 
-## Streaming
+## Loading
 
-The forest never holds up the first frame. The world worker that builds the lake surfaces
-posts them first, then grows the forest and posts it as its own message, also when it beats
-the terrain. Once the scene is presented, the engine builds the three meshes off-scene, gives
-their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles them
-for every view that draws them: main view, mirror, environment probe and shadow maps. Then
-they join the scene, the shadow maps refresh, and the forest dissolves in over 0.7 s through
-a screen-space interleaved-gradient mask (instant under reduced motion). On a failed or
-cancelled preparation the scene simply stays without vegetation.
+The forest is part of the first frame, so trees never pop in after the loader. The world
+worker that builds the lake surfaces posts them first, then grows the forest and posts it as
+its own message; the engine waits for it after building the scene, adds the three meshes,
+gives their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles
+them for every view that draws them (main view, mirror, environment probe and shadow maps) in
+the same batch as the scene's shaders. The forest message usually lands about 0.1 s after the
+world data, and its compiles run alongside the scene's, so the wait is short. On a failed
+preparation the scene simply loads without vegetation.
 
 ## Cost
 
@@ -83,7 +95,8 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 188k triangles (127k of them undergrowth) and the phone forest about 40k. Preparation runs after the surfaces on the
+forest is about 202k triangles (127k of them undergrowth, 116 mid-ground bushes and the islet
+trees about 14k) and the phone forest about 41k. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind

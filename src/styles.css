@@ -128,6 +128,9 @@
   --scene-native-cursor: none;
 }
 .scene-cursor {
+  --cursor-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --cursor-light: #edf2f5;
+  --cursor-ink: #253038;
   position: fixed;
   inset: 0 auto auto 0;
   width: 6px;
@@ -144,27 +147,72 @@
   pointer-events: none;
 }
 .scene-cursor > span {
-  display: block;
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 50%;
+  left: 50%;
   box-sizing: border-box;
-  border: 1px solid #253038;
   border-radius: 50%;
-  background: #edf2f5;
+}
+/* The hit point. Its strain comes from script, frame by frame, without a transition. */
+.scene-cursor-point {
+  width: 6px;
+  height: 6px;
+  margin: -3px;
+  border: 1px solid var(--cursor-ink);
+  background: var(--cursor-light);
+  transition: scale 180ms var(--cursor-ease);
+}
+/* Over controls the point opens into a hollow ring, so the label under it stays legible.
+   A faint ink edge on both sides keeps the ring visible on the daylight sky. */
+.scene-cursor-ring {
+  width: 22px;
+  height: 22px;
+  margin: -11px;
+  border: 1px solid rgb(237 242 245 / 0.92);
+  box-shadow:
+    0 0 0 1px rgb(23 35 45 / 0.2),
+    inset 0 0 0 1px rgb(23 35 45 / 0.2);
+  opacity: 0;
+  scale: 0.3;
   transition:
-    transform var(--cursor-response, 180ms) cubic-bezier(0.22, 1, 0.36, 1),
-    scale 140ms cubic-bezier(0.22, 1, 0.36, 1);
+    opacity 120ms ease-out,
+    scale 260ms var(--cursor-ease);
 }
-.scene-cursor[data-stretched] {
-  --cursor-response: 25ms;
+.scene-cursor[data-interactive='true'] .scene-cursor-ring {
+  opacity: 1;
+  scale: 1;
 }
-.scene-cursor[data-interactive='true'] > span {
-  scale: 1.65;
+.scene-cursor[data-interactive='true'] .scene-cursor-point {
+  scale: 0.5;
+}
+.scene-cursor[data-pressed] .scene-cursor-point {
+  scale: 0.72;
+  transition-duration: 70ms;
+}
+.scene-cursor[data-interactive='true'][data-pressed] .scene-cursor-point {
+  scale: 0.4;
+}
+.scene-cursor[data-interactive='true'][data-pressed] .scene-cursor-ring {
+  scale: 0.84;
+  transition-duration: 90ms;
+}
+/* One quiet ring released by a press on the landscape (animated from script). */
+.scene-cursor-echo {
+  width: 44px;
+  height: 44px;
+  margin: -22px;
+  border: 1px solid rgb(237 242 245 / 0.8);
+  box-shadow: 0 0 0 1px rgb(23 35 45 / 0.1);
+  opacity: 0;
 }
 @media (prefers-reduced-motion: reduce) {
   .scene-cursor > span {
     transition: none !important;
     transform: none !important;
+    translate: none !important;
+  }
+  .scene-cursor-echo {
+    display: none;
   }
 }
 @media (hover: none), (pointer: coarse) {

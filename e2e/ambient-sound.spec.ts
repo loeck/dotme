@@ -89,11 +89,13 @@ test('pending autoplay returns to off without downloading or starting later', as
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'true')
   await expect(button).toHaveAttribute('aria-busy', 'false')
-  expect(requests).toHaveLength(5)
+  // Every generated world has a waterfall; music streams later, only when a piece is due.
+  expect(requests).toHaveLength(8)
 })
 
+// Every generated world now selects a waterfall, so both seeds load its recording.
 for (const { seed, waterfall } of [
-  { seed: 0, waterfall: false },
+  { seed: 0, waterfall: true },
   { seed: 9182, waterfall: true },
 ])
   test(`blocked autoplay loads nothing; keyboard activation loads only present scene audio (seed=${seed})`, async ({
@@ -111,7 +113,7 @@ for (const { seed, waterfall } of [
     await page.keyboard.press('Enter')
     await expect(button).toHaveAttribute('aria-pressed', 'true')
     await expect(button).toHaveAttribute('aria-busy', 'false')
-    await expect.poll(() => requests.length).toBe(waterfall ? 6 : 5)
+    await expect.poll(() => requests.length).toBe(waterfall ? 8 : 7)
     expect(requests.some((url) => url.endsWith('/audio/waterfall.ogg'))).toBe(waterfall)
     const snapshot = await page.evaluate(() => {
       const c = window.testAudioContexts ?? []
@@ -127,7 +129,7 @@ for (const { seed, waterfall } of [
     await page.reload()
     await waitForScene(page)
     await expect(button).toHaveAttribute('aria-pressed', 'false')
-    expect(requests).toHaveLength(waterfall ? 6 : 5)
+    expect(requests).toHaveLength(waterfall ? 8 : 7)
   })
 
 test('cancels a pending load without delayed playback and allows retry', async ({ page }) => {
@@ -146,11 +148,12 @@ test('cancels a pending load without delayed playback and allows retry', async (
   await expect(button).toHaveAttribute('aria-busy', 'true')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await expect(button).toHaveAttribute('aria-label', 'Cancel ambient sound loading')
-  await expect.poll(() => pendingRoutes.length).toBe(5)
+  // The seven base clips; the waterfall waits for base water.
+  await expect.poll(() => pendingRoutes.length).toBe(7)
   await button.click()
   await expect(button).toHaveAttribute('aria-pressed', 'false')
   await Promise.all(pendingRoutes.map((route) => route.continue().catch(() => {})))
-  await expect.poll(() => failedRequests.length).toBe(5)
+  await expect.poll(() => failedRequests.length).toBe(7)
   await expect.poll(() => page.evaluate(audioState)).toBe('suspended')
   await page.unroute('**/audio/*.ogg')
   await expect(button).toHaveAttribute('aria-pressed', 'false')
@@ -236,10 +239,12 @@ test('decodes within the total buffer budget and draws both icons with GPU contr
   const bytes = await page.evaluate(async () => {
     const context = new OfflineAudioContext(1, 1, 32000)
     const buffers = await Promise.all(
-      ['water', 'wind', 'rain', 'insects', 'birds', 'waterfall'].map(async (name) => {
-        const response = await fetch(`/audio/${name}.ogg`)
-        return context.decodeAudioData(await response.arrayBuffer())
-      }),
+      ['water', 'wind', 'rain', 'insects', 'birds', 'owls', 'splashes', 'waterfall'].map(
+        async (name) => {
+          const response = await fetch(`/audio/${name}.ogg`)
+          return context.decodeAudioData(await response.arrayBuffer())
+        },
+      ),
     )
     return buffers.reduce((sum, buffer) => sum + buffer.length * buffer.numberOfChannels * 4, 0)
   })

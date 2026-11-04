@@ -189,7 +189,11 @@ export function appendClumps(
     const isolated = seed.openness > 0.8 ? 0.6 : 1
     // Cards on a crown's underside stay small and do not drop below it, so trunks stay visible.
     const under = Math.max(0, -open[1])
-    const outward: Point = [open[0], Math.max(open[1], -0.1), open[2]]
+    // Clumps opening straight up (a spire's tip, a crown's top) stay on the crown instead of
+    // being pushed above it, and lose some of their top light, or they read as a pale lid
+    // hovering over the tree.
+    const lid = Math.max(0, open[1] - 0.6) / 0.4
+    const outward: Point = [open[0], Math.max(open[1], -0.1) * (1 - lid), open[2]]
     const edge =
       Math.max(options.length, 2 * options.pitch) *
       at.scale *
@@ -200,7 +204,10 @@ export function appendClumps(
       (1 - 0.4 * under)
     const ramp = mixRgb([0.88, 0.96, 1.04], [1.06, 1.02, 0.9], open[1] * 0.5 + 0.5)
     const value =
-      (0.88 + seed.cluster * 0.24) * (0.62 + 0.38 * seed.openness) * (0.8 + 0.2 * seed.height)
+      (0.88 + seed.cluster * 0.24) *
+      (0.62 + 0.38 * seed.openness) *
+      (0.8 + 0.2 * seed.height) *
+      (1 - 0.2 * lid)
     const colour: Rgb = [
       seed.colour[0] * ramp[0] * options.propTint[0] * value,
       seed.colour[1] * ramp[1] * options.propTint[1] * value,
