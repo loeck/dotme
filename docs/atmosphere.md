@@ -94,12 +94,38 @@ away by a third to three quarters of a cell, a third of them trailing a smaller 
 lower, and the odd stone rests against the foot of a riser that rises from its top. Cells are
 about 6 cm near the camera; past z = -12 a 6 cm cell spans only a few pixels, so they take half a
 voxel (12.5 cm) at about a third of the density, which notches the mid-ground hill crests and
-breaks the lit lip lines. Their sides are earthier than their tops, like a clod's cut. They
-are render-only: no collision, no shadow casting, and they never reach into another solid.
-Mobile dresses only the foreground. On seed 9182 they add 18.5k cells and 120k triangles on
-desktop (terrain 309k to 429k) and 0.6k cells and 5k triangles on mobile, and about 60 ms to
-the desktop terrain preparation in the worker; dressing every lip at the near density would
-have added 550k triangles.
+breaks the lit lip lines. Their sides are earthier than their tops, like a clod's cut. Mobile
+dresses only the foreground.
+
+Every exposed top, whatever its material and distance, is also eroded into micro-columns
+(`terrain-erosion.ts`). The top splits into a grid of 6 cm cells near the camera and in the
+foreground, 12.5 cm on the mid-ground hills (two per 25 cm voxel) and 12.5 cm on the far 50 cm
+voxels (four per side; two on phones). A column on the edge of a riser that drops away may sink
+by a cell, near the camera sometimes two, so the step edge wears into notches and short
+micro-steps; a column at the foot of a riser that rises from the top may carry a cell or two of
+scree, so the inner corner fills in as the outer one wears away; and stone tops (shore, rock,
+the wet stones in the lake) carry the odd loose block. Turf lip cells and stones skip columns
+that sank or carry scree. Densities rise with distance (a third of the edge columns near the
+camera, three fifths on the hills and far crests), because there a step is only one or two cells
+high and dense micro-steps are what stop a slope reading as a staircase of whole voxels; phones
+take about half. The mesher lowers the riser under each chip and closes the chip with a floor and
+walls; pieces of an eroded top overlap by a millimetre inside the solid so their T-junctions
+never open a crack. Chip floors keep 16 cm above the lake: lower chips on the shore steps showed
+bright artifacts from the water at their floor. Two rules keep chips from reading as holes: neighbouring chips must open through a
+common side (two chips opening through opposite sides of a thin voxel form a slot through the
+hill), and below the camera's eye level a chip may not open through a side that faces away from
+the camera, where it would only frame the bright lake beyond the crest; above eye level such a
+chip frames the sky and notches the silhouette, which is the point. Scree likewise only leans on
+risers that face the camera. All of it is render-only: collision, picking, the shadow-caster cubes
+and the lake bed keep the whole voxels.
+
+On seed 9182 the micro layers take the desktop terrain from 429k to 798k triangles (66k chips,
+22.5k scree and loose blocks, 10k lip cells) and its mesh buffers from 25.7 to 47.9 MB, and the
+mobile terrain from 98k to 146k triangles (5.9 to 8.8 MB); seeds 1 and 424242 land within 4%.
+Measured in Node with interleaved runs, desktop terrain preparation went from 0.36-0.45 s to
+0.58-0.73 s and mobile from 0.10 s to 0.12-0.16 s; the emission now writes typed arrays
+directly, which pays for part of the extra geometry. See [performance](performance.md) for the
+frame cost.
 
 The fixed camera faces the low sun at both ends of the day, so the golden-hour look
 (`scene-look.ts`) lifts saturation, contrast and warmth but keeps noon's exposure, haze

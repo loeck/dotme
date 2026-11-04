@@ -29,7 +29,8 @@ const SIDES = [
   { face: 5, axis: 2, sign: -1 },
 ] as const
 
-const unit = (a: number, b: number, c: number) => {
+/** Unit hash of a micro-cell lattice position and a salt, shared by every micro-voxel layer. */
+export const cellHash = (a: number, b: number, c: number) => {
   let n = Math.imul((a | 0) + 0x9e37, 0x85ebca6b) ^ Math.imul((b | 0) + 0x7f4a, 0xc2b2ae35)
   n = Math.imul(n ^ (n >>> 15) ^ Math.imul(c | 0, 0x27d4eb2f), 0x165667b1)
   return ((n ^ (n >>> 13)) >>> 0) / 0x1_0000_0000
@@ -54,6 +55,8 @@ export function lipCells(
   visible: readonly boolean[],
   /** Dress mid-ground lips too; mobile keeps only the foreground's. */
   midground = true,
+  /** Slots whose column was chipped away (see terrain-erosion.ts), by side index and slot. */
+  dropped?: (side: number, slot: number) => boolean,
 ): LipCell[] {
   const s = voxel.size
   const top = voxel.y + s / 2
@@ -87,7 +90,7 @@ export function lipCells(
     cells.push(cell)
     return true
   }
-  for (const { face, axis, sign } of SIDES) {
+  for (const [side, { face, axis, sign }] of SIDES.entries()) {
     const tangent = axis === 0 ? 2 : 0
     const plane = required(centre[axis]) + (sign * s) / 2
     const start = required(centre[tangent]) - s / 2
@@ -104,23 +107,23 @@ export function lipCells(
       // A riser drops away from this edge: turf overhangs it.
       for (let k = 0; k < slots; k++) {
         const salt = face * 8 + k
-        if (unit(gx, gz, salt) < (far ? 0.78 : 0.4)) continue
-        const out = m * (0.3 + 0.45 * unit(gx, gz, salt + 101))
-        const width = m * (0.8 + 0.2 * unit(gx, gz, salt + 211))
-        const height = m * (0.7 + 0.5 * unit(gx, gz, salt + 307))
+        if (cellHash(gx, gz, salt) < (far ? 0.78 : 0.4) || dropped?.(side, k)) continue
+        const out = m * (0.3 + 0.45 * cellHash(gx, gz, salt + 101))
+        const width = m * (0.8 + 0.2 * cellHash(gx, gz, salt + 211))
+        const height = m * (0.7 + 0.5 * cellHash(gx, gz, salt + 307))
         // Never flush with the parent top, which would z-fight with it.
-        const lift = m * (0.06 + 0.18 * unit(gx, gz, salt + 401))
+        const lift = m * (0.06 + 0.18 * cellHash(gx, gz, salt + 401))
         const along = start + (k + 0.5) * m
         const cy = top + lift - height / 2
         const tuft = {
           ...box(plane + sign * (out - m / 2), along, cy, m, width, height),
           kind: 'turf' as const,
-          shade: 0.85 + 0.2 * unit(gx, gz, salt + 503),
+          shade: 0.85 + 0.2 * cellHash(gx, gz, salt + 503),
           hidden: [face ^ 1],
         }
         // Some tufts trail a smaller cell one step lower, so the lip line breaks vertically too.
-        if (!place(axis, sign, plane, tuft, true) || unit(gx, gz, salt + 601) >= 0.35) continue
-        const hang = m * (0.45 + 0.35 * unit(gx, gz, salt + 701))
+        if (!place(axis, sign, plane, tuft, true) || cellHash(gx, gz, salt + 601) >= 0.35) continue
+        const hang = m * (0.45 + 0.35 * cellHash(gx, gz, salt + 701))
         place(
           axis,
           sign,
@@ -146,7 +149,8 @@ export function lipCells(
     // Draw the stones before probing: the probe is the costly part, and most edges get none.
     let stones = 0
     for (let k = 0; k < slots; k++)
-      if (unit(gx, gz, 64 + face * 8 + k) >= (far ? 0.9 : 0.72)) stones |= 1 << k
+      if (cellHash(gx, gz, 64 + face * 8 + k) >= (far ? 0.9 : 0.72) && !dropped?.(side, k))
+        stones |= 1 << k
     if (!stones) continue
     // Only where the next step rises from this edge does a stone rest against its foot.
     query[axis] = query[axis + 3] = plane + (sign * m) / 2
@@ -158,9 +162,9 @@ export function lipCells(
     for (let k = 0; k < slots; k++) {
       if (!(stones & (1 << k))) continue
       const salt = 64 + face * 8 + k
-      const width = m * (0.55 + 0.4 * unit(gx, gz, salt + 101))
-      const depth = m * (0.5 + 0.4 * unit(gx, gz, salt + 211))
-      const height = m * (0.35 + 0.35 * unit(gx, gz, salt + 307))
+      const width = m * (0.55 + 0.4 * cellHash(gx, gz, salt + 101))
+      const depth = m * (0.5 + 0.4 * cellHash(gx, gz, salt + 211))
+      const height = m * (0.35 + 0.35 * cellHash(gx, gz, salt + 307))
       place(
         axis,
         sign,
@@ -175,7 +179,7 @@ export function lipCells(
             height,
           ),
           kind: 'pebble',
-          shade: 0.8 + 0.25 * unit(gx, gz, salt + 401),
+          shade: 0.8 + 0.25 * cellHash(gx, gz, salt + 401),
           hidden: [3, face],
         },
         false,

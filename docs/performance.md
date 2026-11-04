@@ -185,6 +185,15 @@ back-facing to that box, its mirror image under the reflection plane and the env
 are dropped when the terrain is prepared, about 37% of the exposed faces.
 Greedy meshing was measured and rejected: neighbouring voxel colours differ, so it would only
 remove about a third of the faces while introducing T-junction pixel gaps.
+The render-only micro-voxels (`terrain-lips.ts`, `terrain-erosion.ts`, see
+[atmosphere](atmosphere.md)) nearly double the desktop terrain, from 429k to 798k triangles on seed
+9182, and add half to the mobile one (98k to 146k). In the scene benchmark on the desktop AMD GPU
+(1280 × 720, two interleaved before/after runs per scenario, shared and noisy host) the summed GPU
+time per frame rose by about 0.6-0.9 ms with WebGPU (night 7.97 to 8.63-8.64 ms, rain 7.48-7.50 to
+8.10-8.35 ms) and about 1 ms on the WebGL fallback at noon, mostly in the main view (+0.4 ms) and the
+lake reflection (+0.3 ms); the frame interval stayed at the 16.7 ms cap and scene readiness moved
+from about 3.4-3.7 s to 3.6-3.9 s. A chip costs about six triangles after eye culling, scree and loose
+blocks about three, so the densities in `erosionDensity` are the knob if a device needs it.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
 the light direction moves by more than about half a texel. The caster cubes carry positions only;
