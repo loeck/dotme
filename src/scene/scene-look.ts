@@ -57,7 +57,7 @@ export const LAST_SIGNAL_LOOK: LookPreset = {
   base: {
     exposure: 1,
     contrast: 1.06,
-    saturation: 0.8,
+    saturation: 0.9,
     tint: [1, 1, 1],
     vignette: 0.22,
     grain: 0.015,

@@ -21,7 +21,7 @@ describe('Last Signal scene look', () => {
     expect(noon).toEqual(LAST_SIGNAL_LOOK.base)
     expect(noon.saturation).toBeLessThan(1)
     const golden = sampleLook({ ...day, sunHeight: elevation(8) })
-    expect(golden.saturation).toBeCloseTo(0.8 * 1.3, 6)
+    expect(golden.saturation).toBeCloseTo(0.9 * 1.3, 6)
     expect(golden.contrast).toBeGreaterThan(noon.contrast)
     // Facing a low sun, the air must not wash the depth planes out: no brighter exposure,
     // no thicker or nearer haze, and only a modest lift of the forward glow.

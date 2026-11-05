@@ -89,6 +89,9 @@ The fixed camera faces the low sun at both ends of the day, so the golden-hour l
 start and air density (5% thinner), with only a 10% lift of the forward glow. A thicker,
 nearer haze there washed the islands and banks into one milky plane against the light.
 
+The base grade keeps saturation at 0.9 (0.8 before the realism pass): with the sky light and
+tone mapping already desaturating sunlit foliage, 0.8 turned spruce tops and grass grey-green.
+
 The lens (`depth-focus.ts`) blurs the far ridges by up to 1.35 pixels beyond 90 m and the near
 bank by at most 0.6 pixels within 4–14 m, as a lens focused tens of metres out at a moderate
 aperture would; a stronger near blur smeared the fine grass blades into fur.
