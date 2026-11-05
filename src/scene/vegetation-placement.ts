@@ -33,8 +33,8 @@ export type PreparedVegetation = Readonly<{
 
 /** Undergrowth and shrub budgets per layout. */
 const GRID = {
-  desktop: { sward: 260_000, density: 1, shrubs: 180 },
-  mobile: { sward: 44_000, density: 1, shrubs: 32 },
+  desktop: { sward: 260_000, density: 1, shrubs: 450 },
+  mobile: { sward: 44_000, density: 1, shrubs: 70 },
 } as const
 const GROUND_COVER_Z = -1.5
 /** Mid-ground shrubs: beyond the undergrowth, up to the far shore's haze. */

@@ -94,7 +94,7 @@ type TerrainShape = Readonly<{
 type Stone = Readonly<{ x: number; z: number; top: number; size: number }>
 
 /** Minimum distance between trunks, in metres. */
-export const TREE_SPACING = 1.6
+export const TREE_SPACING = 1.8
 /** An islet's crown tree stays in proportion to a mound a few metres across. */
 const ISLET_TREE_SCALE = 0.75
 /** The ground never rises closer to the water than this, so every bank has a lip. */
@@ -980,7 +980,7 @@ function placeTrees(
     .filter((site) => site.z < -3 && site.z > -40)
     .sort((a, b) => b.spread - a.spread)
   const ridges = clear.filter((site) => site.z >= -3 || site.z <= -40).sort((a, b) => b.top - a.top)
-  const cap = mobile ? 12 : 30
+  const cap = mobile ? 20 : 72
   const trees: LakeTree[] = []
   const plant = (site: Site, gate: number, size = 1) => {
     if (trees.length >= cap) return

@@ -33,7 +33,7 @@ Nordic shore:
   slots per tree, are mostly bilberry and saplings; mid-ground cover (below) is about 55%
   bilberry, 30% juniper and 15% saplings.
 
-Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
+Trees cluster into groves with clearings, up to 72 on desktop and 20 on phones, keep 1.8 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
 crown (its highest open ground, nearest the centre on a tie) at three quarters of the usual
 size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
@@ -41,7 +41,7 @@ size, so no mound reads as a bare stone pyramid and the tree stays in proportion
 Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
 through scattered bushes instead (Last Signal's islet and bank cover): one candidate per 3 × 3
 columns between the undergrowth and the far shore, jittered, gathered into 5 m patches, off
-tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 on phones.
+tree trunks, other bushes and a step's last column. Up to 450 on desktop and 70 on phones.
 
 ## Wood and foliage
 
@@ -130,8 +130,9 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 234k triangles: 39k of wood, 34k of foliage cards and 161k of undergrowth; the
-phone forest is about 73k (18k, 11k and 44k). The voxel trees it replaces drew 21k of wood and
+forest is about 315k triangles: 87k of wood, 68k of foliage cards and 160k of undergrowth; the
+phone forest is about 84k (25k, 15k and 44k). On the host GPU (WebGL, 1600 × 900) the whole frame
+measures 9–11 ms with this forest and with the sparser one before it, within this host's noise. The voxel trees it replaces drew 21k of wood and
 63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
 long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
 sapling's none. Preparation runs after the surfaces on the

@@ -135,6 +135,20 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .mul(smoothstep(0.82, 0.95, up))
     .mul(litter.oneMinus())
   ground = mix(ground, linear(0.15, 0.118, 0.062), dry.mul(0.7))
+  // Dwarf-shrub heath in patches a few metres across on open, gentle ground: heather's purple-
+  // brown and bilberry's dark green, as Nordic shore heaths mix them, over a clumpy grain so
+  // the slopes read as low vegetation rather than a smooth carpet.
+  const heathPatch = octave(p, 0.42, pixel).add(octave(p, 1.3, pixel).mul(0.35))
+  const heath = smoothstep(-0.05, 0.3, heathPatch)
+    .mul(smoothstep(0.78, 0.92, up))
+    .mul(litter.oneMinus())
+    .mul(smoothstep(0.25, 0.6, above))
+  const shrubTone = octave(p, 0.9, pixel).mul(0.5).add(0.5)
+  const shrubs = mix(linear(0.035, 0.058, 0.024), linear(0.07, 0.05, 0.045), shrubTone)
+  const clumps = octave(p, 5.5, pixel)
+    .mul(0.5)
+    .add(octave(p, 13, pixel).mul(0.25))
+  ground = mix(ground, shrubs.mul(clumps.mul(0.35).add(1)), heath.mul(0.75))
   // Damp peat and soil gather in hollows.
   ground = mix(
     ground,

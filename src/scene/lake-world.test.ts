@@ -129,7 +129,7 @@ describe('lake world', () => {
     const second = createLakeWorld(9182, false)
     expect(first.trees).toEqual(second.trees)
     expect(first.trees.length).toBeGreaterThan(0)
-    expect(first.trees.length).toBeLessThanOrEqual(30)
+    expect(first.trees.length).toBeLessThanOrEqual(72)
     expect(first.trees.some((tree) => tree.z < -3 && tree.z > -40)).toBe(true)
     const fall = required(first.waterfall)
     for (const tree of first.trees) {
@@ -148,7 +148,7 @@ describe('lake world', () => {
           TREE_SPACING ** 2,
         )
       }
-    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(12)
+    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(20)
     // Birches stay in the mid-ground band, as in Last Signal's diorama.
     expect(first.trees.filter((tree) => tree.kind === 'birch').every((tree) => tree.z > -40)).toBe(
       true,

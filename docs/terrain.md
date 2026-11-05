@@ -70,6 +70,9 @@ weathered granite 0.13–0.22):
 
 - moss with brighter cushions where open sky reaches it, heath and straw-dry grass in open,
   gentle patches, damp peat in hollows and litter under the trees;
+- dwarf-shrub heath in patches a few metres across on open, gentle ground: heather's purple-brown
+  and bilberry's dark green over a clumpy grain, so slopes read as low vegetation rather than a
+  smooth carpet;
 - weathered granite on faces steeper than about 50°, convex knobs and where the composition placed stone:
   feldspar speckle, joint fissures a metre or two apart (in the albedo, so they read from afar
   after the relief has faded), muted lichen crusts and dark rain streaks down the faces. Thin
