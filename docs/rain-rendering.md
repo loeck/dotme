@@ -3,7 +3,7 @@
 `RainSimulation` advances world-space droplets at a fixed 60 Hz, matching the engine's frame cap;
 streak heads are extrapolated by the unstepped remainder so drops never stall between steps. Water
 crossings use Illinois regula falsi on the moving surface. One world unit represents
-one metre. Segment/voxel collisions retire drops and create pooled impacts; catch-up and
+one metre. Segment/terrain collisions retire drops and create pooled impacts; catch-up and
 pool capacities are bounded. Horizontal wind, drop size and emission respond to the weather
 state. Reduced motion suppresses rain; hidden pages pause updates.
 

@@ -1,6 +1,6 @@
 # loeck.me
 
-A static personal site with a procedural voxel lake, live weather and ambient sound.
+A static personal site with a procedural lake landscape, live weather and ambient sound.
 The profile, links and metadata are HTML and remain available without JavaScript.
 
 ## Development
@@ -77,7 +77,7 @@ validated `unknown` values at boundaries; casts, `any`, non-null assertions and 
 error suppressions are prohibited. Prefer minimal public interfaces for test doubles.
 Run `pnpm check`, `pnpm bundle:size` and the relevant browser suite before proposing a change.
 
-See [rendering architecture](docs/architecture.md), [vegetation](docs/vegetation.md), [verification](docs/performance.md),
+See [rendering architecture](docs/architecture.md), [terrain](docs/terrain.md), [vegetation](docs/vegetation.md), [verification](docs/performance.md),
 [weather integration](docs/paris-weather.md) and [audio provenance](docs/living-landscape.md).
 
 ## License and attribution

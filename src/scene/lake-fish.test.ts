@@ -15,20 +15,24 @@ import { apparentFishSurface } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { createFishHabitats, LakeFish } from './lake-fish'
+import { createLakeWorld } from './lake-world'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
-import { createVoxelIndex } from './voxel-spatial'
-import type { VoxelIndex } from './voxel-spatial'
-import { createVoxelWorld } from './voxel-world'
+import { prepareBoulders } from './terrain-boulders'
+import { prepareTerrainColliders } from './terrain-surface'
+import type { TerrainColliders } from './terrain-surface'
 
 // Worlds are immutable inputs; retain only the lake data needed by these tests.
-const worlds = new Map<string, { bed: LakeBed; index: VoxelIndex }>()
+const worlds = new Map<string, { bed: LakeBed; index: TerrainColliders }>()
 const cases = [false, true].flatMap((mobile) => [0, 12, 42, 9182].map((seed) => ({ mobile, seed })))
 function lakeData(seed: number, mobile: boolean) {
   const key = `${seed}:${mobile}`
   let entry = worlds.get(key)
   if (!entry) {
-    const world = createVoxelWorld(seed, mobile)
-    entry = { bed: world.lakeBed, index: createVoxelIndex(world.voxels) }
+    const world = createLakeWorld(seed, mobile)
+    entry = {
+      bed: world.lakeBed,
+      index: prepareTerrainColliders(world.field, prepareBoulders(world.boulders, world.seed)),
+    }
     worlds.set(key, entry)
   }
   return entry

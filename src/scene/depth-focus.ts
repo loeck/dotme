@@ -57,8 +57,10 @@ export class DepthFocus {
       renderer,
       Fn(() => {
         const centerDistance = distance(uv())
+        // A lens focused tens of metres out at a moderate aperture keeps the bank a few metres
+        // away nearly sharp: a stronger near blur smeared fine grass blades into fur.
         const radius = max(
-          smoothstep(5, 21, centerDistance).oneMinus().mul(1.25),
+          smoothstep(4, 14, centerDistance).oneMinus().mul(0.6),
           smoothstep(90, 180, centerDistance).mul(1.35),
         )
         const color = this.color.sample(uv()).rgb.toVar(),

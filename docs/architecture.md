@@ -19,21 +19,21 @@ Node materials and TSL passes render through WebGPU. Without a working WebGPU ad
 device, the same renderer is created with its WebGL 2 backend, and the same TSL graph is
 compiled to GLSL; the page releases its static profile only when WebGL 2 is unavailable too.
 Device or context loss ends the graphics session and releases the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
-state. Rapier owns collision queries and stepped rigid-body dynamics over merged terrain
+state. Rapier owns collision queries and stepped rigid-body dynamics over the terrain
 colliders; analytic GPU flows and the wave solver stay custom. World generation is
-deterministic in its seed and layout, so two instances of the world worker each rebuild
-the voxel world and prepare disjoint halves in parallel: one meshes terrain (batches,
-shadow matrices and the BVH), the other prepares lake-bed geometry and normals, water
-geometry, the half-float depth/shore atlas, the simulation mask, cloud noise and the
-merged static collision boxes, and then grows the forest. The forest is a separate message:
+deterministic in its seed and layout, so two instances of the world worker each compose
+the lake again (`lake-world.ts`) and prepare disjoint halves in parallel: one builds the smooth terrain
+mesh and its boulders ([terrain](terrain.md)), the other prepares lake-bed geometry and normals,
+water geometry, the half-float depth/shore atlas, the simulation mask, cloud noise and the
+static colliders (a heightfield and boulder hulls), and then grows the forest. The forest is a separate message:
 the world resolves without it, so physics and scene construction start sooner, and the
 engine adds and compiles it before the first frame (see [vegetation](vegetation.md#loading)). Every part transfers typed buffers; the render thread combines
 them and wraps those buffers in GPU resources and Rapier colliders without repeating
-array generation, bounds scans or box merging. Audio has its own asynchronous resource
+array generation or bounds scans. Audio has its own asynchronous resource
 lifetime.
 
-Terrain and shadow batches are geometries inside one `BatchedMesh` per material, so every
-batch shares one shader program and one render object regardless of its size. Environment materials are compiled once with all meshes
+The terrain and the boulders are each one static mesh with one material, and their shadow
+casters share their geometry. Environment materials are compiled once with all meshes
 included; the six cubemap views reuse those programs with normal culling restored.
 
 Both backends must produce the same image. Three normalizes texture and screen

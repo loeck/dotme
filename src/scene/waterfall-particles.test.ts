@@ -2,7 +2,7 @@ import { InstancedBufferAttribute } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
 import { WATER_LEVEL } from './lake-bed'
-import type { VoxelWaterfall } from './voxel-world'
+import type { WaterfallSite } from './lake-world'
 import { createWaterfallParticles, curtainParcelCount } from './waterfall-particles'
 
 const fall = {
@@ -13,7 +13,7 @@ const fall = {
   seed: 9182,
   direction: [1, 0],
   basin: [],
-} satisfies VoxelWaterfall
+} satisfies WaterfallSite
 
 const attribute = (field: ReturnType<typeof createWaterfallParticles>, name: string) => {
   const found = field.geometry.getAttribute(name)

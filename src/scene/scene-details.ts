@@ -14,10 +14,10 @@ import { LakeSand } from './lake-sand'
 import { LakeSplashes } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
 import { LakeWaterfall } from './lake-waterfall'
+import type { LakeWorld } from './lake-world'
 import type { PhysicsWorld } from './physics-world'
 import { ResourceScope } from './resource-scope'
 import { ShoreWetness } from './shore-wetness'
-import type { VoxelWorld } from './voxel-world'
 import type { WaterContact } from './water-contact'
 import type { WindState } from './wind'
 
@@ -68,7 +68,7 @@ export class SceneDetails {
 
   constructor(
     scene: Scene,
-    world: Pick<VoxelWorld, 'seed' | 'lakeBed' | 'waterfall'>,
+    world: Pick<LakeWorld, 'seed' | 'lakeBed' | 'waterfall'>,
     mobile: boolean,
     reducedMotion: boolean,
     physics: PhysicsWorld,

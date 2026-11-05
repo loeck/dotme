@@ -110,7 +110,8 @@ export function sampleLighting(
   const color = height >= 0 ? sunColor : new Color(0xa3bfd6)
   const intensity = height >= 0 ? sunIntensity : moonIntensity
   const night = 1 - daylight
-  const dayWater = desaturate(new Color().setRGB(0.02, 0.075, 0.07), greyMix).multiplyScalar(
+  // Humic lake water scatters little and in olive-brown: blue is absorbed before it returns.
+  const dayWater = desaturate(new Color().setRGB(0.03, 0.037, 0.016), greyMix).multiplyScalar(
     0.35 + 0.65 * diffuse,
   )
   const irradiance = skyIrradiance(height)
@@ -159,7 +160,7 @@ export function sampleLighting(
     haze: nightHaze.clone().add(scaled(horizonRadiance(height), skyExposure * 0.5)),
     nightHaze,
     waterScatter: new Color()
-      .setRGB(0.0012, 0.007, 0.015)
+      .setRGB(0.0014, 0.0026, 0.0034)
       .lerp(dayWater, daylight * (0.25 + 0.75 * smooth(0, 0.3, height))),
     cloudAmbient: desaturate(
       new Color()

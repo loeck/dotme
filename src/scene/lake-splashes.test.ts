@@ -6,7 +6,7 @@ import { createLakeBed, lakeIndex, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 

@@ -2,15 +2,12 @@ import {
   abs,
   attribute,
   cameraPosition,
-  dFdx,
-  dFdy,
   dot,
   float,
-  log2,
-  max,
   min,
   normalize,
   positionLocal,
+  positionView,
   positionWorld,
   pow,
   saturate,
@@ -19,7 +16,6 @@ import {
   transformNormalToView,
   uniform,
   uv,
-  vec2,
   vec3,
   vec4,
   vertexColor,
@@ -53,12 +49,13 @@ const SHADOW_LAYER = 5
 export const UNDERGROWTH_LAYER = 7
 /** Wind speed (m/s) at which vegetation reaches its full lean. */
 const FULL_LEAN_SPEED = 9
+/** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
+const RELIEF_METRES = 0.004
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
 
 /**
- * Last Signal's vegetation as three draws: voxel wood, foliage clump cards and procedural
- * undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
+ * The forest as three draws: tube-meshed wood, foliage cards and procedural undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
  * buffeting sines at 1.2/√H Hz); cards and blades add a light flutter.
  */
 export class Vegetation {
@@ -80,21 +77,16 @@ export class Vegetation {
       UnsignedByteType,
     )
     atlas.colorSpace = NoColorSpace
-    atlas.generateMipmaps = true
+    // The worker bakes a coverage-preserving mip chain (see `foliage-atlas.ts`).
+    atlas.mipmaps = prepared.atlas.mipmaps.map((level) => ({ ...level }))
+    atlas.generateMipmaps = false
     atlas.minFilter = LinearMipmapLinearFilter
     atlas.magFilter = LinearFilter
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
     this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false)
-    this.add(
-      parent,
-      'foliage',
-      prepared.foliage,
-      this.foliageMaterial(atlas, prepared),
-      true,
-      false,
-    )
+    this.add(parent, 'foliage', prepared.foliage, this.foliageMaterial(atlas), true, false)
     this.add(parent, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
   }
 
@@ -163,30 +155,44 @@ export class Vegetation {
     return material
   }
 
-  private foliageMaterial(atlas: DataTexture, prepared: PreparedVegetation) {
+  private foliageMaterial(atlas: DataTexture) {
+    // Needles and leaves are matte at this scale: a full sky reflection at grazing angles
+    // paled every crown's top edge against the sky.
     const material = new MeshStandardNodeMaterial({
-      roughness: 0.85,
+      roughness: 0.95,
       metalness: 0,
+      envMapIntensity: 0.45,
       side: DoubleSide,
     })
     material.positionNode = positionLocal.add(this.sway())
     const sample = texture(atlas, uv())
-    // Mip coverage compensation keeps distant crowns from thinning as alpha averages out.
-    const texel = uv().mul(vec2(prepared.atlas.width, prepared.atlas.height))
-    const lod = max(log2(max(dFdx(texel).length(), dFdy(texel).length())), 0)
-    const coverage = saturate(sample.a.mul(lod.mul(0.3).add(1)))
+    // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
+    // fill their cards into squares.
+    const coverage = sample.a
     material.alphaTest = 0.5
-    const albedo = vertexColor().rgb.mul(sample.r.mul(1.35).add(0.15))
+    // Needle-to-needle tone, kept within ±25%: a stronger spread speckled sunlit tops pale.
+    const albedo = vertexColor().rgb.mul(sample.r.mul(0.9).add(0.45))
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
     // keeps `alphaTest`, so cards cast their cutout rather than square shadows.
     material.colorNode = vec4(albedo, coverage)
-    // Card normals lean 90% toward the clump's open direction and must not flip on back faces.
+    // Card normals lean toward the outside of their crown and must not flip on back faces.
     const normal = normalize(attribute<'vec3'>('normal'))
-    material.normalNode = transformNormalToView(normal)
+    // Each needle and leaf is a small dome in the atlas: its screen-space slope tilts the normal
+    // (surface gradient, as the terrain's detail relief), so a near spray shades as rounded
+    // shoots rather than a flat card. Mip levels flatten the relief with distance on their own.
+    const base = transformNormalToView(normal).normalize()
+    const relief = sample.g.mul(RELIEF_METRES)
+    const dpdx = positionView.dFdx(),
+      dpdy = positionView.dFdy()
+    const r1 = dpdy.cross(base),
+      r2 = base.cross(dpdx)
+    const det = dpdx.dot(r1)
+    const gradient = det.sign().mul(relief.dFdx().mul(r1).add(relief.dFdy().mul(r2)))
+    material.normalNode = det.abs().mul(base).sub(gradient).normalize()
     const toEye = normalize(cameraPosition.sub(positionWorld))
     const facing = abs(dot(normal, toEye)).oneMinus()
-    // Last Signal: sky-light rim and back-light translucency strongest at the crown rim.
-    const rim = pow(facing, 3).mul(0.35)
+    // Sky-light rim and back-light translucency, strongest at the crown rim.
+    const rim = pow(facing, 3).mul(0.2)
     const back = pow(saturate(dot(this.sunDirection.negate(), toEye)), 4)
       .mul(0.4)
       .mul(facing.mul(0.6).add(0.4))
@@ -195,10 +201,13 @@ export class Vegetation {
   }
 
   private undergrowthMaterial() {
+    // A sward hides most of its blades from the sky behind its neighbours: at grazing view a
+    // full sky reflection washed the bank blue-grey.
     const material = new MeshStandardNodeMaterial({
       vertexColors: true,
-      roughness: 0.8,
+      roughness: 0.92,
       metalness: 0,
+      envMapIntensity: 0.35,
       side: DoubleSide,
     })
     material.positionNode = positionLocal.add(this.sway())
@@ -207,7 +216,8 @@ export class Vegetation {
     const toEye = normalize(cameraPosition.sub(positionWorld))
     // Grass transmission (Voxen): sun through thin blades when looking toward the light.
     const into = saturate(dot(this.sunDirection.negate(), toEye))
-    material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 4).mul(0.12))
+    // Only the thin, light upper blade passes much light; a whole bank glowing reads as straw.
+    material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 6).mul(0.05))
     return material
   }
 

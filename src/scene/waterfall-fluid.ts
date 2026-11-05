@@ -29,7 +29,7 @@ import type { Camera, Node } from 'three/webgpu'
 import { fragmentDepth, screenLinearVarying } from './backend-nodes'
 import { WATER_LEVEL } from './lake-bed'
 import type { LakeWaterMaterial } from './lake-water'
-import type { VoxelWaterfall } from './voxel-world'
+import type { WaterfallSite } from './lake-world'
 import { loopCells, loopNoise, OPEN_AXIS } from './water-noise'
 import { fieldUvNode, windFieldNode } from './water-surface'
 import { WaterfallFluidPass } from './waterfall-fluid-pass'
@@ -127,12 +127,12 @@ export class WaterfallFluid {
   private readonly viewFromLocal = new Matrix4()
   private readonly center = new Vector3()
   private readonly viewMatrix = new Matrix4()
-  private readonly fall: VoxelWaterfall
+  private readonly fall: WaterfallSite
   private compilationDepth = 0
   private prepared = false
   private disposed = false
 
-  constructor(fall: VoxelWaterfall, mobile: boolean, opacity: Node<'float'>, time: Node<'float'>) {
+  constructor(fall: WaterfallSite, mobile: boolean, opacity: Node<'float'>, time: Node<'float'>) {
     this.fall = fall
     this.particles = createWaterfallParticles(fall, mobile)
     this.pass = new WaterfallFluidPass(this.particles)

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { createLakeBed, LAKE_BOUNDS } from './lake-bed'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 
 describe('lake shore distance', () => {
   it('preserves interior, edge and corner distances across overlapping terrain footprints', () => {

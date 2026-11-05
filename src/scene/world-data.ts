@@ -1,26 +1,45 @@
+import { CAMERA_REST } from './camera-rig'
 import { createCloudNoiseData } from './cloud-noise'
 import {
   prepareSubmergedSurface,
   prepareWaterSurface,
   prepareWaterMask,
 } from './lake-geometry-data'
-import { mergeStaticBoxes } from './static-boxes'
+import { createLakeWorld } from './lake-world'
+import type { LakeWorld } from './lake-world'
+import { prepareBoulders } from './terrain-boulders'
+import type { Boulder } from './terrain-boulders'
+import { prepareGorge, withGorge } from './terrain-gorge'
+import { prepareTerrainColliders, prepareTerrainSurface } from './terrain-surface'
 import { prepareVegetation } from './vegetation-placement'
-import { prepareTerrain } from './voxel-mesh'
-import { voxelBoxes } from './voxel-spatial'
-import { createVoxelWorld } from './voxel-world'
-import type { VoxelWorld } from './voxel-world'
 
-/** Terrain meshing and its BVH, the longest half of world preparation. */
-function terrainPart(world: VoxelWorld) {
-  const terrain = prepareTerrain(world)
-  // The renderer needs typed mesh/BVH buffers, not 60k structured-cloned objects.
-  const { voxels: _voxels, ...data } = world
+/**
+ * Boulders big enough on screen for their outline to show joints and weathering: half-width
+ * over 1.3% of their distance from the camera, some 20 pixels across on a desktop frame (2.2%
+ * on phones, whose budget is tighter).
+ */
+const bigOnScreen = (mobile: boolean) => (boulder: Boulder) =>
+  Math.max(...boulder.size) /
+    Math.hypot(boulder.x - CAMERA_REST.x, boulder.y - CAMERA_REST.y, boulder.z - CAMERA_REST.z) >
+  (mobile ? 0.022 : 0.013)
+
+/** The smooth ground and its boulders, the longest half of world preparation. */
+function terrainPart(world: LakeWorld, mobile: boolean) {
+  const terrain = {
+    surface: prepareTerrainSurface(world.field, world.trees, mobile),
+    // The boulders and the jointed rock face behind the waterfall share one mesh.
+    boulders: withGorge(
+      prepareBoulders(world.boulders, world.seed, bigOnScreen(mobile)),
+      prepareGorge(world.field, world.waterfall),
+    ),
+  }
+  // The renderer needs typed mesh buffers, not the generation field.
+  const { field: _field, boulders: _boulders, ...data } = world
   return { world: data, terrain }
 }
 
-/** Lake surfaces, cloud noise and merged collision boxes from the same seeded world. */
-function surfacePart(world: VoxelWorld, seed: number, mobile: boolean) {
+/** Lake surfaces, cloud noise and the static colliders from the same seeded world. */
+function surfacePart(world: LakeWorld, seed: number, mobile: boolean) {
   return {
     noise: createCloudNoiseData(seed),
     surfaces: {
@@ -28,8 +47,8 @@ function surfacePart(world: VoxelWorld, seed: number, mobile: boolean) {
       water: prepareWaterSurface(mobile),
       mask: prepareWaterMask(world.lakeBed),
     },
-    /** `mergeStaticBoxes` of the terrain index boxes, ready for Rapier colliders. */
-    staticBoxes: mergeStaticBoxes(voxelBoxes(world.voxels)),
+    /** Rapier heightfield and boulder hulls, ready for colliders. */
+    colliders: prepareTerrainColliders(world.field, prepareBoulders(world.boulders, world.seed)),
   }
 }
 
@@ -50,9 +69,9 @@ export type WorldPartMessage =
   | { part: 'vegetation'; data: VegetationPart }
 
 export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
-  const world = createVoxelWorld(seed, mobile)
+  const world = createLakeWorld(seed, mobile)
   return {
-    ...terrainPart(world),
+    ...terrainPart(world, mobile),
     ...surfacePart(world, seed, mobile),
     vegetation: Promise.resolve(prepareVegetation(world, seed >>> 0, mobile)),
   }
@@ -60,16 +79,16 @@ export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
 
 /**
  * Generation is deterministic in (seed, mobile), so two workers each rebuild
- * the voxel world and derive disjoint halves of the prepared data in parallel.
+ * the lake world and derive disjoint halves of the prepared data in parallel.
  */
 export function* prepareWorldParts(
   seed: number,
   mobile: boolean,
   part: WorldPart,
 ): Generator<WorldPartMessage> {
-  const world = createVoxelWorld(seed, mobile)
+  const world = createLakeWorld(seed, mobile)
   if (part === 'terrain') {
-    yield { part, data: terrainPart(world) }
+    yield { part, data: terrainPart(world, mobile) }
     return
   }
   yield { part, data: surfacePart(world, seed, mobile) }

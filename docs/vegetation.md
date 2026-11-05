@@ -1,82 +1,123 @@
 # Vegetation
 
-Trees, bushes and foreground undergrowth follow Voxen's _Last Signal_ (`pine.model.ts`,
-`undergrowth.model.ts`, `props.toml`, `forest.toml`) and the renderer decisions behind it:
-wood stays voxels, foliage masks become botanical cards (ADR 0114), and undergrowth is
-procedural geometry (ADR 0107 for grass blades, ADR 0112 for fern fronds). The world worker
-builds everything (`vegetation-models.ts`, `vegetation-meshes.ts`, `foliage-atlas.ts`,
+The lake shore's forest is Norway spruce, Scots pine and weeping birch, with low shrubs on the
+banks and grass, ferns and flowers on the foreground bank. Trees and shrubs are procedural
+models: a branch skeleton grown by each species' habit, wood meshed as smooth tapered tubes and
+twigs clothed in foliage cards from a procedural botanical atlas. Undergrowth is procedural
+geometry (Voxen's ADR 0107 for grass blades, ADR 0112 for fern fronds). The world worker builds
+everything (`vegetation-models.ts`, `vegetation-meshes.ts`, `foliage-atlas.ts`,
 `vegetation-placement.ts`) and transfers typed arrays; the render thread only wraps them
 (`vegetation.ts`).
 
 ## Models
 
-Models are carved from ellipsoid, cone and limb operations on an 8 cm grid (10 cm on phones),
-about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or leaves.
+Trees are 5 to 7.5 m tall before their placement scale, in the proportions of young stands on a
+Nordic shore:
 
-- Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
-  golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles. A needle core a third of the crown radius,
-  upper tiers that thicken toward the top and a solid spire over the top 42% keep the silhouette
-  one continuous cone, so the sky never shows between the small top tiers. Boughs start at 27–33% of the height so
-  a short dark trunk shows under the skirt.
-- Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
-  below, and an uneven crown of scaffold lobes around a dense inner mass.
-- Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
-  main value break against the dark conifers. A deep hanging curtain under each of the four
-  lower forks rounds the crown's underside, which otherwise sat flat like an umbrella.
-- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree,
-  and mid-ground cover (below).
+- Norway spruce: a straight trunk and a whorl of four to six branches every 30 cm, with smaller
+  internodal branches between whorls. Branches leave nearly level at the bottom and rise a little
+  toward the top, sag and lift their tips, and are longest low down, so the crown is a narrow
+  pointed cone (radius about 18% of the height) with branches down to 10–17% of it. Sprays hang
+  along each branch's outer two thirds, shrinking toward the tip; some turn across the branch so
+  one pointing at the viewer still shows. Dark cores round the trunk stand for the shaded inner
+  branches. One variant has darker, bluer needles.
+- Scots pine: a trunk that wanders slightly, grey-brown and furrowed below and orange above,
+  bare to 55–65% of the height but for a few dead stubs. Ten to thirteen scaffold limbs rise
+  15–45° and fork, and every limb and fork ends in a rounded, domed clump of needle brushes.
+- Silver birch: a slender white trunk with black lenticel dashes and a dark, fissured foot.
+  Thirteen to sixteen limbs rise steeply (40–60°) and only their outer part arches, longest
+  mid-crown for an ovoid outline; twigs spread off both sides, about half hanging and half
+  turned every way, so the crown is a mass rather than a willow's curtains.
+- Shrubs: bilberry domes of leafy cards, common junipers (dark blue-green columns a metre or so
+  tall, of two or three irregular stems of needle tufts) and spruce saplings (a spruce's habit at
+  0.9–1.6 m, with shorter internodes and smaller sprays). Tree companions, in about a third of two
+  slots per tree, are mostly bilberry and saplings; mid-ground cover (below) is about 55%
+  bilberry, 30% juniper and 15% saplings.
 
-Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
-the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
+Trees cluster into groves with clearings, up to 110 on desktop and 30 on phones, about 44% spruce, 34% pine and 22% birch, keep 1.8 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
-crown (its highest ground cell, nearest the centre on a tie) at three quarters of the usual
+crown (its highest open ground, nearest the centre on a tie) at three quarters of the usual
 size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
 
 Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
 through scattered bushes instead (Last Signal's islet and bank cover): one candidate per 3 × 3
 columns between the undergrowth and the far shore, jittered, gathered into 5 m patches, off
-tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 on phones.
+tree trunks, other bushes and a step's last column. Up to 450 on desktop and 70 on phones.
 
 ## Wood and foliage
 
-Wood cells are meshed once: exposed faces only, classic per-corner voxel occlusion and a small
-hashed tone per voxel. Foliage cells are never drawn as voxels. As in Voxen's clump planner,
-every three-cell block with an exposed foliage cell becomes one seed: its centroid, majority
-role, mean colour, and the crown shape probed in 26 directions one to three pitches out, which
-gives the open direction and openness. Each seed emits three to five cards from a small
-procedural atlas: drooping, serrated bough sprays for needles (0.6 as tall as wide, tipped
-upward) and hanging leaf clusters for leaves. The first card loosely faces the camera; seeds
-with openness under 0.6 add a dark core disc so gaps inside a crown show foliage, not sky.
-Cluster scales range over [0.85, 1.45], each tree takes a factor in [0.85, 1.2], isolated
-tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a crown's
-underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
-under the crown. Cards stay within about 30° of vertical, so a low camera never sees a crown's top
-cards edge-on as pale slivers. Card normals lean toward the open direction, with its upward
-part damped so sunlit crown tops do not read as a pale lid. Clumps opening nearly straight up
-(a spire's tip) are not pushed above the crown and lose up to 20% of their value, so the tip
-stays attached to the tree. Albedo takes a cluster value hash, a per-tree hue and value jitter,
-a cool-underside to warm-top ramp and an openness and height shade.
+Wood is generalized cylinders: rings along each limb with parallel-transported frames, so tubes
+never twist, with eight sides on a trunk and three or four on a limb (six and three on phones).
+Only a mature spruce's main branches carry wood; the foliage hides its thin internodal ones and a sapling's branches. Bark colour
+is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
+birch's dashes and dark foot.
 
-The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an
-alpha test with a mip-level coverage boost, so distant crowns do not thin out. Lighting adds
-Last Signal's sky-light rim and back-light translucency, strongest at the crown rim and against
-a low sun.
+Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
+card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
+so a crown shades as one mass, and cards deep inside, near the trunk, keep a third of their value and the lower crown, shaded by the upper, a little less.
+Colour takes the species' palette, a per-tree hue and value jitter and a small per-card hash.
+Needle and leaf albedos keep little red and blue (about 0.03 and 0.02 against 0.06–0.09 green,
+as measured on conifer needles), since the sky light and grade already desaturate them, and a
+card's needle-to-needle tone stays within ±25%: a wider spread speckled sunlit tops pale.
+A spruce's leader
+is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
+cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
+
+The atlas has eight tiles: two Norway spruce sprays (a shoot across the top with combed,
+needle-clothed branchlets hanging from it, each branchlet its own shade), two Scots pine tiles
+(overlapping brushes of paired needles radiating round short shoot tips), two weeping birch tiles (slender hanging twigs
+with small ovate leaves), shrub foliage and a lobed core disc. Desktop bakes 512-texel tiles
+(2048 × 1024); phones bake 256-texel ones. The worker also bakes the mip chain, each level's
+alpha scaled per tile so the same share of texels passes the cutout as at full resolution
+(Castaño, "Computing Alpha Mipmaps"): plain averaging thinned distant sprays into blur, and a
+shader boost had filled whole cards into squares. Each
+texel stores a palette-relative tone, a rounded relief (each needle and leaf a dome a few
+texels across) and cutout coverage. The relief's screen-space slope tilts each card's normal
+(the surface-gradient method of the terrain's detail relief), so a near spray shades as rounded
+shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test over that chain. Lighting adds a sky-light rim and
+back-light translucency, strongest at the crown rim and against a low sun.
 
 ## Undergrowth
 
-Grass, ferns and flowers grow on the mossy foreground bank, in 1.6 m clumps inside 8 m patches,
-with some patches drying toward straw. A grass tuft is a sparse fan of six to ten quadratic
-Bézier ribbons with four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from
-the ground to the tip. A fern crown is a ring of arching, drooping rachis strips cut into
-alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
-Under the clumps, a ground cover of short tufts (seven to ten blades of 6–13 cm, two rows
-and a tip, three triangles each) grows on most of the bank's columns, thinner on bare patches
-and drier where the clumps dry, so the soil between tall tufts reads as turf rather than bare
-voxels. Placement reads the neighbouring columns: tall clumps keep off a step's last column,
-and blades near a step or a wall turn away from it and lean less, while ground cover there moves
-inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
-view faces a low sun.
+The foreground bank is a sward of clumps (`grass.ts`), after Ghost of Tsushima's procedural
+grass ([Wohllaib, GDC 2021](https://gdcvault.com/play/1027033/Advanced-Graphics-Summit-Procedural-Grass)):
+a clump, not a blade, sets height (each blade takes 80% of it), facing, lean, colour and dryness,
+so the bank reads as tufts rather than combed hair. Clumps sit on a jittered 15 cm lattice, each
+one of the shore's growth forms:
+
+- short turf (bents, low fescues), 5–10 cm, about 40% of clumps, closing the ground between
+  the others;
+- wiry tufts (wavy hair-grass, sheep's fescue): needle-thin rolled leaves (1.6–2.8 mm before
+  widening) in a fountain leaning outward from the clump's centre;
+- flat-leaved tussocks (purple moor-grass, sedges) in 3 m patches: 4–7 mm blades, 24–52 cm, that
+  arch, twist up to a turn and a half and droop at the tip;
+- rushes, near the water: round, upright, dark stems 35–60 cm;
+- seed stalks over a sixth of the wiry tufts and a tenth of the tussocks: a bare culm with a
+  narrow purplish-brown or silvery panicle.
+
+Dead material is what makes a real sward unkempt: 6–10% of the blades, plus up to 35% more in
+dry patches, are straw (some with a broken, blunt tip) or litter lying almost flat at the base
+([Molinia](https://bsbi.org/learn/resources/plant-crib/molinia); standing litter weighs heavily
+in a canopy's reflectance, [HAPEX](https://www.sciencedirect.com/science/article/abs/pii/0034425795001980)).
+Albedos follow field measurements, about 0.05 for green grass leaves in visible light
+([Majasalmi & Bright 2019](https://gmd.copernicus.org/articles/12/3923/2019/)): blades darken
+toward the root with h^1.5, the shade of their neighbours (as [AMD's mesh-shader
+grass](https://gpuopen.com/learn/mesh_shaders/mesh_shaders-procedural_grass_rendering/)), and
+do not brighten at the tip, the glow that made the old blades read as fur. Each blade is a cubic
+curve from its tilt, bend and droop, five rows near the camera and three far; its normals round
+across the width by ±0.12π, as open Tsushima reimplementations do
+([GodotGrass](https://github.com/2Retr0/GodotGrass)), and blend half way toward up, so it shades
+as a curved strip. Detail falls off with distance: a clump keeps 4/d of its blades (at least a
+fifth) and widens them by the inverse square root, with a floor of about 1.5 pixels, so coverage
+holds without shimmering threads (Outerra and AMD halve the count and double the width per
+level). Ferns (2% of lattice sites) and small flowers (1.5%) break the sward. A triangle budget
+(260k on desktop, 44k on phones), visited in a seeded scatter order, thins the bank evenly.
+
+Placement reads the smooth ground's neighbouring 12.5 cm columns (a slope only counts as a step
+beyond 5 cm per column of distance): clumps near a step or a wall shrink, and their blades turn
+away from it, so none hangs over a drop; blades root only clear of the water. The material is
+matte (a 35% sky reflection: a sward hides most blades from the sky behind its neighbours), and
+thin blades pass a little light only when the view faces a low sun.
 
 ## Loading
 
@@ -95,8 +136,16 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 202k triangles (127k of them undergrowth, 116 mid-ground bushes and the islet
-trees about 14k) and the phone forest about 41k. Preparation runs after the surfaces on the
+forest is about 330k triangles (wood, foliage cards and undergrowth about 70k, 130k and 129k) and
+the phone forest about 95k. Trees past 50 m from the camera use a far level of detail: half the
+sprays drawn 30% larger, lighter wood, and no spruce branch wood under the foliage. Grass keeps
+(4/d)^1.25 of a clump's blades. Spruce cores fill every third whorl and birches four inner cards:
+with crowns this dense, large cards stacked deep inside cost more fill than they add. On the host
+GPU (WebGL, 1600 × 900) the frame measures about 14.8 ms against 15.8 ms before these levels of
+detail; the remaining cost of the forest is the fill of its alpha-tested cards, not triangles. The voxel trees it replaces drew 21k of wood and
+63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
+long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
+sapling's none. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind
