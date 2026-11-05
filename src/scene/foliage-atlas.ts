@@ -7,7 +7,7 @@
  * read as foliage rather than flat paint.
  */
 /** Tile edge in texels: phones draw smaller trees, so they bake a quarter of the texels. */
-export const atlasTile = (mobile: boolean) => (mobile ? 128 : 256)
+export const atlasTile = (mobile: boolean) => (mobile ? 256 : 512)
 export const ATLAS_COLUMNS = 4
 export const ATLAS_ROWS = 2
 export const ATLAS_TILES = {
@@ -22,7 +22,9 @@ export const ATLAS_TILES = {
 } as const
 export type AtlasTile = (typeof ATLAS_TILES)[keyof typeof ATLAS_TILES]
 
-export type FoliageAtlas = Readonly<{ width: number; height: number; data: Uint8Array }>
+export type AtlasLevel = Readonly<{ width: number; height: number; data: Uint8Array }>
+/** The atlas and its full mip chain (level 0 first), each level keeping its tiles' coverage. */
+export type FoliageAtlas = AtlasLevel & Readonly<{ mipmaps: readonly AtlasLevel[] }>
 
 /** UV rectangle [u0, v0, u1, v1] of a tile, v up, inset 1.5 texels of the smaller atlas. */
 export function atlasRect(tile: AtlasTile): readonly [number, number, number, number] {
@@ -191,7 +193,7 @@ function spruceSpray(seed: number, size: number) {
   const tile = new TileCanvas(size)
   const random = prng(seed)
   const shade = (base: number) => (_u: number, v: number) =>
-    clamp01(base * (0.55 + 0.55 * v) + (random() - 0.5) * 0.16)
+    clamp01(base * (0.75 + 0.3 * v) + (random() - 0.5) * 0.2)
   const clothe = (points: readonly Uv[], length: number, density: number, base = 1) => {
     for (let i = 0; i < points.length - 1; i++) {
       const a = points[i] ?? [0, 0],
@@ -257,35 +259,40 @@ function pineTufts(seed: number, size: number) {
   const tile = new TileCanvas(size)
   const random = prng(seed)
   const shade = (base: number) => (_u: number, v: number) =>
-    clamp01(base * (0.6 + 0.5 * v) + (random() - 0.5) * 0.18)
-  const tufts = 6
-  for (let tuft = 0; tuft < tufts; tuft++) {
-    const base: Uv = [0.14 + (0.72 * tuft) / (tufts - 1) + (random() - 0.5) * 0.08, 0.14]
-    const tip: Uv = [base[0] + (random() - 0.5) * 0.16, 0.3 + random() * 0.18]
-    tile.stroke(base, tip, 0.008, 0.006, () => 0.28)
-    // Needles grow along the last half of the twig, the newest at its tip.
-    for (let needle = 0; needle < 110; needle++) {
-      const t = 0.3 + random() * 0.7
-      const from: Uv = [base[0] + (tip[0] - base[0]) * t, base[1] + (tip[1] - base[1]) * t]
-      const angle = Math.PI / 2 + (random() - 0.5) * 2.6 * (0.55 + 0.45 * t)
-      const length = (0.16 + random() * 0.14) * (0.7 + 0.3 * t)
-      const to: Uv = [from[0] + Math.cos(angle) * length, from[1] + Math.sin(angle) * length]
-      tile.stroke(from, to, 0.0038, 0.0012, shade(0.8 + random() * 0.4))
+    clamp01(base * (0.75 + 0.3 * v) + (random() - 0.5) * 0.2)
+  // Shoot tips seen from the side: a short twig ending in a brush of paired needles that
+  // radiate all round it, raked forward and a little upward. Several brushes overlap, so a card
+  // reads as a rounded, ragged clump with no straight edge.
+  const brushes = 7
+  for (let brush = 0; brush < brushes; brush++) {
+    const centre: Uv = [0.2 + random() * 0.6, 0.3 + random() * 0.42]
+    const heading = (random() - 0.5) * 1.4 + Math.PI / 2
+    const tip: Uv = [centre[0] + Math.cos(heading) * 0.06, centre[1] + Math.sin(heading) * 0.06]
+    tile.stroke(centre, tip, 0.007, 0.005, () => 0.28)
+    const reach = 0.13 + random() * 0.08
+    for (let needle = 0; needle < 120; needle++) {
+      const t = random()
+      const from: Uv = [centre[0] + (tip[0] - centre[0]) * t, centre[1] + (tip[1] - centre[1]) * t]
+      // All round the shoot, more toward its tip and the light.
+      const angle = heading + (random() - 0.5) * Math.PI * 2 * (0.6 + 0.4 * (1 - t))
+      const length = reach * (0.6 + random() * 0.5)
+      const to: Uv = [from[0] + Math.cos(angle) * length, from[1] + Math.sin(angle) * length * 0.85]
+      tile.stroke(from, to, 0.0036, 0.0011, shade(0.75 + random() * 0.45))
     }
   }
   return tile
 }
 
-/** Weeping birch: slender twigs hanging from the top, with small toothed, ovate leaves. */
+/** Silver birch: slender twigs drooping from the top, with small toothed, ovate leaves. */
 function birchTwigs(seed: number, size: number) {
   const tile = new TileCanvas(size)
   const random = prng(seed)
   const shade = (base: number) => (_u: number, v: number) =>
-    clamp01(base * (0.62 + 0.45 * v) + (random() - 0.5) * 0.12)
+    clamp01(base * (0.78 + 0.25 * v) + (random() - 0.5) * 0.16)
   const twigs = 9
   for (let twig = 0; twig < twigs; twig++) {
     const from: Uv = [0.08 + (0.84 * twig) / (twigs - 1) + (random() - 0.5) * 0.05, 0.96]
-    const drop = 0.65 + random() * 0.28
+    const drop = 0.4 + random() * 0.3
     const drift = (random() - 0.5) * 0.22
     const points = bend(
       from,
@@ -313,7 +320,7 @@ function shrubLeaves(seed: number, size: number) {
   const tile = new TileCanvas(size)
   const random = prng(seed)
   const shade = (base: number) => (_u: number, v: number) =>
-    clamp01(base * (0.5 + 0.6 * v) + (random() - 0.5) * 0.14)
+    clamp01(base * (0.7 + 0.35 * v) + (random() - 0.5) * 0.16)
   for (let twig = 0; twig < 7; twig++) {
     const from: Uv = [0.5 + (random() - 0.5) * 0.2, 0.02]
     const to: Uv = [0.1 + random() * 0.8, 0.35 + random() * 0.4]
@@ -385,7 +392,80 @@ export function bakeFoliageAtlas(seed: number, mobile = false): FoliageAtlas {
         data[target + 3] = Math.round(alpha * 255)
       }
   }
-  return { width, height, data }
+  const base = { width, height, data }
+  return { ...base, mipmaps: coverageMips(base, size) }
+}
+
+/**
+ * The mip chain of an alpha-tested atlas, after Castaño ("Computing Alpha Mipmaps"): each level
+ * averages the one above (tone and relief weighted by coverage), then each tile's alpha is
+ * scaled so the same share of its texels passes the 0.5 test as at full resolution. Plain
+ * averaging thins distant sprays into blur; boosting it in the shader instead turned whole
+ * cards into opaque squares.
+ */
+function coverageMips(base: AtlasLevel, tile: number): AtlasLevel[] {
+  const levels: AtlasLevel[] = [base]
+  const share = (level: AtlasLevel, size: number, column: number, row: number, scale: number) => {
+    let passed = 0
+    for (let y = 0; y < size; y++)
+      for (let x = 0; x < size; x++) {
+        const a = level.data[((row * size + y) * level.width + column * size + x) * 4 + 3] ?? 0
+        if (a * scale >= 127.5) passed++
+      }
+    return passed / (size * size)
+  }
+  const target = new Map<number, number>()
+  for (let row = 0; row < ATLAS_ROWS; row++)
+    for (let column = 0; column < ATLAS_COLUMNS; column++)
+      target.set(row * ATLAS_COLUMNS + column, share(base, tile, column, row, 1))
+  let previous = base,
+    size = tile
+  while (size > 1) {
+    const width = previous.width >> 1,
+      height = previous.height >> 1
+    size >>= 1
+    const data = new Uint8Array(width * height * 4)
+    for (let y = 0; y < height; y++)
+      for (let x = 0; x < width; x++) {
+        let alpha = 0,
+          tone = 0,
+          relief = 0
+        for (let dy = 0; dy < 2; dy++)
+          for (let dx = 0; dx < 2; dx++) {
+            const i = ((y * 2 + dy) * previous.width + x * 2 + dx) * 4
+            const a = previous.data[i + 3] ?? 0
+            alpha += a
+            tone += (previous.data[i] ?? 0) * a
+            relief += (previous.data[i + 1] ?? 0) * a
+          }
+        const o = (y * width + x) * 4
+        data[o] = alpha > 0 ? Math.round(tone / alpha) : 128
+        data[o + 1] = alpha > 0 ? Math.round(relief / alpha) : 0
+        data[o + 3] = Math.round(alpha / 4)
+      }
+    const level = { width, height, data }
+    // Per tile, the alpha scale that restores the full-resolution coverage.
+    for (let row = 0; row < ATLAS_ROWS; row++)
+      for (let column = 0; column < ATLAS_COLUMNS; column++) {
+        const goal = target.get(row * ATLAS_COLUMNS + column) ?? 0
+        let low = 0.25,
+          high = 16
+        for (let step = 0; step < 14; step++) {
+          const mid = Math.sqrt(low * high)
+          if (share(level, size, column, row, mid) < goal) low = mid
+          else high = mid
+        }
+        const scale = Math.sqrt(low * high)
+        for (let y = 0; y < size; y++)
+          for (let x = 0; x < size; x++) {
+            const i = ((row * size + y) * width + column * size + x) * 4 + 3
+            data[i] = Math.min(255, Math.round((data[i] ?? 0) * scale))
+          }
+      }
+    levels.push(level)
+    previous = level
+  }
+  return levels
 }
 
 /** Fraction of covered texels in a tile, used by tests and coverage calibration. */

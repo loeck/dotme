@@ -24,7 +24,7 @@ export const VEGETATION_PALETTE = {
   barkSpruce: [0.09, 0.075, 0.062],
   barkUpper: [0.24, 0.1, 0.045],
   barkDead: [0.11, 0.1, 0.09],
-  birchBark: [0.52, 0.51, 0.47],
+  birchBark: [0.42, 0.41, 0.38],
   birchMark: [0.045, 0.043, 0.04],
   birchLeaves: [0.105, 0.15, 0.055],
   birchLeavesDeep: [0.07, 0.105, 0.04],
@@ -327,6 +327,7 @@ function shapeCrown(sprays: Spray[], centreHeight: number, axisLean: Point = [0,
     reach.set(key, Math.max(reach.get(key) ?? 0, r))
   }
   const centre = axisAt(centreHeight)
+  const topHeight = Math.max(...sprays.map((spray) => spray.center[1]), 0.1)
   return sprays.map((spray) => {
     const y = spray.center[1]
     const axis = axisAt(y)
@@ -346,7 +347,12 @@ function shapeCrown(sprays: Spray[], centreHeight: number, axisLean: Point = [0,
     return {
       ...spray,
       normal: normalize(add(scale(normal, 0.35), radial, 0.65)),
-      shade: spray.shade * (0.5 + 0.5 * Math.pow(outside, 0.8)),
+      // A crown is dark inside: cards near the trunk keep a third of their value, and the
+      // lower crown, shaded by the upper, a little less than the top.
+      shade:
+        spray.shade *
+        (0.32 + 0.68 * Math.pow(outside, 1.1)) *
+        (0.8 + 0.2 * smooth01(0, topHeight, spray.center[1])),
     }
   })
 }
@@ -409,8 +415,8 @@ export function growSpruce(
       const sag = (0.32 - 0.22 * t) * between(random, 0.8, 1.2)
       const path = limbPath(centre, heading(yaw, elevation), reach, 3, sag, 0.22)
       // Only main branches carry wood: the foliage hides the thin internodal ones entirely, and
-      // a sapling's branches altogether.
-      if (!internodal && youth > 0.5)
+      // a sapling's branches and the short upper ones altogether.
+      if (!internodal && youth > 0.5 && t < 0.7)
         wood.tube(
           path,
           path.map((_, i) => (0.006 + reach * 0.016) * (1 - i / 3.4)),
@@ -418,23 +424,23 @@ export function growSpruce(
           () => scaleRgb(P.barkSpruce, 0.75),
         )
       // Sprays along the branch's outer two thirds; the spacing shrinks with the branch.
-      const step = 0.15 * detail.spacing
+      const step = 0.09 * detail.spacing
       const shoots = Math.max(1, Math.round((reach * 0.7) / step))
       for (let shoot = 0; shoot < shoots; shoot++) {
         const s = 0.32 + (0.68 * (shoot + 0.5)) / shoots
         const { p, tangent } = along(path, s)
         // Sprays shrink toward the branch tip and up the crown, so the cone stays pointed.
         const size =
-          (0.24 * Math.max(0.4, youth) + reach * 0.36) *
+          (0.28 * Math.max(0.4, youth) + reach * 0.42) *
           between(random, 0.85, 1.15) *
           (1.1 - 0.35 * s)
-        const colour = random() < 0.18 ? pale : needles
+        const colour = random() < 0.1 ? pale : needles
         const tile = random() < 0.5 ? ATLAS_TILES.spruceA : ATLAS_TILES.spruceB
         sprays.push(
           hangingCard(p, tangent, size, size * 0.85, between(random, -0.45, 0.45), colour, tile),
         )
         // Some sprays turn across the branch, so a branch pointing at the viewer still shows.
-        if (random() < 0.45)
+        if (random() < 0.9)
           sprays.push(
             hangingCard(
               p,
@@ -529,15 +535,18 @@ export function growPine(seed: number, detail: ModelDetail): TreeModel {
     wood.tube(path, [0.022, 0.012], 3, () => P.barkDead)
   }
   const tuftCloud = (tip: Point, direction: Point, size: number) => {
-    // A flattish pad of tufts round the tip, lifted toward the light.
-    const tufts = Math.max(4, Math.round((11 * size) / detail.spacing))
+    // A rounded, uneven clump of tufts round the tip, domed toward the light: a Scots pine's
+    // crown is clumps, not flat plates.
+    const tufts = Math.max(5, Math.round((21 * size) / detail.spacing))
     const yaw0 = Math.atan2(direction[0], direction[2])
     for (let tuft = 0; tuft < tufts; tuft++) {
       const angle = yaw0 + between(random, -1.6, 1.6)
       const out = size * Math.sqrt(random()) * 0.7
+      // Higher near the clump's middle, drooping at its rim.
+      const dome = 1 - (out / (size * 0.7)) ** 2
       const center: Point = [
         tip[0] + Math.sin(angle) * out,
-        tip[1] + between(random, -0.06, 0.12) * size,
+        tip[1] + (between(random, -0.12, 0.1) + 0.22 * dome) * size,
         tip[2] + Math.cos(angle) * out,
       ]
       const width = size * between(random, 0.55, 0.8)
@@ -555,14 +564,15 @@ export function growPine(seed: number, detail: ModelDetail): TreeModel {
         ),
       )
     }
-    // A pad seen from below and the side: one card lying back toward the sky.
+    // A clump seen from below: one card tipped back toward the sky, smaller than the clump so
+    // its straight edge never shows.
     sprays.push(
       uprightCard(
-        add(tip, [0, 0.05 * size, 0]),
+        add(tip, [0, 0.08 * size, 0]),
         yaw0,
-        1.1,
-        size * 0.9,
-        size * 0.7,
+        0.7,
+        size * 0.6,
+        size * 0.5,
         scaleRgb(P.needles, 0.8),
         ATLAS_TILES.pineA,
       ),
@@ -649,8 +659,9 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
     // Longest mid-crown, for an ovoid outline; rising, then arching over.
     const reach =
       height * (0.2 + 0.16 * Math.sin(Math.PI * Math.min(1, t * 1.2))) * between(random, 0.8, 1.15)
-    const elevation = ((48 - 18 * t) * Math.PI) / 180
-    const path = limbPath(from, heading(yaw, elevation), reach, 4, 0.75, -0.2)
+    // Limbs rise steeply and only their outer part arches: an ovoid crown, not a willow's.
+    const elevation = ((62 - 24 * t) * Math.PI) / 180
+    const path = limbPath(from, heading(yaw, elevation), reach, 4, 0.42, -0.12)
     const base = trunkRadius * (0.35 - 0.15 * t)
     wood.tube(
       path,
@@ -659,7 +670,7 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
       () => mixRgb(P.birchBark, P.birchMark, 0.55),
     )
     // Curtains of hanging twigs along the limb's outer part and at its end.
-    const twigs = Math.max(3, Math.round((reach * 8) / detail.spacing))
+    const twigs = Math.max(3, Math.round((reach * 16) / detail.spacing))
     for (let twig = 0; twig < twigs; twig++) {
       const s = 0.25 + (0.75 * (twig + 0.5)) / twigs
       const at = along(path, s)
@@ -667,20 +678,35 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
       // Twigs spread off the limb on both sides, so curtains overlap into one crown.
       const off = between(random, -0.3, 0.3)
       const p = add(at.p, normalize(cross([0, 1, 0], tangent)), off)
-      const size = between(random, 0.6, 0.85) * (1 - 0.2 * t)
+      const size = between(random, 0.7, 0.98) * (1 - 0.2 * t)
       const colour = random() < 0.35 ? P.birchLeavesDeep : P.birchLeaves
       const tile = random() < 0.5 ? ATLAS_TILES.birchA : ATLAS_TILES.birchB
-      const across = random() < 0.5 ? tangent : cross([0, 1, 0], tangent)
-      const card = hangingCard(
-        p,
-        across,
-        size * 0.9,
-        size * 1.15,
-        between(random, -0.35, 0.35),
-        colour,
-        tile,
-      )
-      sprays.push(card)
+      // Twigs hang only partly: some cards hang from the limb, others turn every way.
+      if (random() < 0.45) {
+        const across = random() < 0.5 ? tangent : cross([0, 1, 0], tangent)
+        sprays.push(
+          hangingCard(
+            p,
+            across,
+            size * 0.85,
+            size * 0.85,
+            between(random, -0.5, 0.5),
+            colour,
+            tile,
+          ),
+        )
+      } else
+        sprays.push(
+          uprightCard(
+            add(p, [0, -size * 0.15, 0]),
+            random() * TAU,
+            between(random, -0.4, 0.6),
+            size * 0.85,
+            size * 0.75,
+            colour,
+            tile,
+          ),
+        )
     }
   }
   // An inner crown of deeper leaves keeps the curtains from reading as separate clouds.

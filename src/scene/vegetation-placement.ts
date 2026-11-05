@@ -41,7 +41,7 @@ const GROUND_COVER_Z = -1.5
 const SHRUB_FAR_Z = -46
 /** Furthest a companion bush stands from its tree: (0.6 + 0.7) × the largest tree scale. */
 const COMPANION_REACH = 2.4
-const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 3, pine: 2, birch: 2 }
+const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 6, pine: 5, birch: 5 }
 /** Tip travel at full wind as a share of model height (Voxen's `maxTip`). */
 const TREE_SWAY: Record<TreeKind, number> = { spruce: 0.03, pine: 0.03, birch: 0.05 }
 
@@ -178,7 +178,7 @@ export function prepareVegetation(
     const treeSeed = seed + variant * 7919 + kind.length * 104_729
     if (kind === 'birch') return growBirch(treeSeed, detail)
     if (kind === 'pine') return growPine(treeSeed, detail)
-    return growSpruce(treeSeed, detail, variant === 2)
+    return growSpruce(treeSeed, detail, variant % 3 === 2)
   }
   const plant = (
     entry: TreeModel,

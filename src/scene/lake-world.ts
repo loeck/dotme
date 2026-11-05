@@ -980,7 +980,7 @@ function placeTrees(
     .filter((site) => site.z < -3 && site.z > -40)
     .sort((a, b) => b.spread - a.spread)
   const ridges = clear.filter((site) => site.z >= -3 || site.z <= -40).sort((a, b) => b.top - a.top)
-  const cap = mobile ? 20 : 72
+  const cap = mobile ? 30 : 110
   const trees: LakeTree[] = []
   const plant = (site: Site, gate: number, size = 1) => {
     if (trees.length >= cap) return
@@ -994,7 +994,8 @@ function placeTrees(
     // Trees grow toward the horizon, which deepens the layered forest (Last Signal's diorama).
     const depth = clamp((-site.z - 8) / 50, 0, 1)
     const pick = hash(seed, xi, zi, 919)
-    const kind: TreeKind = site.z > -40 && pick < 0.34 ? 'birch' : pick < 0.72 ? 'spruce' : 'pine'
+    // A boreal shore is conifer forest with birch mixed in.
+    const kind: TreeKind = site.z > -40 && pick < 0.22 ? 'birch' : pick < 0.66 ? 'spruce' : 'pine'
     // The trunk sits at the lowest ground under it, so no root hangs over a slope.
     const y = Math.min(
       ...[
@@ -1009,7 +1010,7 @@ function placeTrees(
       x: site.x,
       y,
       z: site.z,
-      scale: (0.85 + hash(seed, xi, zi, 913) * 0.45) * (1 + depth * 0.35) * size,
+      scale: (0.65 + hash(seed, xi, zi, 913) * 0.7) * (1 + depth * 0.35) * size,
       kind,
       yaw: hash(seed, xi, zi, 921) * Math.PI * 2,
     })

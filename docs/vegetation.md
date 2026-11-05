@@ -23,17 +23,18 @@ Nordic shore:
   branches. One variant has darker, bluer needles.
 - Scots pine: a trunk that wanders slightly, grey-brown and furrowed below and orange above,
   bare to 55–65% of the height but for a few dead stubs. Ten to thirteen scaffold limbs rise
-  15–45° and fork, and every limb and fork ends in a flattish cloud of needle tufts.
-- Weeping birch: a slender white trunk with black lenticel dashes and a dark, fissured foot.
-  Thirteen to sixteen limbs rise steeply and arch over, longest mid-crown for an ovoid outline,
-  and curtains of hanging twigs spread off both sides of them.
+  15–45° and fork, and every limb and fork ends in a rounded, domed clump of needle brushes.
+- Silver birch: a slender white trunk with black lenticel dashes and a dark, fissured foot.
+  Thirteen to sixteen limbs rise steeply (40–60°) and only their outer part arches, longest
+  mid-crown for an ovoid outline; twigs spread off both sides, about half hanging and half
+  turned every way, so the crown is a mass rather than a willow's curtains.
 - Shrubs: bilberry domes of leafy cards, common junipers (dark blue-green columns a metre or so
   tall, of two or three irregular stems of needle tufts) and spruce saplings (a spruce's habit at
   0.9–1.6 m, with shorter internodes and smaller sprays). Tree companions, in about a third of two
   slots per tree, are mostly bilberry and saplings; mid-ground cover (below) is about 55%
   bilberry, 30% juniper and 15% saplings.
 
-Trees cluster into groves with clearings, up to 72 on desktop and 20 on phones, keep 1.8 m between trunks and grow up to 35% larger
+Trees cluster into groves with clearings, up to 110 on desktop and 30 on phones, about 44% spruce, 34% pine and 22% birch, keep 1.8 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
 crown (its highest open ground, nearest the centre on a tie) at three quarters of the usual
 size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
@@ -53,22 +54,24 @@ birch's dashes and dark foot.
 
 Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
-so a crown shades as one mass, and cards deep inside, near the trunk, darken to half their value.
+so a crown shades as one mass, and cards deep inside, near the trunk, keep a third of their value and the lower crown, shaded by the upper, a little less.
 Colour takes the species' palette, a per-tree hue and value jitter and a small per-card hash.
 Needles stay olive rather than blue-grey: sunlit, the haze already adds the blue. A spruce's leader
 is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
 cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
 
 The atlas has eight tiles: two Norway spruce sprays (a shoot across the top with combed,
-needle-clothed branchlets hanging from it, each branchlet its own shade), two Scots pine tuft
-sets (brushes of long needles on short twigs), two weeping birch tiles (slender hanging twigs
-with small ovate leaves), shrub foliage and a lobed core disc. Desktop bakes 256-texel tiles
-(1024 × 512); phones bake 128-texel ones, a quarter of the work, for their smaller trees. Each
+needle-clothed branchlets hanging from it, each branchlet its own shade), two Scots pine tiles
+(overlapping brushes of paired needles radiating round short shoot tips), two weeping birch tiles (slender hanging twigs
+with small ovate leaves), shrub foliage and a lobed core disc. Desktop bakes 512-texel tiles
+(2048 × 1024); phones bake 256-texel ones. The worker also bakes the mip chain, each level's
+alpha scaled per tile so the same share of texels passes the cutout as at full resolution
+(Castaño, "Computing Alpha Mipmaps"): plain averaging thinned distant sprays into blur, and a
+shader boost had filled whole cards into squares. Each
 texel stores a palette-relative tone, a rounded relief (each needle and leaf a dome a few
 texels across) and cutout coverage. The relief's screen-space slope tilts each card's normal
 (the surface-gradient method of the terrain's detail relief), so a near spray shades as rounded
-shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test with a
-mip-level coverage boost, so distant crowns do not thin out. Lighting adds a sky-light rim and
+shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test over that chain. Lighting adds a sky-light rim and
 back-light translucency, strongest at the crown rim and against a low sun.
 
 ## Undergrowth
@@ -130,9 +133,9 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 315k triangles: 87k of wood, 68k of foliage cards and 160k of undergrowth; the
-phone forest is about 84k (25k, 15k and 44k). On the host GPU (WebGL, 1600 × 900) the whole frame
-measures 9–11 ms with this forest and with the sparser one before it, within this host's noise. The voxel trees it replaces drew 21k of wood and
+forest is about 440k triangles: 112k of wood, 179k of foliage cards (about 2.6 times the previous
+crowns' density) and 160k of undergrowth; the phone forest about 115k. The budget is set aside
+for now and will be optimised last. The voxel trees it replaces drew 21k of wood and
 63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
 long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
 sapling's none. Preparation runs after the surfaces on the

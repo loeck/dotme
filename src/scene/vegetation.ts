@@ -2,12 +2,8 @@ import {
   abs,
   attribute,
   cameraPosition,
-  dFdx,
-  dFdy,
   dot,
   float,
-  log2,
-  max,
   min,
   normalize,
   positionLocal,
@@ -20,7 +16,6 @@ import {
   transformNormalToView,
   uniform,
   uv,
-  vec2,
   vec3,
   vec4,
   vertexColor,
@@ -82,21 +77,16 @@ export class Vegetation {
       UnsignedByteType,
     )
     atlas.colorSpace = NoColorSpace
-    atlas.generateMipmaps = true
+    // The worker bakes a coverage-preserving mip chain (see `foliage-atlas.ts`).
+    atlas.mipmaps = prepared.atlas.mipmaps.map((level) => ({ ...level }))
+    atlas.generateMipmaps = false
     atlas.minFilter = LinearMipmapLinearFilter
     atlas.magFilter = LinearFilter
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
     this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false)
-    this.add(
-      parent,
-      'foliage',
-      prepared.foliage,
-      this.foliageMaterial(atlas, prepared),
-      true,
-      false,
-    )
+    this.add(parent, 'foliage', prepared.foliage, this.foliageMaterial(atlas), true, false)
     this.add(parent, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
   }
 
@@ -165,7 +155,7 @@ export class Vegetation {
     return material
   }
 
-  private foliageMaterial(atlas: DataTexture, prepared: PreparedVegetation) {
+  private foliageMaterial(atlas: DataTexture) {
     // Needles and leaves are matte at this scale: a full sky reflection at grazing angles
     // paled every crown's top edge against the sky.
     const material = new MeshStandardNodeMaterial({
@@ -176,10 +166,9 @@ export class Vegetation {
     })
     material.positionNode = positionLocal.add(this.sway())
     const sample = texture(atlas, uv())
-    // Mip coverage compensation keeps distant crowns from thinning as alpha averages out.
-    const texel = uv().mul(vec2(prepared.atlas.width, prepared.atlas.height))
-    const lod = max(log2(max(dFdx(texel).length(), dFdy(texel).length())), 0)
-    const coverage = saturate(sample.a.mul(lod.mul(0.3).add(1)))
+    // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
+    // fill their cards into squares.
+    const coverage = sample.a
     material.alphaTest = 0.5
     const albedo = vertexColor().rgb.mul(sample.r.mul(1.35).add(0.15))
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
