@@ -27,6 +27,14 @@ export function createPointerLightUniforms() {
 const POINTER_LIGHT_JUMP = 1
 const POINTER_LIGHT_JUMP_SHARE = 0.35
 
+/** How a material takes the cursor's light; the defaults suit opaque ground and rock. */
+export type PointerLightResponse = Readonly<{
+  /** Share (0–1) of the light a thin card or blade passes to its unlit side. */
+  translucency?: number
+  /** Multiplier on the irradiance, for surfaces that hide most of it otherwise. */
+  gain?: number
+}>
+
 export class PointerLight {
   readonly uniforms = createPointerLightUniforms()
 
@@ -68,9 +76,10 @@ export class PointerLight {
     if (Math.abs(strength.value - target) < 0.0001) strength.value = target
   }
 
-  applyTo(material: MeshStandardNodeMaterial) {
+  applyTo(material: MeshStandardNodeMaterial, response: PointerLightResponse = {}) {
+    const { translucency = 0, gain = 1 } = response
     const light = new IrradianceNode(
-      pointerLightAt(positionWorld, normalWorld, this.uniforms).mul(4),
+      pointerLightAt(positionWorld, normalWorld, this.uniforms, translucency).mul(4 * gain),
     )
     const setup = material.setupMaterialLightings.bind(material)
     const cacheKey = material.customProgramCacheKey.bind(material)
@@ -78,18 +87,25 @@ export class PointerLight {
     // light. An emissive overlay bypasses both and overexposes the dark shore.
     material.setupMaterialLightings = (builder) => [...setup(builder), light]
     material.customProgramCacheKey = () =>
-      `${cacheKey()}:pointer-irradiance:${this.uniforms.uPointerLightStrength.id}`
+      `${cacheKey()}:pointer-irradiance:${this.uniforms.uPointerLightStrength.id}:${translucency}:${gain}`
     material.needsUpdate = true
   }
 }
 export type PointerLightUniforms = ReturnType<typeof createPointerLightUniforms>
-export function pointerLightAt(world: Node<'vec3'>, normal: Node<'vec3'>, u: PointerLightUniforms) {
+export function pointerLightAt(
+  world: Node<'vec3'>,
+  normal: Node<'vec3'>,
+  u: PointerLightUniforms,
+  translucency = 0,
+) {
   const offset = world.sub(u.uPointerLightPosition),
     radius2 = offset.dot(offset).div(20.25)
   const falloff = exp(radius2.mul(-3.5)).mul(smoothstep(0.5, 1, radius2).oneMinus())
   const source = u.uPointerLightSource.sub(world),
     direction = source.div(max(source.length(), 0.001))
-  const facing = max(0, normal.dot(direction).add(0.18).div(1.18))
+  const cosine = normal.dot(direction)
+  const front = max(0, cosine.add(0.18).div(1.18))
+  const facing = translucency > 0 ? max(front, cosine.negate().mul(translucency)) : front
   return vec3(0.85, 1.02, 1.2).mul(facing).mul(falloff).mul(u.uPointerLightStrength)
 }
 
