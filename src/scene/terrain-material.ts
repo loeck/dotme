@@ -266,11 +266,14 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   )
 
   const distance = p.distance(cameraPosition)
-  const near = smoothstep(30, 3, distance)
+  const near = smoothstep(45, 3, distance)
+  // Weathered granite: knobbly grain, and cracks cut in where a ridged field crosses zero.
+  const crack = smoothstep(0.06, 0.0, octave(p, 1.6, pixel).abs()).mul(0.012)
   const relief = octave(p, 2.3, pixel)
-    .mul(0.02)
-    .add(octave(p, 7, pixel).mul(0.008))
-    .add(octave(p, 19, pixel).mul(0.003))
+    .mul(0.032)
+    .add(octave(p, 7, pixel).mul(0.012))
+    .add(octave(p, 19, pixel).mul(0.004))
+    .sub(crack)
   material.normalNode = bumpNormal(relief, near)
   return material
 }

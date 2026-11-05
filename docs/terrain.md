@@ -17,7 +17,8 @@ corners of the terrain grid (25 cm on desktop, 28 cm on phones):
   undulation, a bank lip at least 28 cm above the water, and a rounded dome on each islet (taller
   on phones, whose islets are under a metre wide) so its crown still carries a tree once smoothed;
 - a rock share: a bare band along the shore and seeded outcrop patches;
-- the low, broken shore that enters beneath the camera.
+- the low, broken shore that enters beneath the camera; on phones it reaches past the lens's
+  axis, so the portrait frame has a grassy bank in its lower left rather than a sliver.
 
 Stones set in the water (single blocks off the wet edge, broken fingers off the left headlands, a
 few fixed rocks) are listed separately and become boulders; touching ones merge into one larger
@@ -98,8 +99,8 @@ stones flanking the waterfall, waterline stones mostly on rocky banks, outcrops 
 or rocky ground, and rare glacial erratics on open ground. Placement is a seeded, ranked lattice, clear of
 lanterns, trunks, the camera's own bank and the fall's corridor and landing, whose raster cells no
 stone's waterline may reach. Each is one of eight
-cleaved icospheres: low-frequency swelling, then five to eight joint planes that cut flat,
-slightly rounded facets, a flattened underside, partial burial and a lean toward the ground's
+cleaved icospheres: low-frequency swelling, then seven to eleven joint planes that cut flat,
+slightly rounded facets, a weathered fractal roughness, a flattened underside, partial burial and a lean toward the ground's
 normal. They merge into one static mesh (about 100k triangles on desktop) with tone, moss bias and
 height per vertex: moss caps on upper faces, a dark wet band at the waterline and soil at the foot.
 

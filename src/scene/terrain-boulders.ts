@@ -344,6 +344,35 @@ function icosphere(detail: number) {
  * A unit boulder: lumpy low-frequency swelling, several cleavage planes that cut flat, slightly
  * rounded facets (weathered granite splits along joints), and a flattened, buried underside.
  */
+/** Smooth 3D value noise in [0, 1]. */
+function valueNoise3(seed: number, x: number, y: number, z: number) {
+  const x0 = Math.floor(x),
+    y0 = Math.floor(y),
+    z0 = Math.floor(z)
+  const fx = x - x0,
+    fy = y - y0,
+    fz = z - z0
+  const sx = fx * fx * (3 - 2 * fx),
+    sy = fy * fy * (3 - 2 * fy),
+    sz = fz * fz * (3 - 2 * fz)
+  const corner = (dx: number, dy: number, dz: number) =>
+    hash(seed, x0 + dx + (z0 + dz) * 157, y0 + dy, 331)
+  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
+  return lerp(
+    lerp(
+      lerp(corner(0, 0, 0), corner(1, 0, 0), sx),
+      lerp(corner(0, 1, 0), corner(1, 1, 0), sx),
+      sy,
+    ),
+    lerp(
+      lerp(corner(0, 0, 1), corner(1, 0, 1), sx),
+      lerp(corner(0, 1, 1), corner(1, 1, 1), sx),
+      sy,
+    ),
+    sz,
+  )
+}
+
 export function boulderShape(variant: number, seed: number, detail = 2) {
   const { positions, indices } = icosphere(detail)
   const random = (stream: number, i: number) => hash(seed, variant, i, stream)
@@ -355,12 +384,13 @@ export function boulderShape(variant: number, seed: number, detail = 2) {
       a: (random(207, i) - 0.4) * 0.32,
     }
   })
-  const planes = Array.from({ length: 5 + Math.floor(random(211, 0) * 4) }, (_, i) => {
+  // Joint planes cleave the block: glacial boulders are angular blocks rounded at the edges.
+  const planes = Array.from({ length: 7 + Math.floor(random(211, 0) * 5) }, (_, i) => {
     const theta = random(213, i) * Math.PI * 2,
       phi = Math.acos(random(217, i) * 1.6 - 0.8)
     return {
       d: [Math.sin(phi) * Math.cos(theta), Math.cos(phi), Math.sin(phi) * Math.sin(theta)] as const,
-      offset: 0.72 + random(219, i) * 0.2,
+      offset: 0.64 + random(219, i) * 0.24,
     }
   })
   for (let i = 0; i < positions.length; i += 3) {
@@ -386,6 +416,14 @@ export function boulderShape(variant: number, seed: number, detail = 2) {
       }
     }
     if (y < -0.45) y = -0.45 + (y + 0.45) * 0.35
+    // Weathered, uneven faces: a little fractal relief along each vertex's direction.
+    const rough =
+      (valueNoise3(seed + variant, x * 2.2, y * 2.2, z * 2.2) - 0.5) * 0.07 +
+      (valueNoise3(seed + variant + 7, x * 5.1, y * 5.1, z * 5.1) - 0.5) * 0.03
+    const radius = Math.hypot(x, y, z) || 1
+    x += (x / radius) * rough
+    y += (y / radius) * rough
+    z += (z / radius) * rough
     positions[i] = x
     positions[i + 1] = y
     positions[i + 2] = z

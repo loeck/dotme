@@ -326,7 +326,7 @@ function foregroundAt(
   if (z < zone.start || z > zone.end || x < zone.minX || x > zone.maxX) return null
   const advance = clamp((z - zone.start) / 7, 0, 1)
   const edge =
-    (mobile ? -2.55 + advance * 2.49 : -10 + advance * 9.4) +
+    (mobile ? -1.75 + advance * 2.49 : -10 + advance * 9.4) +
     shift +
     (smoothNoise(seed, z, 0, 1.8, 409) - 0.5) * (mobile ? 0.35 : 1.3)
   const depth = edge - x
@@ -1097,7 +1097,7 @@ export function createLakeWorld(seed: number, mobile: boolean): LakeWorld {
   const coast = (x: number, z: number) => coastField(root, x, z, mobile, shape)
   const foreground: Foreground = {
     minX: mobile ? -4.2 : -12,
-    maxX: mobile ? -0.08 : -0.55,
+    maxX: mobile ? 0.7 : -0.55,
     start: mobile ? 5 : 3,
     end: 13,
   }
