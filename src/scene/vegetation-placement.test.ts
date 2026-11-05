@@ -176,6 +176,23 @@ describe('lake-shore vegetation', () => {
     expect(far.indexCount).toBeLessThan(near.indexCount / 4)
   })
 
+  it('gives every tree picking spheres around its crown', () => {
+    const world = createLakeWorld(9182, false)
+    const { pick } = prepareVegetation(world, 9182, false)
+    expect(pick.length % 4).toBe(0)
+    for (const tree of world.trees) {
+      // At least one sphere stands over the trunk, above the ground, within the crown's reach.
+      let found = false
+      for (let i = 0; i < pick.length; i += 4) {
+        const dx = (pick[i] ?? 0) - tree.x,
+          dz = (pick[i + 2] ?? 0) - tree.z
+        const above = (pick[i + 1] ?? 0) - tree.y
+        if (Math.hypot(dx, dz) < 1.5 && above > 1 && (pick[i + 3] ?? 0) > 0.2) found = true
+      }
+      expect(found, `${tree.kind} at ${tree.x},${tree.z}`).toBe(true)
+    }
+  })
+
   it('is deterministic and stays within a triangle budget', () => {
     for (const mobile of [false, true]) {
       const world = createLakeWorld(9182, mobile)

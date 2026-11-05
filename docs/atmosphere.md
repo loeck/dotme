@@ -51,6 +51,11 @@ Terrain shadow layers preserve independent visibility for shadow and main passes
 Profile contrast samples the rendered backdrop through the composition pipeline. The DOM
 retains text, links, keyboard focus and screen-reader semantics. Cursor light is a subtle
 nighttime effect; pointer interaction remains available in daylight.
+The pointer ray stops at the first solid: the colliders (ground, cliffs, boulders) or a tree
+or shrub's crown, which has no collider and is picked as a stack of spheres following its cards
+(one per 0.8 m band). So the light falls on the crown under the cursor, a crown in front of the
+water or the waterfall hides them from the pointer, and pointing at a crown against the sky
+does not reach the clouds.
 
 ## Cursor
 

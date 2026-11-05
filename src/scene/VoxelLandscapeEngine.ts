@@ -150,6 +150,29 @@ type Mote = Readonly<{
   speed: number
 }>
 
+/** Nearest entry of a ray (unit direction) into any sphere (x, y, z, radius), before `max`. */
+function raySpheres(
+  origin: Vector3,
+  direction: Vector3,
+  spheres: Float32Array,
+  max: number,
+): number {
+  let nearest = max
+  for (let i = 0; i + 3 < spheres.length; i += 4) {
+    const ox = origin.x - (spheres[i] ?? 0),
+      oy = origin.y - (spheres[i + 1] ?? 0),
+      oz = origin.z - (spheres[i + 2] ?? 0)
+    const r = spheres[i + 3] ?? 0
+    const b = ox * direction.x + oy * direction.y + oz * direction.z
+    const c = ox * ox + oy * oy + oz * oz - r * r
+    const disc = b * b - c
+    if (disc < 0) continue
+    const t = -b - Math.sqrt(disc)
+    if (t > 0 && t < nearest) nearest = t
+  }
+  return nearest
+}
+
 export class VoxelLandscapeEngine {
   private readonly renderDiagnostics = new SceneRenderDiagnostics()
   private readonly options: Omit<VoxelLandscapeEngineOptions, 'prepared'>
@@ -215,6 +238,8 @@ export class VoxelLandscapeEngine {
   private readonly motes: Mote[] = []
   private moteMesh: InstancedMesh<BoxGeometry, MeshBasicNodeMaterial> | null = null
   private vegetation: Vegetation | undefined
+  /** Trees' and shrubs' picking spheres (x, y, z, radius), empty until the forest loads. */
+  private vegetationPick: Float32Array = new Float32Array(0)
   /** Holds the forest, built before the first frame. */
   private readonly vegetationGroup = new Group()
   private readonly moteTransform = new Object3D()
@@ -856,6 +881,8 @@ export class VoxelLandscapeEngine {
     const distance = this.waterHit.distanceTo(this.camera.position)
     const index = lakeIndex(this.bed, this.waterHit.x, this.waterHit.z)
     if (distance > 130 || index < 0 || !this.bed.water[index]) return null
+    // A crown in front of the water hides it from the pointer.
+    if (raySpheres(ray.origin, ray.direction, this.vegetationPick, distance) < distance) return null
     // Conservative raster of the actual solids includes the banks and isolated stones.
     const cell = LAKE_BOUNDS.size / this.bed.resolution
     for (let d = 0; d < distance - 0.05; d += cell * 0.5) {
@@ -868,6 +895,16 @@ export class VoxelLandscapeEngine {
     return target.copy(this.waterHit)
   }
 
+  /**
+   * Distance along the pointer ray to the first solid it meets: the colliders (ground, cliffs,
+   * boulders) or a tree or shrub's crown, which has no collider. Infinity when it meets none.
+   */
+  private pointerSolidDistance(max = 130) {
+    const ray = this.raycaster.ray
+    const solid = this.physics.castDistance(ray.origin, ray.direction, max) ?? Infinity
+    return Math.min(solid, raySpheres(ray.origin, ray.direction, this.vegetationPick, solid))
+  }
+
   private updatePointerLight(
     pointerOnScene: boolean,
     waterPoint: Vector3 | null,
@@ -877,8 +914,8 @@ export class VoxelLandscapeEngine {
     let contact = null
     if (nightStrength > 0 && pointerOnScene && this.pointerType === 'mouse' && this.focused) {
       const ray = this.raycaster.ray
-      const solid = this.physics.castDistance(ray.origin, ray.direction, 130)
-      if (solid !== null && (!waterPoint || solid < ray.origin.distanceTo(waterPoint)))
+      const solid = this.pointerSolidDistance()
+      if (solid < Infinity && (!waterPoint || solid < ray.origin.distanceTo(waterPoint)))
         contact = ray.at(solid, this.lightHit)
       else contact = waterPoint
     }
@@ -902,9 +939,7 @@ export class VoxelLandscapeEngine {
     const ray = this.raycaster.ray
     let solid: number | null = null
     const solidDistance = () => {
-      if (solid === null) {
-        solid = this.physics.castDistance(ray.origin, ray.direction, 130) ?? Infinity
-      }
+      if (solid === null) solid = this.pointerSolidDistance()
       return solid
     }
     let blockTarget = 0
@@ -1498,6 +1533,7 @@ export class VoxelLandscapeEngine {
     signal.throwIfAborted()
     const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
     this.vegetation = vegetation
+    this.vegetationPick = data.pick
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
     this.vegetationGroup.updateMatrixWorld(true)

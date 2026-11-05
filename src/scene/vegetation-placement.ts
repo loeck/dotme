@@ -9,6 +9,7 @@ import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import { appendFern, appendSprays, appendFlower, MeshBuilder } from './vegetation-meshes'
 import type { MeshData } from './vegetation-meshes'
 import {
+  crownSpheres,
   growBirch,
   growBush,
   growJuniper,
@@ -29,6 +30,8 @@ export type PreparedVegetation = Readonly<{
   foliage: MeshData
   undergrowth: MeshData
   atlas: FoliageAtlas
+  /** Picking volumes of trees and shrubs: world x, y, z and radius per sphere. */
+  pick: Float32Array
 }>
 
 /** Undergrowth and shrub budgets per layout. */
@@ -160,6 +163,8 @@ export function prepareVegetation(
   const foliage = new MeshBuilder(true)
   const undergrowth = new MeshBuilder(false)
   const models = new Map<string, TreeModel>()
+  const crowns = new Map<TreeModel, Float32Array>()
+  const pickSpheres: number[] = []
   const model = (name: string, build: () => TreeModel) => {
     let entry = models.get(name)
     if (!entry) {
@@ -191,6 +196,24 @@ export function prepareVegetation(
     /** Card size multiplier: sparser far models draw their cards larger to keep coverage. */
     cardScale = 1,
   ) => {
+    // Picking spheres follow the drawn crown: yawed, scaled and placed like the model.
+    let spheres = crowns.get(entry)
+    if (!spheres) {
+      spheres = crownSpheres(entry)
+      crowns.set(entry, spheres)
+    }
+    const c = Math.cos(at.yaw),
+      sn = Math.sin(at.yaw)
+    for (let i = 0; i < spheres.length; i += 4) {
+      const x = spheres[i] ?? 0,
+        z = spheres[i + 2] ?? 0
+      pickSpheres.push(
+        at.x + (c * x + sn * z) * at.scale,
+        at.y + (spheres[i + 1] ?? 0) * at.scale,
+        at.z + (-sn * x + c * z) * at.scale,
+        (spheres[i + 3] ?? 0) * at.scale * cardScale,
+      )
+    }
     const phase = hash(seed, salt, 7, 937) * Math.PI * 2
     const omega = (2 * Math.PI * 1.2) / Math.sqrt(entry.height * at.scale)
     const swayMetres = sway * entry.height * at.scale
@@ -474,5 +497,6 @@ export function prepareVegetation(
     foliage: foliage.build(),
     undergrowth: undergrowth.build(),
     atlas: bakeFoliageAtlas(seed, mobile),
+    pick: Float32Array.from(pickSpheres),
   }
 }
