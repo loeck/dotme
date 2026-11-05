@@ -1,34 +1,36 @@
 # Vegetation
 
-Trees, bushes and foreground undergrowth follow Voxen's _Last Signal_ (`pine.model.ts`,
-`undergrowth.model.ts`, `props.toml`, `forest.toml`) and the renderer decisions behind it:
-wood stays voxels, foliage masks become botanical cards (ADR 0114), and undergrowth is
-procedural geometry (ADR 0107 for grass blades, ADR 0112 for fern fronds). The world worker
-builds everything (`vegetation-models.ts`, `vegetation-meshes.ts`, `foliage-atlas.ts`,
+The lake shore's forest is Norway spruce, Scots pine and weeping birch, with low shrubs on the
+banks and grass, ferns and flowers on the foreground bank. Trees and shrubs are procedural
+models: a branch skeleton grown by each species' habit, wood meshed as smooth tapered tubes and
+twigs clothed in foliage cards from a procedural botanical atlas. Undergrowth is procedural
+geometry (Voxen's ADR 0107 for grass blades, ADR 0112 for fern fronds). The world worker builds
+everything (`vegetation-models.ts`, `vegetation-meshes.ts`, `foliage-atlas.ts`,
 `vegetation-placement.ts`) and transfers typed arrays; the render thread only wraps them
 (`vegetation.ts`).
 
 ## Models
 
-Models are carved from ellipsoid, cone and limb operations on an 8 cm grid (10 cm on phones),
-about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or leaves.
+Trees are 5 to 7.5 m tall before their placement scale, in the proportions of young stands on a
+Nordic shore:
 
-- Spruce: Last Signal's conical form, a core cone and seven boughs per tier turned by the
-  golden angle, drooping 28° and tapering 84% toward the top; 15% of boughs use the pale needle
-  colour. One variant uses the darker spruce needles. A needle core a third of the crown radius,
-  upper tiers that thicken toward the top and a solid spire over the top 42% keep the silhouette
-  one continuous cone, so the sky never shows between the small top tiers. Boughs start at 27–33% of the height so
-  a short dark trunk shows under the skirt.
-- Pine: Last Signal's mature form, a tall trunk orange from 55% of the canopy base, bark flakes
-  below, and an uneven crown of scaffold lobes around a dense inner mass.
-- Birch: a pale trunk with rotated dark marks and forked leaf sprays from half its height, the
-  main value break against the dark conifers. A deep hanging curtain under each of the four
-  lower forks rounds the crown's underside, which otherwise sat flat like an umbrella.
-- Bush: a dozen overlapping leaf clumps; tree companions in about a third of two slots per tree,
-  and mid-ground cover (below).
+- Norway spruce: a straight trunk and a whorl of four to six branches every 30 cm, with smaller
+  internodal branches between whorls. Branches leave nearly level at the bottom and rise a little
+  toward the top, sag and lift their tips, and are longest low down, so the crown is a narrow
+  pointed cone (radius about 18% of the height) with branches down to 10–17% of it. Sprays hang
+  along each branch's outer two thirds, shrinking toward the tip; some turn across the branch so
+  one pointing at the viewer still shows. Dark cores round the trunk stand for the shaded inner
+  branches. One variant has darker, bluer needles.
+- Scots pine: a trunk that wanders slightly, grey-brown and furrowed below and orange above,
+  bare to 55–65% of the height but for a few dead stubs. Ten to thirteen scaffold limbs rise
+  15–45° and fork, and every limb and fork ends in a flattish cloud of needle tufts.
+- Weeping birch: a slender white trunk with black lenticel dashes and a dark, fissured foot.
+  Thirteen to sixteen limbs rise steeply and arch over, longest mid-crown for an ovoid outline,
+  and curtains of hanging twigs spread off both sides of them.
+- Shrub: a low dome of leafy cards; tree companions in about a third of two slots per tree, and
+  mid-ground cover (below).
 
-Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
-the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
+Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
 crown (its highest open ground, nearest the centre on a tie) at three quarters of the usual
 size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
@@ -40,28 +42,25 @@ tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 
 
 ## Wood and foliage
 
-Wood cells are meshed once: exposed faces only, classic per-corner voxel occlusion and a small
-hashed tone per voxel. Foliage cells are never drawn as voxels. As in Voxen's clump planner,
-every three-cell block with an exposed foliage cell becomes one seed: its centroid, majority
-role, mean colour, and the crown shape probed in 26 directions one to three pitches out, which
-gives the open direction and openness. Each seed emits three to five cards from a small
-procedural atlas: drooping, serrated bough sprays for needles (0.6 as tall as wide, tipped
-upward) and hanging leaf clusters for leaves. The first card loosely faces the camera; seeds
-with openness under 0.6 add a dark core disc so gaps inside a crown show foliage, not sky.
-Cluster scales range over [0.85, 1.45], each tree takes a factor in [0.85, 1.2], isolated
-tufts shrink to 0.6 and far clumps grow up to 1.25× from 15 to 55 m. Seeds on a crown's
-underside get cards up to 40% smaller that never drop below the seed, so the trunk stays visible
-under the crown. Cards stay within about 30° of vertical, so a low camera never sees a crown's top
-cards edge-on as pale slivers. Card normals lean toward the open direction, with its upward
-part damped so sunlit crown tops do not read as a pale lid. Clumps opening nearly straight up
-(a spire's tip) are not pushed above the crown and lose up to 20% of their value, so the tip
-stays attached to the tree. Albedo takes a cluster value hash, a per-tree hue and value jitter,
-a cool-underside to warm-top ramp and an openness and height shade.
+Wood is generalized cylinders: rings along each limb with parallel-transported frames, so tubes
+never twist, with eight sides on a trunk and three or four on a limb (six and three on phones).
+Only a spruce's main branches carry wood; the foliage hides its thin internodal ones. Bark colour
+is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
+birch's dashes and dark foot.
 
-The atlas (512 × 256 RGBA8) stores a palette-relative tone and cutout coverage. Cards use an
-alpha test with a mip-level coverage boost, so distant crowns do not thin out. Lighting adds
-Last Signal's sky-light rim and back-light translucency, strongest at the crown rim and against
-a low sun.
+Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
+card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
+so a crown shades as one mass, and cards deep inside, near the trunk, darken to half their value.
+Colour takes the species' palette, a per-tree hue and value jitter and a small per-card hash.
+
+The atlas has eight tiles: two Norway spruce sprays (a shoot across the top with combed,
+needle-clothed branchlets hanging from it, each branchlet its own shade), two Scots pine tuft
+sets (brushes of long needles on short twigs), two weeping birch tiles (slender hanging twigs
+with small ovate leaves), shrub foliage and a lobed core disc. Desktop bakes 256-texel tiles
+(1024 × 512); phones bake 128-texel ones, a quarter of the work, for their smaller trees. Each
+texel stores a palette-relative tone and cutout coverage. Cards use an alpha test with a
+mip-level coverage boost, so distant crowns do not thin out. Lighting adds a sky-light rim and
+back-light translucency, strongest at the crown rim and against a low sun.
 
 ## Undergrowth
 
@@ -96,8 +95,10 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 202k triangles (127k of them undergrowth, 116 mid-ground bushes and the islet
-trees about 14k) and the phone forest about 41k. Preparation runs after the surfaces on the
+forest is about 266k triangles: 37k of wood, 27k of foliage cards and 203k of undergrowth; the
+phone forest is about 56k (18k, 10k and 28k). The voxel trees it replaces drew 21k of wood and
+63k of cards on desktop, so trees and shrubs cost about the same, and preparation takes about as
+long (within 5%, measured side by side). Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind

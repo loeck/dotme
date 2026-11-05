@@ -4,7 +4,8 @@ import { ATLAS_TILES, bakeFoliageAtlas, tileCoverage } from './foliage-atlas'
 import { WATER_LEVEL } from './lake-bed'
 import { createLakeWorld } from './lake-world'
 import { MeshBuilder, appendTuft } from './vegetation-meshes'
-import { foliageSeeds, meshSculpt, sculptSpruce, VoxelSculpt } from './vegetation-models'
+import { growBirch, growBush, growPine, growSpruce, MODEL_DETAIL } from './vegetation-models'
+import type { TreeModel } from './vegetation-models'
 import { prepareVegetation } from './vegetation-placement'
 
 const triangles = (vegetation: ReturnType<typeof prepareVegetation>) =>
@@ -13,62 +14,103 @@ const triangles = (vegetation: ReturnType<typeof prepareVegetation>) =>
     vegetation.undergrowth.indices.length) /
   3
 
-describe('Last Signal vegetation', () => {
-  it('meshes only exposed wood faces, with corner occlusion and outward winding', () => {
-    const sculpt = new VoxelSculpt(0.1)
-    sculpt.voxel([0.05, 0.05, 0.05], [1, 1, 1])
-    sculpt.voxel([0.15, 0.05, 0.05], [1, 1, 1])
-    sculpt.voxel([0.15, 0.15, 0.05], [1, 1, 1])
-    // Foliage cells never become voxel faces.
-    sculpt.kind = 'needle'
-    sculpt.voxel([0.05, 0.15, 0.05], [0, 1, 0])
-    const mesh = meshSculpt(sculpt, { seed: 1, relief: 0, bendFrom: 0 })
-    // An L of three wood cubes sharing two faces: 14 exposed faces, 4 vertices and 2 triangles each.
-    expect(mesh.positions.length / 3).toBe(56)
-    expect(mesh.indices.length).toBe(84)
-    for (let i = 0; i < mesh.indices.length; i += 3) {
-      const [a, b, c] = [0, 1, 2].map((k) => (mesh.indices[i + k] ?? 0) * 3)
-      const p = (v: number, axis: number) => mesh.positions[v + axis] ?? 0
-      const e1 = [0, 1, 2].map((axis) => p(b ?? 0, axis) - p(a ?? 0, axis))
-      const e2 = [0, 1, 2].map((axis) => p(c ?? 0, axis) - p(a ?? 0, axis))
-      const cross = [
-        (e1[1] ?? 0) * (e2[2] ?? 0) - (e1[2] ?? 0) * (e2[1] ?? 0),
-        (e1[2] ?? 0) * (e2[0] ?? 0) - (e1[0] ?? 0) * (e2[2] ?? 0),
-        (e1[0] ?? 0) * (e2[1] ?? 0) - (e1[1] ?? 0) * (e2[0] ?? 0),
-      ]
-      const n = [0, 1, 2].map((axis) => (mesh.normals[(a ?? 0) + axis] ?? 0) / 127)
-      expect(cross.reduce((sum, value, axis) => sum + value * (n[axis] ?? 0), 0)).toBeGreaterThan(0)
-    }
-    const colours = Array.from(mesh.colors)
-    expect(Math.min(...colours)).toBeLessThan(Math.max(...colours))
+/** The outward-facing share of a model's wood triangles (normal against face winding). */
+function outwardShare(model: TreeModel) {
+  const { positions, normals, indices } = model.wood
+  let outward = 0
+  for (let i = 0; i < indices.length; i += 3) {
+    const [a, b, c] = [0, 1, 2].map((k) => (indices[i + k] ?? 0) * 3)
+    const p = (v: number, axis: number) => positions[(v ?? 0) + axis] ?? 0
+    const e1 = [0, 1, 2].map((axis) => p(b ?? 0, axis) - p(a ?? 0, axis))
+    const e2 = [0, 1, 2].map((axis) => p(c ?? 0, axis) - p(a ?? 0, axis))
+    const cross = [
+      (e1[1] ?? 0) * (e2[2] ?? 0) - (e1[2] ?? 0) * (e2[1] ?? 0),
+      (e1[2] ?? 0) * (e2[0] ?? 0) - (e1[0] ?? 0) * (e2[2] ?? 0),
+      (e1[0] ?? 0) * (e2[1] ?? 0) - (e1[1] ?? 0) * (e2[0] ?? 0),
+    ]
+    const n = [0, 1, 2].map((axis) => normals[(a ?? 0) + axis] ?? 0)
+    if (cross.reduce((sum, value, axis) => sum + value * (n[axis] ?? 0), 0) > 0) outward++
+  }
+  return outward / (indices.length / 3)
+}
+
+describe('lake-shore vegetation', () => {
+  const detail = MODEL_DETAIL.desktop
+  const models = {
+    spruce: growSpruce(7, detail, false),
+    pine: growPine(8, detail),
+    birch: growBirch(9, detail),
+  }
+
+  it.each(Object.entries(models))(
+    'grows a %s with outward tube wood and a lit crown',
+    (_, model) => {
+      expect(model.height).toBeGreaterThan(4.5)
+      expect(model.height).toBeLessThan(8)
+      expect(outwardShare(model)).toBeGreaterThan(0.99)
+      expect(model.sprays.length).toBeGreaterThan(100)
+      for (const spray of model.sprays) {
+        expect(Math.hypot(...spray.normal)).toBeCloseTo(1, 5)
+        expect(Math.hypot(...spray.t)).toBeCloseTo(1, 5)
+        expect(Math.hypot(...spray.b)).toBeCloseTo(1, 5)
+        expect(spray.shade).toBeGreaterThan(0.25)
+        expect(spray.shade).toBeLessThanOrEqual(1)
+        expect(spray.center[1]).toBeLessThan(model.height + 0.6)
+      }
+      // Cards deep inside the crown are darker than those on its outside.
+      const shades = model.sprays.map((spray) => spray.shade).toSorted((a, b) => a - b)
+      expect(shades[Math.floor(shades.length * 0.1)] ?? 0).toBeLessThan(
+        shades[Math.floor(shades.length * 0.9)] ?? 0,
+      )
+    },
+  )
+
+  it('shapes each species by its habit', () => {
+    const crownBottom = (model: TreeModel) =>
+      Math.min(...model.sprays.map((spray) => spray.center[1])) / model.height
+    // Spruce keeps branches near the ground; Scots pine is bare most of the way up.
+    expect(crownBottom(models.spruce)).toBeLessThan(0.2)
+    expect(crownBottom(models.pine)).toBeGreaterThan(0.4)
+    // A spruce is a narrow cone: widest low down, pointed at the top.
+    const width = (model: TreeModel, from: number, to: number) =>
+      Math.max(
+        ...model.sprays
+          .filter(
+            (spray) => spray.center[1] > from * model.height && spray.center[1] < to * model.height,
+          )
+          .map((spray) => Math.hypot(spray.center[0], spray.center[2])),
+      )
+    expect(width(models.spruce, 0.15, 0.35)).toBeGreaterThan(width(models.spruce, 0.75, 0.95) * 2)
+    expect(width(models.spruce, 0.15, 0.35)).toBeLessThan(models.spruce.height * 0.3)
+    // Birch twigs hang: their cards are about upright.
+    const birchCards = models.birch.sprays.filter((spray) => spray.b[1] > 0.7).length
+    expect(birchCards / models.birch.sprays.length).toBeGreaterThan(0.6)
   })
 
-  it('reduces a spruce crown to clump seeds that face open air', () => {
-    const sculpt = sculptSpruce(7, 0.08, false)
-    const seeds = foliageSeeds(sculpt, 3)
-    expect(seeds.length).toBeGreaterThan(30)
-    for (const seed of seeds) {
-      expect(Math.hypot(...seed.open)).toBeCloseTo(1, 5)
-      expect(seed.openness).toBeGreaterThan(0)
-      expect(seed.openness).toBeLessThanOrEqual(1)
-      expect(seed.leaf).toBe(false)
-    }
-    // Seeds on the crown's flanks open outward, away from the trunk.
-    const outward = seeds.filter(
-      (seed) => seed.open[0] * seed.center[0] + seed.open[2] * seed.center[2] > 0,
-    ).length
-    expect(outward / seeds.length).toBeGreaterThan(0.6)
+  it('is deterministic and lighter on phones', () => {
+    expect(growSpruce(7, detail, false)).toEqual(models.spruce)
+    const phone = growSpruce(7, MODEL_DETAIL.mobile, false)
+    expect(phone.sprays.length).toBeLessThan(models.spruce.sprays.length)
+    expect(phone.wood.indices.length).toBeLessThan(models.spruce.wood.indices.length)
+    expect(growBush(3, detail).height).toBeLessThan(0.6)
   })
 
-  it('bakes a botanical atlas with Last Signal coverage targets', () => {
+  it('bakes a botanical atlas with open, cut-out foliage', () => {
     const atlas = bakeFoliageAtlas(3)
     expect(atlas.data.length).toBe(atlas.width * atlas.height * 4)
-    for (const tile of [ATLAS_TILES.needleA, ATLAS_TILES.needleB]) {
-      expect(tileCoverage(atlas, tile)).toBeGreaterThan(0.2)
-      expect(tileCoverage(atlas, tile)).toBeLessThan(0.75)
+    for (const tile of [
+      ATLAS_TILES.spruceA,
+      ATLAS_TILES.spruceB,
+      ATLAS_TILES.pineA,
+      ATLAS_TILES.pineB,
+      ATLAS_TILES.birchA,
+      ATLAS_TILES.birchB,
+      ATLAS_TILES.bush,
+    ]) {
+      // Enough foliage to read as a mass, enough gaps to read as needles and leaves.
+      expect(tileCoverage(atlas, tile)).toBeGreaterThan(0.12)
+      expect(tileCoverage(atlas, tile)).toBeLessThan(0.7)
     }
-    for (const tile of [ATLAS_TILES.leafA, ATLAS_TILES.leafB])
-      expect(tileCoverage(atlas, tile)).toBeGreaterThan(0.25)
     expect(tileCoverage(atlas, ATLAS_TILES.disc)).toBeGreaterThan(0.4)
   })
 

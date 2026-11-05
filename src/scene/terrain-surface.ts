@@ -94,10 +94,11 @@ function skyVisibility(field: TerrainField, trees: readonly TreeShade[], mobile:
       }
       visibility[i] = 1 - occlusion / directions.length
     }
-  // Canopy: a soft disc of shade under each crown, darker under dense spruce.
+  // Canopy: a soft disc of shade under each crown, darkest under a spruce's skirt that reaches
+  // the ground, lighter under a pine's high crown and a birch's open curtains.
   for (const tree of trees) {
-    const radius = tree.scale * (tree.kind === 'birch' ? 1.5 : 1.8)
-    const strength = tree.kind === 'spruce' ? 0.26 : tree.kind === 'pine' ? 0.18 : 0.14
+    const radius = tree.scale * (tree.kind === 'spruce' ? 2 : tree.kind === 'pine' ? 1.9 : 1.6)
+    const strength = tree.kind === 'spruce' ? 0.34 : tree.kind === 'pine' ? 0.16 : 0.14
     const c0 = Math.max(0, Math.floor((tree.x - radius - field.minX) / cell)),
       c1 = Math.min(columns - 1, Math.ceil((tree.x + radius - field.minX) / cell))
     const r0 = Math.max(0, Math.floor((tree.z - radius - field.minZ) / cell)),

@@ -57,8 +57,7 @@ const FULL_LEAN_SPEED = 9
 const MAX_FLUTTER_OMEGA = 7
 
 /**
- * Last Signal's vegetation as three draws: voxel wood, foliage clump cards and procedural
- * undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
+ * The forest as three draws: tube-meshed wood, foliage cards and procedural undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
  * buffeting sines at 1.2/√H Hz); cards and blades add a light flutter.
  */
 export class Vegetation {
@@ -180,12 +179,12 @@ export class Vegetation {
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
     // keeps `alphaTest`, so cards cast their cutout rather than square shadows.
     material.colorNode = vec4(albedo, coverage)
-    // Card normals lean 90% toward the clump's open direction and must not flip on back faces.
+    // Card normals lean toward the outside of their crown and must not flip on back faces.
     const normal = normalize(attribute<'vec3'>('normal'))
     material.normalNode = transformNormalToView(normal)
     const toEye = normalize(cameraPosition.sub(positionWorld))
     const facing = abs(dot(normal, toEye)).oneMinus()
-    // Last Signal: sky-light rim and back-light translucency strongest at the crown rim.
+    // Sky-light rim and back-light translucency, strongest at the crown rim.
     const rim = pow(facing, 3).mul(0.35)
     const back = pow(saturate(dot(this.sunDirection.negate(), toEye)), 4)
       .mul(0.4)
