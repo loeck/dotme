@@ -136,9 +136,13 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 440k triangles: 112k of wood, 179k of foliage cards (about 2.6 times the previous
-crowns' density) and 160k of undergrowth; the phone forest about 115k. The budget is set aside
-for now and will be optimised last. The voxel trees it replaces drew 21k of wood and
+forest is about 330k triangles (wood, foliage cards and undergrowth about 70k, 130k and 129k) and
+the phone forest about 95k. Trees past 50 m from the camera use a far level of detail: half the
+sprays drawn 30% larger, lighter wood, and no spruce branch wood under the foliage. Grass keeps
+(4/d)^1.25 of a clump's blades. Spruce cores fill every third whorl and birches four inner cards:
+with crowns this dense, large cards stacked deep inside cost more fill than they add. On the host
+GPU (WebGL, 1600 × 900) the frame measures about 14.8 ms against 15.8 ms before these levels of
+detail; the remaining cost of the forest is the fill of its alpha-tested cards, not triangles. The voxel trees it replaces drew 21k of wood and
 63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
 long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
 sapling's none. Preparation runs after the surfaces on the

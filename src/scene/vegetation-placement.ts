@@ -18,7 +18,7 @@ import {
   mixRgb,
   VEGETATION_PALETTE,
 } from './vegetation-models'
-import type { TreeModel } from './vegetation-models'
+import type { ModelDetail, TreeModel } from './vegetation-models'
 
 /**
  * The forest as three merged world-space meshes: tube-meshed wood, foliage cards over the
@@ -41,6 +41,8 @@ const GROUND_COVER_Z = -1.5
 const SHRUB_FAR_Z = -46
 /** Furthest a companion bush stands from its tree: (0.6 + 0.7) × the largest tree scale. */
 const COMPANION_REACH = 2.4
+/** Trees farther than this from the camera, metres, use the far level of detail. */
+const FAR_TREE = 50
 const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 6, pine: 5, birch: 5 }
 /** Tip travel at full wind as a share of model height (Voxen's `maxTip`). */
 const TREE_SWAY: Record<TreeKind, number> = { spruce: 0.03, pine: 0.03, birch: 0.05 }
@@ -174,17 +176,20 @@ export function prepareVegetation(
       growSpruce(seed + 51 + slot, detail, slot === 1, [0.9, 1.6]),
     )
   }
-  const growTree = (kind: TreeKind, variant: number) => {
+  const farDetail = mobile ? MODEL_DETAIL.mobileFar : MODEL_DETAIL.desktopFar
+  const growTree = (kind: TreeKind, variant: number, lod: ModelDetail) => {
     const treeSeed = seed + variant * 7919 + kind.length * 104_729
-    if (kind === 'birch') return growBirch(treeSeed, detail)
-    if (kind === 'pine') return growPine(treeSeed, detail)
-    return growSpruce(treeSeed, detail, variant % 3 === 2)
+    if (kind === 'birch') return growBirch(treeSeed, lod)
+    if (kind === 'pine') return growPine(treeSeed, lod)
+    return growSpruce(treeSeed, lod, variant % 3 === 2)
   }
   const plant = (
     entry: TreeModel,
     at: Readonly<{ x: number; y: number; z: number; yaw: number; scale: number }>,
     sway: number,
     salt: number,
+    /** Card size multiplier: sparser far models draw their cards larger to keep coverage. */
+    cardScale = 1,
   ) => {
     const phase = hash(seed, salt, 7, 937) * Math.PI * 2
     const omega = (2 * Math.PI * 1.2) / Math.sqrt(entry.height * at.scale)
@@ -193,7 +198,7 @@ export function prepareVegetation(
     // Per-prop size and hue/value jitter.
     const jitter = hash(seed, salt, 11, 941)
     appendSprays(foliage, entry.sprays, at, {
-      propFactor: 0.92 + jitter * 0.16,
+      propFactor: (0.92 + jitter * 0.16) * cardScale,
       propTint: [
         0.94 + jitter * 0.1,
         0.97 + hash(seed, salt, 13, 947) * 0.06,
@@ -212,8 +217,20 @@ export function prepareVegetation(
     const xi = Math.round(tree.x * 10),
       zi = Math.round(tree.z * 10)
     const variant = Math.floor(hash(seed, xi, zi, 931) * TREE_VARIANTS[tree.kind])
-    const entry = model(`${tree.kind}-${variant}`, () => growTree(tree.kind, variant))
-    plant(entry, tree, TREE_SWAY[tree.kind], index * 2 + 1)
+    // Past 50 m a crown is a few dozen pixels: half its sprays, drawn larger, read the same.
+    const far =
+      Math.hypot(tree.x - CAMERA_REST.x, tree.y - CAMERA_REST.y, tree.z - CAMERA_REST.z) > FAR_TREE
+    const lod = far ? farDetail : detail
+    const entry = model(`${tree.kind}-${variant}-${far ? 'far' : 'near'}`, () =>
+      growTree(tree.kind, variant, lod),
+    )
+    plant(
+      entry,
+      tree,
+      TREE_SWAY[tree.kind],
+      index * 2 + 1,
+      Math.pow(lod.spacing / detail.spacing, 0.4),
+    )
     // Last Signal's companions: two slots per tree, a bush in about a third of them.
     for (let slot = 0; slot < 2; slot++) {
       if (hash(seed, xi, zi, 941 + slot) > 0.36) continue
@@ -430,7 +447,7 @@ export function prepareVegetation(
         : form === 'turf'
           ? 0.09 + 0.04 * r(9)
           : 0.07 + 0.05 * r(9)) * (edge.near ? 0.6 : 1)
-    const lod = Math.min(1, Math.max(0.2, 4 / distance))
+    const lod = Math.min(1, Math.max(0.15, (4 / distance) ** 1.25))
     appendClump(
       undergrowth,
       {

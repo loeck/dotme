@@ -132,6 +132,9 @@ export type ModelDetail = Readonly<{ trunkSides: number; limbSides: number; spac
 export const MODEL_DETAIL = {
   desktop: { trunkSides: 8, limbSides: 4, spacing: 1 },
   mobile: { trunkSides: 6, limbSides: 3, spacing: 1.35 },
+  /** Trees far from the camera: half the sprays (drawn larger) and lighter wood. */
+  desktopFar: { trunkSides: 5, limbSides: 3, spacing: 2 },
+  mobileFar: { trunkSides: 4, limbSides: 3, spacing: 2.4 },
 } as const satisfies Record<string, ModelDetail>
 
 /** Wood as generalized cylinders: rings along a path with parallel-transported frames. */
@@ -416,8 +419,8 @@ export function growSpruce(
       const sag = (0.32 - 0.22 * t) * between(random, 0.8, 1.2)
       const path = limbPath(centre, heading(yaw, elevation), reach, 3, sag, 0.22)
       // Only main branches carry wood: the foliage hides the thin internodal ones entirely, and
-      // a sapling's branches and the short upper ones altogether.
-      if (!internodal && youth > 0.5 && t < 0.7)
+      // a sapling's branches, the short upper ones and a far tree's altogether.
+      if (!internodal && youth > 0.5 && t < 0.7 && detail.spacing < 2)
         wood.tube(
           path,
           path.map((_, i) => (0.006 + reach * 0.016) * (1 - i / 3.4)),
@@ -456,8 +459,10 @@ export function growSpruce(
       }
     }
     // A dark core around the trunk, where the shaded inner branches have shed most needles.
-    if (whorl % 2 === 0 || t > 0.7) {
-      const core = crownRadius * (1 - t) * 0.9 + 0.2 * youth
+    // Dense sprays now hide most of the inside, so cores only fill every third whorl, smaller:
+    // large cards stacked deep in a crown cost far more fill than they add.
+    if (whorl % 3 === 0 && t < 0.8) {
+      const core = crownRadius * (1 - t) * 0.6 + 0.15 * youth
       sprays.push({
         ...uprightCard(
           whorlCentre,
@@ -711,7 +716,7 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
     }
   }
   // An inner crown of deeper leaves keeps the curtains from reading as separate clouds.
-  for (let k = 0; k < 10; k++) {
+  for (let k = 0; k < 4; k++) {
     const y = height * between(random, 0.5, 0.88)
     sprays.push(
       uprightCard(

@@ -187,8 +187,7 @@ describe('lake-shore vegetation', () => {
       )
       expect(first.foliage.indices.length).toBeGreaterThan(0)
       expect(first.undergrowth.indices.length).toBeGreaterThan(0)
-      // A loose ceiling for now: the forest budget is set aside until the final optimisation pass.
-      expect(triangles(first)).toBeLessThan(mobile ? 200_000 : 600_000)
+      expect(triangles(first)).toBeLessThan(mobile ? 120_000 : 380_000)
       for (let i = 1; i < first.undergrowth.positions.length; i += 3)
         expect(first.undergrowth.positions[i] ?? 0).toBeGreaterThan(WATER_LEVEL)
     }
