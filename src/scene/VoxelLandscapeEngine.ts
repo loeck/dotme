@@ -62,6 +62,7 @@ import type { LightingState } from './lighting'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import type { PhysicsWorld } from './physics-world'
 import { PointerLight } from './pointer-light'
+import type { PointerLightResponse } from './pointer-light'
 import { prepareWorldAsync } from './prepare-world'
 import type { PreparedWorld } from './prepare-world'
 import { DEFAULT_RAIN, UMBRELLA_RADIUS } from './rain-simulation'
@@ -1535,7 +1536,8 @@ export class VoxelLandscapeEngine {
     this.vegetation = vegetation
     this.vegetationPick = data.pick
     for (const mesh of vegetation.meshes)
-      if (mesh.material instanceof MeshStandardNodeMaterial) this.receiveSceneLight(mesh.material)
+      if (mesh.material instanceof MeshStandardNodeMaterial)
+        this.receiveSceneLight(mesh.material, vegetation.pointerLight.get(mesh))
     this.vegetationGroup.updateMatrixWorld(true)
     performance.mark('vegetation-presented')
   }
@@ -1544,9 +1546,12 @@ export class VoxelLandscapeEngine {
    * Cloud shadows, the pointer light and the main view's fog hand-off (volumetric air replaces
    * material fog there) for a lit scene material, including ones that join after the build.
    */
-  private receiveSceneLight(material: MeshStandardNodeMaterial) {
+  private receiveSceneLight(
+    material: MeshStandardNodeMaterial,
+    pointerLight?: PointerLightResponse,
+  ) {
     this.clouds.shadows.applyTo(material, this.camera)
-    this.pointerLight.applyTo(material)
+    this.pointerLight.applyTo(material, pointerLight)
   }
 
   private compileShadowMaps(

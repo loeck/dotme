@@ -39,6 +39,7 @@ import {
 import type { Node, Object3D } from 'three/webgpu'
 
 import type { LightingState } from './lighting'
+import type { PointerLightResponse } from './pointer-light'
 import type { MeshData } from './vegetation-meshes'
 import type { PreparedVegetation } from './vegetation-placement'
 
@@ -51,6 +52,14 @@ export const UNDERGROWTH_LAYER = 7
 const FULL_LEAN_SPEED = 9
 /** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
 const RELIEF_METRES = 0.004
+/**
+ * How the night cursor's lantern lights each draw. Leaves, needles and blades pass a good
+ * share of a light to their far side, and a crown's cards face every way. Its leaves are
+ * also darker than the ground and its cutouts show the night behind, so on a crown the same
+ * lantern read as a faint smudge next to its pool on the ground: the gain brings it level.
+ */
+const FOLIAGE_POINTER_LIGHT: PointerLightResponse = { translucency: 0.6, gain: 4 }
+const UNDERGROWTH_POINTER_LIGHT: PointerLightResponse = { translucency: 0.5 }
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
 
@@ -60,6 +69,8 @@ const MAX_FLUTTER_OMEGA = 7
  */
 export class Vegetation {
   readonly meshes: Mesh[] = []
+  /** How each mesh takes the night cursor's light; wood keeps the opaque default. */
+  readonly pointerLight = new Map<Mesh, PointerLightResponse>()
   private readonly time = uniform(0)
   private readonly wind = uniform(new Vector2(1, 0))
   private readonly strength = uniform(0)
@@ -85,9 +96,25 @@ export class Vegetation {
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
-    this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false)
-    this.add(parent, 'foliage', prepared.foliage, this.foliageMaterial(atlas), true, false)
-    this.add(parent, 'undergrowth', prepared.undergrowth, this.undergrowthMaterial(), false, true)
+    this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false, {})
+    this.add(
+      parent,
+      'foliage',
+      prepared.foliage,
+      this.foliageMaterial(atlas),
+      true,
+      false,
+      FOLIAGE_POINTER_LIGHT,
+    )
+    this.add(
+      parent,
+      'undergrowth',
+      prepared.undergrowth,
+      this.undergrowthMaterial(),
+      false,
+      true,
+      UNDERGROWTH_POINTER_LIGHT,
+    )
   }
 
   private add(
@@ -97,6 +124,7 @@ export class Vegetation {
     material: MeshStandardNodeMaterial,
     castShadow: boolean,
     mainViewOnly: boolean,
+    pointerLight: PointerLightResponse,
   ) {
     if (!data.indices.length) {
       material.dispose()
@@ -119,6 +147,7 @@ export class Vegetation {
     if (mainViewOnly) mesh.layers.set(UNDERGROWTH_LAYER)
     parent.add(mesh)
     this.meshes.push(mesh)
+    this.pointerLight.set(mesh, pointerLight)
     this.disposables.push(geometry, material)
   }
 
@@ -246,5 +275,6 @@ export class Vegetation {
     for (const mesh of this.meshes) mesh.removeFromParent()
     for (const item of this.disposables) item.dispose()
     this.meshes.length = 0
+    this.pointerLight.clear()
   }
 }

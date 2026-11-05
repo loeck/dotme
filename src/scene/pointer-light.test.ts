@@ -1,4 +1,5 @@
 import { Vector3 } from 'three'
+import { MeshStandardNodeMaterial } from 'three/webgpu'
 import { expect, it } from 'vitest'
 
 import { PointerLight } from './pointer-light'
@@ -88,4 +89,18 @@ it('clears lingering illumination as soon as night ends, even on an accelerated 
   light.update(contact, direction, 1, 0, true)
   light.update(contact, direction, 0, 1 / 60)
   expect(light.uniforms.uPointerLightStrength.value).toBe(0)
+})
+
+it('keys each light response to its own material program', () => {
+  const light = new PointerLight()
+  const keys = [undefined, { translucency: 0.6, gain: 4 }, { translucency: 0.5 }].map(
+    (response) => {
+      const material = new MeshStandardNodeMaterial()
+      light.applyTo(material, response)
+      const key = material.customProgramCacheKey()
+      material.dispose()
+      return key
+    },
+  )
+  expect(new Set(keys).size).toBe(keys.length)
 })
