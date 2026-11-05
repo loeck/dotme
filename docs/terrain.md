@@ -92,7 +92,8 @@ steep faces, the pointer light and the reflection fog apply as to any scene mate
 ## Boulders
 
 `terrain-boulders.ts` places up to 320 boulders on desktop and 90 on phones: the composition's single
-water stones (flat-topped, reaching below the wave trough), large
+water stones (each its own size, shape and lean, from a hand or two out of the water to just
+awash, and reaching below the wave trough), large
 stones flanking the waterfall, waterline stones mostly on rocky banks, outcrops and scree on steep
 or rocky ground, and rare glacial erratics on open ground. Placement is a seeded, ranked lattice, clear of
 lanterns, trunks, the camera's own bank and the fall's corridor and landing, whose raster cells no

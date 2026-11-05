@@ -120,25 +120,36 @@ export function placeBoulders(
     return true
   }
 
-  // 1. The composition's single stones, half out of the water, where the voxels put them.
+  // 1. The composition's stones in the water, each its own size, shape and lean: some stand a
+  // hand or two out, a few lie just awash, so a row of them never reads as identical buttons.
   islands.forEach((island, index) => {
-    const width = clamp(island.extent * 0.75, 0.2, 0.62) * mix(0.9, 1.35, hash(seed, index, 1, 97))
-    // Low, flat-topped stones, as waves and ice leave them.
-    const height = clamp(Math.max(island.top - WATER_LEVEL, 0.05) * 0.75 + width * 0.18, 0.1, 0.38)
-    const top = island.top + 0.03
+    const size = mix(0.55, 1.7, Math.pow(hash(seed, index, 1, 97), 1.5))
+    const width = clamp(island.extent * 0.75, 0.2, 0.62) * size
+    // Low, rounded stones, as waves and ice leave them; one in seven only just breaks the water.
+    const awash = hash(seed, index, 17, 115) < 0.15
+    const emerge = awash
+      ? mix(-0.03, 0.02, hash(seed, index, 19, 117))
+      : mix(0.04, 0.26, hash(seed, index, 19, 117)) * (0.6 + 0.5 * size)
+    const top = WATER_LEVEL + emerge
     if (!free(island.x, island.z, width * 0.8) || boulders.length >= budget) return
-    // Like the voxel column it replaces, the stone reaches well below the wave trough.
-    const bottom = Math.min(top - height * 2, WATER_LEVEL - 0.6)
+    // It reaches well below the wave trough, so it stands in the water rather than floats.
+    const bottom = Math.min(
+      top - width * mix(0.5, 1, hash(seed, index, 21, 119)),
+      WATER_LEVEL - 0.6,
+    )
     const halfHeight = (top - bottom) / 2
-    const normal: [number, number, number] = [0, 1, 0]
-    const aspect = mix(0.8, 1.25, hash(seed, index, 3, 101))
+    const tiltAngle = hash(seed, index, 23, 121) * Math.PI * 2
+    const tilt = hash(seed, index, 25, 123) * 0.3
+    const up = [Math.sin(tiltAngle) * tilt, 1, Math.cos(tiltAngle) * tilt] as const
+    const length = Math.hypot(up[0], up[1], up[2])
+    const aspect = mix(0.6, 1.6, hash(seed, index, 3, 101))
     boulders.push({
       x: island.x,
       y: top - halfHeight,
       z: island.z,
       size: [width * aspect, halfHeight, width / aspect],
       yaw: hash(seed, index, 5, 103) * Math.PI * 2,
-      up: normal,
+      up: [up[0] / length, up[1] / length, up[2] / length],
       variant: Math.floor(hash(seed, index, 7, 107) * BOULDER_VARIANTS),
       tone: hash(seed, index, 11, 109),
       moss: hash(seed, index, 13, 113) * 0.6,

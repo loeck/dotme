@@ -254,7 +254,8 @@ describe('lake world', () => {
         )
         expect(stone, `${x},${z}`).toBeDefined()
         expect(required(stone).y - required(stone).size[1]).toBeLessThanOrEqual(-0.4)
-        expect(required(stone).y + required(stone).size[1]).toBeGreaterThan(WATER_LEVEL + 0.05)
+        // Standing out of the water, or just awash.
+        expect(required(stone).y + required(stone).size[1]).toBeGreaterThan(WATER_LEVEL - 0.04)
       }
     },
   )
