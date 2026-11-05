@@ -56,7 +56,10 @@ Foliage cards keep their place on their twig, in model space, rather than facing
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
 so a crown shades as one mass, and cards deep inside, near the trunk, keep a third of their value and the lower crown, shaded by the upper, a little less.
 Colour takes the species' palette, a per-tree hue and value jitter and a small per-card hash.
-Needles stay olive rather than blue-grey: sunlit, the haze already adds the blue. A spruce's leader
+Needle and leaf albedos keep little red and blue (about 0.03 and 0.02 against 0.06–0.09 green,
+as measured on conifer needles), since the sky light and grade already desaturate them, and a
+card's needle-to-needle tone stays within ±25%: a wider spread speckled sunlit tops pale.
+A spruce's leader
 is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
 cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
 

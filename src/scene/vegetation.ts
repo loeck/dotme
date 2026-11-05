@@ -170,7 +170,8 @@ export class Vegetation {
     // fill their cards into squares.
     const coverage = sample.a
     material.alphaTest = 0.5
-    const albedo = vertexColor().rgb.mul(sample.r.mul(1.35).add(0.15))
+    // Needle-to-needle tone, kept within ±25%: a stronger spread speckled sunlit tops pale.
+    const albedo = vertexColor().rgb.mul(sample.r.mul(0.9).add(0.45))
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
     // keeps `alphaTest`, so cards cast their cutout rather than square shadows.
     material.colorNode = vec4(albedo, coverage)

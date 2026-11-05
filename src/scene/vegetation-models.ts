@@ -12,22 +12,23 @@ export type Rgb = readonly [number, number, number]
 export type Point = readonly [number, number, number]
 
 /**
- * Linear albedos, in measured ranges for bark, needles and leaves in visible light. Needles stay
- * olive rather than blue-grey: sunlit, the haze already adds the blue.
+ * Linear albedos, in measured ranges for bark, needles and leaves in visible light: conifer
+ * needles reflect little red and blue (about 0.03 and 0.02) against 0.06–0.09 green; sunlit, the
+ * haze and sky light already desaturate them, so the albedo keeps their full green.
  */
 export const VEGETATION_PALETTE = {
-  needles: [0.05, 0.082, 0.032],
-  needlesPale: [0.066, 0.1, 0.04],
-  spruce: [0.035, 0.062, 0.035],
-  sprucePale: [0.048, 0.08, 0.045],
+  needles: [0.034, 0.078, 0.022],
+  needlesPale: [0.048, 0.094, 0.03],
+  spruce: [0.024, 0.06, 0.028],
+  sprucePale: [0.034, 0.074, 0.036],
   bark: [0.075, 0.06, 0.048],
   barkSpruce: [0.09, 0.075, 0.062],
   barkUpper: [0.24, 0.1, 0.045],
   barkDead: [0.11, 0.1, 0.09],
   birchBark: [0.42, 0.41, 0.38],
   birchMark: [0.045, 0.043, 0.04],
-  birchLeaves: [0.105, 0.15, 0.055],
-  birchLeavesDeep: [0.07, 0.105, 0.04],
+  birchLeaves: [0.08, 0.15, 0.035],
+  birchLeavesDeep: [0.05, 0.1, 0.026],
   shrub: [0.06, 0.1, 0.045],
   juniper: [0.035, 0.058, 0.042],
   juniperPale: [0.05, 0.072, 0.052],
