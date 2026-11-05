@@ -76,7 +76,7 @@ weathered granite 0.13–0.22):
   smooth carpet;
 - weathered granite on faces steeper than about 50°, convex knobs and where the composition placed stone:
   feldspar speckle, joint fissures a metre or two apart (in the albedo, so they read from afar
-  after the relief has faded), muted lichen crusts and dark rain streaks down the faces. Thin
+  after the relief has faded), pale grey-green lichen rosettes in patches, rare orange ones (Xanthoria, Caloplaca) as shore rocks carry, and dark rain streaks down the faces. Thin
   vegetation creeps back over ledges;
 - a narrow strip of gravel a hand's breadth above the water, then dark wet silt at the waterline,
   broken by noise; on a low, grassy bank the turf runs almost to the water;
@@ -101,7 +101,9 @@ lanterns, trunks, the camera's own bank and the fall's corridor and landing, who
 stone's waterline may reach. Each is one of eight
 cleaved icospheres: low-frequency swelling, then seven to eleven joint planes that cut flat,
 slightly rounded facets, a weathered fractal roughness, a flattened underside, partial burial and a lean toward the ground's
-normal. They merge into one static mesh (about 100k triangles on desktop) with tone, moss bias and
+normal. Those big on screen (half-width over 1.3% of their distance, 2.2% on phones: 59 of 320 and 8 of
+90 on seed 9182) use a four-times finer icosphere so joints show in their outline. They merge
+into one static mesh (about 165k triangles on desktop, 44k on phones) with tone, moss bias and
 height per vertex: moss caps on upper faces, a dark wet band at the waterline and soil at the foot.
 
 ## The waterfall's rock face
@@ -141,8 +143,8 @@ column of distance.
 
 The terrain and boulder meshes cast through the static shadow layer by sharing their geometry
 with depth-only twins, so the moon map and lantern cubes still refresh only when lights move. On
-seed 9182, the terrain and boulders total about 274k triangles on desktop (the voxel terrain with its
-micro-voxels had 798k) and 72k on phones (146k). World preparation runs its two halves in parallel,
+seed 9182, the terrain and boulders total about 336k triangles on desktop (the voxel terrain with its
+micro-voxels had 798k) and 87k on phones (146k), the waterfall face and the finer near boulders included. World preparation runs its two halves in parallel,
 each composing the world again. Measured in Node (median of three runs), the terrain half takes
 0.45 s on desktop and 0.07 s on phones, the surfaces half 0.44 s and 0.11 s; with the voxel
 composition they took 1.25 s and 0.87 s on desktop, 0.27 s and 0.23 s on phones.

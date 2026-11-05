@@ -262,9 +262,10 @@ export type TerrainColliders = {
   /** The displaced cliff cells as drawn: world positions and triangles. */
   cliffPositions: Float32Array
   cliffIndices: Uint32Array
-  /** Boulder hull points, `stride` vertices per boulder. */
+  /** Boulder hull points, `boulderStarts` delimiting each boulder's. */
   boulderPoints: Float32Array
-  boulderStride: number
+  /** First hull point of each boulder, plus the total at the end. */
+  boulderStarts: Uint32Array
   /** Conservative 2 m broadphase: highest solid per column, for airborne segment rejection. */
   columnsTop: Readonly<{ x: number; z: number; width: number; height: number; tops: Float64Array }>
 }
@@ -383,7 +384,7 @@ export function prepareTerrainColliders(
     cliffPositions: Float32Array.from(cliffPositions),
     cliffIndices: Uint32Array.from(cliffIndices),
     boulderPoints: boulders.positions.slice(),
-    boulderStride: boulders.stride,
+    boulderStarts: boulders.starts.slice(),
     columnsTop: { x, z, width: tileWidth, height: tileHeight, tops },
   }
 }

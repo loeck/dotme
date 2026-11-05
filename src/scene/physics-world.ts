@@ -87,10 +87,10 @@ export function createPhysicsWorld(
     )
     if (statics.cliffIndices.length)
       fixed(rapier.ColliderDesc.trimesh(statics.cliffPositions, statics.cliffIndices))
-    const stride = statics.boulderStride * 3
-    for (let start = 0; start + stride <= statics.boulderPoints.length; start += stride) {
+    const starts = statics.boulderStarts
+    for (let b = 0; b + 1 < starts.length; b++) {
       const hull = rapier.ColliderDesc.convexHull(
-        statics.boulderPoints.subarray(start, start + stride),
+        statics.boulderPoints.subarray((starts[b] ?? 0) * 3, (starts[b + 1] ?? 0) * 3),
       )
       if (hull) fixed(hull)
     }

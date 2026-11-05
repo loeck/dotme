@@ -467,25 +467,52 @@ export type PreparedBoulders = {
   /** Per vertex: tone, moss bias, height above the boulder's base (0..1), spray wetness. */
   surface: Uint8Array
   indices: Uint32Array
-  /** Vertices per boulder (every variant shares the icosphere topology). */
-  stride: number
+  /** First vertex of each boulder, plus the total at the end (boulders differ in detail). */
+  starts: Uint32Array
   count: number
 }
 
-/** Merge every boulder into one static, world-space mesh. */
-export function prepareBoulders(boulders: readonly Boulder[], seed: number): PreparedBoulders {
-  const shapes = Array.from({ length: BOULDER_VARIANTS }, (_, variant) =>
+/**
+ * Merge every boulder into one static, world-space mesh. Boulders `fine` selects (the ones big
+ * on screen) use a four-times finer icosphere, so their joints and weathering show in the
+ * silhouette; the rest keep the coarse one.
+ */
+export function prepareBoulders(
+  boulders: readonly Boulder[],
+  seed: number,
+  fine: (boulder: Boulder) => boolean = () => false,
+): PreparedBoulders {
+  const coarse = Array.from({ length: BOULDER_VARIANTS }, (_, variant) =>
     boulderShape(variant, seed),
   )
-  const stride = (shapes[0]?.positions.length ?? 0) / 3
-  const triangles = shapes[0]?.indices.length ?? 0
-  const positions = new Float32Array(boulders.length * stride * 3)
-  const normals = new Int8Array(boulders.length * stride * 3)
-  const surface = new Uint8Array(boulders.length * stride * 4)
-  const indices = new Uint32Array(boulders.length * triangles)
+  let detailed: ReturnType<typeof boulderShape>[] | undefined
+  const shapeOf = (boulder: Boulder) => {
+    if (!fine(boulder)) return coarse[boulder.variant] ?? coarse[0]
+    detailed ??= Array.from({ length: BOULDER_VARIANTS }, (_, variant) =>
+      boulderShape(variant, seed, 3),
+    )
+    return detailed[boulder.variant] ?? detailed[0]
+  }
+  const shapes = boulders.map(shapeOf)
+  const starts = new Uint32Array(boulders.length + 1)
+  let vertices = 0,
+    triangleCount = 0
+  shapes.forEach((shape, b) => {
+    starts[b] = vertices
+    vertices += (shape?.positions.length ?? 0) / 3
+    triangleCount += shape?.indices.length ?? 0
+  })
+  starts[boulders.length] = vertices
+  const positions = new Float32Array(vertices * 3)
+  const normals = new Int8Array(vertices * 3)
+  const surface = new Uint8Array(vertices * 4)
+  const indices = new Uint32Array(triangleCount)
+  let indexAt = 0
   boulders.forEach((boulder, b) => {
-    const shape = shapes[boulder.variant] ?? shapes[0]
+    const shape = shapes[b]
     if (!shape) return
+    const first = starts[b] ?? 0
+    const stride = shape.positions.length / 3
     // Basis: yaw about Y, then tilt Y onto `up`.
     const cy = Math.cos(boulder.yaw),
       sy = Math.sin(boulder.yaw)
@@ -517,7 +544,7 @@ export function prepareBoulders(boulders: readonly Boulder[], seed: number): Pre
       const rx = px * cy - pz * sy,
         rz = px * sy + pz * cy
       const [tx, ty, tz] = tilt(rx, py, rz)
-      const at = (b * stride + v) * 3
+      const at = (first + v) * 3
       positions[at] = boulder.x + tx
       positions[at + 1] = boulder.y + ty
       positions[at + 2] = boulder.z + tz
@@ -532,7 +559,7 @@ export function prepareBoulders(boulders: readonly Boulder[], seed: number): Pre
       normals[at] = Math.round((mx / length) * 127)
       normals[at + 1] = Math.round((my / length) * 127)
       normals[at + 2] = Math.round((mz / length) * 127)
-      const sAt = (b * stride + v) * 4
+      const sAt = (first + v) * 4
       surface[sAt] = Math.round(boulder.tone * 255)
       surface[sAt + 1] = Math.round(boulder.moss * 255)
       surface[sAt + 2] = Math.round(
@@ -540,8 +567,7 @@ export function prepareBoulders(boulders: readonly Boulder[], seed: number): Pre
       )
       surface[sAt + 3] = 0
     }
-    for (let i = 0; i < triangles; i++)
-      indices[b * triangles + i] = b * stride + (shape.indices[i] ?? 0)
+    for (const index of shape.indices) indices[indexAt++] = first + index
   })
-  return { positions, normals, surface, indices, stride, count: boulders.length }
+  return { positions, normals, surface, indices, starts, count: boulders.length }
 }

@@ -175,8 +175,8 @@ variant is created lazily on the first runtime sweep.
 ## Frame budget
 
 The terrain is one static mesh and the boulders another, each with a single material, so
-three.js does per-object work twice per pass. On seed 9182 they total about 274k triangles on
-desktop and 72k on phones, against 798k and 146k for the voxel terrain with its micro-voxels
+three.js does per-object work twice per pass. On seed 9182 they total about 336k triangles on
+desktop and 87k on phones, against 798k and 146k for the voxel terrain with its micro-voxels
 ([terrain](terrain.md#shadows-and-cost)). Quads under the water are not meshed.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when

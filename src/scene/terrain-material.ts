@@ -89,8 +89,17 @@ function graniteColour(p: Vec3Node, pixel: FloatNode, tone: FloatNode): Vec3Node
     tone.add(blotch.mul(0.3)).clamp(),
   )
   const speckled = base.mul(speckle.mul(0.2).add(1))
-  const lichened = mix(speckled, linear(0.105, 0.112, 0.088), crust.mul(0.45))
-  return lichened.mul(streak.mul(0.25).oneMinus()).mul(joints.mul(0.38).oneMinus())
+  // Crustose lichens: pale grey-green rosettes in patches, and rare orange ones (Xanthoria,
+  // Caloplaca) that shore rocks carry; both make up much of what a granite boulder shows.
+  const pale = mix(
+    linear(0.12, 0.128, 0.1),
+    linear(0.16, 0.165, 0.14),
+    octave(p, 9, pixel).mul(0.5).add(0.5),
+  )
+  const lichened = mix(speckled, pale, crust.mul(0.62))
+  const orange = smoothstep(0.42, 0.6, octave(p.add(17.3), 2.7, pixel)).mul(0.5)
+  const spotted = mix(lichened, linear(0.26, 0.12, 0.03), orange.mul(crust.oneMinus()).mul(0.35))
+  return spotted.mul(streak.mul(0.3).oneMinus()).mul(joints.mul(0.42).oneMinus())
 }
 
 export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMaterial {
