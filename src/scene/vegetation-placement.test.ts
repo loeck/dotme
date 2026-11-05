@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import { ATLAS_TILES, bakeFoliageAtlas, tileCoverage } from './foliage-atlas'
+import { appendClump } from './grass'
 import { WATER_LEVEL } from './lake-bed'
 import { createLakeWorld } from './lake-world'
-import { MeshBuilder, appendTuft } from './vegetation-meshes'
+import { MeshBuilder } from './vegetation-meshes'
 import { growBirch, growBush, growPine, growSpruce, MODEL_DETAIL } from './vegetation-models'
 import type { TreeModel } from './vegetation-models'
 import { prepareVegetation } from './vegetation-placement'
@@ -114,43 +115,65 @@ describe('lake-shore vegetation', () => {
     expect(tileCoverage(atlas, ATLAS_TILES.disc)).toBeGreaterThan(0.4)
   })
 
-  it('builds grass blades as tapered ribbons rooted at the tuft', () => {
-    const builder = new MeshBuilder(false)
-    appendTuft(builder, [0, 0, 0], {
-      blades: 8,
-      height: 0.3,
-      width: 0.02,
-      colours: { root: [0.07, 0.1, 0.05], tip: [0.2, 0.26, 0.09] },
-      salt: 1,
-      phase: 0,
-    })
-    const mesh = builder.build()
-    // Four rows of two vertices plus a tip per blade; three quads and a tip triangle.
-    expect(mesh.positions.length / 3).toBe(8 * 9)
-    expect(mesh.indices.length / 3).toBe(8 * 7)
-    const heights = Array.from(
-      { length: mesh.positions.length / 3 },
-      (_, i) => mesh.positions[i * 3 + 1] ?? 0,
-    )
-    expect(Math.min(...heights)).toBeGreaterThanOrEqual(0)
-    expect(Math.max(...heights)).toBeLessThanOrEqual(0.3)
-  })
+  it.each(['turf', 'wiry', 'flat', 'rush'] as const)(
+    'grows a %s clump of rooted, rounded blades with dead material',
+    (form) => {
+      const builder = new MeshBuilder(false)
+      const clump = {
+        x: 0,
+        z: 0,
+        radius: 0.12,
+        form,
+        height: 0.3,
+        dryness: 0.5,
+        value: 1,
+        seeds: form === 'wiry',
+        salt: 7,
+        phase: 0,
+      }
+      appendClump(builder, clump, () => 0, 1, 0.002)
+      const mesh = builder.build()
+      expect(mesh.indices.length / 3).toBeGreaterThan(20)
+      let lowest = Infinity,
+        highest = -Infinity,
+        reach = 0
+      const colours = new Set<string>()
+      for (let i = 0; i < mesh.positions.length; i += 3) {
+        lowest = Math.min(lowest, mesh.positions[i + 1] ?? 0)
+        highest = Math.max(highest, mesh.positions[i + 1] ?? 0)
+        reach = Math.max(reach, Math.hypot(mesh.positions[i] ?? 0, mesh.positions[i + 2] ?? 0))
+        colours.add(Array.from(mesh.colors.slice(i, i + 3), (v) => v.toFixed(3)).join())
+      }
+      // Rooted at the ground, no taller than a seed stalk, within a blade's reach of the clump.
+      expect(lowest).toBeGreaterThanOrEqual(-0.011)
+      expect(highest).toBeLessThan(0.3 * 1.2 * 2.1)
+      expect(reach).toBeLessThan(0.12 + 0.3 * 1.2 + 0.02)
+      // Many shades: per-blade value, root darkening, straw and litter.
+      expect(colours.size).toBeGreaterThan(form === 'rush' ? 12 : 30)
+      // Normals face up-ish: rounded across the blade and blended toward the sky.
+      for (let i = 1; i < mesh.normals.length; i += 3)
+        expect(mesh.normals[i] ?? 0).toBeGreaterThan(0)
+    },
+  )
 
-  it('builds ground-cover blades as two rows and a tip', () => {
-    const builder = new MeshBuilder(false)
-    appendTuft(builder, [0, 0, 0], {
-      blades: 5,
-      height: 0.1,
-      width: 0.02,
-      colours: { root: [0.07, 0.1, 0.05], tip: [0.2, 0.26, 0.09] },
-      salt: 2,
+  it('thins and widens blades with distance', () => {
+    const clump = {
+      x: 0,
+      z: 0,
+      radius: 0.1,
+      form: 'wiry' as const,
+      height: 0.2,
+      dryness: 0.2,
+      value: 1,
+      seeds: false,
+      salt: 3,
       phase: 0,
-      profile: 'short',
-    })
-    const mesh = builder.build()
-    // Two rows of two vertices plus a tip per blade; one quad and a tip triangle.
-    expect(mesh.positions.length / 3).toBe(5 * 5)
-    expect(mesh.indices.length / 3).toBe(5 * 3)
+    }
+    const near = new MeshBuilder(false),
+      far = new MeshBuilder(false)
+    appendClump(near, clump, () => 0, 1, 0.002)
+    appendClump(far, clump, () => 0, 0.25, 0.012)
+    expect(far.indexCount).toBeLessThan(near.indexCount / 4)
   })
 
   it('is deterministic and stays within a triangle budget', () => {

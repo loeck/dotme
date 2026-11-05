@@ -73,23 +73,45 @@ back-light translucency, strongest at the crown rim and against a low sun.
 
 ## Undergrowth
 
-Grass, ferns and flowers grow on the foreground bank as one sward sized to the camera: per
-12.5 cm column of soft ground, up to 22 blades near the lens (16 on phones), falling off with
-distance while each blade widens (about 0.0018 × distance + 2 mm), so every blade covers about
-the same few pixels and the turf stays closed from 3 to 17 m. Blades within 7 m have four rows
-(widths 0.55, 1, 0.5 and 0.12) and a pointed tip; farther ones two rows and a tip. An 8 m patch
-field thins the turf into mossy patches (never bare earth), a 1.6 m field raises tussocks (blades
-up to 36 cm) above short grazed turf (7–16 cm), and dry patches turn tips toward straw. Each blade
-takes its own value (±18%), some go dry, and roots sit dark in the shade of the blades around
-them. About 1% of columns carry a fern crown (a ring of arching, drooping rachis strips cut into
-alternating leaflets) and another 1% a small flower (a thin stem and five cupped petals around a
-warm heart). A triangle budget (260k on desktop, 44k on phones) thins the whole bank evenly.
+The foreground bank is a sward of clumps (`grass.ts`), after Ghost of Tsushima's procedural
+grass ([Wohllaib, GDC 2021](https://gdcvault.com/play/1027033/Advanced-Graphics-Summit-Procedural-Grass)):
+a clump, not a blade, sets height (each blade takes 80% of it), facing, lean, colour and dryness,
+so the bank reads as tufts rather than combed hair. Clumps sit on a jittered 15 cm lattice, each
+one of the shore's growth forms:
+
+- short turf (bents, low fescues), 5–10 cm, about 40% of clumps, closing the ground between
+  the others;
+- wiry tufts (wavy hair-grass, sheep's fescue): needle-thin rolled leaves (1.6–2.8 mm before
+  widening) in a fountain leaning outward from the clump's centre;
+- flat-leaved tussocks (purple moor-grass, sedges) in 3 m patches: 4–7 mm blades, 24–52 cm, that
+  arch, twist up to a turn and a half and droop at the tip;
+- rushes, near the water: round, upright, dark stems 35–60 cm;
+- seed stalks over a sixth of the wiry tufts and a tenth of the tussocks: a bare culm with a
+  narrow purplish-brown or silvery panicle.
+
+Dead material is what makes a real sward unkempt: 6–10% of the blades, plus up to 35% more in
+dry patches, are straw (some with a broken, blunt tip) or litter lying almost flat at the base
+([Molinia](https://bsbi.org/learn/resources/plant-crib/molinia); standing litter weighs heavily
+in a canopy's reflectance, [HAPEX](https://www.sciencedirect.com/science/article/abs/pii/0034425795001980)).
+Albedos follow field measurements, about 0.05 for green grass leaves in visible light
+([Majasalmi & Bright 2019](https://gmd.copernicus.org/articles/12/3923/2019/)): blades darken
+toward the root with h^1.5, the shade of their neighbours (as [AMD's mesh-shader
+grass](https://gpuopen.com/learn/mesh_shaders/mesh_shaders-procedural_grass_rendering/)), and
+do not brighten at the tip, the glow that made the old blades read as fur. Each blade is a cubic
+curve from its tilt, bend and droop, five rows near the camera and three far; its normals round
+across the width by ±0.12π, as open Tsushima reimplementations do
+([GodotGrass](https://github.com/2Retr0/GodotGrass)), and blend half way toward up, so it shades
+as a curved strip. Detail falls off with distance: a clump keeps 4/d of its blades (at least a
+fifth) and widens them by the inverse square root, with a floor of about 1.5 pixels, so coverage
+holds without shimmering threads (Outerra and AMD halve the count and double the width per
+level). Ferns (2% of lattice sites) and small flowers (1.5%) break the sward. A triangle budget
+(260k on desktop, 44k on phones), visited in a seeded scatter order, thins the bank evenly.
 
 Placement reads the smooth ground's neighbouring 12.5 cm columns (a slope only counts as a step
-beyond 5 cm per column of distance): blades near a step or a wall turn away from it, lean less,
-root farther in and stay shorter, so no blade hangs over a drop. The material is matte (a 35% sky
-reflection: a sward hides most blades from the sky behind its neighbours), and thin blades pass
-a little light only when the view faces a low sun, so a backlit bank does not glow like straw.
+beyond 5 cm per column of distance): clumps near a step or a wall shrink, and their blades turn
+away from it, so none hangs over a drop; blades root only clear of the water. The material is
+matte (a 35% sky reflection: a sward hides most blades from the sky behind its neighbours), and
+thin blades pass a little light only when the view faces a low sun.
 
 ## Loading
 
@@ -108,8 +130,8 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 225k triangles: 39k of wood, 34k of foliage cards and 151k of undergrowth; the
-phone forest is about 69k (18k, 11k and 39k). The voxel trees it replaces drew 21k of wood and
+forest is about 234k triangles: 39k of wood, 34k of foliage cards and 161k of undergrowth; the
+phone forest is about 73k (18k, 11k and 44k). The voxel trees it replaces drew 21k of wood and
 63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
 long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
 sapling's none. Preparation runs after the surfaces on the

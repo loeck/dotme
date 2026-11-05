@@ -1,7 +1,7 @@
 /**
  * World-space vegetation geometry: tube-meshed wood, foliage cards from the botanical atlas,
- * and procedural undergrowth (Bézier grass ribbons after Voxen's ADR 0107, leaflet-cut fern
- * fronds after ADR 0112, small flowers). Everything is baked once in the world worker and
+ * and procedural undergrowth (leaflet-cut fern fronds after Voxen's ADR 0112, small flowers;
+ * the grass clumps live in `grass.ts`). Everything is baked once in the world worker and
  * merged per material, so the whole forest costs three draws.
  */
 import { atlasRect } from './foliage-atlas'
@@ -29,17 +29,11 @@ const normalize = (v: Point): Point => {
   const length = Math.hypot(v[0], v[1], v[2]) || 1
   return [v[0] / length, v[1] / length, v[2] / length]
 }
-const cross = (a: Point, b: Point): Point => [
-  a[1] * b[2] - a[2] * b[1],
-  a[2] * b[0] - a[0] * b[2],
-  a[0] * b[1] - a[1] * b[0],
-]
 const add = (a: Point, b: Point, k = 1): Point => [
   a[0] + b[0] * k,
   a[1] + b[1] * k,
   a[2] + b[2] * k,
 ]
-const scale = (c: Rgb, k: number): Rgb => [c[0] * k, c[1] * k, c[2] * k]
 const rotateY = (v: Point, yaw: number): Point => {
   const c = Math.cos(yaw),
     s = Math.sin(yaw)
@@ -199,124 +193,6 @@ export function appendSprays(
       options.sway.omega,
     ])
   })
-}
-
-/** Tuft palette after Last Signal's `[[grass]]` rows (forest.toml). */
-export type GrassColours = Readonly<{ root: Rgb; tip: Rgb }>
-
-/** Blades sway at most about 1.3 Hz, the buffet's fastest sine then near 2 Hz. */
-const MAX_BLADE_OMEGA = 2 * Math.PI * 1.3
-
-/** Row positions along a blade and their width share (ADR 0107). */
-const BLADE_ROWS = [
-  [0, 0.55],
-  [0.33, 1],
-  [0.66, 0.5],
-  [0.9, 0.12],
-] as const
-const SHORT_BLADE_ROWS = [
-  [0, 0.7],
-  [0.5, 0.6],
-] as const
-
-/**
- * A sparse fan of pointed, arching ribbons (ADR 0107): each blade is a quadratic Bézier with
- * four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from the ground to a
- * drier tip. Normals lean toward the sky so blades read lit from both sides.
- */
-export function appendTuft(
-  builder: MeshBuilder,
-  root: Point,
-  options: Readonly<{
-    blades: number
-    height: number
-    width: number
-    colours: GrassColours
-    salt: number
-    phase: number
-    /** `short`: ground-cover blades of two rows and a tip, three triangles each. */
-    profile?: 'full' | 'short'
-    /** Unit XZ direction toward a nearby step edge or wall: blades turn away from it and lean less. */
-    edge?: readonly [number, number]
-    /** Radius over which blades root, metres (4 cm by default: one tuft). */
-    spread?: number
-    /** Per-blade variety: value jitter (±share) and the share of blades gone dry. */
-    variety?: Readonly<{ value: number; dry: number; dryTip: Rgb }>
-  }>,
-) {
-  const rows = options.profile === 'short' ? SHORT_BLADE_ROWS : BLADE_ROWS
-  // 1.2/√H Hz, capped: a short blade's true rate (4 Hz at 10 cm) reads as trembling on screen.
-  const omega = Math.min(
-    (2 * Math.PI * 1.2) / Math.sqrt(Math.max(options.height, 0.05)),
-    MAX_BLADE_OMEGA,
-  )
-  for (let blade = 0; blade < options.blades; blade++) {
-    const r = (stream: number) => hash(blade, options.salt, stream)
-    const angle = r(1) * Math.PI * 2
-    const spread = Math.sqrt(r(2)) * (options.spread ?? 0.04)
-    const h = options.height * (0.55 + r(3) * 0.45)
-    // Each blade its own value, and some gone dry, as a real sward is never one colour.
-    const variety = options.variety
-    const value = variety ? 1 + (r(7) - 0.5) * 2 * variety.value : 1
-    const dry = variety ? r(8) < variety.dry : false
-    const rootColour = scale(options.colours.root, value)
-    const tipColour = scale(dry && variety ? variety.dryTip : options.colours.tip, value)
-    let dir: Point = [Math.sin(angle), 0, Math.cos(angle)]
-    const edge = options.edge
-    // Mirror blades heading toward an edge so none hangs over a drop or into a wall.
-    const toward = edge ? dir[0] * edge[0] + dir[2] * edge[1] : 0
-    if (edge && toward > 0) dir = [dir[0] - 2 * toward * edge[0], 0, dir[2] - 2 * toward * edge[1]]
-    const lean = (0.25 + r(4) * 0.55) * (edge ? 0.6 : 1)
-    const side: Point = [Math.cos(angle + r(5) * 0.6), 0, -Math.sin(angle + r(5) * 0.6)]
-    const p0 = add(root, dir, spread)
-    const p1 = add(add(p0, UP, h * 0.55), dir, lean * h * 0.25)
-    const p2 = add(add(p0, UP, h * (1 - 0.3 * lean * lean)), dir, lean * h)
-    const at = (t: number): Point => {
-      const a = (1 - t) * (1 - t),
-        b = 2 * (1 - t) * t,
-        c = t * t
-      return [
-        p0[0] * a + p1[0] * b + p2[0] * c,
-        p0[1] * a + p1[1] * b + p2[1] * c,
-        p0[2] * a + p1[2] * b + p2[2] * c,
-      ]
-    }
-    const tangentAt = (t: number) =>
-      normalize([
-        2 * (1 - t) * (p1[0] - p0[0]) + 2 * t * (p2[0] - p1[0]),
-        2 * (1 - t) * (p1[1] - p0[1]) + 2 * t * (p2[1] - p1[1]),
-        2 * (1 - t) * (p1[2] - p0[2]) + 2 * t * (p2[2] - p1[2]),
-      ])
-    const ids: number[] = []
-    for (const [t, w] of rows) {
-      const p = at(t)
-      let n = cross(side, tangentAt(t))
-      if (n[1] < 0) n = [-n[0], -n[1], -n[2]]
-      n = normalize(add(n, UP, 0.45))
-      const colour = mixRgb(rootColour, tipColour, Math.pow(t, 0.9))
-      const wind = [t * t * h * 0.45, options.phase + r(6), t * 0.01, omega] as const
-      const half = (options.width * w) / 2
-      ids.push(
-        builder.vertex(add(p, side, -half), n, colour, wind),
-        builder.vertex(add(p, side, half), n, colour, wind),
-      )
-    }
-    for (let row = 0; row < rows.length - 1; row++)
-      builder.quad(
-        ids[row * 2] ?? 0,
-        ids[row * 2 + 1] ?? 0,
-        ids[row * 2 + 3] ?? 0,
-        ids[row * 2 + 2] ?? 0,
-      )
-    const tip = builder.vertex(p2, add(UP, dir, 0.3), tipColour, [
-      h * 0.45,
-      options.phase + r(6),
-      0.01,
-      omega,
-    ])
-    const last = (rows.length - 1) * 2
-    builder.triangle(ids[last] ?? 0, ids[last + 1] ?? 0, tip)
-  }
 }
 
 /**

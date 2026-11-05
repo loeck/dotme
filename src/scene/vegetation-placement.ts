@@ -1,16 +1,12 @@
 import { CAMERA_REST } from './camera-rig'
 import { bakeFoliageAtlas } from './foliage-atlas'
 import type { FoliageAtlas } from './foliage-atlas'
+import { appendClump } from './grass'
+import type { GrassForm } from './grass'
 import { WATER_LEVEL } from './lake-bed'
 import type { TreeKind, LakeWorld } from './lake-world'
 import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
-import {
-  appendFern,
-  appendSprays,
-  appendFlower,
-  appendTuft,
-  MeshBuilder,
-} from './vegetation-meshes'
+import { appendFern, appendSprays, appendFlower, MeshBuilder } from './vegetation-meshes'
 import type { MeshData } from './vegetation-meshes'
 import {
   growBirch,
@@ -37,8 +33,8 @@ export type PreparedVegetation = Readonly<{
 
 /** Undergrowth and shrub budgets per layout. */
 const GRID = {
-  desktop: { sward: 260_000, bladesNear: 22, shrubs: 180 },
-  mobile: { sward: 44_000, bladesNear: 16, shrubs: 32 },
+  desktop: { sward: 260_000, density: 1, shrubs: 180 },
+  mobile: { sward: 44_000, density: 1, shrubs: 32 },
 } as const
 const GROUND_COVER_Z = -1.5
 /** Mid-ground shrubs: beyond the undergrowth, up to the far shore's haze. */
@@ -340,92 +336,120 @@ export function prepareVegetation(
       order: hash(seed, Math.round(cell.x / COLUMN), Math.round(cell.z / COLUMN), 1031),
     }))
     .sort((a, b) => a.order - b.order)
-  // A sward sized to the camera: near it, many fine blades; farther out, fewer and a little
-  // wider, so each covers about the same few pixels and the turf stays closed from 3 to 17 m.
-  // Patches set the kind of ground: short grazed turf, taller tussocks, dry tufts; ferns and
-  // flowers break it here and there. The triangle budget thins the whole bank evenly.
+  // The sward as clumps (see `grass.ts`) on a jittered 20 cm lattice: each clump one growth form
+  // of the shore, its height, colour and dryness its own, its blades rooted on the ground beneath.
+  // Detail falls off with distance (fewer, wider blades), and a triangle budget visited in a
+  // seeded scatter order thins the whole bank evenly.
   const camera = [CAMERA_REST.x, CAMERA_REST.y, CAMERA_REST.z] as const
-  for (const { x, z, column } of candidates) {
+  const ground = (x: number, z: number) => {
+    const column = tops.at(x, z)
+    // Blades root only clear of the water, so none stands in it.
+    return column?.ground && column.top > WATER_LEVEL + 0.03 ? column.top : null
+  }
+  const SPACING = 0.15
+  const sites: { x: number; z: number; key: number; order: number }[] = []
+  {
+    let minX = Infinity,
+      maxX = -Infinity,
+      minZ = Infinity,
+      maxZ = -Infinity
+    for (const { x, z } of candidates) {
+      minX = Math.min(minX, x)
+      maxX = Math.max(maxX, x)
+      minZ = Math.min(minZ, z)
+      maxZ = Math.max(maxZ, z)
+    }
+    for (let gz = Math.floor(minZ / SPACING); gz <= Math.ceil(maxZ / SPACING); gz++)
+      for (let gx = Math.floor(minX / SPACING); gx <= Math.ceil(maxX / SPACING); gx++) {
+        const x = (gx + 0.2 + hash(seed, gx, gz, 1301) * 0.6) * SPACING,
+          z = (gz + 0.2 + hash(seed, gx, gz, 1303) * 0.6) * SPACING
+        const column = tops.at(x, z)
+        if (!column?.ground || z <= GROUND_COVER_Z || column.top <= WATER_LEVEL + 0.05) continue
+        sites.push({ x, z, key: gx * 7919 + gz, order: hash(seed, gx, gz, 1307) })
+      }
+  }
+  sites.sort((a, b) => a.order - b.order)
+  for (const { x, z, key } of sites) {
     if (undergrowth.indexCount / 3 >= grid.sward) break
-    const xi = Math.round(x / COLUMN),
-      zi = Math.round(z / COLUMN)
-    const distance = Math.hypot(x - camera[0], column.top - camera[1], z - camera[2])
+    const top = ground(x, z) ?? 0
+    const r = (stream: number) => hash(seed, key, 0, stream)
+    const distance = Math.hypot(x - camera[0], top - camera[1], z - camera[2])
+    const species = valueNoise(seed, x, z, 3, 1311)
     const tussock = valueNoise(seed, x, z, 1.6, 961)
-    const patch = valueNoise(seed, x, z, 8, 967)
-    const dryness = Math.max(0, valueNoise(seed, x, z, 8, 1033) - 0.45) * 0.9
-    // On a step's last column the root moves inward, blades turn away and stay short.
-    const edge = edgeAt(x, z, column.top, 1)
-    const towardEdge = edgeAt(x, z, column.top, 2).toward
-    const salt = xi * 7919 + zi
-    const phase = hash(seed, xi, zi, 997) * Math.PI * 2
-    const root = [
-      x +
-        (hash(seed, xi, zi, 983) - 0.5) * COLUMN * (edge.near ? 0.3 : 0.9) -
-        (edge.toward?.[0] ?? 0) * COLUMN * (edge.toward ? 0.3 : 0),
-      column.top - 0.01,
-      z +
-        (hash(seed, xi, zi, 991) - 0.5) * COLUMN * (edge.near ? 0.3 : 0.9) -
-        (edge.toward?.[1] ?? 0) * COLUMN * (edge.toward ? 0.3 : 0),
-    ] as const
-    const pick = hash(seed, xi, zi, 977)
-    if (pick < 0.012 && !edge.near) {
-      appendFern(undergrowth, root, {
-        fronds: 5 + Math.floor(hash(seed, xi, zi, 1009) * 3),
-        length: 0.32 + hash(seed, xi, zi, 1013) * 0.14,
+    const dryField = Math.max(0, valueNoise(seed, x, z, 8, 1033) - 0.4) * 1.2
+    const edge = edgeAt(x, z, top, 1)
+    const towardEdge = edgeAt(x, z, top, 2).toward
+    const phase = r(1) * Math.PI * 2
+    // Ferns and flowers break the sward here and there.
+    const pick = r(2)
+    if (pick < 0.02 && !edge.near) {
+      appendFern(undergrowth, [x, top - 0.01, z], {
+        fronds: 5 + Math.floor(r(3) * 3),
+        length: 0.32 + r(4) * 0.14,
         colour: P.fern,
         tip: mixRgb(P.fern, P.grassTip, 0.35),
-        salt,
+        salt: key,
         phase,
       })
       continue
     }
-    if (pick < 0.02 && !edge.near) {
-      const yellow = hash(seed, xi, zi, 1019) < 0.3
-      appendFlower(undergrowth, root, {
-        height: 0.14 + hash(seed, xi, zi, 1021) * 0.12,
+    if (pick < 0.035 && !edge.near) {
+      const yellow = r(5) < 0.3
+      appendFlower(undergrowth, [x, top - 0.01, z], {
+        height: 0.14 + r(6) * 0.12,
         petal: yellow ? P.flowerYellow : P.flowerWhite,
         heart: P.flowerHeart,
         stem: P.flowerStem,
-        salt,
+        salt: key,
         phase,
       })
     }
-    // Thinner, mossy patches in the turf, never bare earth.
-    const cover = 0.35 + 0.65 * smooth01(0.18, 0.45, patch + (tussock - 0.5) * 0.3)
-    const near = distance < 7
-    const blades = Math.round(
-      Math.min(grid.bladesNear, Math.max(4, (grid.bladesNear * 3.5) / distance)) * cover,
-    )
-    if (blades < 2) continue
-    // Taller in tussocks, short grazed turf between them.
-    const tall = smooth01(0.45, 0.75, tussock)
-    const height = (0.07 + 0.09 * hash(seed, xi, zi, 1049) + 0.2 * tall) * (edge.near ? 0.8 : 1)
-    const width = Math.min(0.025, Math.max(0.0045, 0.0018 * distance + 0.002))
-    const tone = 0.85 + hash(seed, xi, zi, 1063) * 0.3
-    appendTuft(undergrowth, root, {
-      ...(towardEdge ? { edge: towardEdge } : {}),
-      blades,
-      height,
-      width,
-      spread: COLUMN * (edge.near ? 0.35 : 0.65),
-      colours: {
-        // Roots sit in the shade of the blades around them.
-        root: [
-          P.grassBase[0] * 0.55 * tone,
-          P.grassBase[1] * 0.55 * tone,
-          P.grassBase[2] * 0.5 * tone,
-        ],
-        tip: mixRgb(
-          mixRgb(P.grassTip, P.grassDry, dryness * 0.6),
-          P.grassBase,
-          0.25 + 0.2 * (1 - tall),
-        ),
+    // Rushes by the water, flat-leaved tussocks in patches, wiry tufts elsewhere.
+    // Short turf closes the ground between the taller clumps.
+    const wet = top < WATER_LEVEL + 0.12
+    const form: GrassForm =
+      wet && r(7) < 0.18
+        ? 'rush'
+        : r(13) < 0.4
+          ? 'turf'
+          : species > 0.56 || tussock > 0.7
+            ? 'flat'
+            : 'wiry'
+    const tall = smooth01(0.45, 0.8, tussock)
+    const height =
+      form === 'rush'
+        ? 0.35 + 0.25 * r(8)
+        : form === 'turf'
+          ? 0.05 + 0.05 * r(8)
+          : form === 'flat'
+            ? 0.24 + 0.18 * r(8) + 0.1 * tall
+            : 0.09 + 0.1 * r(8) + 0.1 * tall
+    const radius =
+      (form === 'flat'
+        ? 0.1 + 0.06 * r(9)
+        : form === 'turf'
+          ? 0.09 + 0.04 * r(9)
+          : 0.07 + 0.05 * r(9)) * (edge.near ? 0.6 : 1)
+    const lod = Math.min(1, Math.max(0.2, 4 / distance))
+    appendClump(
+      undergrowth,
+      {
+        x,
+        z,
+        radius,
+        form,
+        height: height * (edge.near ? 0.8 : 1),
+        dryness: Math.min(1, dryField + r(10) * 0.3),
+        value: 0.85 + r(11) * 0.3,
+        seeds: r(12) < (form === 'wiry' ? 0.16 : form === 'flat' ? 0.1 : 0),
+        ...(towardEdge ? { edge: towardEdge } : {}),
+        salt: key,
+        phase,
       },
-      variety: { value: 0.18, dry: 0.06 + dryness * 0.5, dryTip: P.grassDry },
-      salt,
-      phase,
-      profile: near ? 'full' : 'short',
-    })
+      ground,
+      lod * grid.density,
+      0.0013 * distance,
+    )
   }
 
   return {
