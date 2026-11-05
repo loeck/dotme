@@ -367,7 +367,11 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(2.8, 6, depth))
       .mul(float(1).sub(smoothstep(24, 48, cameraPosition.xz.sub(p).length())))
     const clarity = max(u.uWaterClarity.mul(nearShallow.mul(0.1).add(0.9)), reveal)
-    const absorption = mix(vec3(0.8, 0.55, 0.45), vec3(0.45, 0.16, 0.11), clarity)
+    // A humic boreal lake, not a tropical one: dissolved organic matter absorbs blue strongly
+    // (a440 about 1.2 /m with a 0.015 /nm slope, plus pure water's red absorption), so light
+    // through it turns tea-amber and the depths go dark olive-brown (Secchi depth about 2 m;
+    // Arst et al. 2008). Murky water after rain absorbs more across the board.
+    const absorption = mix(vec3(0.85, 0.7, 1.5), vec3(0.4, 0.29, 1.05), clarity)
     const transmission = exp(absorption.mul(path).negate())
     const bedBlur = u.uBedTexel.mul(mix(1.1, 0.18, clarity))
     const bedTap = (coordinate: typeof bedUv) =>
@@ -385,10 +389,10 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const lightGate = inputs ? mix(mix(0.25, 0.8, u.uNight), 1, sunlit) : float(1)
     const scatter = u.uWaterScatter.rgb
       .mul(lightGate)
-      .mul(mix(vec3(1.18, 1.12, 0.92), vec3(0.8, 1.08, 1.12), u.uWaterClarity))
+      .mul(mix(vec3(1.1, 1.05, 0.85), vec3(1.05, 1, 0.8), u.uWaterClarity))
     const shallow = float(1).sub(smoothstep(0.3, 3.2, depth))
     const scatterBody = scatter
-      .mul(mix(vec3(1), vec3(0.22, 0.3, 0.48), smoothstep(2, 6, depth).mul(mix(0.35, 1, clarity))))
+      .mul(mix(vec3(1), vec3(0.38, 0.32, 0.18), smoothstep(2, 6, depth).mul(mix(0.35, 1, clarity))))
       .mul(mix(vec3(1), vec3(0.4, 0.6, 0.72), u.uNight.mul(shallow)))
     const bedVeil = float(1).sub(clamp(clarity, 0, 1))
     const bedLuminance = dot(bed, vec3(0.2126, 0.7152, 0.0722))
@@ -422,7 +426,10 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(30, 85, viewDist))
       .mul(u.uWaterClarity)
       .mul(u.uWaterClarity)
-    const dayFloor = mix(0.14, 1, float(1).sub(clamp(clarity, 0, 1)))
+    // Near the camera the reflection is held below Fresnel so the shallow bed shows through, but
+    // only to 0.4: at 20–30 m from a 2.5 m eye, Fresnel is already 0.3–0.5, and dark humic water
+    // hides its bed past a couple of metres anyway, so a lower cap made mid-distance water glassy.
+    const dayFloor = mix(0.4, 1, float(1).sub(clamp(clarity, 0, 1)))
     const reflectance = mix(fresnel, min(fresnel, mix(dayFloor, 0.1, u.uNight)), window)
     const shorePixel = min(1, fwidth(shore)),
       distance = max(0, shore)
@@ -508,8 +515,9 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(mix(0.3, 1, clarity))
       .mul(u.uLightColor.rgb)
       .mul(sunlit)
-      .mul(vec3(0.35, 0.95, 0.9))
-      .mul(0.06)
+      // Light through a wave crest of humic water comes out amber-olive, not turquoise.
+      .mul(vec3(0.9, 0.85, 0.35))
+      .mul(0.05)
     const downFace = clamp(normal.dot(view), 0, 1).pow(2)
     const shaftBands = sin(
       p

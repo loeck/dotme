@@ -22,13 +22,21 @@ the pixel footprint, sharpen glints and break up reflections without changing th
 Rain adds a jittered field of expanding rings whose density follows rain intensity, roughens the
 whole surface so reflections dull, and turns rings below a pixel into roughness and brief impact
 specks instead of aliasing. Sun glitter, subsurface glow and shafts are direct sun
-and follow the cloud shadow. Clear water keeps
-strong red absorption over pale sand for a turquoise tint, the scatter body darkens toward
-deep teal with depth, reflectance near the camera is capped lower so the bed stays visible,
-and light reaching the bed is attenuated by depth on the way down as well as up. Daylight glitter
-and a turquoise subsurface glow sit on top of the reflected and transmitted light. At night the
-glitter and short capillary glints fade, leaving a softer moon reflection. The bed takes a dim
-blue tint that fades with depth, so only the shallows stay visible over navy water. Shoreline
+and follow the cloud shadow. The water is a humic
+boreal lake's, not a tropical one: dissolved organic matter absorbs blue strongly, so clear water
+absorbs about (0.40, 0.29, 1.05) per metre in red, green and blue (a440 about 1.2 /m with a
+0.015 /nm spectral slope, plus pure water's red absorption), and rain-murky water more
+(0.85, 0.7, 1.5). Light through it turns tea-amber over the pale sand of the shallows, and the
+scatter body, dim and olive-brown, darkens toward near black with depth: brown-water lakes in
+Finland and Estonia have Secchi depths of about 2 m ([Arst et al. 2008](https://www.borenv.net/BER/archive/pdfs/ber13/ber13-133.pdf);
+[Thrane et al. 2014](https://link.springer.com/article/10.1007/s10021-014-9776-2)). Near the
+camera the reflection is held below Fresnel so the shallow bed shows through, but only down to
+0.4: at 20–30 m from a 2.5 m eye Fresnel is already 0.3–0.5, and the dark water hides its bed
+past a couple of metres anyway. Light reaching the bed is attenuated by depth on the way down
+as well as up. Daylight glitter and an amber-olive subsurface glow sit on top of the reflected
+and transmitted light. At night the glitter and short capillary glints fade, leaving a softer
+moon reflection; the bed takes a dim tint that fades with depth, so only the shallows stay
+visible over near-black water. Shoreline
 foam is a bright animated band whose width follows wave arrival. Calm water leaves only a trace
 of it in patches; far away, where the band is held at a pixel and a half so it does not alias,
 its strength falls in proportion, so the foam keeps its true amount instead of outlining every
