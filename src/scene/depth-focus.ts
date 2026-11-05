@@ -2,11 +2,15 @@ import {
   Fn,
   If,
   Loop,
+  abs,
   clamp,
   cos,
+  dot,
   float,
   max,
+  min,
   mix,
+  select,
   sin,
   smoothstep,
   sqrt,
@@ -14,6 +18,7 @@ import {
   uniform,
   uv,
   vec2,
+  vec3,
   vec4,
 } from 'three/tsl'
 import { DepthTexture, HalfFloatType, RenderTarget, UnsignedIntType, Vector2 } from 'three/webgpu'
@@ -32,6 +37,8 @@ export type PlanarMirror = Readonly<{
 /** Texture name of the main view's render target, which GPU captures attribute by. */
 export const LENS_TARGET = 'Landscape lens color'
 
+const REC709 = vec3(0.2126, 0.7152, 0.0722)
+
 /** Scene radiance and depth remain linear until the final output transform. */
 export class DepthFocus {
   readonly target = new RenderTarget(1, 1, {
@@ -43,6 +50,7 @@ export class DepthFocus {
   private readonly color = texture(this.target.texture)
   private readonly depth = texture(this.depthTexture)
   private readonly cssPixel = uniform(new Vector2(1, 1))
+  private readonly bufferPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
   constructor(renderer: WebGPURenderer, lowPower: boolean, grade: SceneGrade) {
     this.target.texture.name = LENS_TARGET
@@ -52,6 +60,47 @@ export class DepthFocus {
       return this.cameraRange.x
         .mul(this.cameraRange.y)
         .div(this.cameraRange.y.sub(d.mul(this.cameraRange.y.sub(this.cameraRange.x))))
+    }
+    /**
+     * Edge antialiasing (FXAA, Lottes's console variant) on the linear radiance: luma is
+     * compressed as display would be, then the pixel blends along the edge it straddles. The
+     * scene draws without MSAA, so alpha-tested leaves, grass blades and twigs otherwise step.
+     */
+    const antialiased = (coord: Node<'vec2'>) => {
+      const px = this.bufferPixel
+      const at = (dx: number, dy: number) => this.color.sample(coord.add(px.mul(vec2(dx, dy)))).rgb
+      const luma = (c: Node<'vec3'>) => {
+        const l = dot(c, REC709)
+        return sqrt(l.div(l.add(1)))
+      }
+      const centre = this.color.sample(coord).rgb
+      const lM = luma(centre)
+      const lNW = luma(at(-1, -1)),
+        lNE = luma(at(1, -1)),
+        lSW = luma(at(-1, 1)),
+        lSE = luma(at(1, 1))
+      const lMin = min(lM, min(min(lNW, lNE), min(lSW, lSE)))
+      const lMax = max(lM, max(max(lNW, lNE), max(lSW, lSE)))
+      const dir = vec2(lSW.add(lSE).sub(lNW.add(lNE)), lNW.add(lSW).sub(lNE.add(lSE))).toVar()
+      const reduce = max(
+        lNW
+          .add(lNE)
+          .add(lSW)
+          .add(lSE)
+          .mul(0.25 * 0.125),
+        1 / 128,
+      )
+      const scale = float(1).div(min(abs(dir.x), abs(dir.y)).add(reduce))
+      const step = clamp(dir.mul(scale), -8, 8).mul(px)
+      const sampleAt = (k: number) => this.color.sample(coord.add(step.mul(k))).rgb
+      const a = sampleAt(1 / 3 - 0.5)
+        .add(sampleAt(2 / 3 - 0.5))
+        .mul(0.5)
+      const b = a.mul(0.5).add(sampleAt(-0.5).add(sampleAt(0.5)).mul(0.25))
+      const lB = luma(b)
+      const blended = select(lB.lessThan(lMin).or(lB.greaterThan(lMax)), a, b)
+      // Flat regions keep the untouched pixel: no blur where there is no edge.
+      return select(lMax.sub(lMin).lessThan(max(0.04, lMax.mul(0.125))), centre, blended)
     }
     this.pipeline = new FullscreenPass(
       renderer,
@@ -63,7 +112,7 @@ export class DepthFocus {
           smoothstep(4, 14, centerDistance).oneMinus().mul(0.6),
           smoothstep(90, 180, centerDistance).mul(1.35),
         )
-        const color = this.color.sample(uv()).rgb.toVar(),
+        const color = antialiased(uv()).toVar(),
           weight = float(1).toVar()
         If(radius.greaterThan(0.3), () => {
           Loop(samples, ({ i }) => {
@@ -95,6 +144,7 @@ export class DepthFocus {
   }
   resize(bufferWidth: number, bufferHeight: number, cssWidth: number, cssHeight: number) {
     this.target.setSize(bufferWidth, bufferHeight)
+    this.bufferPixel.value.set(1 / bufferWidth, 1 / bufferHeight)
     this.cssPixel.value.set(1 / cssWidth, 1 / cssHeight)
   }
   get depthTexture() {

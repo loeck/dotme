@@ -170,8 +170,9 @@ export class Vegetation {
     // fill their cards into squares.
     const coverage = sample.a
     material.alphaTest = 0.5
-    // Needle-to-needle tone, kept within ±25%: a stronger spread speckled sunlit tops pale.
-    const albedo = vertexColor().rgb.mul(sample.r.mul(0.9).add(0.45))
+    // Needle-to-needle and leaf-to-leaf tone, kept within about ±35% of the palette: a wider
+    // spread pushed sunlit leaves into the tone curve's shoulder, which washed them pale grey.
+    const albedo = vertexColor().rgb.mul(sample.r.mul(0.6).add(0.55))
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
     // keeps `alphaTest`, so cards cast their cutout rather than square shadows.
     material.colorNode = vec4(albedo, coverage)
@@ -196,7 +197,12 @@ export class Vegetation {
     const back = pow(saturate(dot(this.sunDirection.negate(), toEye)), 4)
       .mul(0.4)
       .mul(facing.mul(0.6).add(0.4))
-    material.emissiveNode = albedo.mul(this.ambient.mul(rim).add(this.sunColour.mul(back)))
+    // Light through a leaf comes out a saturated yellow-green: chlorophyll passes green and
+    // some red and absorbs blue, so back-lit crown rims glow rather than wash grey.
+    const transmitted = albedo.mul(vec3(1, 1.15, 0.45))
+    material.emissiveNode = albedo
+      .mul(this.ambient.mul(rim))
+      .add(transmitted.mul(this.sunColour.mul(back)))
     return material
   }
 

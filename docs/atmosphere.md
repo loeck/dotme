@@ -37,7 +37,9 @@ never to moonlight or lamps.
 A seeded shared wind field drives cloud displacement, water waves and environmental
 motion. Cloud bodies and procedural noise derive from the world seed. Day/night lighting
 and cloud transmission are expressed with TSL nodes rendered through WebGPU.
-The cloud volume is captured at 15 Hz on desktop and 10 Hz on low-power devices. A
+The cloud volume is captured at 15 Hz on desktop and 10 Hz on low-power devices, into a cube of
+384 texels a face on desktop (256 before: at 1600 px across, one texel spread over nine pixels
+and every cumulus edge blurred) and 128 on low-power devices. A
 separate upper-sky texture records cursor passages while the left mouse button is held; the cloud
 volume uses it to erode density with a noise-warped edge during capture. The texture is
 anchored to world directions, so openings survive camera motion. Each texel heals on its own
@@ -46,6 +48,33 @@ stay open; releasing the button, leaving the sky or the canvas only ends the cur
 Reduced motion clears it.
 Cloud transmission samples the opening at the actual cloud crossing of each light ray.
 Direct shafts appear only when a passage also crosses the sun or moon direction.
+
+## God rays
+
+The air (`volumetric-light.ts`) is raymarched at half resolution through the sun's shadow map,
+which the trees' cards cast into, so their shadows cut beams through lit air. Three things make
+the beams read:
+
+- samples crowd toward the eye (quadratic spacing over up to 240 m, 32 on desktop and 16 on
+  low-power devices), where beams between the trees are a metre or two across, and each pixel
+  starts at its own interleaved-gradient offset; the composite's depth-aware 3 × 3 tent turns
+  that jitter into continuous beams instead of step bands, without bleeding air across
+  silhouettes;
+- a fine aerosol near the ground and the water (pollen, dust, humidity: 0.0013 /m by day, a
+  quarter more at golden hour, thinning upward over about 14 m and none under overcast) scatters
+  the sun into beams but adds only a fifth of its share of sky light, so it does not grey the
+  air;
+- when the sun is in or near the frame, screen-space crepuscular rays march 20 depth samples from
+  each pixel toward its disc. Open sky along the way streams light through canopy gaps finer than
+  the shadow map resolves. The light follows a tight forward lobe (cos⁶⁰, plus 5% of cos⁶) and is
+  weighted toward partly blocked lines (between branches, at ridge edges), since fully open sky
+  already carries the sun's glow; it grows with the air in front of the pixel, up to about 120 m,
+  and the sky itself takes a third. A first version with a wide lobe and uniform weight veiled
+  the whole golden-hour frame in milk.
+
+At noon the sun stands behind the camera, so the screen-space rays are skipped. On the host GPU
+(WebGL 2, 1280 × 720) the atmosphere pass measured 1.3–1.6 ms with or without the rays, as before
+the change.
 Terrain shadow layers preserve independent visibility for shadow and main passes.
 
 Profile contrast samples the rendered backdrop through the composition pipeline. The DOM
@@ -83,23 +112,47 @@ small lantern hanging 35 cm above the point: a glint just below it on screen tha
 break into a short shimmering streak, the way the bank's lamps reflect. It is a few
 instructions in the existing water material, with no extra pass.
 
-The ground is a smooth heightfield with granite boulders, shaded by a layered, texture-free
-material (moss, heath, litter, peat, granite, gravel, wet mud) whose octaves fade before they
+The ground is a smooth heightfield with limestone boulders, shaded by a layered, texture-free
+material (meadow grass, buttercups, rough grassland, litter, soil, limestone, far canopy, gravel,
+wet mud) whose octaves fade before they
 alias; see [terrain](terrain.md). The probe lights flat ground from the bright zenith, but a steep
 face samples the dark horizon of islands and water, so a sky fill adds ambient-tinted irradiance,
 through the diffuse BRDF and occlusion, peaking on vertical faces (`terrain-detail.ts`).
 
-The fixed camera faces the low sun at both ends of the day, so the golden-hour look
+The sun's day arc keeps both ends in frame, rising over the right ridge and setting over the left
+cliffs, but through the middle of the day it swings round behind the camera's right shoulder
+(`MIDDAY_SWING`, about 130° at noon, weighted by the square of the arc's sine): the woods,
+meadows and limestone then face it in three-quarter light, as in summer reference footage,
+instead of reading as back-lit silhouettes. Elevation is unchanged. The fixed camera faces the
+low sun at both ends of the day, so the golden-hour look
 (`scene-look.ts`) lifts saturation, contrast and warmth but keeps noon's exposure, haze
 start and air density (5% thinner), with only a 10% lift of the forward glow. A thicker,
 nearer haze there washed the islands and banks into one milky plane against the light.
 
-The base grade keeps saturation at 0.9 (0.8 before the realism pass): with the sky light and
-tone mapping already desaturating sunlit foliage, 0.8 turned spruce tops and grass grey-green.
+The base grade keeps saturation at 0.97 and contrast at 1.1 (0.9 and 1.06 for the boreal
+shore), with thinner, later haze (×1.45 from 28 m, against ×1.8 from 22 m): a temperate summer
+day reads as clear air over saturated, lush greens. With the sky light and tone mapping already
+desaturating sunlit foliage, a lower saturation turned crowns and grass grey-green.
+
+Clouds add a second, softer extinction octave to their sun transmittance (Wrenninge's multiple
+scattering approximation) and a higher ambient floor, so a cumulus's shaded base is a light grey
+rather than the slate of single scattering. Partly cloudy skies draw their bodies at 80% scale:
+separate fair-weather cumulus over a clear blue sky. Each body sits on a flat base (its lower
+half squashed 1.9 times) and domes upward; fine erosion bites hardest at the rim, so the edge
+breaks into rounded turrets while the core stays solid, and a steeper density ramp keeps the
+rim crisp.
+
+The visible clear sky is deepened as a polarising filter photographs a summer sky: overhead
+about 38% darker and 35% more saturated, near the horizon 14% darker and 12% more saturated, so
+white cumulus stand out against a deep blue as in reference footage. Only the sky the camera and
+its reflections see changes: scene lighting reads the atmosphere's LUTs directly.
 
 The lens (`depth-focus.ts`) blurs the far ridges by up to 1.35 pixels beyond 90 m and the near
 bank by at most 0.6 pixels within 4–14 m, as a lens focused tens of metres out at a moderate
-aperture would; a stronger near blur smeared the fine grass blades into fur.
+aperture would; a stronger near blur smeared the fine grass blades into fur. The scene draws
+without MSAA, so the lens first antialiases the centre sample (FXAA, Lottes's console variant, on
+display-compressed luma): alpha-tested leaves, grass blades and twigs otherwise stepped on 1×
+screens. It measured within the noise of the lens pass (about 0.5 ms).
 
 Indirect terrain light, local reflections and weather remain artistic approximations.
 Validate changes with seeded clear/cloudy captures at noon, sunrise (`startTime=06:00`),

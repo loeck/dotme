@@ -182,12 +182,12 @@ describe('solar lighting and light-space projection', () => {
     expect(overcast.g / overcast.r).toBeLessThan(clear.g / clear.r)
     expect(overcast.g / overcast.r).toBeLessThan(2)
   })
-  it('grades water scatter a dark humic olive-brown by day and near black by night', () => {
+  it('grades water scatter a dim green-teal by day and near black by night', () => {
     const noon = sampleLighting(12 * 3600).waterScatter
-    // A boreal lake's dissolved organic matter absorbs blue: what scatters back is olive-brown,
-    // and dim, so the water mirrors the sky instead of glowing turquoise.
-    expect(noon.g).toBeGreaterThan(noon.b * 1.5)
-    expect(noon.r).toBeGreaterThan(noon.b * 1.2)
+    // Clear lake water absorbs red: what scatters back is green-teal, and dim, so the water
+    // mirrors the sky instead of glowing turquoise.
+    expect(noon.g).toBeGreaterThan(noon.r * 2)
+    expect(noon.g).toBeGreaterThan(noon.b)
     expect(noon.r + noon.g + noon.b).toBeLessThan(0.1)
     const midnight = sampleLighting(0).waterScatter
     expect(midnight.r + midnight.g + midnight.b).toBeLessThan(0.01)

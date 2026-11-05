@@ -1,6 +1,6 @@
 /**
- * Procedural trees and shrubs of a Nordic lake shore: Norway spruce, Scots pine, weeping birch
- * and low shrubs. Each model grows a branch skeleton by its species' habit, meshes its wood as
+ * Procedural trees and shrubs of a temperate lake in summer: oak and beech, silver birch, the odd
+ * Norway spruce and Scots pine, and leafy shrubs. Each model grows a branch skeleton by its species' habit, meshes its wood as
  * smooth tapered tubes and clothes its twigs with foliage cards from the botanical atlas
  * (`foliage-atlas.ts`). Everything is pure and deterministic, so the world worker can prepare
  * it and transfer typed arrays.
@@ -27,19 +27,27 @@ export const VEGETATION_PALETTE = {
   barkDead: [0.11, 0.1, 0.09],
   birchBark: [0.42, 0.41, 0.38],
   birchMark: [0.045, 0.043, 0.04],
-  birchLeaves: [0.08, 0.15, 0.035],
+  birchLeaves: [0.068, 0.135, 0.03],
   birchLeavesDeep: [0.05, 0.1, 0.026],
-  shrub: [0.06, 0.1, 0.045],
+  // Summer broadleaves: an oak's leaves darker and a little bluer, a beech's or a lime's fresher.
+  oakLeaves: [0.06, 0.126, 0.026],
+  oakLeavesDeep: [0.036, 0.084, 0.02],
+  beechLeaves: [0.082, 0.16, 0.032],
+  beechLeavesDeep: [0.05, 0.11, 0.024],
+  oakBark: [0.075, 0.062, 0.048],
+  beechBark: [0.16, 0.148, 0.128],
+  shrub: [0.06, 0.12, 0.035],
   juniper: [0.035, 0.058, 0.042],
   juniperPale: [0.05, 0.072, 0.052],
-  shrubDeep: [0.04, 0.07, 0.035],
+  shrubDeep: [0.038, 0.08, 0.026],
   grassBase: [0.05, 0.085, 0.022],
   grassTip: [0.13, 0.2, 0.045],
   grassDry: [0.24, 0.2, 0.09],
-  fern: [0.07, 0.12, 0.04],
-  flowerStem: [0.06, 0.1, 0.04],
+  fern: [0.07, 0.13, 0.035],
+  flowerStem: [0.06, 0.11, 0.03],
   flowerWhite: [0.62, 0.62, 0.56],
-  flowerYellow: [0.62, 0.46, 0.08],
+  // Meadow buttercup: a glossy, saturated yellow.
+  flowerYellow: [0.7, 0.52, 0.03],
   flowerHeart: [0.55, 0.36, 0.05],
 } as const satisfies Record<string, Rgb>
 
@@ -133,7 +141,7 @@ export const MODEL_DETAIL = {
   desktop: { trunkSides: 8, limbSides: 4, spacing: 1 },
   mobile: { trunkSides: 6, limbSides: 3, spacing: 1.35 },
   /** Trees far from the camera: half the sprays (drawn larger) and lighter wood. */
-  desktopFar: { trunkSides: 5, limbSides: 3, spacing: 2 },
+  desktopFar: { trunkSides: 5, limbSides: 3, spacing: 2.3 },
   mobileFar: { trunkSides: 4, limbSides: 3, spacing: 2.4 },
 } as const satisfies Record<string, ModelDetail>
 
@@ -738,6 +746,172 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
   }
 }
 
+export type BroadleafHabit = 'oak' | 'beech'
+
+/**
+ * A temperate broadleaf in the open: a stout bole, scaffold limbs that rise and fork, and every
+ * fork ending in a domed clump of leafy sprays, so the crown is a mass of rounded billows with
+ * deep shade between them. An oak's crown is broad and lumpy, low on a short, dark, furrowed
+ * bole; a beech's (or a lime's) taller and ovoid, on smooth grey bark with brighter leaves.
+ */
+export function growBroadleaf(
+  seed: number,
+  detail: ModelDetail,
+  habit: BroadleafHabit,
+  heights: readonly [number, number] = habit === 'oak' ? [6, 7.8] : [6.6, 8.4],
+): TreeModel {
+  const random = mulberry32(seed)
+  const wood = new WoodBuilder()
+  const sprays: Spray[] = []
+  const oak = habit === 'oak'
+  const height = between(random, heights[0], heights[1])
+  const youth = Math.min(1, height / 5)
+  const crownBase = height * (oak ? between(random, 0.18, 0.28) : between(random, 0.24, 0.34))
+  // Crown half-width: an oak's spreads about as wide as it is tall above its bole.
+  const crownRadius = height * (oak ? between(random, 0.36, 0.42) : between(random, 0.27, 0.32))
+  const crownCentre = crownBase + (height - crownBase) * (oak ? 0.5 : 0.48)
+  const trunk = trunkPath(random, height * 0.92, 12, oak ? 0.06 : 0.03)
+  const trunkRadius = (oak ? 0.06 : 0.045) + height * (oak ? 0.016 : 0.012)
+  const bark = oak ? P.oakBark : P.beechBark
+  wood.tube(
+    trunk,
+    trunk.map((_, i) => trunkRadius * (1 - (0.8 * i) / 12) * (i === 0 ? 1.35 : 1)),
+    youth > 0.5 ? detail.trunkSides : 5,
+    (s, angle) =>
+      oak
+        ? scaleRgb(bark, (0.72 + 0.28 * Math.abs(Math.sin(angle * 5 + s * 9))) * (0.85 + 0.2 * s))
+        : scaleRgb(bark, (0.92 + 0.08 * Math.sin(angle * 2 + s * 4)) * (0.8 + 0.25 * s)),
+  )
+  const leaves = oak ? [P.oakLeaves, P.oakLeavesDeep] : [P.beechLeaves, P.beechLeavesDeep]
+  const tiles = oak ? [ATLAS_TILES.oakA, ATLAS_TILES.oakB] : [ATLAS_TILES.limeA, ATLAS_TILES.limeB]
+  /** A domed clump of sprays round `centre`, fuller toward the light and the crown's outside. */
+  const clump = (centre: Point, radius: number, outward: Point) => {
+    // Alpha-tested cards cost fill, not triangles: fewer, slightly smaller cards keep a clump
+    // closed at about two thirds of the overdraw.
+    const cards = Math.max(5, Math.round((17 * radius * radius) / detail.spacing))
+    for (let card = 0; card < cards; card++) {
+      // Points on the clump's outer shell, mostly on its upper and outward side.
+      const yaw = random() * TAU
+      const elevation = Math.asin(between(random, -0.45, 1))
+      let direction = heading(yaw, elevation)
+      direction = normalize(add(direction, outward, 0.45))
+      const out = radius * between(random, 0.45, 1)
+      const p = add(centre, direction, out)
+      const size = radius * between(random, 0.7, 0.95) * (oak ? 1 : 1.08)
+      // Each clump shades as one billow: its sunlit top keeps the fresh leaves, its underside
+      // and inside the deeper ones, rather than a random patchwork of tones.
+      const top = smooth01(-0.35, 0.55, direction[1])
+      const colour = mixRgb(
+        leaves[1] ?? P.oakLeavesDeep,
+        leaves[0] ?? P.oakLeaves,
+        clamp(top * 0.8 + between(random, 0, 0.25), 0, 1),
+      )
+      const inner = 0.72 + 0.28 * smooth01(0.45, 0.95, out / radius)
+      sprays.push({
+        ...uprightCard(
+          p,
+          Math.atan2(direction[0], direction[2]) + between(random, -0.7, 0.7),
+          // Tipped back a little at most: cards facing the sky light up as a pale lid.
+          between(random, -0.15, 0.45),
+          size,
+          size * 0.9,
+          colour,
+          tiles[random() < 0.5 ? 0 : 1] ?? ATLAS_TILES.oakA,
+        ),
+        shade: inner * (0.82 + 0.18 * top),
+      })
+    }
+  }
+  const limbs = (oak ? 7 : 6) + Math.floor(random() * 3)
+  const phase = random() * TAU
+  for (let limb = 0; limb < limbs; limb++) {
+    const t = limb / (limbs - 1)
+    const y = crownBase + (crownCentre - crownBase) * 1.1 * t
+    const from = along(trunk, (y + 0.15) / (height * 0.92 + 0.15)).p
+    const yaw = phase + limb * TAU * GOLDEN_TURN + between(random, -0.3, 0.3)
+    // Low limbs spread wide; higher ones rise steeply toward the crown's top.
+    const elevation = (((oak ? 28 : 40) + (oak ? 34 : 30) * t) * Math.PI) / 180
+    const reach =
+      crownRadius * (oak ? 1.05 - 0.35 * t : 0.95 - 0.3 * t) * between(random, 0.85, 1.1)
+    const path = limbPath(from, heading(yaw, elevation), reach, 4, oak ? 0.18 : 0.08, 0.12)
+    const base = trunkRadius * (0.48 - 0.18 * t)
+    // Past 50 m the crown hides all but the lowest limbs: a far tree keeps only those in wood.
+    if (detail.spacing < 2 || t < 0.4)
+      wood.tube(
+        path,
+        path.map((_, i) => base * (1 - i / 4.8)),
+        detail.limbSides,
+        (s) => scaleRgb(bark, 0.85 - 0.15 * s),
+      )
+    // A clump part way along the limb fills the crown's inside, then two or three forks from
+    // the outer half, each ending in a clump, and one at the limb's end.
+    const middle = along(path, between(random, 0.45, 0.6)).p
+    clump(
+      middle,
+      crownRadius * between(random, 0.28, 0.36),
+      normalize(sub(middle, [0, crownCentre, 0])),
+    )
+    const forks = 2 + Math.floor(random() * 2)
+    for (let fork = 0; fork < forks; fork++) {
+      const { p } = along(path, between(random, 0.45, 0.85))
+      const forkYaw = yaw + between(random, -1, 1)
+      const forkReach = reach * between(random, 0.35, 0.55)
+      const twig = limbPath(
+        p,
+        heading(forkYaw, elevation + between(random, -0.1, 0.35)),
+        forkReach,
+        2,
+        0.05,
+        0.1,
+      )
+      // Forks carry no wood: their clump hides them, and they cost a fifth of the forest's wood.
+      const end = twig[twig.length - 1] ?? p
+      clump(
+        end,
+        crownRadius * between(random, 0.32, 0.42),
+        normalize(sub(end, [0, crownCentre, 0])),
+      )
+    }
+    const end = path[path.length - 1] ?? from
+    clump(end, crownRadius * between(random, 0.38, 0.48), normalize(sub(end, [0, crownCentre, 0])))
+  }
+  // The leader's top and a few billows filling the crown's upper middle.
+  const top = trunk[trunk.length - 1] ?? [0, height, 0]
+  clump(add(top, [0, height * 0.02, 0]), crownRadius * 0.5, [0, 1, 0])
+  for (let k = 0; k < 3; k++) {
+    const yaw = random() * TAU
+    const centre: Point = [
+      top[0] + Math.sin(yaw) * crownRadius * 0.45,
+      crownCentre + (height - crownCentre) * between(random, 0.35, 0.7),
+      top[2] + Math.cos(yaw) * crownRadius * 0.45,
+    ]
+    clump(centre, crownRadius * 0.4, normalize(sub(centre, [0, crownCentre, 0])))
+  }
+  // Inner cores: the crown shows shaded leaves, not sky, through its gaps.
+  for (let k = 0; k < 3; k++) {
+    const y = crownCentre + (height - crownCentre) * between(random, -0.5, 0.4)
+    sprays.push({
+      ...uprightCard(
+        along(trunk, clamp((y + 0.15) / (height * 0.92 + 0.15), 0, 1)).p,
+        random() * TAU,
+        0,
+        crownRadius * 0.75,
+        crownRadius * 0.6,
+        leaves[1] ?? P.oakLeavesDeep,
+        ATLAS_TILES.disc,
+      ),
+      shade: 0.8,
+    })
+  }
+  // Clumps reach past the nominal height: report the crown's true top.
+  const crownTop = Math.max(height, ...sprays.map((spray) => spray.center[1] + spray.height * 0.45))
+  return {
+    wood: wood.build(crownBase * 0.6),
+    sprays: shapeCrown(sprays, crownCentre),
+    height: crownTop,
+  }
+}
+
 /**
  * Common juniper: a dark, blue-green column a metre or so tall, as it grows on dry, rocky
  * shore ground, made of two or three irregular stems of upright needle sprays.
@@ -785,8 +959,9 @@ export function growBush(seed: number, detail: ModelDetail): TreeModel {
   const random = mulberry32(seed)
   const wood = new WoodBuilder()
   const sprays: Spray[] = []
-  const radius = between(random, 0.32, 0.45)
-  const cards = Math.round(9 / detail.spacing)
+  // Hazel and hawthorn at a wood's edge: leafy domes up to a metre or so across.
+  const radius = between(random, 0.38, 0.6)
+  const cards = Math.round(11 / detail.spacing)
   for (let card = 0; card < cards; card++) {
     const angle = (card / cards) * TAU + between(random, -0.3, 0.3)
     const out = radius * between(random, 0.15, 0.6)
@@ -799,7 +974,7 @@ export function growBush(seed: number, detail: ModelDetail): TreeModel {
         size,
         size * 0.75,
         card < cards / 3 ? P.shrubDeep : P.shrub,
-        ATLAS_TILES.bush,
+        card % 3 === 2 ? ATLAS_TILES.limeA : ATLAS_TILES.bush,
       ),
     )
   }

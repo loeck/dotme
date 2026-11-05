@@ -1,7 +1,7 @@
 /**
- * A procedural botanical atlas, drawn once in the world worker: Norway spruce sprays with their
- * hanging branchlets, Scots pine needle tufts, weeping birch twigs, shrub foliage and a lobed
- * core disc. Each RGBA8 texel stores a palette-relative tone in R, a rounded relief in G (each
+ * A procedural botanical atlas, drawn once in the world worker: oak and lime-and-beech leaf
+ * sprays, Norway spruce sprays with their hanging branchlets, Scots pine needle tufts, weeping
+ * birch twigs, shrub foliage and a lobed core disc. Each RGBA8 texel stores a palette-relative tone in R, a rounded relief in G (each
  * needle and leaf a small dome, for a per-texel normal) and cutout coverage in A; tone
  * darkens toward the bottom of a card and varies needle to needle and leaf to leaf, so crowns
  * read as foliage rather than flat paint.
@@ -9,7 +9,7 @@
 /** Tile edge in texels: phones draw smaller trees, so they bake a quarter of the texels. */
 export const atlasTile = (mobile: boolean) => (mobile ? 256 : 512)
 export const ATLAS_COLUMNS = 4
-export const ATLAS_ROWS = 2
+export const ATLAS_ROWS = 3
 export const ATLAS_TILES = {
   spruceA: 0,
   spruceB: 1,
@@ -19,6 +19,10 @@ export const ATLAS_TILES = {
   birchB: 5,
   bush: 6,
   disc: 7,
+  oakA: 8,
+  oakB: 9,
+  limeA: 10,
+  limeB: 11,
 } as const
 export type AtlasTile = (typeof ATLAS_TILES)[keyof typeof ATLAS_TILES]
 
@@ -136,6 +140,49 @@ class TileCanvas {
         const ex = u - a[0] - dx * t,
           ey = v - a[1] - dy * t
         return Math.sqrt(ex * ex + ey * ey) - (r0 + (r1 - r0) * t)
+      },
+      tone,
+    )
+  }
+  /**
+   * A broad leaf from `base` along `angle`: ovate (widest a third of the way up, a short drip
+   * tip) or, with `lobes`, an oak's rounded lobes cut into its margin.
+   */
+  broadLeaf(
+    base: readonly [number, number],
+    angle: number,
+    length: number,
+    width: number,
+    lobes: number,
+    tone: (u: number, v: number) => number,
+  ) {
+    const c = Math.cos(angle),
+      s = Math.sin(angle)
+    // A tight box round the blade (base to tip, half a width either side): a square of the
+    // leaf's length about its base scanned four times the texels.
+    const tip = [base[0] + c * length, base[1] + s * length] as const
+    const margin = width * 0.5 + 2 / this.size
+    const edge = 1 / this.size
+    this.stamp(
+      [
+        Math.min(base[0], tip[0]) - margin,
+        Math.min(base[1], tip[1]) - margin,
+        Math.max(base[0], tip[0]) + margin,
+        Math.max(base[1], tip[1]) + margin,
+      ],
+      (u, v) => {
+        const lx = (u - base[0]) * c + (v - base[1]) * s
+        const ly = -(u - base[0]) * s + (v - base[1]) * c
+        const t = lx / length
+        if (t < 0 || t > 1)
+          return Math.sqrt(Math.min(lx * lx, (lx - length) * (lx - length)) + ly * ly)
+        // Beyond the blade's widest half-width the texel is uncovered whatever the profile:
+        // skip the costly profile (most of the box lies there).
+        const outside = Math.abs(ly) - width * 0.5
+        if (outside > edge) return outside
+        let half = width * 0.5 * Math.pow(Math.sin(Math.PI * Math.pow(t, 0.62)), 0.8)
+        if (lobes > 0) half *= 0.72 + 0.28 * Math.abs(Math.cos(Math.PI * lobes * t))
+        return Math.abs(ly) - half
       },
       tone,
     )
@@ -343,6 +390,58 @@ function shrubLeaves(seed: number, size: number) {
   return tile
 }
 
+/**
+ * A leafy spray of a broadleaf crown (oak, lime, beech) seen from outside: twigs fan up and out
+ * from the card's foot and carry broad leaves, alternate and overlapping, so the card reads as a
+ * rounded, ragged mass of leaves with sky only at its rim. Oak leaves are smaller and lobed;
+ * lime and beech leaves broad, ovate and larger.
+ */
+function broadleafSpray(seed: number, size: number, oak: boolean) {
+  const tile = new TileCanvas(size)
+  const random = prng(seed)
+  const shade = (base: number) => (_u: number, v: number) =>
+    clamp01(base * (0.68 + 0.4 * v) + (random() - 0.5) * 0.12)
+  const twigs = oak ? 11 : 9
+  for (let twig = 0; twig < twigs; twig++) {
+    // A fan from the foot: the middle twigs rise, the outer ones spread and droop a little.
+    const spread = (twig / (twigs - 1) - 0.5) * 2
+    const from: Uv = [0.5 + spread * 0.08, 0.04 + random() * 0.06]
+    const reach = 0.55 + random() * 0.3 - Math.abs(spread) * 0.15
+    const heading = Math.PI / 2 - spread * (1.05 + random() * 0.25)
+    const to: Uv = [
+      clamp01(from[0] + Math.cos(heading) * reach),
+      clamp01(from[1] + Math.sin(heading) * reach * 0.95),
+    ]
+    const control: Uv = [from[0] + (to[0] - from[0]) * 0.35, from[1] + (to[1] - from[1]) * 0.75]
+    const points = bend(from, control, to, 8)
+    for (let i = 0; i < points.length - 1; i++)
+      tile.stroke(points[i] ?? [0, 0], points[i + 1] ?? [0, 0], 0.0045, 0.0025, () => 0.25)
+    const leaves = oak ? 15 : 11
+    for (let leaf = 0; leaf < leaves; leaf++) {
+      const t = 0.18 + (leaf / leaves) * 0.82
+      const at = points[Math.min(points.length - 1, Math.round(t * (points.length - 1)))] ?? from
+      const next = points[Math.min(points.length - 1, Math.round(t * (points.length - 1)) + 1)]
+      const along = next ? Math.atan2(next[1] - at[1], next[0] - at[0]) : heading
+      const side = leaf % 2 === 0 ? 1 : -1
+      const angle = along + side * (0.55 + random() * 0.6)
+      const length = (oak ? 0.1 + random() * 0.04 : 0.13 + random() * 0.05) * (1 - 0.25 * t)
+      // Each leaf its own tone: sunlit and shaded leaves, some turned edge-on.
+      tile.broadLeaf(
+        at,
+        angle,
+        length,
+        length * (oak ? 0.55 : 0.72),
+        oak ? 3.5 : 0,
+        shade(0.7 + random() * 0.4),
+      )
+    }
+    // A terminal leaf at each twig's end rounds the spray's outline.
+    const length = oak ? 0.11 : 0.14
+    tile.broadLeaf(to, heading, length, length * 0.65, oak ? 3.5 : 0, shade(0.9 + random() * 0.2))
+  }
+  return tile
+}
+
 /** Lobed, dark core disc that shows foliage rather than sky through gaps inside a crown. */
 function coreDisc(seed: number, size: number) {
   const tile = new TileCanvas(size)
@@ -377,6 +476,10 @@ export function bakeFoliageAtlas(seed: number, mobile = false): FoliageAtlas {
     [ATLAS_TILES.birchB, birchTwigs(seed + 6, size)],
     [ATLAS_TILES.bush, shrubLeaves(seed + 7, size)],
     [ATLAS_TILES.disc, coreDisc(seed + 8, size)],
+    [ATLAS_TILES.oakA, broadleafSpray(seed + 9, size, true)],
+    [ATLAS_TILES.oakB, broadleafSpray(seed + 10, size, true)],
+    [ATLAS_TILES.limeA, broadleafSpray(seed + 11, size, false)],
+    [ATLAS_TILES.limeB, broadleafSpray(seed + 12, size, false)],
   ]
   for (const [index, tile] of tiles) {
     const ox = (index % ATLAS_COLUMNS) * size,

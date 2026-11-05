@@ -9,13 +9,11 @@ import {
   dot,
   exp,
   sin,
-  floor,
   fwidth,
   float,
   max,
   min,
   mix,
-  mod,
   normalize,
   positionLocal,
   positionWorld,
@@ -367,11 +365,11 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .sub(smoothstep(2.8, 6, depth))
       .mul(float(1).sub(smoothstep(24, 48, cameraPosition.xz.sub(p).length())))
     const clarity = max(u.uWaterClarity.mul(nearShallow.mul(0.1).add(0.9)), reveal)
-    // A humic boreal lake, not a tropical one: dissolved organic matter absorbs blue strongly
-    // (a440 about 1.2 /m with a 0.015 /nm slope, plus pure water's red absorption), so light
-    // through it turns tea-amber and the depths go dark olive-brown (Secchi depth about 2 m;
-    // Arst et al. 2008). Murky water after rain absorbs more across the board.
-    const absorption = mix(vec3(0.85, 0.7, 1.5), vec3(0.4, 0.29, 1.05), clarity)
+    // A clear, temperate lake: pure water absorbs red (about 0.35 /m) far more than green, and
+    // a little phytoplankton and dissolved matter take some blue, so light through it turns
+    // green-teal and the bed stays visible a few metres down (Secchi depth about 4–5 m).
+    // Murky water after rain absorbs more across the board.
+    const absorption = mix(vec3(0.72, 0.45, 0.5), vec3(0.36, 0.16, 0.15), clarity)
     const transmission = exp(absorption.mul(path).negate())
     const bedBlur = u.uBedTexel.mul(mix(1.1, 0.18, clarity))
     const bedTap = (coordinate: typeof bedUv) =>
@@ -392,7 +390,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(mix(vec3(1.1, 1.05, 0.85), vec3(1.05, 1, 0.8), u.uWaterClarity))
     const shallow = float(1).sub(smoothstep(0.3, 3.2, depth))
     const scatterBody = scatter
-      .mul(mix(vec3(1), vec3(0.38, 0.32, 0.18), smoothstep(2, 6, depth).mul(mix(0.35, 1, clarity))))
+      .mul(mix(vec3(1), vec3(0.22, 0.42, 0.44), smoothstep(2, 6, depth).mul(mix(0.35, 1, clarity))))
       .mul(mix(vec3(1), vec3(0.4, 0.6, 0.72), u.uNight.mul(shallow)))
     const bedVeil = float(1).sub(clamp(clarity, 0, 1))
     const bedLuminance = dot(bed, vec3(0.2126, 0.7152, 0.0722))
@@ -488,25 +486,33 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       return total
     })()
     const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(meniscus))
-    const sparkle = normalize(
-      normal.add(
-        vec3(
-          contactNoise(p.mul(23).add(u.uTime.mul(0.35))).sub(0.5),
-          0,
-          contactNoise(p.mul(31).yx.add(u.uTime.mul(0.3))).sub(0.5),
-        ).mul(0.6),
-      ),
+    // Sun glitter as a glitter path (Cox and Munk): the shaded normal already carries the
+    // resolved waves, and the facets below a pixel spread around it with a slope variance, so
+    // the path is a smooth column under the sun rather than glints salting the whole lake.
+    const halfVector = normalize(u.uLightDirection.add(view))
+    const cosHalf = clamp(normal.dot(halfVector), 0.05, 1)
+    const tanHalf2 = float(1).sub(cosHalf.mul(cosHalf)).div(cosHalf.mul(cosHalf))
+    const slopeVariance = mix(0.006, 0.02, u.uWaterAgitation)
+    const glitterPath = exp(tanHalf2.div(slopeVariance).negate()).div(cosHalf.pow(4))
+    // Inside the path, the facets that face the sun exactly flash as short dashes along the
+    // wave crests (across the view, so foreshortening leaves them flat), and they twinkle as
+    // the crests move. Below a pixel they resolve to their mean, so far water glows evenly.
+    const across = normalize(vec2(view.z, view.x.negate()))
+    const toward = vec2(across.y.negate(), across.x)
+    const dash = vec2(p.dot(across).mul(7), p.dot(toward).mul(34))
+    const flicker = contactNoise(dash.add(vec2(u.uTime.mul(0.9), u.uTime.mul(-1.7)))).mul(
+      contactNoise(dash.mul(1.7).add(vec2(u.uTime.mul(-1.3), u.uTime.mul(2.1)).add(17.3))),
     )
-    const glitterBase = clamp(reflect(u.uLightDirection.negate(), sparkle).dot(view), 0, 1).pow(350)
-    const sparkleCell = floor(p.mul(14)).add(floor(mod(u.uTime.mul(8), 64)).mul(0.37))
-    const sparkleGate = smoothstep(0.982, 1, contactNoise(sparkleCell))
-    const glitter = glitterBase
+    const facets = smoothstep(0.42, 0.75, flicker)
+    const resolved = smoothstep(0.6, 0.25, footprint.mul(34))
+    const sparkle = mix(float(0.16), facets.mul(1.6), resolved)
+    const glitter = glitterPath
+      .mul(sparkle)
+      .mul(0.11)
       .mul(u.uLightColor.rgb)
-      .mul(1.0)
       .mul(float(1).sub(u.uNight))
       .mul(sunlit)
       .mul(u.uDirectSun)
-      .mul(float(0.55).add(sparkleGate.mul(3)))
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))
     const sssDirection = normalize(u.uLightDirection.negate().add(normal.mul(WATER_IOR - 1)))
     const sss = clamp(view.dot(sssDirection), 0, 1)
@@ -515,8 +521,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .mul(mix(0.3, 1, clarity))
       .mul(u.uLightColor.rgb)
       .mul(sunlit)
-      // Light through a wave crest of humic water comes out amber-olive, not turquoise.
-      .mul(vec3(0.9, 0.85, 0.35))
+      // Light through a wave crest of clear lake water comes out a pale green.
+      .mul(vec3(0.5, 0.9, 0.7))
       .mul(0.05)
     const downFace = clamp(normal.dot(view), 0, 1).pow(2)
     const shaftBands = sin(

@@ -6,6 +6,7 @@ import {
   float,
   min,
   mix,
+  select,
   sin,
   smoothstep,
   texture3D,
@@ -110,8 +111,11 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
               .mod(CLOUD_PERIOD)
               .sub(CLOUD_PERIOD / 2),
           )
-          const q = p.div(radii.xyz),
-            boundary = q.dot(q)
+          // A cumulus sits on a flat base at its condensation level and domes upward: the
+          // body's lower half is squashed, its upper half keeps the full height.
+          const q = p.div(radii.xyz).toVar()
+          q.y.mulAssign(select(q.y.lessThan(0), float(1.9), float(1)))
+          const boundary = q.dot(q)
           If(boundary.greaterThanEqual(2.65), () => {
             Continue()
           })
@@ -126,8 +130,15 @@ export function createCloudVolume(seed: number, weather: WeatherPreset, noise: D
             .add(sample.g.sub(0.5).mul(0.7))
             .sub(erosion.mul(2.2))
             .toVar()
-          if (detail) mass.subAssign(texture3D(noise, noisePoint.mul(2.7)).g.oneMinus().mul(0.12))
-          total.addAssign(smoothstep(0.03, 0.5, mass).mul(envelope).mul(0.75))
+          // Billows: fine erosion bites hardest at the rim, so the edge breaks into rounded
+          // turrets while the core stays solid, and a steeper ramp keeps the rim crisp.
+          if (detail)
+            mass.subAssign(
+              texture3D(noise, noisePoint.mul(2.7))
+                .g.oneMinus()
+                .mul(mix(0.3, 0.1, smoothstep(0.1, 0.6, mass))),
+            )
+          total.addAssign(smoothstep(0.04, 0.34, mass).mul(envelope).mul(0.75))
         })
       })
       return min(total.max(0), 1).mul(uniforms.uCloudDensity)

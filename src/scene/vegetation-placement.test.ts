@@ -5,7 +5,14 @@ import { appendClump } from './grass'
 import { WATER_LEVEL } from './lake-bed'
 import { createLakeWorld } from './lake-world'
 import { MeshBuilder } from './vegetation-meshes'
-import { growBirch, growBush, growPine, growSpruce, MODEL_DETAIL } from './vegetation-models'
+import {
+  growBirch,
+  growBroadleaf,
+  growBush,
+  growPine,
+  growSpruce,
+  MODEL_DETAIL,
+} from './vegetation-models'
 import type { TreeModel } from './vegetation-models'
 import { prepareVegetation } from './vegetation-placement'
 
@@ -41,13 +48,16 @@ describe('lake-shore vegetation', () => {
     spruce: growSpruce(7, detail, false),
     pine: growPine(8, detail),
     birch: growBirch(9, detail),
+    oak: growBroadleaf(10, detail, 'oak'),
+    beech: growBroadleaf(11, detail, 'beech'),
   }
 
   it.each(Object.entries(models))(
     'grows a %s with outward tube wood and a lit crown',
-    (_, model) => {
+    (name, model) => {
       expect(model.height).toBeGreaterThan(4.5)
-      expect(model.height).toBeLessThan(8)
+      // A broadleaf's billows rise a little past its leader.
+      expect(model.height).toBeLessThan(name === 'oak' || name === 'beech' ? 10 : 8)
       expect(outwardShare(model)).toBeGreaterThan(0.99)
       expect(model.sprays.length).toBeGreaterThan(100)
       for (const spray of model.sprays) {
@@ -86,10 +96,23 @@ describe('lake-shore vegetation', () => {
     // Birch twigs hang: their cards are about upright.
     const birchCards = models.birch.sprays.filter((spray) => spray.b[1] > 0.7).length
     expect(birchCards / models.birch.sprays.length).toBeGreaterThan(0.6)
+    // Broadleaves carry a broad, rounded crown on a clear bole: an oak's wider than a beech's,
+    // both far wider than a spruce's cone at the same height.
+    for (const model of [models.oak, models.beech]) {
+      expect(crownBottom(model)).toBeGreaterThan(0.08)
+      expect(width(model, 0.45, 0.75)).toBeGreaterThan(model.height * 0.26)
+      expect(width(model, 0.45, 0.75)).toBeGreaterThan(width(models.spruce, 0.45, 0.75) * 1.5)
+    }
+    expect(width(models.oak, 0.45, 0.75) / models.oak.height).toBeGreaterThan(
+      width(models.beech, 0.45, 0.75) / models.beech.height,
+    )
   })
 
   it('is deterministic and lighter on phones', () => {
     expect(growSpruce(7, detail, false)).toEqual(models.spruce)
+    expect(growBroadleaf(10, detail, 'oak')).toEqual(models.oak)
+    const phoneOak = growBroadleaf(10, MODEL_DETAIL.mobile, 'oak')
+    expect(phoneOak.sprays.length).toBeLessThan(models.oak.sprays.length)
     const phone = growSpruce(7, MODEL_DETAIL.mobile, false)
     expect(phone.sprays.length).toBeLessThan(models.spruce.sprays.length)
     expect(phone.wood.indices.length).toBeLessThan(models.spruce.wood.indices.length)
@@ -107,6 +130,10 @@ describe('lake-shore vegetation', () => {
       ATLAS_TILES.birchA,
       ATLAS_TILES.birchB,
       ATLAS_TILES.bush,
+      ATLAS_TILES.oakA,
+      ATLAS_TILES.oakB,
+      ATLAS_TILES.limeA,
+      ATLAS_TILES.limeB,
     ]) {
       // Enough foliage to read as a mass, enough gaps to read as needles and leaves.
       expect(tileCoverage(atlas, tile)).toBeGreaterThan(0.12)
