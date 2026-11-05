@@ -39,6 +39,7 @@ const add = (a: Point, b: Point, k = 1): Point => [
   a[1] + b[1] * k,
   a[2] + b[2] * k,
 ]
+const scale = (c: Rgb, k: number): Rgb => [c[0] * k, c[1] * k, c[2] * k]
 const rotateY = (v: Point, yaw: number): Point => {
   const c = Math.cos(yaw),
     s = Math.sin(yaw)
@@ -68,6 +69,9 @@ export class MeshBuilder {
   }
   get vertexCount() {
     return this.positions.length / 3
+  }
+  get indexCount() {
+    return this.indices.length
   }
   vertex(
     p: Point,
@@ -234,6 +238,10 @@ export function appendTuft(
     profile?: 'full' | 'short'
     /** Unit XZ direction toward a nearby step edge or wall: blades turn away from it and lean less. */
     edge?: readonly [number, number]
+    /** Radius over which blades root, metres (4 cm by default: one tuft). */
+    spread?: number
+    /** Per-blade variety: value jitter (±share) and the share of blades gone dry. */
+    variety?: Readonly<{ value: number; dry: number; dryTip: Rgb }>
   }>,
 ) {
   const rows = options.profile === 'short' ? SHORT_BLADE_ROWS : BLADE_ROWS
@@ -245,8 +253,14 @@ export function appendTuft(
   for (let blade = 0; blade < options.blades; blade++) {
     const r = (stream: number) => hash(blade, options.salt, stream)
     const angle = r(1) * Math.PI * 2
-    const spread = r(2) * 0.04
+    const spread = Math.sqrt(r(2)) * (options.spread ?? 0.04)
     const h = options.height * (0.55 + r(3) * 0.45)
+    // Each blade its own value, and some gone dry, as a real sward is never one colour.
+    const variety = options.variety
+    const value = variety ? 1 + (r(7) - 0.5) * 2 * variety.value : 1
+    const dry = variety ? r(8) < variety.dry : false
+    const rootColour = scale(options.colours.root, value)
+    const tipColour = scale(dry && variety ? variety.dryTip : options.colours.tip, value)
     let dir: Point = [Math.sin(angle), 0, Math.cos(angle)]
     const edge = options.edge
     // Mirror blades heading toward an edge so none hangs over a drop or into a wall.
@@ -279,7 +293,7 @@ export function appendTuft(
       let n = cross(side, tangentAt(t))
       if (n[1] < 0) n = [-n[0], -n[1], -n[2]]
       n = normalize(add(n, UP, 0.45))
-      const colour = mixRgb(options.colours.root, options.colours.tip, Math.pow(t, 0.9))
+      const colour = mixRgb(rootColour, tipColour, Math.pow(t, 0.9))
       const wind = [t * t * h * 0.45, options.phase + r(6), t * 0.01, omega] as const
       const half = (options.width * w) / 2
       ids.push(
@@ -294,7 +308,7 @@ export function appendTuft(
         ids[row * 2 + 3] ?? 0,
         ids[row * 2 + 2] ?? 0,
       )
-    const tip = builder.vertex(p2, add(UP, dir, 0.3), options.colours.tip, [
+    const tip = builder.vertex(p2, add(UP, dir, 0.3), tipColour, [
       h * 0.45,
       options.phase + r(6),
       0.01,

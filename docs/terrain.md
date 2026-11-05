@@ -74,7 +74,8 @@ weathered granite 0.13–0.22):
   feldspar speckle, joint fissures a metre or two apart (in the albedo, so they read from afar
   after the relief has faded), muted lichen crusts and dark rain streaks down the faces. Thin
   vegetation creeps back over ledges;
-- gravel then dark, glossy mud at the waterline, broken by noise;
+- a narrow strip of gravel a hand's breadth above the water, then dark wet silt at the waterline,
+  broken by noise; on a low, grassy bank the turf runs almost to the water;
 - a slow tint across the hills hides repetition at 30–70 m.
 
 Every Perlin octave is band-limited: it fades before a cell covers less than about two pixels

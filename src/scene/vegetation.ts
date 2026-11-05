@@ -211,10 +211,13 @@ export class Vegetation {
   }
 
   private undergrowthMaterial() {
+    // A sward hides most of its blades from the sky behind its neighbours: at grazing view a
+    // full sky reflection washed the bank blue-grey.
     const material = new MeshStandardNodeMaterial({
       vertexColors: true,
-      roughness: 0.8,
+      roughness: 0.92,
       metalness: 0,
+      envMapIntensity: 0.35,
       side: DoubleSide,
     })
     material.positionNode = positionLocal.add(this.sway())
@@ -223,7 +226,8 @@ export class Vegetation {
     const toEye = normalize(cameraPosition.sub(positionWorld))
     // Grass transmission (Voxen): sun through thin blades when looking toward the light.
     const into = saturate(dot(this.sunDirection.negate(), toEye))
-    material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 4).mul(0.12))
+    // Only the thin, light upper blade passes much light; a whole bank glowing reads as straw.
+    material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 6).mul(0.05))
     return material
   }
 

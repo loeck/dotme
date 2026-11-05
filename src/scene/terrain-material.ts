@@ -159,12 +159,14 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   const stone = graniteColour(p, pixel, macro)
 
   // The waterline: gravel and pebbles, then dark saturated mud, broken by noise.
-  const gravelLine = float(0.32).add(patch.mul(0.18)).add(grain.mul(0.05))
-  const gravel = smoothstep(gravelLine, gravelLine.sub(0.12), above).mul(
+  // A narrow strip a hand or two above the water: on a low, grassy bank the turf runs almost to
+  // the waterline, as it does on a real lake shore.
+  const gravelLine = float(0.04).add(patch.mul(0.06)).add(grain.mul(0.03))
+  const gravel = smoothstep(gravelLine, gravelLine.sub(0.05), above).mul(
     steep.mul(2.2).oneMinus().clamp(),
   )
   const pebbles = linear(0.12, 0.112, 0.098).mul(octave(p, 14, pixel).mul(0.25).add(1))
-  const mud = smoothstep(float(0.11).add(grain.mul(0.03)), float(0.02), above)
+  const mud = smoothstep(float(0.035).add(grain.mul(0.015)), float(0.005), above)
 
   let albedo: Vec3Node = mix(ground, pebbles, gravel)
   albedo = mix(albedo, stone, rock.mul(ledges.mul(0.7).oneMinus()))
@@ -178,7 +180,8 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     float(0.68),
     rock,
   )
-  material.roughnessNode = mix(roughness, float(0.42), mud)
+  // Wet silt, not a mirror: glossier, it caught the whole sky at grazing view like concrete.
+  material.roughnessNode = mix(roughness, float(0.62), mud)
   material.aoNode = skyVisibility
 
   // Detail relief: moss tufts on the ground, cracks and grain on stone, pebbles at the shore.

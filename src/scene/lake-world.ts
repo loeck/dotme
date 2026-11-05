@@ -337,7 +337,7 @@ function foregroundAt(
   const ridges = smoothNoise(seed, x, z, 1, 439)
   const relief = ((patches - 0.5) * 2.6 + (ridges - 0.5) * 2) * 0.125
   const height = 0.03 + clamp(depth / 2.4, 0, 1) * 0.13 + Math.max(0, swell - 0.32) * 0.3 + relief
-  const shore = 0.45 * (1 - smooth01(0.2, 0.32, depth))
+  const shore = 0.45 * (1 - smooth01(0.08, 0.18, depth))
   const outcrop = smooth01(0.74, 0.8, smoothNoise(seed, x, z, 0.8, 421))
   return { height: Math.max(0.125, height), rock: Math.max(shore, outcrop) }
 }

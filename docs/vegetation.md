@@ -73,19 +73,23 @@ back-light translucency, strongest at the crown rim and against a low sun.
 
 ## Undergrowth
 
-Grass, ferns and flowers grow on the mossy foreground bank, in 1.6 m clumps inside 8 m patches,
-with some patches drying toward straw. A grass tuft is a sparse fan of six to ten quadratic
-Bézier ribbons with four rows of widths 0.55, 1, 0.5 and 0.12 and a pointed tip, tinted from
-the ground to the tip. A fern crown is a ring of arching, drooping rachis strips cut into
-alternating leaflets. Flowers have a thin stem and five cupped petals around a warm heart.
-Under the clumps, a ground cover of short tufts (seven to ten blades of 6–13 cm, two rows
-and a tip, three triangles each) grows on most of the bank's columns, thinner on bare patches
-and drier where the clumps dry, so the soil between tall tufts reads as turf rather than bare
-ground. Placement reads the smooth ground's neighbouring 12.5 cm columns (a slope only counts as
-a step beyond 5 cm per column of distance): tall clumps keep off a step's last column,
-and blades near a step or a wall turn away from it and lean less, while ground cover there moves
-inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
-view faces a low sun.
+Grass, ferns and flowers grow on the foreground bank as one sward sized to the camera: per
+12.5 cm column of soft ground, up to 22 blades near the lens (16 on phones), falling off with
+distance while each blade widens (about 0.0018 × distance + 2 mm), so every blade covers about
+the same few pixels and the turf stays closed from 3 to 17 m. Blades within 7 m have four rows
+(widths 0.55, 1, 0.5 and 0.12) and a pointed tip; farther ones two rows and a tip. An 8 m patch
+field thins the turf into mossy patches (never bare earth), a 1.6 m field raises tussocks (blades
+up to 36 cm) above short grazed turf (7–16 cm), and dry patches turn tips toward straw. Each blade
+takes its own value (±18%), some go dry, and roots sit dark in the shade of the blades around
+them. About 1% of columns carry a fern crown (a ring of arching, drooping rachis strips cut into
+alternating leaflets) and another 1% a small flower (a thin stem and five cupped petals around a
+warm heart). A triangle budget (260k on desktop, 44k on phones) thins the whole bank evenly.
+
+Placement reads the smooth ground's neighbouring 12.5 cm columns (a slope only counts as a step
+beyond 5 cm per column of distance): blades near a step or a wall turn away from it, lean less,
+root farther in and stay shorter, so no blade hangs over a drop. The material is matte (a 35% sky
+reflection: a sward hides most blades from the sky behind its neighbours), and thin blades pass
+a little light only when the view faces a low sun, so a backlit bank does not glow like straw.
 
 ## Loading
 
@@ -104,8 +108,8 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 277k triangles: 39k of wood, 34k of foliage cards and 203k of undergrowth; the
-phone forest is about 57k (18k, 11k and 28k). The voxel trees it replaces drew 21k of wood and
+forest is about 225k triangles: 39k of wood, 34k of foliage cards and 151k of undergrowth; the
+phone forest is about 69k (18k, 11k and 39k). The voxel trees it replaces drew 21k of wood and
 63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
 long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
 sapling's none. Preparation runs after the surfaces on the
