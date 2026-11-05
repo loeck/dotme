@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createPhysicsWorld, loadPhysics, mergeStaticBoxes } from './physics-world'
 import { createVoxelIndex, firstVoxelHit } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 
 const voxel = (x: number, y: number, z: number, size = 1): Voxel => ({ x, y, z, size, color: 0 })
 

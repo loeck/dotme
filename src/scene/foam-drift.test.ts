@@ -5,7 +5,7 @@ import { required } from '../invariant'
 import { FoamDrift } from './foam-drift'
 import { createLakeBed, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 import { WindModel } from './wind'
 
 const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }

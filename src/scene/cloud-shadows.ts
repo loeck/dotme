@@ -213,7 +213,11 @@ export class CloudShadows {
     Object.assign(light, { colorNode })
   }
   applyTo(material: MeshStandardNodeMaterial, mainCamera?: Camera) {
-    material.aoNode = mix(0.35, 1, cloudShadow(positionWorld, this.uniforms))
+    // Compose with occlusion a material already has (baked sky visibility on the terrain).
+    const cloud = mix(0.35, 1, cloudShadow(positionWorld, this.uniforms))
+    material.aoNode = material.aoNode
+      ? cloud.mul(new ConvertNode<'float'>(material.aoNode, 'float'))
+      : cloud
     if (mainCamera) {
       const reflectionFog = uniform(1).onRenderUpdate(({ camera }) =>
         camera === mainCamera ? 0 : 1,

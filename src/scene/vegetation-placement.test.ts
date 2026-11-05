@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import { ATLAS_TILES, bakeFoliageAtlas, tileCoverage } from './foliage-atlas'
 import { WATER_LEVEL } from './lake-bed'
+import { createLakeWorld } from './lake-world'
 import { MeshBuilder, appendTuft } from './vegetation-meshes'
 import { foliageSeeds, meshSculpt, sculptSpruce, VoxelSculpt } from './vegetation-models'
 import { prepareVegetation } from './vegetation-placement'
-import { createVoxelWorld } from './voxel-world'
 
 const triangles = (vegetation: ReturnType<typeof prepareVegetation>) =>
   (vegetation.wood.indices.length +
@@ -113,7 +113,7 @@ describe('Last Signal vegetation', () => {
 
   it('is deterministic and stays within a triangle budget', () => {
     for (const mobile of [false, true]) {
-      const world = createVoxelWorld(9182, mobile)
+      const world = createLakeWorld(9182, mobile)
       const first = prepareVegetation(world, 9182, mobile)
       const second = prepareVegetation(world, 9182, mobile)
       expect(Array.from(first.foliage.positions)).toEqual(Array.from(second.foliage.positions))

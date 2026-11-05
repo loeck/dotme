@@ -45,8 +45,8 @@ import { required } from '../invariant'
 import { WATER_LEVEL } from './lake-bed'
 import type { SplashJet, WaterfallImpact } from './lake-splashes'
 import type { LakeWaterMaterial } from './lake-water'
+import type { WaterfallSite } from './lake-world'
 import { ResourceScope } from './resource-scope'
-import type { VoxelWaterfall } from './voxel-world'
 import type { WaterContact } from './water-contact'
 import {
   contactNoise,
@@ -133,7 +133,7 @@ export class LakeWaterfall {
   private readonly scene: Scene
   private keyLight: DirectionalLight | undefined
   private readonly opacity = uniform(0)
-  private readonly fall: VoxelWaterfall
+  private readonly fall: WaterfallSite
   private readonly emitJet: (jet: SplashJet) => void
   private readonly emitImpact: (impact: WaterfallImpact, wind: WindState) => void
   private contact?: WaterContact
@@ -187,7 +187,7 @@ export class LakeWaterfall {
 
   constructor(
     scene: Scene,
-    fall: VoxelWaterfall,
+    fall: WaterfallSite,
     mobile: boolean,
     reducedMotion: boolean,
     emitJet: (jet: SplashJet) => void,

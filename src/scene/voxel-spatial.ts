@@ -1,5 +1,7 @@
 import { required } from '../invariant'
-import type { Voxel } from './voxel-world'
+
+/** An axis-aligned cube: the box primitive of simple fixtures and of the spatial index. */
+export type Voxel = Readonly<{ x: number; y: number; z: number; size: number; color: number }>
 
 export type VoxelIndex = {
   boxes: Float64Array

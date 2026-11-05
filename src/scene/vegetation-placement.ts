@@ -2,6 +2,8 @@ import { CAMERA_REST } from './camera-rig'
 import { bakeFoliageAtlas } from './foliage-atlas'
 import type { FoliageAtlas } from './foliage-atlas'
 import { WATER_LEVEL } from './lake-bed'
+import type { TreeKind, LakeWorld } from './lake-world'
+import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import {
   appendClumps,
   appendFern,
@@ -21,7 +23,6 @@ import {
   VEGETATION_PALETTE,
 } from './vegetation-models'
 import type { FoliageSeed, VegetationGeometry, VoxelSculpt } from './vegetation-models'
-import type { TreeKind, VoxelWorld } from './voxel-world'
 
 /**
  * The forest as three merged world-space meshes, after Last Signal: voxel wood, foliage clump
@@ -80,30 +81,67 @@ function valueNoise(seed: number, x: number, z: number, scale: number, stream: n
   return a + (b - a) * sx + (c - a) * sz + (a - b - c + d) * sx * sz
 }
 
-/** Highest solid top per 12.5 cm column, and whether that top is mossy ground, limited to
- * the foreground bank and the ground around trees: the whole lake would cost far more. */
-function columnTops(world: VoxelWorld) {
+/** Ground height per 12.5 cm column, and whether it is soft, mossy ground (not rock, gravel or
+ * a steep face), limited to the foreground bank and the ground around trees: the whole lake
+ * would cost far more. */
+function columnTops(world: LakeWorld) {
   const columns = new Map<string, Column>()
-  const groundEnd = world.groups.ground.count
-  const needed = (x: number, z: number, margin: number) =>
-    z > GROUND_COVER_Z - margin ||
-    world.trees.some(
-      (tree) => (tree.x - x) ** 2 + (tree.z - z) ** 2 < (COMPANION_REACH + margin) ** 2,
+  const { field } = world
+  // Boulders by 2 m bucket: nothing grows out of a stone.
+  const buckets = new Map<string, LakeWorld['boulders'][number][]>()
+  for (const boulder of world.boulders) {
+    const reach = Math.max(boulder.size[0], boulder.size[2]) + 0.15
+    for (
+      let bz = Math.floor((boulder.z - reach) / 2);
+      bz <= Math.floor((boulder.z + reach) / 2);
+      bz++
     )
-  world.voxels.forEach((voxel, index) => {
-    if (!needed(voxel.x, voxel.z, voxel.size)) return
-    const top = voxel.y + voxel.size / 2
-    const span = Math.max(1, Math.round(voxel.size / COLUMN))
-    const x0 = Math.round((voxel.x - voxel.size / 2) / COLUMN),
-      z0 = Math.round((voxel.z - voxel.size / 2) / COLUMN)
-    for (let i = 0; i < span; i++)
-      for (let k = 0; k < span; k++) {
-        const key = `${x0 + i}:${z0 + k}`
-        const previous = columns.get(key)
-        if (previous && previous.top >= top) continue
-        columns.set(key, { top, ground: index < groundEnd })
+      for (
+        let bx = Math.floor((boulder.x - reach) / 2);
+        bx <= Math.floor((boulder.x + reach) / 2);
+        bx++
+      ) {
+        const key = `${bx}:${bz}`
+        const list = buckets.get(key)
+        if (list) list.push(boulder)
+        else buckets.set(key, [boulder])
       }
-  })
+  }
+  const onStone = (x: number, z: number) =>
+    (buckets.get(`${Math.floor(x / 2)}:${Math.floor(z / 2)}`) ?? []).some(
+      (boulder) =>
+        Math.hypot(x - boulder.x, z - boulder.z) <
+        Math.max(boulder.size[0], boulder.size[2]) + 0.15,
+    )
+  const add = (cx: number, cz: number) => {
+    const key = `${cx}:${cz}`
+    if (columns.has(key)) return
+    const x = (cx + 0.5) * COLUMN,
+      z = (cz + 0.5) * COLUMN
+    const top = sampleHeight(field, x, z)
+    if (top <= WATER_LEVEL) return
+    const [, up] = sampleNormal(field, x, z)
+    columns.set(key, {
+      top,
+      ground: up > 0.82 && sampleRock(field, x, z) < 0.45 && !onStone(x, z),
+    })
+  }
+  const fieldMaxX = field.minX + (field.columns - 1) * field.cell
+  const fieldMaxZ = field.minZ + (field.rows - 1) * field.cell
+  for (
+    let cz = Math.floor((GROUND_COVER_Z - 0.5) / COLUMN);
+    cz <= Math.floor(fieldMaxZ / COLUMN);
+    cz++
+  )
+    for (let cx = Math.ceil(field.minX / COLUMN); cx <= Math.floor(fieldMaxX / COLUMN); cx++)
+      add(cx, cz)
+  const reach = Math.ceil((COMPANION_REACH + 0.5) / COLUMN)
+  for (const tree of world.trees) {
+    const tx = Math.floor(tree.x / COLUMN),
+      tz = Math.floor(tree.z / COLUMN)
+    for (let dz = -reach; dz <= reach; dz++)
+      for (let dx = -reach; dx <= reach; dx++) add(tx + dx, tz + dz)
+  }
   return {
     columns,
     at(x: number, z: number) {
@@ -119,7 +157,7 @@ type Model = Readonly<{
 }>
 
 export function prepareVegetation(
-  world: VoxelWorld,
+  world: LakeWorld,
   seed: number,
   mobile: boolean,
 ): PreparedVegetation {
@@ -228,7 +266,8 @@ export function prepareVegetation(
       for (let dx = -reach; dx <= reach; dx++) {
         if (!dx && !dz) continue
         const neighbour = tops.columns.get(`${cx + dx}:${cz + dz}`)
-        if (neighbour && Math.abs(neighbour.top - top) <= 0.05) continue
+        // A slope is not a step: tolerate 5 cm per column of distance.
+        if (neighbour && Math.abs(neighbour.top - top) <= 0.05 * Math.hypot(dx, dz)) continue
         near = true
         const weight = 1 / Math.hypot(dx, dz)
         ex += dx * weight

@@ -6,7 +6,7 @@ import { LakeWaterMaterial } from './lake-water'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { SceneDetails, updateDetailEnvironment } from './scene-details'
 import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 import { WindModel } from './wind'
 
 describe('detail environment bridge', () => {

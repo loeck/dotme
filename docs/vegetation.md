@@ -30,7 +30,7 @@ about a third of the 25 cm terrain voxel. Each cell has a role: wood, needles or
 Trunks are deliberately stout (Last Signal's pine: 0.18 m at the base) so they still read from
 the default camera, tens of metres away. Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
-crown (its highest ground cell, nearest the centre on a tie) at three quarters of the usual
+crown (its highest open ground, nearest the centre on a tie) at three quarters of the usual
 size, so no mound reads as a bare stone pyramid and the tree stays in proportion to it.
 
 Past the foreground, grass blades would shrink below a pixel, so the mid-ground turf reads
@@ -73,7 +73,8 @@ alternating leaflets. Flowers have a thin stem and five cupped petals around a w
 Under the clumps, a ground cover of short tufts (seven to ten blades of 6–13 cm, two rows
 and a tip, three triangles each) grows on most of the bank's columns, thinner on bare patches
 and drier where the clumps dry, so the soil between tall tufts reads as turf rather than bare
-voxels. Placement reads the neighbouring columns: tall clumps keep off a step's last column,
+ground. Placement reads the smooth ground's neighbouring 12.5 cm columns (a slope only counts as
+a step beyond 5 cm per column of distance): tall clumps keep off a step's last column,
 and blades near a step or a wall turn away from it and lean less, while ground cover there moves
 inward and stays shorter, so no blade hangs over a drop. Thin blades pass some sunlight when the
 view faces a low sun.

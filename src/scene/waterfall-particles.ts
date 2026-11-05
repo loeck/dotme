@@ -23,7 +23,7 @@ import {
 } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
-import type { VoxelWaterfall } from './voxel-world'
+import type { WaterfallSite } from './lake-world'
 
 const GRAVITY = 9.81
 const IMPACT_OFFSET = 0.8
@@ -41,7 +41,7 @@ export function curtainParcelCount(mobile: boolean) {
  * driven by Rapier bodies. Positions, velocities and blocker foam stream in
  * every frame; the cursor hole is a real absence of bodies.
  */
-export function createWaterfallParticles(fall: VoxelWaterfall, mobile: boolean) {
+export function createWaterfallParticles(fall: WaterfallSite, mobile: boolean) {
   const count = curtainParcelCount(mobile)
   const height = Math.max(SOURCE_DEPTH, fall.top - WATER_LEVEL)
   const sizes = new Float32Array(count)

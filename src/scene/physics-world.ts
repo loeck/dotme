@@ -2,6 +2,7 @@ import type { World } from '@dimforge/rapier3d-compat'
 
 import { required } from '../invariant'
 import { mergeStaticBoxes } from './static-boxes'
+import type { TerrainColliders } from './terrain-surface'
 import type { VoxelIndex } from './voxel-spatial'
 
 export { mergeStaticBoxes } from './static-boxes'
@@ -40,6 +41,7 @@ export type TracerPoint = {
 /** Terrain membership; queries address statics only, never droplets or fish. */
 const STATIC_GROUPS = (0x0001 << 16) | 0xffff
 const STATIC_QUERY_GROUPS = (0x0001 << 16) | 0x0001
+const GRID_NUDGE = 7.3e-5
 
 export type PhysicsWorld = {
   readonly rapier: RapierModule
@@ -53,34 +55,64 @@ export type PhysicsWorld = {
 }
 
 /**
- * One shared world: fixed terrain colliders, queries plus stepped dynamics.
- * `merged` is `mergeStaticBoxes(index.boxes)`, which world preparation already
- * computes off the main thread.
+ * One shared world: fixed terrain colliders, queries plus stepped dynamics. The scene passes
+ * its smooth terrain (a heightfield and boulder hulls); box solids remain for compact fixtures,
+ * with `merged` = `mergeStaticBoxes(index.boxes)`.
  */
 export function createPhysicsWorld(
   rapier: RapierModule,
-  index: VoxelIndex,
-  merged = mergeStaticBoxes(index.boxes),
+  statics: VoxelIndex | TerrainColliders,
+  merged?: Float64Array,
 ): PhysicsWorld {
   const world = new rapier.World({ x: 0, y: -9.81, z: 0 })
-  for (let i = 0; i + 5 < merged.length; i += 6) {
-    const x0 = required(merged[i]),
-      y0 = required(merged[i + 1]),
-      z0 = required(merged[i + 2])
-    const x1 = required(merged[i + 3]),
-      y1 = required(merged[i + 4]),
-      z1 = required(merged[i + 5])
+  let staticCount = 0
+  const fixed = (desc: InstanceType<RapierModule['ColliderDesc']>) => {
     world.createCollider(
-      rapier.ColliderDesc.cuboid((x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2)
-        .setTranslation((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)
-        .setRestitution(0.05)
-        .setFriction(0.9)
-        .setCollisionGroups(STATIC_GROUPS),
+      desc.setRestitution(0.05).setFriction(0.9).setCollisionGroups(STATIC_GROUPS),
     )
+    staticCount++
+  }
+  if ('heights' in statics) {
+    const [cx, cy, cz] = statics.center
+    const [sx, sy, sz] = statics.scale
+    fixed(
+      rapier.ColliderDesc.heightfield(statics.rows - 1, statics.columns - 1, statics.heights, {
+        x: sx,
+        y: sy,
+        z: sz,
+      })
+        // Rapier misses an exactly vertical ray lying on a heightfield grid line. Grid lines sit
+        // on round coordinates; a sub-millimetre irrational shift keeps queries off them.
+        .setTranslation(cx + GRID_NUDGE * Math.SQRT2, cy, cz + GRID_NUDGE * Math.SQRT1_2),
+    )
+    const stride = statics.boulderStride * 3
+    for (let start = 0; start + stride <= statics.boulderPoints.length; start += stride) {
+      const hull = rapier.ColliderDesc.convexHull(
+        statics.boulderPoints.subarray(start, start + stride),
+      )
+      if (hull) fixed(hull)
+    }
+  } else {
+    const boxes = merged ?? mergeStaticBoxes(statics.boxes)
+    for (let i = 0; i + 5 < boxes.length; i += 6) {
+      const x0 = required(boxes[i]),
+        y0 = required(boxes[i + 1]),
+        z0 = required(boxes[i + 2])
+      const x1 = required(boxes[i + 3]),
+        y1 = required(boxes[i + 4]),
+        z1 = required(boxes[i + 5])
+      fixed(
+        rapier.ColliderDesc.cuboid((x1 - x0) / 2, (y1 - y0) / 2, (z1 - z0) / 2).setTranslation(
+          (x0 + x1) / 2,
+          (y0 + y1) / 2,
+          (z0 + z1) / 2,
+        ),
+      )
+    }
   }
   // Populate the query pipeline once; statics never move afterwards.
   world.step()
-  const columns = index.columns
+  const columns = 'heights' in statics ? statics.columnsTop : statics.columns
   const ray = new rapier.Ray({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: 1 })
   const broadphaseHit = (a: TracerPoint, b: TracerPoint) => {
     const x0 = Math.max(0, Math.floor(Math.min(a.x, b.x) / 2) - columns.x)
@@ -104,7 +136,7 @@ export function createPhysicsWorld(
   return {
     rapier,
     world,
-    staticCount: merged.length / 6,
+    staticCount,
     trace(a, b) {
       if (!broadphaseHit(a, b)) return Infinity
       aim(a.x, a.y, a.z, b.x - a.x, b.y - a.y, b.z - a.z)

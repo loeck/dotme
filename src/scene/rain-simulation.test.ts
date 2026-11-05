@@ -12,7 +12,7 @@ import {
 } from './rain-simulation'
 import type { SegmentTrace } from './rain-simulation'
 import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 
 const empty = (): SegmentTrace => () => Infinity
 const shelter = async (voxels: Voxel[]): Promise<PhysicsWorld> =>

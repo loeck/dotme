@@ -3,7 +3,6 @@ import {
   AdditiveBlending,
   AmbientLight,
   BackSide,
-  BatchedMesh,
   BoxGeometry,
   Camera,
   BufferAttribute,
@@ -19,7 +18,6 @@ import {
   Mesh,
   MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
-  OrthographicCamera,
   Object3D,
   PCFShadowMap,
   PMREMGenerator,
@@ -42,7 +40,6 @@ import type { RenderTarget } from 'three/webgpu'
 import type { AmbientEnvironment } from '../audio/environment'
 import { pointSound, waterfallSound } from '../audio/environment'
 import type { WaterSoundEvent } from '../audio/water-sounds'
-import { required } from '../invariant'
 import { sceneParams } from '../scene-params'
 import { CAMERA_IDLE_DRIFT, CAMERA_REST, cameraTarget, ENVIRONMENT_PROBE } from './camera-rig'
 import { installCompilationScheduler } from './compilation-scheduler'
@@ -59,6 +56,7 @@ import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
+import type { LakeLamp, WaterfallSite } from './lake-world'
 import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
@@ -82,12 +80,11 @@ import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
 import { SubmergedScene } from './submerged-scene'
-import { applyTerrainDetail, TerrainSkyFill } from './terrain-detail'
+import { TerrainSkyFill } from './terrain-detail'
+import { createBoulderMaterial, createTerrainMaterial } from './terrain-material'
 import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
-import type { TerrainBatch } from './voxel-mesh'
-import type { VoxelLamp, VoxelMaterial, VoxelWaterfall } from './voxel-world'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
 import { WaterSimulation } from './water-simulation'
@@ -153,31 +150,6 @@ type Mote = Readonly<{
   speed: number
 }>
 
-/** Each batch holds one face orientation. Only valid for FrontSide materials: a batch
- * that can only face away from the eye would be fully back-face culled anyway. */
-function cullBackFacingBatches(
-  mesh: BatchedMesh,
-  instances: readonly { id: number; face: number; bounds: TerrainBatch['bounds'] }[],
-) {
-  const eye = new Vector3()
-  const frustumCull = mesh.onBeforeRender.bind(mesh)
-  mesh.onBeforeRender = (renderer, scene, camera, geometry, material, group) => {
-    const perspective = !(camera instanceof OrthographicCamera)
-    camera.getWorldPosition(eye)
-    for (const { id, face, bounds } of instances) {
-      const axis = face >> 1
-      const position = eye.getComponent(axis)
-      const visible =
-        !perspective ||
-        (face % 2 === 0
-          ? position > required(bounds.min[axis])
-          : position < required(bounds.max[axis]))
-      if (mesh.getVisibleAt(id) !== visible) mesh.setVisibleAt(id, visible)
-    }
-    frustumCull(renderer, scene, camera, geometry, material, group)
-  }
-}
-
 export class VoxelLandscapeEngine {
   private readonly renderDiagnostics = new SceneRenderDiagnostics()
   private readonly options: Omit<VoxelLandscapeEngineOptions, 'prepared'>
@@ -189,7 +161,7 @@ export class VoxelLandscapeEngine {
   private readonly sceneContrast: SceneContrast
   private readonly grade = new SceneGrade()
   private gradeFrame = 0
-  private readonly waterfall: VoxelWaterfall | undefined
+  private readonly waterfall: WaterfallSite | undefined
   private readonly waterfallAudioPosition = new Vector3()
   private readonly soundPosition = new Vector3()
   private solarClock: SolarClock
@@ -231,7 +203,7 @@ export class VoxelLandscapeEngine {
   private readonly materials: Array<{ dispose: () => void }> = []
   private readonly geometries: Array<{ dispose: () => void }> = []
   private readonly lampLights: Array<{
-    source: VoxelLamp
+    source: LakeLamp
     light: PointLight
     bulb: Mesh<SphereGeometry, MeshBasicNodeMaterial>
     glow: Mesh<PlaneGeometry, MeshBasicNodeMaterial>
@@ -330,9 +302,7 @@ export class VoxelLandscapeEngine {
       await preparationFrame(signal)
       signal.throwIfAborted()
       // Owned before the next yield so cancellation also frees the Rapier world.
-      const physics = resources.own(
-        createPhysicsWorld(await physicsModule, prepared.terrain.index, prepared.staticBoxes),
-      )
+      const physics = resources.own(createPhysicsWorld(await physicsModule, prepared.colliders))
       // Collider creation and scene construction are separate tasks for the loader.
       await preparationFrame(signal)
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
@@ -626,48 +596,29 @@ export class VoxelLandscapeEngine {
   private buildWorld(prepared: PreparedWorld) {
     const { world, terrain } = prepared
     const seed = world.seed
-    const surfaces: Record<VoxelMaterial, { roughness: number; metalness: number }> = {
-      ground: { roughness: 0.88, metalness: 0 },
-      shore: { roughness: 0.24, metalness: 0.04 },
-      rock: { roughness: 0.42, metalness: 0.02 },
-    }
-    for (const kind of ['ground', 'shore', 'rock'] as const) {
-      const material = new MeshStandardNodeMaterial({
-        ...surfaces[kind],
-        envMapIntensity: 0.8,
-        flatShading: true,
-        vertexColors: true,
-      })
-      applyTerrainDetail(material, this.terrainSky)
+    const meshes = [
+      { data: terrain.surface, material: createTerrainMaterial(this.terrainSky) },
+      { data: terrain.boulders, material: createBoulderMaterial(this.terrainSky) },
+    ]
+    for (const { data, material } of meshes) {
       this.materials.push(this.resources.own(material))
-      const batches = terrain.batches.filter((batch) => batch.material === kind)
-      if (!batches.length) continue
-      const mesh = new BatchedMesh(
-        batches.length,
-        batches.reduce((sum, batch) => sum + batch.positions.length / 3, 0),
-        batches.reduce((sum, batch) => sum + batch.indices.length, 0),
-        material,
-      )
-      const instances = batches.map((batch) => {
-        const geometry = new BufferGeometry()
-        geometry.setAttribute('position', new BufferAttribute(batch.positions, 3))
-        geometry.setAttribute('normal', new BufferAttribute(batch.normals, 3, true))
-        geometry.setAttribute('color', new BufferAttribute(batch.colors, 3))
-        geometry.setIndex(new BufferAttribute(batch.indices, 1))
-        const id = mesh.addInstance(mesh.addGeometry(geometry))
-        geometry.dispose()
-        return { id, face: batch.face, bounds: batch.bounds }
-      })
-      cullBackFacingBatches(mesh, instances)
+      if (!data.indices.length) continue
+      const geometry = new BufferGeometry()
+      geometry.setAttribute('position', new BufferAttribute(data.positions, 3))
+      geometry.setAttribute('normal', new BufferAttribute(data.normals, 3, true))
+      geometry.setAttribute('surface', new BufferAttribute(data.surface, 4, true))
+      geometry.setIndex(new BufferAttribute(data.indices, 1))
+      geometry.computeBoundingSphere()
+      this.geometries.push(this.resources.own(geometry))
+      const mesh = new Mesh(geometry, material)
       mesh.receiveShadow = true
       mesh.updateMatrixWorld(true)
       mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
       this.voxelGroup.add(mesh)
       this.objects.push(mesh)
-      this.resources.own(mesh)
     }
 
-    this.buildShadowCasters(terrain)
+    this.buildShadowCasters()
 
     const bulbGeometry = new SphereGeometry(0.11, 6, 5)
     const glowGeometry = new PlaneGeometry(2.0, 2.0)
@@ -843,60 +794,20 @@ export class VoxelLandscapeEngine {
     if (this.reducedMotion) this.requestFrame()
   }
 
-  private buildShadowCasters(terrain: PreparedWorld['terrain']) {
-    const box = new BoxGeometry(1, 1, 1)
-    const corners = box.getAttribute('position')
-    const corner = (vertex: number) =>
-      (corners.getX(vertex) > 0 ? 1 : 0) |
-      (corners.getY(vertex) > 0 ? 2 : 0) |
-      (corners.getZ(vertex) > 0 ? 4 : 0)
-    const cubeIndices = Array.from(required(box.index).array, corner)
-    box.dispose()
-    const cubes = terrain.shadowMatrices.reduce((sum, matrices) => sum + matrices.length / 16, 0)
+  /** The terrain and boulder meshes, depth-only on the shadow layer, sharing their geometry. */
+  private buildShadowCasters() {
     const material = new MeshBasicNodeMaterial()
     this.materials.push(this.resources.own(material))
-    const mesh = new BatchedMesh(
-      terrain.shadowMatrices.length,
-      cubes * 8,
-      cubes * cubeIndices.length,
-      material,
-    )
-    mesh.sortObjects = false
-    for (const matrices of terrain.shadowMatrices) {
-      const count = matrices.length / 16
-      const positions = new Float32Array(count * 24)
-      const indices = new Uint32Array(count * cubeIndices.length)
-      for (let cube = 0; cube < count; cube++) {
-        const half = required(matrices[cube * 16]) * 0.5
-        const x = required(matrices[cube * 16 + 12]),
-          y = required(matrices[cube * 16 + 13]),
-          z = required(matrices[cube * 16 + 14])
-        for (let k = 0; k < 8; k++) {
-          const at = (cube * 8 + k) * 3
-          positions[at] = x + (k & 1 ? half : -half)
-          positions[at + 1] = y + (k & 2 ? half : -half)
-          positions[at + 2] = z + (k & 4 ? half : -half)
-        }
-        for (let i = 0; i < cubeIndices.length; i++)
-          indices[cube * cubeIndices.length + i] = cube * 8 + required(cubeIndices[i])
-      }
-      const geometry = new BufferGeometry()
-      geometry.setAttribute('position', new BufferAttribute(positions, 3))
-      geometry.setIndex(new BufferAttribute(indices, 1))
-      mesh.addInstance(mesh.addGeometry(geometry))
-      geometry.dispose()
+    for (const source of this.voxelGroup.children) {
+      if (!(source instanceof Mesh)) continue
+      const mesh = new Mesh(source.geometry, material)
+      mesh.castShadow = true
+      mesh.layers.set(5)
+      mesh.updateMatrixWorld(true)
+      mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
+      this.shadowGroup.add(mesh)
+      this.objects.push(mesh)
     }
-    // Three's batching transforms normals in every shader, the depth-only shadow pass included,
-    // and warns when the attribute is missing. Depth never reads them, so the position buffer
-    // stands in: the same attribute binds twice with no extra memory or upload.
-    mesh.geometry.setAttribute('normal', mesh.geometry.getAttribute('position'))
-    mesh.castShadow = true
-    mesh.layers.set(5)
-    mesh.updateMatrixWorld(true)
-    mesh.matrixAutoUpdate = mesh.matrixWorldAutoUpdate = false
-    this.shadowGroup.add(mesh)
-    this.objects.push(mesh)
-    this.resources.own(mesh)
   }
 
   /** A lantern only needs a cube map when it is one of the shadow casters. */

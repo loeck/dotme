@@ -13,9 +13,10 @@ import { createLakeBed } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import type { SplashJet } from './lake-splashes'
 import { LakeWaterfall } from './lake-waterfall'
+import type { WaterfallSite } from './lake-world'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel, VoxelWaterfall } from './voxel-world'
+import type { Voxel } from './voxel-spatial'
 import { waterfallDrift } from './waterfall-flow'
 import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
 import { WindModel } from './wind'
@@ -34,7 +35,7 @@ const fall = {
     { x: -22.53, z: -18, size: 1 },
     { x: -23.53, z: -18, size: 1 },
   ],
-} satisfies VoxelWaterfall
+} satisfies WaterfallSite
 
 const steadyWind: WindState = {
   direction: [1, 0],

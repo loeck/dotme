@@ -6,7 +6,7 @@ import { WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { bedDepth } from './lake-fish'
 import { LakeRay, rayOutlineRadius, rayPose, selectRayCircuit } from './lake-ray'
-import { createVoxelWorld } from './voxel-world'
+import { createLakeWorld } from './lake-world'
 
 const beds = new Map<string, LakeBed>()
 const cases = [false, true].flatMap((mobile) => [0, 12, 42, 9182].map((seed) => ({ mobile, seed })))
@@ -14,7 +14,7 @@ function lakeBed(seed: number, mobile: boolean) {
   const key = `${seed}:${mobile}`
   let bed = beds.get(key)
   if (!bed) {
-    bed = createVoxelWorld(seed, mobile).lakeBed
+    bed = createLakeWorld(seed, mobile).lakeBed
     beds.set(key, bed)
   }
   return bed

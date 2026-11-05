@@ -432,7 +432,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const tangent = vec2(shoreNormal.y.negate(), shoreNormal.x)
     const anchor = p.sub(shoreNormal.mul(distance))
     const patches = contactNoise(anchor.mul(0.9).add(tangent.mul(u.uTime).mul(0.045)))
-    const width = max(mix(0.45, 1.5, arrival), shorePixel.mul(1.45)).mul(mix(0.65, 1, patches))
+    // A calm lake on a shelving shore keeps a thin, broken film; arriving waves widen it.
+    const width = max(mix(0.22, 1.1, arrival), shorePixel.mul(1.45)).mul(mix(0.65, 1, patches))
     const contact = float(1).sub(
       smoothstep(width.mul(0.25), width.add(shorePixel.mul(0.5)), distance),
     )
@@ -442,7 +443,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const lace = contactNoise(flow.mul(3.2))
     const grain = mix(contactNoise(flow.mul(16)), 0.5, smoothstep(0.035, 0.18, footprint))
     const breakup = smoothstep(0.24, 0.67, lace.add(grain.mul(0.18)))
-    const residual = mix(0.08, 0.6, smoothstep(0.32, 0.62, patches))
+    const residual = mix(0.03, 0.38, smoothstep(0.32, 0.62, patches))
     const breakEnergy = smoothstep(0.08, 0.35, incidentSlope.length().add(state.y.abs().mul(0.45)))
     const shallowBreak = float(1).sub(smoothstep(0.4, 2, depth))
     const film = contact
