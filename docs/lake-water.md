@@ -29,7 +29,10 @@ and light reaching the bed is attenuated by depth on the way down as well as up.
 and a turquoise subsurface glow sit on top of the reflected and transmitted light. At night the
 glitter and short capillary glints fade, leaving a softer moon reflection. The bed takes a dim
 blue tint that fades with depth, so only the shallows stay visible over navy water. Shoreline
-foam is a bright animated band whose width follows wave arrival.
+foam is a bright animated band whose width follows wave arrival. Calm water leaves only a trace
+of it in patches; far away, where the band is held at a pixel and a half so it does not alias,
+its strength falls in proportion, so the foam keeps its true amount instead of outlining every
+shore in white.
 
 The bed capture carries a simple seabed: dune relief in the depth field, wave-ripple
 stripes on the sand albedo, dark meadow patches aligned with instanced seagrass tufts that

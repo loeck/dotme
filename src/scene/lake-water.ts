@@ -433,7 +433,11 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const anchor = p.sub(shoreNormal.mul(distance))
     const patches = contactNoise(anchor.mul(0.9).add(tangent.mul(u.uTime).mul(0.045)))
     // A calm lake on a shelving shore keeps a thin, broken film; arriving waves widen it.
-    const width = max(mix(0.22, 1.1, arrival), shorePixel.mul(1.45)).mul(mix(0.65, 1, patches))
+    const nominal = mix(0.22, 1.1, arrival).mul(mix(0.65, 1, patches))
+    const width = max(nominal, shorePixel.mul(1.45).mul(mix(0.65, 1, patches)))
+    // Far away the band is held at a pixel and a half so it does not alias; its strength falls
+    // in proportion, so the foam keeps its true amount rather than outlining every shore.
+    const coverage = min(1, nominal.div(width))
     const contact = float(1).sub(
       smoothstep(width.mul(0.25), width.add(shorePixel.mul(0.5)), distance),
     )
@@ -443,13 +447,15 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const lace = contactNoise(flow.mul(3.2))
     const grain = mix(contactNoise(flow.mul(16)), 0.5, smoothstep(0.035, 0.18, footprint))
     const breakup = smoothstep(0.24, 0.67, lace.add(grain.mul(0.18)))
-    const residual = mix(0.03, 0.38, smoothstep(0.32, 0.62, patches))
+    // Calm water leaves only a trace of foam in patches; a wet, dark edge does the rest.
+    const residual = mix(0, 0.16, smoothstep(0.38, 0.68, patches))
     const breakEnergy = smoothstep(0.08, 0.35, incidentSlope.length().add(state.y.abs().mul(0.45)))
     const shallowBreak = float(1).sub(smoothstep(0.4, 2, depth))
     const film = contact
       .mul(mix(residual, 0.9, arrival))
       .mul(mix(0.28, 1, breakup))
       .add(contact.mul(shallowBreak).mul(breakEnergy).mul(0.18))
+      .mul(coverage)
     const crawl = sin(anchor.dot(tangent).mul(2.5).add(u.uTime.mul(1.1))).mul(0.12)
     const front = float(1).sub(
       smoothstep(
