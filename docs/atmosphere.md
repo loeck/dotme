@@ -66,7 +66,8 @@ the beams read:
   air;
 - when the sun is in or near the frame, screen-space crepuscular rays march 20 depth samples from
   each pixel toward its disc. Open sky along the way streams light through canopy gaps finer than
-  the shadow map resolves. The light follows a tight forward lobe (cos⁶⁰, plus 5% of cos⁶) and is
+  the shadow map resolves. The light follows a tight forward lobe (cos⁶⁰, half strength about 9°
+  from the disc, plus 5% of cos⁶) and is
   weighted toward partly blocked lines (between branches, at ridge edges), since fully open sky
   already carries the sun's glow; it grows with the air in front of the pixel, up to about 120 m,
   and the sky itself takes a third. A first version with a wide lobe and uniform weight veiled

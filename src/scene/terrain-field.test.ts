@@ -178,8 +178,6 @@ describe('terrain surface', () => {
       expect(again.positions).toEqual(surface.positions)
       expect(again.surface).toEqual(surface.surface)
     },
-    // Meshing the desktop field twice takes 3.5–4.5 s alone, past the default under load.
-    15_000,
   )
 
   it('collides where the ground is drawn', async () => {

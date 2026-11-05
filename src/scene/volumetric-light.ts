@@ -154,13 +154,12 @@ export class VolumetricLight {
         // metre or two across, and each pixel starts at its own offset: the composite's
         // depth-aware filter turns the jitter into smooth beams instead of step bands.
         const span = max(0, distance.sub(entry)),
-          stride = span.div(steps),
           jitter = interleavedGradientNoise(uv().mul(this.airSize).floor()),
           accumulated = float(1).toVar(),
           radiance = vec3(0).toVar()
         const phase = airPhase(ray.dot(this.sunDirection)),
           ambient = this.ambient.rgb.add(sky.horizon(ray).mul(this.skyAir))
-        If(stride.greaterThan(0).and(sigma.greaterThan(0)), () => {
+        If(span.greaterThan(0).and(sigma.greaterThan(0)), () => {
           Loop(steps, ({ i }) => {
             const t0 = float(i).div(steps),
               t1 = float(i).add(1).div(steps),
@@ -224,7 +223,8 @@ export class VolumetricLight {
         const facing = smoothstep(0.0, 0.25, sunClip.w.div(1000))
         const offscreen = max(abs(sunUv.x.sub(0.5)), abs(sunUv.y.sub(0.5)))
         const inFrame = smoothstep(1.1, 0.55, offscreen).mul(facing)
-        If(inFrame.greaterThan(0.001), () => {
+        // `sunGlow` is zero at night, when the light direction is the moon's.
+        If(inFrame.greaterThan(0.001).and(this.sunGlow.r.greaterThan(0)), () => {
           const lit = float(0).toVar(),
             weights = float(0).toVar()
           Loop(RAY_SAMPLES, ({ i }) => {
@@ -234,16 +234,16 @@ export class VolumetricLight {
               .greaterThanEqual(vec2(0))
               .all()
               .and(coord.lessThanEqual(vec2(1)).all())
-            const open = inside.select(
+            const clear = inside.select(
               smoothstep(0.99995, 1, this.depth.sample(clamp(coord, 0, 1)).r),
               1,
             )
             // Nearer occluders weigh more: a beam is born at the gap it passes.
             const weight = float(1).sub(t.mul(0.6))
-            lit.addAssign(open.mul(weight))
+            lit.addAssign(clear.mul(weight))
             weights.addAssign(weight)
           })
-          // A tight forward lobe (half strength about 12° from the disc) plus a faint wide one:
+          // A tight forward lobe (half strength about 9° from the disc) plus a faint wide one:
           // beams fan from the sun without veiling the whole frame.
           const toward = max(ray.dot(this.sunDirection), 0)
           const glow = pow(toward, 60).add(pow(toward, 6).mul(0.05))

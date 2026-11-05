@@ -1,8 +1,9 @@
 /**
- * Procedural trees and shrubs of a temperate lake in summer: oak and beech, silver birch, the odd
- * Norway spruce and Scots pine, and leafy shrubs. Each model grows a branch skeleton by its species' habit, meshes its wood as
- * smooth tapered tubes and clothes its twigs with foliage cards from the botanical atlas
- * (`foliage-atlas.ts`). Everything is pure and deterministic, so the world worker can prepare
+ * Procedural trees and shrubs of a temperate lake in summer: oak and beech, silver birch, leafy
+ * shrubs, and the Norway spruce and Scots pine of the former boreal shore (spruce saplings still
+ * grow at the wood's edge). Each model grows a branch skeleton by its species' habit, meshes
+ * its wood as smooth tapered tubes and clothes its twigs with foliage cards from the botanical
+ * atlas (`foliage-atlas.ts`). Everything is pure and deterministic, so the world worker can prepare
  * it and transfer typed arrays.
  */
 import { ATLAS_TILES } from './foliage-atlas'
