@@ -805,3 +805,37 @@ export function growBush(seed: number, detail: ModelDetail): TreeModel {
   }
   return { wood: wood.build(0), sprays: shapeCrown(sprays, radius * 0.25), height: radius * 0.8 }
 }
+
+/**
+ * A crown as a stack of spheres in model space (x, y, z, radius per sphere), for picking: one per
+ * 0.8 m band of the sprays, centred on the band's spray centroid and reaching its farthest card.
+ */
+export function crownSpheres(model: TreeModel): Float32Array {
+  const bands = new Map<number, { x: number; z: number; y: number; n: number; reach: number }>()
+  for (const spray of model.sprays) {
+    const key = Math.floor(spray.center[1] / 0.8)
+    const band = bands.get(key) ?? { x: 0, z: 0, y: 0, n: 0, reach: 0 }
+    band.x += spray.center[0]
+    band.z += spray.center[2]
+    band.y += spray.center[1]
+    band.n++
+    bands.set(key, band)
+  }
+  const spheres: number[] = []
+  for (const [key, band] of [...bands].sort((a, b) => a[0] - b[0])) {
+    const cx = band.x / band.n,
+      cz = band.z / band.n
+    let reach = 0
+    for (const spray of model.sprays) {
+      if (Math.floor(spray.center[1] / 0.8) !== key) continue
+      reach = Math.max(
+        reach,
+        Math.hypot(spray.center[0] - cx, spray.center[2] - cz) +
+          Math.max(spray.width, spray.height) * 0.4,
+      )
+    }
+    // Most of a band's cards lie well inside its farthest one: pick a little inside it.
+    spheres.push(cx, (key + 0.5) * 0.8, cz, Math.max(0.25, reach * 0.85))
+  }
+  return Float32Array.from(spheres)
+}
