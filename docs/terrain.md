@@ -98,6 +98,17 @@ slightly rounded facets, a flattened underside, partial burial and a lean toward
 normal. They merge into one static mesh (about 100k triangles on desktop) with tone, moss bias and
 height per vertex: moss caps on upper faces, a dark wet band at the waterline and soil at the foot.
 
+## The waterfall's rock face
+
+A heightfield has no vertices partway down a cliff, so the face under the fall's lip would be one
+planar slope. `terrain-gorge.ts` lays a jointed granite wall over the block the fall leaves from:
+rays fan out in plan from a point behind the lip, round its front and both flanks, and each
+column follows the heightfield's face down that ray. Blocky bulges, ledges a hand or two high and
+vertical joints push it out; behind the water it stays 10 cm clear of the falling sheet, and it
+tucks into the ground at the fan's ends and under the crest, so its edges never show. Spray wets
+the face behind and beside the sheet (darker, glossier stone, no moss). It shares the boulders'
+material and mesh: 3–7k triangles.
+
 ## Lake, physics and vegetation
 
 The lake comes from the ground (`createLakeBedFromTerrain`): water wherever the ground lies below
@@ -107,10 +118,13 @@ highest solid over it, ground or boulder top. The bed's depth, dunes and stones 
 every water, fish and splash system reads the same rasters as before.
 
 Rapier collides with a heightfield over the same corners and one convex hull per boulder; under
-open water the heightfield drops away below the shore. A sub-millimetre
-offset keeps grid lines off round coordinates: Rapier misses an exactly vertical ray lying on one.
-The colliders use the heights before the steep faces are pushed in and out, so a ray hitting a
-cliff can land up to about 45 cm from the drawn rock; on gentle ground they agree within 5 cm.
+open water the heightfield drops away below the shore. A sub-millimetre offset keeps grid lines
+off round coordinates: Rapier misses an exactly vertical ray lying on one. Cliffs are drawn
+pushed in and out of the heightfield's faces, so the colliders replay the same displacement: the
+displaced cells (about 1% of the corners on desktop, 4% on phones) collide as the drawn
+triangles, a small triangle mesh, and the heightfield drops away under them. A horizontal ray at
+a cliff lands on the drawn rock (it was off by 8 cm at the median and up to 59 cm before), and
+building the colliders still takes about 50 ms on desktop and 15 ms on phones in Node.
 The rain's broadphase is the highest solid per 2 m column. Trees grow on open ground above the
 bank (not rock, not steeper than about 37°) and their trunks sit at the lowest ground under them;
 lanterns keep their hover above the highest smoothed ground under their drift, and the undergrowth reads ground height

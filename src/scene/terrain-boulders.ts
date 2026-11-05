@@ -415,7 +415,7 @@ export function vertexNormals(positions: Float32Array, indices: ArrayLike<number
 export type PreparedBoulders = {
   positions: Float32Array
   normals: Int8Array
-  /** Per vertex: tone, moss bias, height above the boulder's base (0..1), unused. */
+  /** Per vertex: tone, moss bias, height above the boulder's base (0..1), spray wetness. */
   surface: Uint8Array
   indices: Uint32Array
   /** Vertices per boulder (every variant shares the icosphere topology). */

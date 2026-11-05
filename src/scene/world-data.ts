@@ -7,6 +7,7 @@ import {
 import { createLakeWorld } from './lake-world'
 import type { LakeWorld } from './lake-world'
 import { prepareBoulders } from './terrain-boulders'
+import { prepareGorge, withGorge } from './terrain-gorge'
 import { prepareTerrainColliders, prepareTerrainSurface } from './terrain-surface'
 import { prepareVegetation } from './vegetation-placement'
 
@@ -14,7 +15,11 @@ import { prepareVegetation } from './vegetation-placement'
 function terrainPart(world: LakeWorld, mobile: boolean) {
   const terrain = {
     surface: prepareTerrainSurface(world.field, world.trees, mobile),
-    boulders: prepareBoulders(world.boulders, world.seed),
+    // The boulders and the jointed rock face behind the waterfall share one mesh.
+    boulders: withGorge(
+      prepareBoulders(world.boulders, world.seed),
+      prepareGorge(world.field, world.waterfall),
+    ),
   }
   // The renderer needs typed mesh buffers, not the generation field.
   const { field: _field, boulders: _boulders, ...data } = world

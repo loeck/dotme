@@ -11,12 +11,15 @@ import type { AtlasTile } from './foliage-atlas'
 export type Rgb = readonly [number, number, number]
 export type Point = readonly [number, number, number]
 
-/** Linear albedos, in measured ranges for bark, needles and leaves in visible light. */
+/**
+ * Linear albedos, in measured ranges for bark, needles and leaves in visible light. Needles stay
+ * olive rather than blue-grey: sunlit, the haze already adds the blue.
+ */
 export const VEGETATION_PALETTE = {
-  needles: [0.05, 0.085, 0.045],
-  needlesPale: [0.075, 0.115, 0.055],
-  spruce: [0.035, 0.065, 0.045],
-  sprucePale: [0.05, 0.085, 0.058],
+  needles: [0.05, 0.082, 0.032],
+  needlesPale: [0.066, 0.1, 0.04],
+  spruce: [0.035, 0.062, 0.035],
+  sprucePale: [0.048, 0.08, 0.045],
   bark: [0.075, 0.06, 0.048],
   barkSpruce: [0.09, 0.075, 0.062],
   barkUpper: [0.24, 0.1, 0.045],
@@ -26,6 +29,8 @@ export const VEGETATION_PALETTE = {
   birchLeaves: [0.105, 0.15, 0.055],
   birchLeavesDeep: [0.07, 0.105, 0.04],
   shrub: [0.06, 0.1, 0.045],
+  juniper: [0.035, 0.058, 0.042],
+  juniperPale: [0.05, 0.072, 0.052],
   shrubDeep: [0.04, 0.07, 0.035],
   grassBase: [0.08, 0.112, 0.056],
   grassTip: [0.19, 0.26, 0.09],
@@ -353,11 +358,18 @@ const P = VEGETATION_PALETTE
  * tips, longest at the bottom of a narrow cone; combed branchlets hang from each branch, and a
  * slim leader carries the spire.
  */
-export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): TreeModel {
+export function growSpruce(
+  seed: number,
+  detail: ModelDetail,
+  dark: boolean,
+  heights: readonly [number, number] = [5.6, 7],
+): TreeModel {
   const random = mulberry32(seed)
   const wood = new WoodBuilder()
   const sprays: Spray[] = []
-  const height = between(random, 5.6, 7)
+  const height = between(random, heights[0], heights[1])
+  // Saplings keep a mature tree's habit at their own size.
+  const youth = Math.min(1, height / 6)
   const crownBase = height * between(random, 0.1, 0.17)
   const crownRadius = height * between(random, 0.17, 0.19)
   const needles = dark ? P.spruce : P.needles
@@ -367,11 +379,12 @@ export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): Tr
   wood.tube(
     trunk,
     trunk.map((_, i) => trunkRadius * (1 - (0.94 * i) / 12)),
-    detail.trunkSides,
+    youth > 0.5 ? detail.trunkSides : 5,
     (s, angle) =>
       scaleRgb(P.barkSpruce, (0.85 + 0.15 * Math.sin(angle * 3 + s * 20)) * (0.8 + 0.25 * s)),
   )
-  const whorls = Math.round((height - crownBase) / 0.3)
+  // Internodes are shorter on a young tree.
+  const whorls = Math.round((height - crownBase) / (0.3 * Math.max(0.5, youth)))
   const phase = random() * TAU
   for (let whorl = 0; whorl < whorls; whorl++) {
     const t = whorl / whorls
@@ -395,8 +408,9 @@ export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): Tr
       const elevation = ((-12 + 30 * t) * Math.PI) / 180
       const sag = (0.32 - 0.22 * t) * between(random, 0.8, 1.2)
       const path = limbPath(centre, heading(yaw, elevation), reach, 3, sag, 0.22)
-      // Only main branches carry wood: the foliage hides the thin internodal ones entirely.
-      if (!internodal)
+      // Only main branches carry wood: the foliage hides the thin internodal ones entirely, and
+      // a sapling's branches altogether.
+      if (!internodal && youth > 0.5)
         wood.tube(
           path,
           path.map((_, i) => (0.006 + reach * 0.016) * (1 - i / 3.4)),
@@ -410,7 +424,10 @@ export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): Tr
         const s = 0.32 + (0.68 * (shoot + 0.5)) / shoots
         const { p, tangent } = along(path, s)
         // Sprays shrink toward the branch tip and up the crown, so the cone stays pointed.
-        const size = (0.24 + reach * 0.36) * between(random, 0.85, 1.15) * (1.1 - 0.35 * s)
+        const size =
+          (0.24 * Math.max(0.4, youth) + reach * 0.36) *
+          between(random, 0.85, 1.15) *
+          (1.1 - 0.35 * s)
         const colour = random() < 0.18 ? pale : needles
         const tile = random() < 0.5 ? ATLAS_TILES.spruceA : ATLAS_TILES.spruceB
         sprays.push(
@@ -432,8 +449,8 @@ export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): Tr
       }
     }
     // A dark core around the trunk, where the shaded inner branches have shed most needles.
-    if (whorl % 2 === 0 && t < 0.8) {
-      const core = crownRadius * (1 - t) * 0.9 + 0.2
+    if (whorl % 2 === 0 || t > 0.7) {
+      const core = crownRadius * (1 - t) * 0.9 + 0.2 * youth
       sprays.push({
         ...uprightCard(
           whorlCentre,
@@ -448,18 +465,19 @@ export function growSpruce(seed: number, detail: ModelDetail, dark: boolean): Tr
       })
     }
   }
-  // The leader: a slim spire of upright sprays over the last whorl.
-  for (let k = 0; k < 4; k++) {
-    const y = height * (0.9 + 0.025 * k)
+  // The leader: a slim, dense spire of upright sprays over the last whorls, so the tip reads
+  // as solid needles against the sky rather than a few cards the sky shows through.
+  for (let k = 0; k < 10; k++) {
+    const y = height * (0.8 + 0.018 * k)
     sprays.push(
       uprightCard(
         along(trunk, (y + 0.15) / (height + 0.15)).p,
-        (k * TAU) / 4 + phase,
+        k * TAU * GOLDEN_TURN + phase,
         0,
-        0.3 - 0.04 * k,
-        0.5,
+        (0.42 - 0.025 * k) * youth,
+        0.55 * youth,
         needles,
-        ATLAS_TILES.pineA,
+        k % 2 === 0 ? ATLAS_TILES.spruceA : ATLAS_TILES.pineA,
       ),
     )
   }
@@ -688,7 +706,49 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
   }
 }
 
-/** A low shrub: a dome of leafy cards round a few short stems. */
+/**
+ * Common juniper: a dark, blue-green column a metre or so tall, as it grows on dry, rocky
+ * shore ground, made of two or three irregular stems of upright needle sprays.
+ */
+export function growJuniper(seed: number, detail: ModelDetail): TreeModel {
+  const random = mulberry32(seed)
+  const wood = new WoodBuilder()
+  const sprays: Spray[] = []
+  const height = between(random, 0.7, 1.3)
+  const stems = 2 + Math.floor(random() * 2)
+  for (let stem = 0; stem < stems; stem++) {
+    const angle = random() * TAU
+    const offset = between(random, 0.05, 0.16)
+    const stemHeight = height * between(random, 0.7, 1)
+    const radius = height * between(random, 0.16, 0.22)
+    const cards = Math.max(6, Math.round(18 / detail.spacing))
+    for (let card = 0; card < cards; card++) {
+      const t = (card + random()) / cards
+      // Widest a third of the way up, rounded at the top.
+      const r = radius * Math.sin(Math.PI * Math.min(1, 0.25 + t * 0.85)) * between(random, 0.5, 1)
+      const around = random() * TAU
+      const size = height * between(random, 0.3, 0.42) * (1 - 0.4 * t)
+      sprays.push(
+        uprightCard(
+          [
+            Math.sin(angle) * offset + Math.sin(around) * r,
+            stemHeight * t * 0.92 + size * 0.3,
+            Math.cos(angle) * offset + Math.cos(around) * r,
+          ],
+          around + between(random, -0.5, 0.5),
+          between(random, 0, 0.35),
+          size,
+          size * 1.1,
+          random() < 0.3 ? P.juniperPale : P.juniper,
+          random() < 0.5 ? ATLAS_TILES.pineA : ATLAS_TILES.pineB,
+        ),
+      )
+    }
+  }
+  return { wood: wood.build(0), sprays: shapeCrown(sprays, height * 0.4), height }
+}
+
+/** A low shrub (bilberry, young growth): a dome of leafy cards round a few short stems. */
 export function growBush(seed: number, detail: ModelDetail): TreeModel {
   const random = mulberry32(seed)
   const wood = new WoodBuilder()

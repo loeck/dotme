@@ -14,6 +14,7 @@ import type { MeshData } from './vegetation-meshes'
 import {
   growBirch,
   growBush,
+  growJuniper,
   growPine,
   growSpruce,
   MODEL_DETAIL,
@@ -163,6 +164,14 @@ export function prepareVegetation(
     }
     return entry
   }
+  // Shrubs of a Nordic shore: bilberry domes, junipers on the drier ground, spruce saplings.
+  const shrub = (pick: number, slot: number) => {
+    if (pick < 0.55) return model(`bush-${slot}`, () => growBush(seed + 31 + slot, detail))
+    if (pick < 0.85) return model(`juniper-${slot}`, () => growJuniper(seed + 41 + slot, detail))
+    return model(`sapling-${slot}`, () =>
+      growSpruce(seed + 51 + slot, detail, slot === 1, [0.9, 1.6]),
+    )
+  }
   const growTree = (kind: TreeKind, variant: number) => {
     const treeSeed = seed + variant * 7919 + kind.length * 104_729
     if (kind === 'birch') return growBirch(treeSeed, detail)
@@ -212,7 +221,9 @@ export function prepareVegetation(
         bz = tree.z + Math.cos(angle) * distance
       const column = tops.at(bx, bz)
       if (!column?.ground || column.top < tree.y - 0.6 || column.top <= WATER_LEVEL + 0.1) continue
-      const bush = model(`bush-${slot}`, () => growBush(seed + 31 + slot, detail))
+      // Companions are mostly bilberry and saplings: young growth under a parent tree.
+      const pick = hash(seed, xi, zi, 963 + slot)
+      const bush = shrub(pick < 0.7 ? pick * 0.75 : 0.86 + (pick - 0.7) * 0.4, slot)
       companions.push({ x: bx, z: bz })
       plant(
         bush,
@@ -297,7 +308,7 @@ export function prepareVegetation(
       continue
     shrubs.push({ x, z, r })
     const slot = hash(seed, cx, cz, 1217) < 0.5 ? 0 : 1
-    const bush = model(`bush-${slot}`, () => growBush(seed + 31 + slot, detail))
+    const bush = shrub(hash(seed, cx, cz, 1221), slot)
     plant(
       bush,
       { x, y: column.top - 0.04, z, yaw: hash(seed, cx, cz, 1219) * Math.PI * 2, scale },

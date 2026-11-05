@@ -85,6 +85,8 @@ export function createPhysicsWorld(
         // on round coordinates; a sub-millimetre irrational shift keeps queries off them.
         .setTranslation(cx + GRID_NUDGE * Math.SQRT2, cy, cz + GRID_NUDGE * Math.SQRT1_2),
     )
+    if (statics.cliffIndices.length)
+      fixed(rapier.ColliderDesc.trimesh(statics.cliffPositions, statics.cliffIndices))
     const stride = statics.boulderStride * 3
     for (let start = 0; start + stride <= statics.boulderPoints.length; start += stride) {
       const hull = rapier.ColliderDesc.convexHull(

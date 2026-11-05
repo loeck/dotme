@@ -134,28 +134,18 @@ function forestLitter(field: TerrainField, trees: readonly TreeShade[]) {
   return litter
 }
 
-export function prepareTerrainSurface(
-  field: TerrainField,
-  trees: readonly TreeShade[],
-  mobile: boolean,
-): PreparedTerrainSurface {
+/** Corner positions and normals (central differences, quantized as the mesh stores them). */
+function cornerGrid(field: TerrainField) {
   const { columns, rows, cell, heights, minX, minZ } = field
-  const count = columns * rows
-  const positions = new Float32Array(count * 3)
-  const normals = new Int8Array(count * 3)
-  const surface = new Uint8Array(count * 4)
-  const visibility = skyVisibility(field, trees, mobile)
-  const litter = forestLitter(field, trees)
-  // Curvature at about a metre: the blurred height minus the height, positive in hollows.
-  const broad = blurGrid(heights, columns, rows, Math.max(1, Math.round(0.8 / cell)))
+  const positions = new Float32Array(columns * rows * 3)
+  const normals = new Int8Array(columns * rows * 3)
   const at = (row: number, column: number) =>
     heights[clamp(row, 0, rows - 1) * columns + clamp(column, 0, columns - 1)] ?? 0
   for (let row = 0; row < rows; row++)
     for (let column = 0; column < columns; column++) {
       const i = row * columns + column
-      const h = heights[i] ?? 0
       positions[i * 3] = minX + column * cell
-      positions[i * 3 + 1] = h
+      positions[i * 3 + 1] = heights[i] ?? 0
       positions[i * 3 + 2] = minZ + row * cell
       const dx = (at(row, column + 1) - at(row, column - 1)) / (2 * cell)
       const dz = (at(row + 1, column) - at(row - 1, column)) / (2 * cell)
@@ -163,6 +153,62 @@ export function prepareTerrainSurface(
       normals[i * 3] = Math.round((-dx / length) * 127)
       normals[i * 3 + 1] = Math.round((1 / length) * 127)
       normals[i * 3 + 2] = Math.round((-dz / length) * 127)
+    }
+  return { positions, normals }
+}
+
+/**
+ * A heightfield face is a ruled plane; break steep faces up horizontally with 3D noise so
+ * cliffs bulge and recede like jointed rock. The composed waterfall lip stays put: the lock
+ * fades over most of a metre here, so no bulge reaches under the falling sheet. Returns the
+ * displaced corners. The colliders replay this exactly, so they match the drawn rock.
+ */
+function displaceCliffs(field: TerrainField, positions: Float32Array, normals: Int8Array) {
+  const { columns, rows } = field
+  const calm = blurGrid(field.locked, columns, rows, 3)
+  const moved: number[] = []
+  for (let i = 0; i < columns * rows; i++) {
+    const nx = (normals[i * 3] ?? 0) / 127,
+      ny = (normals[i * 3 + 1] ?? 127) / 127,
+      nz = (normals[i * 3 + 2] ?? 0) / 127
+    const steep =
+      smooth01(0.3, 0.75, 1 - ny) *
+      (1 - Math.min(1, Math.max(field.locked[i] ?? 0, (calm[i] ?? 0) * 2.5)))
+    if (steep <= 0) continue
+    const horizontal = Math.hypot(nx, nz) || 1
+    const x = positions[i * 3] ?? 0,
+      y = positions[i * 3 + 1] ?? 0,
+      z = positions[i * 3 + 2] ?? 0
+    const push =
+      (noise3(x * 0.45, y * 0.7, z * 0.45) * 0.6 +
+        noise3(x * 1.1, y * 1.6, z * 1.1) * 0.24 +
+        noise3(x * 3.3, y * 3.3, z * 3.3) * 0.07) *
+      steep
+    positions[i * 3] = x + (nx / horizontal) * push
+    positions[i * 3 + 2] = z + (nz / horizontal) * push
+    positions[i * 3 + 1] = y + noise3(x * 2.1 + 7, y * 2.1, z * 2.1) * 0.06 * steep
+    moved.push(i)
+  }
+  return moved
+}
+
+export function prepareTerrainSurface(
+  field: TerrainField,
+  trees: readonly TreeShade[],
+  mobile: boolean,
+): PreparedTerrainSurface {
+  const { columns, rows, cell, heights } = field
+  const count = columns * rows
+  const { positions, normals } = cornerGrid(field)
+  const surface = new Uint8Array(count * 4)
+  const visibility = skyVisibility(field, trees, mobile)
+  const litter = forestLitter(field, trees)
+  // Curvature at about a metre: the blurred height minus the height, positive in hollows.
+  const broad = blurGrid(heights, columns, rows, Math.max(1, Math.round(0.8 / cell)))
+  for (let row = 0; row < rows; row++)
+    for (let column = 0; column < columns; column++) {
+      const i = row * columns + column
+      const h = heights[i] ?? 0
       surface[i * 4] = Math.round(clamp(field.rock[i] ?? 0, 0, 1) * 255)
       surface[i * 4 + 1] = Math.round(clamp(visibility[i] ?? 1, 0, 1) * 255)
       surface[i * 4 + 2] = Math.round(clamp(0.5 + ((broad[i] ?? h) - h) * 2.5, 0, 1) * 255)
@@ -186,31 +232,7 @@ export function prepareTerrainSurface(
       if (Math.abs(ha - hc) <= Math.abs(hb - hd)) indices.push(a, d, c, a, c, b)
       else indices.push(a, d, b, b, d, c)
     }
-  // A heightfield face is a ruled plane; break steep faces up horizontally with 3D noise so
-  // cliffs bulge and recede like jointed rock. The composed waterfall lip stays put.
-  // The lock fades over most of a metre here, so no bulge reaches under the falling sheet.
-  const calm = blurGrid(field.locked, columns, rows, 3)
-  for (let i = 0; i < count; i++) {
-    const nx = (normals[i * 3] ?? 0) / 127,
-      ny = (normals[i * 3 + 1] ?? 127) / 127,
-      nz = (normals[i * 3 + 2] ?? 0) / 127
-    const steep =
-      smooth01(0.3, 0.75, 1 - ny) *
-      (1 - Math.min(1, Math.max(field.locked[i] ?? 0, (calm[i] ?? 0) * 2.5)))
-    if (steep <= 0) continue
-    const horizontal = Math.hypot(nx, nz) || 1
-    const x = positions[i * 3] ?? 0,
-      y = positions[i * 3 + 1] ?? 0,
-      z = positions[i * 3 + 2] ?? 0
-    const push =
-      (noise3(x * 0.45, y * 0.7, z * 0.45) * 0.6 +
-        noise3(x * 1.1, y * 1.6, z * 1.1) * 0.24 +
-        noise3(x * 3.3, y * 3.3, z * 3.3) * 0.07) *
-      steep
-    positions[i * 3] = x + (nx / horizontal) * push
-    positions[i * 3 + 2] = z + (nz / horizontal) * push
-    positions[i * 3 + 1] = y + noise3(x * 2.1 + 7, y * 2.1, z * 2.1) * 0.06 * steep
-  }
+  displaceCliffs(field, positions, normals)
   const indexArray = Uint32Array.from(indices)
   const smoothNormals = vertexNormals(positions, indexArray)
   for (let i = 0; i < smoothNormals.length; i++)
@@ -225,7 +247,10 @@ export function prepareTerrainSurface(
   }
 }
 
-/** Static collision data: a Rapier heightfield over the land and one hull per boulder. */
+/**
+ * Static collision data: a Rapier heightfield over the land, the drawn cliff faces as a small
+ * triangle mesh where the heightfield steps aside for them, and one hull per boulder.
+ */
 export type TerrainColliders = {
   /** Heights in Rapier's layout: row (z) + column (x) * rows. */
   heights: Float32Array
@@ -234,6 +259,9 @@ export type TerrainColliders = {
   /** World extent of the heightfield and its centre. */
   scale: readonly [number, number, number]
   center: readonly [number, number, number]
+  /** The displaced cliff cells as drawn: world positions and triangles. */
+  cliffPositions: Float32Array
+  cliffIndices: Uint32Array
   /** Boulder hull points, `stride` vertices per boulder. */
   boulderPoints: Float32Array
   boulderStride: number
@@ -249,12 +277,68 @@ export function prepareTerrainColliders(
   boulders: PreparedBoulders,
 ): TerrainColliders {
   const { columns, rows, cell, minX, minZ } = field
+  // Cliffs are drawn pushed in and out of the heightfield's ruled faces. Their cells collide as
+  // the same triangles, and the heightfield drops away under them.
+  const grid = cornerGrid(field)
+  const moved = displaceCliffs(field, grid.positions, grid.normals)
+  const cellColumns = columns - 1
+  const zone = new Uint8Array(cellColumns * (rows - 1))
+  for (const i of moved) {
+    const row = Math.floor(i / columns),
+      column = i % columns
+    for (let r = row - 1; r <= row; r++)
+      for (let c = column - 1; c <= column; c++)
+        if (r >= 0 && c >= 0 && r < rows - 1 && c < cellColumns) zone[r * cellColumns + c] = 1
+  }
+  const cliffVertex = new Map<number, number>()
+  const cliffPositions: number[] = []
+  const cliffIndices: number[] = []
+  const vertex = (i: number) => {
+    let index = cliffVertex.get(i)
+    if (index === undefined) {
+      index = cliffPositions.length / 3
+      cliffVertex.set(i, index)
+      cliffPositions.push(
+        grid.positions[i * 3] ?? 0,
+        grid.positions[i * 3 + 1] ?? 0,
+        grid.positions[i * 3 + 2] ?? 0,
+      )
+    }
+    return index
+  }
+  for (let row = 0; row < rows - 1; row++)
+    for (let column = 0; column < cellColumns; column++) {
+      if (!zone[row * cellColumns + column]) continue
+      const a = row * columns + column,
+        b = a + 1,
+        c = a + columns + 1,
+        d = a + columns
+      const h = field.heights
+      const ha = h[a] ?? 0,
+        hb = h[b] ?? 0,
+        hc = h[c] ?? 0,
+        hd = h[d] ?? 0
+      if (Math.max(ha, hb, hc, hd) < HIDDEN_BELOW) continue
+      // The drawn mesh's flatter diagonal.
+      const corners =
+        Math.abs(ha - hc) <= Math.abs(hb - hd) ? [a, d, c, a, c, b] : [a, d, b, b, d, c]
+      for (const corner of corners) cliffIndices.push(vertex(corner))
+    }
+  // A corner whose every cell is a cliff cell leaves the heightfield.
+  const inZone = (r: number, c: number) =>
+    r < 0 || c < 0 || r >= rows - 1 || c >= cellColumns || zone[r * cellColumns + c] === 1
   const heights = new Float32Array(columns * rows)
   for (let row = 0; row < rows; row++)
     for (let column = 0; column < columns; column++) {
       const h = field.heights[row * columns + column] ?? OPEN_WATER_FLOOR
+      const cliff =
+        inZone(row - 1, column - 1) &&
+        inZone(row - 1, column) &&
+        inZone(row, column - 1) &&
+        inZone(row, column) &&
+        cliffVertex.has(row * columns + column)
       // The land continues just below the wave trough, then drops away under open water.
-      heights[row + column * rows] = h > WATER_LEVEL - 0.4 ? h : OPEN_WATER_FLOOR
+      heights[row + column * rows] = h > WATER_LEVEL - 0.4 && !cliff ? h : OPEN_WATER_FLOOR
     }
   const width = (columns - 1) * cell,
     depth = (rows - 1) * cell
@@ -282,6 +366,8 @@ export function prepareTerrainColliders(
       ] as const)
         raise(minX + (column + dx) * cell, minZ + (row + dz) * cell, top)
     }
+  for (let i = 0; i < cliffPositions.length; i += 3)
+    raise(cliffPositions[i] ?? 0, cliffPositions[i + 2] ?? 0, cliffPositions[i + 1] ?? 0)
   for (let i = 0; i < boulders.positions.length; i += 3)
     raise(
       boulders.positions[i] ?? 0,
@@ -294,6 +380,8 @@ export function prepareTerrainColliders(
     columns,
     scale: [width, 1, depth],
     center: [minX + width / 2, 0, minZ + depth / 2],
+    cliffPositions: Float32Array.from(cliffPositions),
+    cliffIndices: Uint32Array.from(cliffIndices),
     boulderPoints: boulders.positions.slice(),
     boulderStride: boulders.stride,
     columnsTop: { x, z, width: tileWidth, height: tileHeight, tops },

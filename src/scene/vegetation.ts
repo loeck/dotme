@@ -11,6 +11,7 @@ import {
   min,
   normalize,
   positionLocal,
+  positionView,
   positionWorld,
   pow,
   saturate,
@@ -53,6 +54,8 @@ const SHADOW_LAYER = 5
 export const UNDERGROWTH_LAYER = 7
 /** Wind speed (m/s) at which vegetation reaches its full lean. */
 const FULL_LEAN_SPEED = 9
+/** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
+const RELIEF_METRES = 0.004
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
 
@@ -163,9 +166,12 @@ export class Vegetation {
   }
 
   private foliageMaterial(atlas: DataTexture, prepared: PreparedVegetation) {
+    // Needles and leaves are matte at this scale: a full sky reflection at grazing angles
+    // paled every crown's top edge against the sky.
     const material = new MeshStandardNodeMaterial({
-      roughness: 0.85,
+      roughness: 0.95,
       metalness: 0,
+      envMapIntensity: 0.45,
       side: DoubleSide,
     })
     material.positionNode = positionLocal.add(this.sway())
@@ -181,11 +187,22 @@ export class Vegetation {
     material.colorNode = vec4(albedo, coverage)
     // Card normals lean toward the outside of their crown and must not flip on back faces.
     const normal = normalize(attribute<'vec3'>('normal'))
-    material.normalNode = transformNormalToView(normal)
+    // Each needle and leaf is a small dome in the atlas: its screen-space slope tilts the normal
+    // (surface gradient, as the terrain's detail relief), so a near spray shades as rounded
+    // shoots rather than a flat card. Mip levels flatten the relief with distance on their own.
+    const base = transformNormalToView(normal).normalize()
+    const relief = sample.g.mul(RELIEF_METRES)
+    const dpdx = positionView.dFdx(),
+      dpdy = positionView.dFdy()
+    const r1 = dpdy.cross(base),
+      r2 = base.cross(dpdx)
+    const det = dpdx.dot(r1)
+    const gradient = det.sign().mul(relief.dFdx().mul(r1).add(relief.dFdy().mul(r2)))
+    material.normalNode = det.abs().mul(base).sub(gradient).normalize()
     const toEye = normalize(cameraPosition.sub(positionWorld))
     const facing = abs(dot(normal, toEye)).oneMinus()
     // Sky-light rim and back-light translucency, strongest at the crown rim.
-    const rim = pow(facing, 3).mul(0.35)
+    const rim = pow(facing, 3).mul(0.2)
     const back = pow(saturate(dot(this.sunDirection.negate(), toEye)), 4)
       .mul(0.4)
       .mul(facing.mul(0.6).add(0.4))

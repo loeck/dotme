@@ -197,7 +197,10 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   return material
 }
 
-/** Granite boulders: tone per stone, moss caps, lichen, and a dark wet band at the waterline. */
+/**
+ * Granite boulders and the waterfall's rock face: tone per stone, moss caps, lichen, a dark wet
+ * band at the waterline, and darker, glossier stone where spray wets it.
+ */
 export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMaterial {
   const material = new MeshStandardNodeMaterial({
     roughness: 0.7,
@@ -208,7 +211,9 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   const surface = attribute<'vec4'>('surface', 'vec4')
   const tone = surface.x,
     mossBias = surface.y,
-    base = surface.z
+    base = surface.z,
+    // Spray on the rock face behind a waterfall: darker, glossier stone.
+    spray = surface.w
   const p = positionWorld
   const pixel = footprint()
   const up = normalWorldGeometry.y
@@ -232,11 +237,16 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   // The buried foot gathers soil.
   const foot = smoothstep(0.2, 0.0, base).mul(smoothstep(0.05, 0.2, above))
 
-  let albedo: Vec3Node = mix(stone, mossColour, moss)
+  let albedo: Vec3Node = mix(stone, mossColour, moss.mul(spray.oneMinus()))
   albedo = mix(albedo, linear(0.045, 0.042, 0.032), waterline.mul(0.8))
   albedo = mix(albedo, linear(0.06, 0.045, 0.032), foot.mul(0.6))
+  albedo = albedo.mul(spray.mul(-0.45).add(1))
   material.colorNode = albedo
-  material.roughnessNode = mix(mix(float(0.66), float(0.93), moss), float(0.3), waterline)
+  material.roughnessNode = mix(
+    mix(mix(float(0.66), float(0.93), moss), float(0.3), waterline),
+    float(0.22),
+    spray,
+  )
 
   const distance = p.distance(cameraPosition)
   const near = smoothstep(30, 3, distance)

@@ -27,8 +27,11 @@ Nordic shore:
 - Weeping birch: a slender white trunk with black lenticel dashes and a dark, fissured foot.
   Thirteen to sixteen limbs rise steeply and arch over, longest mid-crown for an ovoid outline,
   and curtains of hanging twigs spread off both sides of them.
-- Shrub: a low dome of leafy cards; tree companions in about a third of two slots per tree, and
-  mid-ground cover (below).
+- Shrubs: bilberry domes of leafy cards, common junipers (dark blue-green columns a metre or so
+  tall, of two or three irregular stems of needle tufts) and spruce saplings (a spruce's habit at
+  0.9–1.6 m, with shorter internodes and smaller sprays). Tree companions, in about a third of two
+  slots per tree, are mostly bilberry and saplings; mid-ground cover (below) is about 55%
+  bilberry, 30% juniper and 15% saplings.
 
 Trees cluster into groves with clearings, keep 1.6 m between trunks and grow up to 35% larger
 toward the horizon. Birches stay in the mid-ground band. Each islet first gets a tree on its
@@ -44,7 +47,7 @@ tree trunks, other bushes and a step's last column. Up to 180 on desktop and 32 
 
 Wood is generalized cylinders: rings along each limb with parallel-transported frames, so tubes
 never twist, with eight sides on a trunk and three or four on a limb (six and three on phones).
-Only a spruce's main branches carry wood; the foliage hides its thin internodal ones. Bark colour
+Only a mature spruce's main branches carry wood; the foliage hides its thin internodal ones and a sapling's branches. Bark colour
 is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
 birch's dashes and dark foot.
 
@@ -52,13 +55,19 @@ Foliage cards keep their place on their twig, in model space, rather than facing
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
 so a crown shades as one mass, and cards deep inside, near the trunk, darken to half their value.
 Colour takes the species' palette, a per-tree hue and value jitter and a small per-card hash.
+Needles stay olive rather than blue-grey: sunlit, the haze already adds the blue. A spruce's leader
+is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
+cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
 
 The atlas has eight tiles: two Norway spruce sprays (a shoot across the top with combed,
 needle-clothed branchlets hanging from it, each branchlet its own shade), two Scots pine tuft
 sets (brushes of long needles on short twigs), two weeping birch tiles (slender hanging twigs
 with small ovate leaves), shrub foliage and a lobed core disc. Desktop bakes 256-texel tiles
 (1024 × 512); phones bake 128-texel ones, a quarter of the work, for their smaller trees. Each
-texel stores a palette-relative tone and cutout coverage. Cards use an alpha test with a
+texel stores a palette-relative tone, a rounded relief (each needle and leaf a dome a few
+texels across) and cutout coverage. The relief's screen-space slope tilts each card's normal
+(the surface-gradient method of the terrain's detail relief), so a near spray shades as rounded
+shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test with a
 mip-level coverage boost, so distant crowns do not thin out. Lighting adds a sky-light rim and
 back-light translucency, strongest at the crown rim and against a low sun.
 
@@ -95,10 +104,11 @@ The forest is three merged world-space meshes, so three draws: wood, foliage car
 undergrowth. The undergrowth sits on `UNDERGROWTH_LAYER`, which only the main camera enables,
 so the water reflection, the environment probe and the shadow pass never draw it. Wood and
 foliage cast shadows through the shadow layer, with the cards' cutout. On seed 9182 the desktop
-forest is about 266k triangles: 37k of wood, 27k of foliage cards and 203k of undergrowth; the
-phone forest is about 56k (18k, 10k and 28k). The voxel trees it replaces drew 21k of wood and
-63k of cards on desktop, so trees and shrubs cost about the same, and preparation takes about as
-long (within 5%, measured side by side). Preparation runs after the surfaces on the
+forest is about 277k triangles: 39k of wood, 34k of foliage cards and 203k of undergrowth; the
+phone forest is about 57k (18k, 11k and 28k). The voxel trees it replaces drew 21k of wood and
+63k of cards on desktop, so trees and shrubs cost a little less, and preparation takes about as
+long (within 5%, measured side by side). Only a spruce's main branches carry wood, and a
+sapling's none. Preparation runs after the surfaces on the
 same worker, off the first frame's critical path. Unit tests bound the triangle budget and check determinism.
 
 ## Wind

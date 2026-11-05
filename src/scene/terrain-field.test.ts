@@ -205,6 +205,35 @@ describe('terrain surface', () => {
       // Open water has no floor near the surface.
       const deep = physics.castDistance({ x: 0, y: 5, z: -20 }, { x: 0, y: -1, z: 0 }, 9)
       expect(deep).toBeNull()
+      // Cliffs collide where they are drawn, pushed in and out of the heightfield's faces.
+      const surface = prepareTerrainSurface(world.field, world.trees, true)
+      const errors: number[] = []
+      for (let i = 0; i < surface.positions.length / 3; i += 5) {
+        const column = i % world.field.columns,
+          row = Math.floor(i / world.field.columns)
+        const x = required(surface.positions[i * 3]),
+          y = required(surface.positions[i * 3 + 1]),
+          z = required(surface.positions[i * 3 + 2])
+        const shift = Math.hypot(
+          x - (world.field.minX + column * world.field.cell),
+          z - (world.field.minZ + row * world.field.cell),
+        )
+        const nx = required(surface.normals[i * 3]),
+          nz = required(surface.normals[i * 3 + 2])
+        const flat = Math.hypot(nx, nz)
+        if (shift < 0.05 || y < 0.1 || flat < 60) continue
+        // A ray from 30 cm out, aimed a little off the vertex (rays exactly through a mesh
+        // vertex can slip between its triangles).
+        const hit = physics.castDistance(
+          { x: x + (nx / flat) * 0.3 + 0.003, y: y + 0.004, z: z + (nz / flat) * 0.3 },
+          { x: -nx / flat, y: 0, z: -nz / flat },
+          1,
+        )
+        if (hit !== null) errors.push(Math.abs(hit - 0.3))
+      }
+      errors.sort((a, b) => a - b)
+      expect(errors.length).toBeGreaterThan(30)
+      expect(required(errors[Math.floor(errors.length * 0.9)])).toBeLessThan(0.03)
     } finally {
       physics.dispose()
     }

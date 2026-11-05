@@ -1,7 +1,8 @@
 /**
  * A procedural botanical atlas, drawn once in the world worker: Norway spruce sprays with their
  * hanging branchlets, Scots pine needle tufts, weeping birch twigs, shrub foliage and a lobed
- * core disc. Each RGBA8 texel stores a palette-relative tone in R and cutout coverage in A; tone
+ * core disc. Each RGBA8 texel stores a palette-relative tone in R, a rounded relief in G (each
+ * needle and leaf a small dome, for a per-texel normal) and cutout coverage in A; tone
  * darkens toward the bottom of a card and varies needle to needle and leaf to leaf, so crowns
  * read as foliage rather than flat paint.
  */
@@ -51,10 +52,13 @@ class TileCanvas {
   readonly size: number
   readonly tone: Float32Array
   readonly alpha: Float32Array
+  /** Rounded relief per texel: highest along each needle's or leaf's midline. */
+  readonly relief: Float32Array
   constructor(size: number) {
     this.size = size
     this.tone = new Float32Array(size * size)
     this.alpha = new Float32Array(size * size)
+    this.relief = new Float32Array(size * size)
   }
   /** Stamp a primitive whose signed distance (in tile units, 0..1) is `distance`. */
   stamp(
@@ -85,6 +89,9 @@ class TileCanvas {
         const previous = this.alpha[index] ?? 0
         if (cover >= previous) this.tone[index] = tone(u, v)
         this.alpha[index] = Math.max(previous, cover)
+        // A dome a few texels across: needles round off, leaves bulge from their midrib.
+        const dome = Math.sqrt(Math.max(0, Math.min(1, -d / (px * 3))))
+        this.relief[index] = Math.max(this.relief[index] ?? 0, dome)
       }
   }
   /** A tapered stroke between two points with radii r0 and r1. */
@@ -373,7 +380,7 @@ export function bakeFoliageAtlas(seed: number, mobile = false): FoliageAtlas {
         const target = ((oy + y) * width + ox + x) * 4
         const alpha = tile.alpha[source] ?? 0
         data[target] = Math.round((alpha > 0 ? (tile.tone[source] ?? 0) : 0.5) * 255)
-        data[target + 1] = 0
+        data[target + 1] = Math.round((tile.relief[source] ?? 0) * 255)
         data[target + 2] = 0
         data[target + 3] = Math.round(alpha * 255)
       }
