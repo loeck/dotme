@@ -56,13 +56,13 @@ export type LookPreset = Readonly<{
 export const LAST_SIGNAL_LOOK: LookPreset = {
   base: {
     exposure: 1,
-    contrast: 1.06,
-    saturation: 0.9,
+    contrast: 1.1,
+    saturation: 0.97,
     tint: [1, 1, 1],
-    vignette: 0.22,
+    vignette: 0.2,
     grain: 0.015,
-    haze: 1.8,
-    hazeStart: 22,
+    haze: 1.45,
+    hazeStart: 28,
     hazeFalloff: 0.035,
     mist: 0.0035,
     mistTop: 2.6,

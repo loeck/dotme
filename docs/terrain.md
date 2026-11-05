@@ -1,6 +1,6 @@
 # Terrain
 
-The ground is a smooth heightfield with granite boulders, shaded by a texture-free layered
+The ground is a smooth heightfield with limestone boulders, shaded by a texture-free layered
 material. It is what the scene renders and collides with, and the lake, the waterfall's pool,
 the forest and the lanterns are all placed on it.
 
@@ -59,32 +59,38 @@ then recomputed from the final triangles. A vertex attribute carries four bytes:
 
 - rock share from the source materials, blurred;
 - sky visibility: the heightfield's horizon in eight azimuths up to 7 m, times a soft disc of
-  shade under each crown (darker under spruce), baked as ambient occlusion;
+  shade under each crown (darker and wider under the broadleaves' summer canopy and spruce),
+  baked as ambient occlusion;
 - curvature, positive in hollows;
 - needle and leaf litter under each tree's drip line.
 
 ## Material
 
-`terrain-material.ts` builds the ground from what a Nordic lake shore shows at this scale, with
-albedos in measured visible-light ranges (moss and conifer litter 0.04–0.12, soil about 0.1,
-weathered granite 0.13–0.22):
+`terrain-material.ts` builds the ground from what a temperate lake shows in summer at this scale,
+with albedos in measured visible-light ranges (green grass 0.06–0.14, soil about 0.1, weathered
+limestone 0.2–0.35):
 
-- moss with brighter cushions where open sky reaches it, heath and straw-dry grass in open,
-  gentle patches, damp peat in hollows and litter under the trees;
-- dwarf-shrub heath in patches a few metres across on open, gentle ground: heather's purple-brown
-  and bilberry's dark green over a clumpy grain, so slopes read as low vegetation rather than a
-  smooth carpet;
-- weathered granite on faces steeper than about 50°, convex knobs and where the composition placed stone:
-  feldspar speckle, joint fissures a metre or two apart (in the albedo, so they read from afar
-  after the relief has faded), pale grey-green lichen rosettes in patches, rare orange ones (Xanthoria, Caloplaca) as shore rocks carry, and dark rain streaks down the faces. Thin
-  vegetation creeps back over ledges;
+- a fresh, yellow-green meadow sward, brighter where open sky reaches it, paler seeding grass in
+  open, gentle patches, damp soil in hollows and leaf litter under the trees;
+- rough, tussocky grassland in patches a few metres across on open, gentle ground: darker, bluer
+  clumps over a clumpy grain, so slopes read as tall vegetation rather than a smooth carpet;
+- drifts of buttercups over the open meadow: yellow heads a few centimetres across that blend to
+  a faint golden cast once they fall below a pixel;
+- past the mid-ground (48–95 m) a closed broadleaf canopy over the hills: dark billows a few metres
+  across, sunlit on their tops, thinning into the meadow in slow patches and leaving outcrops bare
+  (the modelled trees stop at the far shore);
+- weathered limestone only on real outcrops (the sward holds on steeper ground than the old moss
+  did), convex knobs and where the composition placed stone: a fine speckle, joint fissures a
+  metre or two apart (in the albedo, so they read from afar after the relief has faded), pale
+  lichen crusts, and dark rain streaks down the faces. Ivy, ferns and grass cling to the faces in
+  ragged, mostly upright streaks, and thin vegetation creeps back over ledges;
 - a narrow strip of gravel a hand's breadth above the water, then dark wet silt at the waterline,
   broken by noise; on a low, grassy bank the turf runs almost to the water;
 - a slow tint across the hills hides repetition at 30–70 m.
 
 Every Perlin octave is band-limited: it fades before a cell covers less than about two pixels
 ([Quilez, bandlimiting](https://iquilezles.org/articles/bandlimiting/)), so the grazing camera never
-shimmers. Detail relief (moss tufts, rock grain, pebbles) is a world-space height turned into a
+shimmers. Detail relief (grass tufts, rock grain, pebbles) is a world-space height turned into a
 surface gradient, applied after differentiation so triangles never print through, as in three's
 `TerrainGenerator`; it fades out by 42 m. The baked sky visibility is the material's ambient
 occlusion and composes with the cloud shadows. Rain wetness (`shore-wetness.ts`), the sky fill on
@@ -104,12 +110,13 @@ slightly rounded facets, a weathered fractal roughness, a flattened underside, p
 normal. Those big on screen (half-width over 1.3% of their distance, 2.2% on phones: 59 of 320 and 8 of
 90 on seed 9182) use a four-times finer icosphere so joints show in their outline. They merge
 into one static mesh (about 165k triangles on desktop, 44k on phones) with tone, moss bias and
-height per vertex: moss caps on upper faces, a dark wet band at the waterline and soil at the foot.
+height per vertex: grass and moss caps on upper faces (an outcrop in a meadow wears turf on every
+ledge), a dark wet band at the waterline and soil at the foot.
 
 ## The waterfall's rock face
 
 A heightfield has no vertices partway down a cliff, so the face under the fall's lip would be one
-planar slope. `terrain-gorge.ts` lays a jointed granite wall over the block the fall leaves from:
+planar slope. `terrain-gorge.ts` lays a jointed limestone wall over the block the fall leaves from:
 rays fan out in plan from a point behind the lip, round its front and both flanks, and each
 column follows the heightfield's face down that ray. Blocky bulges, ledges a hand or two high and
 vertical joints push it out; behind the water it stays 10 cm clear of the falling sheet, and it

@@ -102,6 +102,9 @@ describe('weather preload deadline', () => {
     await expect(start()).resolves.toEqual(randomSceneWeather(42))
   })
   it('aborts at 3 seconds and ignores a late response even if fetch ignores cancellation', async () => {
+    // The fallback reads the clock when the deadline fires, the expectation a little later (after
+    // waitFor's own fake-clock steps): start on a whole second so both fall in the same one.
+    vi.setSystemTime(new Date(2026, 5, 1, 12, 0, 0, 0))
     let reply: ((response: Response) => void) | undefined
     fetchMock.mockImplementation(
       () =>

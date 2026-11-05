@@ -60,6 +60,20 @@ const smooth01 = (a: number, b: number, x: number) => {
 }
 
 /**
+ * Shade under each crown, radius per unit of tree scale: a broadleaf's dense summer canopy shades
+ * a wide disc nearly as deeply as a spruce's skirt that reaches the ground; a pine's high crown
+ * and a birch's open curtains far less.
+ */
+const BIRCH_SHADE = { radius: 1.6, strength: 0.14 }
+const CANOPY_SHADE: Readonly<Record<string, { radius: number; strength: number }>> = {
+  oak: { radius: 2.6, strength: 0.28 },
+  beech: { radius: 2.6, strength: 0.28 },
+  spruce: { radius: 2, strength: 0.34 },
+  pine: { radius: 1.9, strength: 0.16 },
+  birch: BIRCH_SHADE,
+}
+
+/**
  * Sky visibility from the heightfield's horizon (8 azimuths, marched to 7 m) and from the
  * canopies of nearby trees, the main cue that seats ground in hollows and under the forest.
  */
@@ -94,11 +108,12 @@ function skyVisibility(field: TerrainField, trees: readonly TreeShade[], mobile:
       }
       visibility[i] = 1 - occlusion / directions.length
     }
-  // Canopy: a soft disc of shade under each crown, darkest under a spruce's skirt that reaches
-  // the ground, lighter under a pine's high crown and a birch's open curtains.
+  // Canopy: a soft disc of shade under each crown (see CANOPY_SHADE).
   for (const tree of trees) {
-    const radius = tree.scale * (tree.kind === 'spruce' ? 2 : tree.kind === 'pine' ? 1.9 : 1.6)
-    const strength = tree.kind === 'spruce' ? 0.34 : tree.kind === 'pine' ? 0.16 : 0.14
+    // Any other kind shades like a birch.
+    const canopy = CANOPY_SHADE[tree.kind] ?? BIRCH_SHADE
+    const radius = tree.scale * canopy.radius,
+      strength = canopy.strength
     const c0 = Math.max(0, Math.floor((tree.x - radius - field.minX) / cell)),
       c1 = Math.min(columns - 1, Math.ceil((tree.x + radius - field.minX) / cell))
     const r0 = Math.max(0, Math.floor((tree.z - radius - field.minZ) / cell)),

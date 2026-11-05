@@ -22,19 +22,27 @@ the pixel footprint, sharpen glints and break up reflections without changing th
 Rain adds a jittered field of expanding rings whose density follows rain intensity, roughens the
 whole surface so reflections dull, and turns rings below a pixel into roughness and brief impact
 specks instead of aliasing. Sun glitter, subsurface glow and shafts are direct sun
-and follow the cloud shadow. The water is a humic
-boreal lake's, not a tropical one: dissolved organic matter absorbs blue strongly, so clear water
-absorbs about (0.40, 0.29, 1.05) per metre in red, green and blue (a440 about 1.2 /m with a
-0.015 /nm spectral slope, plus pure water's red absorption), and rain-murky water more
-(0.85, 0.7, 1.5). Light through it turns tea-amber over the pale sand of the shallows, and the
-scatter body, dim and olive-brown, darkens toward near black with depth: brown-water lakes in
-Finland and Estonia have Secchi depths of about 2 m ([Arst et al. 2008](https://www.borenv.net/BER/archive/pdfs/ber13/ber13-133.pdf);
-[Thrane et al. 2014](https://link.springer.com/article/10.1007/s10021-014-9776-2)). Near the
+and follow the cloud shadow. The water is a clear,
+temperate lake's: pure water absorbs red far more than green, and a little phytoplankton and
+dissolved matter take some blue, so clear water absorbs about (0.36, 0.16, 0.15) per metre in
+red, green and blue and rain-murky water more (0.72, 0.45, 0.5). Light through it turns a soft
+blue-green over the sand of the shallows, the bed stays visible a few metres down (a Secchi depth
+of about 4–5 m), and the scatter body, dim and green-teal, darkens toward a deep teal with depth.
+The boreal shore before used a humic lake's optics (blue absorbed at about 1 /m, tea-amber
+shallows, olive-brown depths), which read as murky against a summer broadleaf wood. Near the
 camera the reflection is held below Fresnel so the shallow bed shows through, but only down to
 0.4: at 20–30 m from a 2.5 m eye Fresnel is already 0.3–0.5, and the dark water hides its bed
-past a couple of metres anyway. Light reaching the bed is attenuated by depth on the way down
-as well as up. Daylight glitter and an amber-olive subsurface glow sit on top of the reflected
-and transmitted light. At night the glitter and short capillary glints fade, leaving a softer
+past a few metres anyway. Light reaching the bed is attenuated by depth on the way down
+as well as up. Daylight glitter is a glitter path ([Cox and Munk 1954](https://doi.org/10.1364/JOSA.44.000838)):
+the shaded normal carries the resolved waves, and the facets below a pixel spread round it with a
+slope variance of 0.006–0.02 (calm to agitated), so the sun's reflection is a continuous column
+rather than glints scattered over the whole lake. Inside it, facets that face the sun exactly flash
+as short dashes along the wave crests (7 by 34 cycles per metre, across and along the view, so
+foreshortening leaves them flat, as real glints look) and twinkle as two crossing noise fields
+move; once a dash falls below a pixel it resolves to its mean, so far water glows evenly instead
+of aliasing. The former glints, a per-cell jittered normal raised to the 350th power, salted the
+lake with isolated white pixels far outside the sun's path. A pale green subsurface glow sits on
+top of the reflected and transmitted light. At night the glitter and short capillary glints fade, leaving a softer
 moon reflection; the bed takes a dim tint that fades with depth, so only the shallows stay
 visible over near-black water. Shoreline
 foam is a bright animated band whose width follows wave arrival. Calm water leaves only a trace

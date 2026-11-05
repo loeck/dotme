@@ -10,6 +10,7 @@ import {
   float,
   length,
   mat3,
+  max,
   mix,
   normalize,
   positionLocal,
@@ -95,7 +96,17 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       elevation.sub(0.018).sub(variation.sub(0.5).mul(0.012)).mul(12).pow2().negate(),
     )
     const valley = exp(azimuth.sub(0.08).div(0.46).pow2().negate())
-    const radiance = sky.radiance(direction)
+    // The clear sky as a polarising filter photographs it on a summer day: about a third darker
+    // and more saturated, deepest overhead and paler toward the horizon, so white cumulus stand
+    // out against a deep blue. Only the visible sky changes; scene lighting reads the LUTs.
+    const physical = sky.radiance(direction)
+    const overhead = smoothstep(0.02, 0.6, elevation)
+    const radiance = max(
+      mix(vec3(luminanceOf(physical)), physical, mix(float(1.12), float(1.35), overhead)).mul(
+        mix(float(0.86), float(0.62), overhead),
+      ),
+      vec3(0),
+    )
     const radianceGrey = luminanceOf(radiance)
     const dimRadiance = mix(radiance, vec3(radianceGrey), u.uOvercast.mul(0.45)).mul(
       u.uWeatherLight,
@@ -122,14 +133,28 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
     // Distant ridges and mist take the sky's own horizon light in their direction:
     // warm towards the sun, rose and blue under the Earth's shadow.
     const air = sky.horizon(direction).mul(u.uWeatherLight)
-    const tone = (nightTone: Node<'vec3'>, strength: number) =>
-      nightTone.mul(night).add(air.mul(strength))
+    const tone = (nightTone: Node<'vec3'>, strength: number, tint: Node<'vec3'> = vec3(1)) =>
+      nightTone.mul(night).add(air.mul(strength).mul(tint))
     const drift = u.uTime.mul(0.011),
       peaks = distantPeaks(azimuth, u.uSeed, u.uMobile),
       baseFade = smoothstep(-0.008, 0.026, elevation)
+    // Distant ranges are wooded hills: the farthest blue with air, the nearer ones greener and
+    // darker, each crest broken by a tree line, and the nearest shaded and lit slope by slope.
+    const treeline = (scale: number, amplitude: number, offset: number) =>
+      horizonNoise(vec2(azimuth.mul(scale), u.uSeed.add(offset)))
+        .sub(0.5)
+        .mul(amplitude)
+        .add(
+          horizonNoise(vec2(azimuth.mul(scale * 2.7), u.uSeed.add(offset + 5)))
+            .sub(0.5)
+            .mul(amplitude * 0.5),
+        )
+    const slopes = horizonNoise(vec2(azimuth.mul(9), u.uSeed.add(41)))
+      .mul(0.5)
+      .add(0.75)
     color = mix(
       color,
-      tone(vec3(0.0078, 0.0123, 0.0188), 0.3),
+      tone(vec3(0.0078, 0.0123, 0.0188), 0.32, vec3(0.93, 0.99, 1.04)),
       smoothstep(peaks.x.sub(0.006), peaks.x.add(0.009), elevation)
         .oneMinus()
         .mul(baseFade)
@@ -146,16 +171,24 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
     )
     color = mix(
       color,
-      tone(vec3(0.0053, 0.0085, 0.0131), 0.19),
-      smoothstep(peaks.y.sub(0.004), peaks.y.add(0.006), elevation)
+      tone(vec3(0.0053, 0.0085, 0.0131), 0.21, vec3(0.8, 1, 0.82)),
+      smoothstep(
+        peaks.y.add(treeline(260, 0.0028, 11)).sub(0.003),
+        peaks.y.add(treeline(260, 0.0028, 11)).add(0.004),
+        elevation,
+      )
         .oneMinus()
         .mul(baseFade)
         .mul(0.91),
     )
     color = mix(
       color,
-      tone(vec3(0.0031, 0.0051, 0.0081), 0.11),
-      smoothstep(peaks.z.sub(0.003), peaks.z.add(0.004), elevation)
+      tone(vec3(0.0031, 0.0051, 0.0081), 0.13, vec3(0.62, 1, 0.52).mul(slopes)),
+      smoothstep(
+        peaks.z.add(treeline(520, 0.004, 23)).sub(0.0015),
+        peaks.z.add(treeline(520, 0.004, 23)).add(0.002),
+        elevation,
+      )
         .oneMinus()
         .mul(baseFade)
         .mul(0.86),

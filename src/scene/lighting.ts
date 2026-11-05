@@ -50,6 +50,9 @@ const skyLight = (c: Rgb, scale: number) => {
     .multiplyScalar(scale)
 }
 
+/** How far the noon sun swings round from the frame's centre, radians. */
+export const MIDDAY_SWING = 2.25
+
 /** Artistic orbit between sunrise and sunset. Directions always point FROM the scene TO the light. */
 export function sampleLighting(
   initialSeconds: number,
@@ -70,8 +73,12 @@ export function sampleLighting(
   // stay in frame. The night arc returns behind the camera, which keeps the
   // moon crossing the visible sky instead of the zenith. Elevation is unchanged.
   const bearing = 0.36
+  // Through the middle of the day the sun swings round behind the camera's right shoulder
+  // (about 130° at noon), so the woods and meadows face it in three-quarter light rather than
+  // reading as back-lit silhouettes; both ends of the arc are unchanged.
+  const swing = isDay ? Math.sin(angle) ** 2 * MIDDAY_SWING : 0
   const azimuth = isDay
-    ? bearing * (1 - (2 * angle) / Math.PI)
+    ? bearing * (1 - (2 * angle) / Math.PI) + swing
     : -bearing + ((angle - Math.PI) / Math.PI) * (2 * Math.PI + 2 * bearing)
   const orbitHeight = Math.sin(angle) * 0.85
   const height = isDay ? orbitHeight : orbitHeight * (1 - 0.5 * smooth(-0.3, -0.6, orbitHeight))
@@ -110,8 +117,9 @@ export function sampleLighting(
   const color = height >= 0 ? sunColor : new Color(0xa3bfd6)
   const intensity = height >= 0 ? sunIntensity : moonIntensity
   const night = 1 - daylight
-  // Humic lake water scatters little and in olive-brown: blue is absorbed before it returns.
-  const dayWater = desaturate(new Color().setRGB(0.03, 0.037, 0.016), greyMix).multiplyScalar(
+  // A clear, temperate lake scatters little, and in green-teal: water absorbs red, and the
+  // little phytoplankton and dissolved matter it holds take some of the blue.
+  const dayWater = desaturate(new Color().setRGB(0.012, 0.031, 0.03), greyMix).multiplyScalar(
     0.35 + 0.65 * diffuse,
   )
   const irradiance = skyIrradiance(height)

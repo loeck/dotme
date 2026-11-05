@@ -129,7 +129,7 @@ describe('lake world', () => {
     const second = createLakeWorld(9182, false)
     expect(first.trees).toEqual(second.trees)
     expect(first.trees.length).toBeGreaterThan(0)
-    expect(first.trees.length).toBeLessThanOrEqual(110)
+    expect(first.trees.length).toBeLessThanOrEqual(170)
     expect(first.trees.some((tree) => tree.z < -3 && tree.z > -40)).toBe(true)
     const fall = required(first.waterfall)
     for (const tree of first.trees) {
@@ -138,7 +138,7 @@ describe('lake world', () => {
       expect(Math.hypot(tree.x - fall.x, tree.z - fall.z)).toBeGreaterThan(2.5)
       expect(tree.scale).toBeGreaterThanOrEqual(0.65 * 0.75)
       expect(tree.scale).toBeLessThanOrEqual(1.35 * 1.35)
-      expect(['spruce', 'pine', 'birch']).toContain(tree.kind)
+      expect(['oak', 'beech', 'spruce', 'pine', 'birch']).toContain(tree.kind)
     }
     for (let a = 0; a < first.trees.length; a++)
       for (let b = a + 1; b < first.trees.length; b++) {
@@ -148,12 +148,12 @@ describe('lake world', () => {
           TREE_SPACING ** 2,
         )
       }
-    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(30)
+    expect(worldFor(12, true).trees.length).toBeLessThanOrEqual(38)
     // Birches stay in the mid-ground band, as in Last Signal's diorama.
     expect(first.trees.filter((tree) => tree.kind === 'birch').every((tree) => tree.z > -40)).toBe(
       true,
     )
-    // Groves: both conifers and birches appear on the default seed.
+    // Groves: several species appear on the default seed.
     expect(new Set(first.trees.map((tree) => tree.kind)).size).toBeGreaterThan(1)
   })
 

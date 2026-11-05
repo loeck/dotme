@@ -48,7 +48,7 @@ import type { WeatherPreset } from './weather'
 import type { WindModel } from './wind'
 
 export const CLOUD_PROFILES = {
-  desktop: { resolution: 256, hz: 15, steps: 48 },
+  desktop: { resolution: 384, hz: 15, steps: 48 },
   mobile: { resolution: 128, hz: 10, steps: 24 },
 } as const
 export function sampleCloudDisplacement(wind: WindModel, time: number): [number, number] {
@@ -212,10 +212,12 @@ export class VolumetricClouds {
                   ).mul(float(j).mul(12).add(9)),
                 )
               })
-              const moon = exp(optical.mul(-0.055)),
+              // Multiple scattering (Wrenninge's octaves): a second, softer extinction keeps a
+              // cumulus's shaded base a light grey rather than the slate of single scattering.
+              const moon = exp(optical.mul(-0.055)).add(exp(optical.mul(-0.014)).mul(0.4)),
                 sky = exp(density(p.add(vec3(0, 18, 0)), false).mul(-18 * 0.055))
               const source = u.uCloudAmbient.rgb
-                .mul(sky.mul(1.65).add(0.25))
+                .mul(sky.mul(1.65).add(0.42))
                 .add(u.uCloudDirect.rgb.mul(moon).mul(phase.mul(0.2).add(0.3)))
               const opacity = exp(d.mul(stride).mul(-0.055)).oneMinus()
               radiance.addAssign(transmission.mul(opacity).mul(source))

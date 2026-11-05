@@ -11,6 +11,7 @@ import type { MeshData } from './vegetation-meshes'
 import {
   crownSpheres,
   growBirch,
+  growBroadleaf,
   growBush,
   growJuniper,
   growPine,
@@ -36,7 +37,7 @@ export type PreparedVegetation = Readonly<{
 
 /** Undergrowth and shrub budgets per layout. */
 const GRID = {
-  desktop: { sward: 260_000, density: 1, shrubs: 450 },
+  desktop: { sward: 260_000, density: 1, shrubs: 520 },
   mobile: { sward: 44_000, density: 1, shrubs: 70 },
 } as const
 const GROUND_COVER_Z = -1.5
@@ -46,9 +47,15 @@ const SHRUB_FAR_Z = -46
 const COMPANION_REACH = 2.4
 /** Trees farther than this from the camera, metres, use the far level of detail. */
 const FAR_TREE = 50
-const TREE_VARIANTS: Record<TreeKind, number> = { spruce: 6, pine: 5, birch: 5 }
+const TREE_VARIANTS: Record<TreeKind, number> = { oak: 6, beech: 5, spruce: 3, pine: 2, birch: 4 }
 /** Tip travel at full wind as a share of model height (Voxen's `maxTip`). */
-const TREE_SWAY: Record<TreeKind, number> = { spruce: 0.03, pine: 0.03, birch: 0.05 }
+const TREE_SWAY: Record<TreeKind, number> = {
+  oak: 0.025,
+  beech: 0.03,
+  spruce: 0.03,
+  pine: 0.03,
+  birch: 0.05,
+}
 
 type Column = { top: number; ground: boolean }
 const COLUMN = 0.125
@@ -173,17 +180,23 @@ export function prepareVegetation(
     }
     return entry
   }
-  // Shrubs of a Nordic shore: bilberry domes, junipers on the drier ground, spruce saplings.
+  // Shrubs of a temperate wood's edge: leafy domes (hazel, hawthorn), young oaks and beeches,
+  // and the odd juniper or spruce sapling.
   const shrub = (pick: number, slot: number) => {
     if (pick < 0.55) return model(`bush-${slot}`, () => growBush(seed + 31 + slot, detail))
-    if (pick < 0.85) return model(`juniper-${slot}`, () => growJuniper(seed + 41 + slot, detail))
-    return model(`sapling-${slot}`, () =>
+    if (pick < 0.62) return model(`juniper-${slot}`, () => growJuniper(seed + 41 + slot, detail))
+    if (pick < 0.92)
+      return model(`sapling-${slot}`, () =>
+        growBroadleaf(seed + 61 + slot, detail, slot === 1 ? 'beech' : 'oak', [1.3, 2.1]),
+      )
+    return model(`spruce-sapling-${slot}`, () =>
       growSpruce(seed + 51 + slot, detail, slot === 1, [0.9, 1.6]),
     )
   }
   const farDetail = mobile ? MODEL_DETAIL.mobileFar : MODEL_DETAIL.desktopFar
   const growTree = (kind: TreeKind, variant: number, lod: ModelDetail) => {
     const treeSeed = seed + variant * 7919 + kind.length * 104_729
+    if (kind === 'oak' || kind === 'beech') return growBroadleaf(treeSeed, lod, kind)
     if (kind === 'birch') return growBirch(treeSeed, lod)
     if (kind === 'pine') return growPine(treeSeed, lod)
     return growSpruce(treeSeed, lod, variant % 3 === 2)
@@ -263,9 +276,9 @@ export function prepareVegetation(
         bz = tree.z + Math.cos(angle) * distance
       const column = tops.at(bx, bz)
       if (!column?.ground || column.top < tree.y - 0.6 || column.top <= WATER_LEVEL + 0.1) continue
-      // Companions are mostly bilberry and saplings: young growth under a parent tree.
+      // Companions are mostly leafy shrubs and saplings: young growth under a parent tree.
       const pick = hash(seed, xi, zi, 963 + slot)
-      const bush = shrub(pick < 0.7 ? pick * 0.75 : 0.86 + (pick - 0.7) * 0.4, slot)
+      const bush = shrub(pick < 0.7 ? pick * 0.78 : 0.62 + (pick - 0.7), slot)
       companions.push({ x: bx, z: bz })
       plant(
         bush,
@@ -433,10 +446,12 @@ export function prepareVegetation(
       })
       continue
     }
-    if (pick < 0.035 && !edge.near) {
-      const yellow = r(5) < 0.3
+    // Meadow flowers gather in drifts: buttercups mostly, with white ox-eye and campion.
+    const drift = smooth01(0.35, 0.75, valueNoise(seed, x, z, 2.5, 1319))
+    if (pick < 0.03 + 0.09 * drift && !edge.near) {
+      const yellow = r(5) < 0.78
       appendFlower(undergrowth, [x, top - 0.01, z], {
-        height: 0.14 + r(6) * 0.12,
+        height: 0.2 + r(6) * 0.22,
         petal: yellow ? P.flowerYellow : P.flowerWhite,
         heart: P.flowerHeart,
         stem: P.flowerStem,
@@ -450,7 +465,7 @@ export function prepareVegetation(
     const form: GrassForm =
       wet && r(7) < 0.18
         ? 'rush'
-        : r(13) < 0.4
+        : r(13) < 0.22
           ? 'turf'
           : species > 0.56 || tussock > 0.7
             ? 'flat'
@@ -462,8 +477,8 @@ export function prepareVegetation(
         : form === 'turf'
           ? 0.05 + 0.05 * r(8)
           : form === 'flat'
-            ? 0.24 + 0.18 * r(8) + 0.1 * tall
-            : 0.09 + 0.1 * r(8) + 0.1 * tall
+            ? 0.3 + 0.2 * r(8) + 0.14 * tall
+            : 0.16 + 0.14 * r(8) + 0.12 * tall
     const radius =
       (form === 'flat'
         ? 0.1 + 0.06 * r(9)
@@ -479,9 +494,11 @@ export function prepareVegetation(
         radius,
         form,
         height: height * (edge.near ? 0.8 : 1),
-        dryness: Math.min(1, dryField + r(10) * 0.3),
+        // A summer meadow: lush, with only a little dead grass in dry patches.
+        dryness: Math.min(1, dryField * 0.35 + r(10) * 0.08),
         value: 0.85 + r(11) * 0.3,
-        seeds: r(12) < (form === 'wiry' ? 0.16 : form === 'flat' ? 0.1 : 0),
+        // Early summer: few grasses have run to seed yet.
+        seeds: r(12) < (form === 'wiry' ? 0.07 : form === 'flat' ? 0.05 : 0),
         ...(towardEdge ? { edge: towardEdge } : {}),
         salt: key,
         phase,

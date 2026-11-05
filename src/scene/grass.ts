@@ -42,13 +42,16 @@ export type Clump = Readonly<{
   phase: number
 }>
 
-/** Linear albedos of a shore sward: fresh leaves near 0.05, straw near 0.2, litter grey-brown. */
+/**
+ * Linear albedos of a summer meadow sward: fresh, yellow-green leaves (cocksfoot, meadow
+ * foxtail, ryegrass) near 0.06–0.08 green, straw near 0.2, litter grey-brown.
+ */
 const GRASS = {
-  root: [0.014, 0.022, 0.009],
-  wiry: [0.05, 0.08, 0.022],
-  wiryTip: [0.065, 0.085, 0.03],
-  flat: [0.04, 0.078, 0.028],
-  flatTip: [0.05, 0.088, 0.034],
+  root: [0.016, 0.028, 0.008],
+  wiry: [0.06, 0.105, 0.022],
+  wiryTip: [0.1, 0.155, 0.032],
+  flat: [0.05, 0.1, 0.024],
+  flatTip: [0.085, 0.145, 0.03],
   rush: [0.03, 0.06, 0.02],
   straw: [0.22, 0.185, 0.1],
   strawTip: [0.27, 0.23, 0.13],

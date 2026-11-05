@@ -26,9 +26,9 @@ export type LakeLamp = Readonly<{
   driftRadius: number
 }>
 
-/** Last Signal's forest: dark conical spruces, Scots pines with an orange upper trunk, and
- * pale birches as the main value break against the conifers. */
-export type TreeKind = 'spruce' | 'pine' | 'birch'
+/** A temperate broadleaf wood: broad, billowing oaks and taller beeches, with a few pale
+ * birches as value breaks. Spruce and pine models remain available but are not planted. */
+export type TreeKind = 'oak' | 'beech' | 'spruce' | 'pine' | 'birch'
 
 export type LakeTree = Readonly<{
   x: number
@@ -980,9 +980,9 @@ function placeTrees(
     .filter((site) => site.z < -3 && site.z > -40)
     .sort((a, b) => b.spread - a.spread)
   const ridges = clear.filter((site) => site.z >= -3 || site.z <= -40).sort((a, b) => b.top - a.top)
-  const cap = mobile ? 30 : 110
+  const cap = mobile ? 38 : 170
   const trees: LakeTree[] = []
-  const plant = (site: Site, gate: number, size = 1) => {
+  const plant = (site: Site, gate: number, size = 1, forced?: TreeKind) => {
     if (trees.length >= cap) return
     const xi = Math.round(site.x * 10),
       zi = Math.round(site.z * 10)
@@ -994,8 +994,10 @@ function placeTrees(
     // Trees grow toward the horizon, which deepens the layered forest (Last Signal's diorama).
     const depth = clamp((-site.z - 8) / 50, 0, 1)
     const pick = hash(seed, xi, zi, 919)
-    // A boreal shore is conifer forest with birch mixed in.
-    const kind: TreeKind = site.z > -40 && pick < 0.22 ? 'birch' : pick < 0.66 ? 'spruce' : 'pine'
+    // A temperate broadleaf wood: oak and beech, with birch as pale value breaks in the
+    // mid-ground. Conifers are gone: their layered cards read as bonsai among round crowns.
+    const kind: TreeKind =
+      forced ?? (site.z > -40 && pick < 0.12 ? 'birch' : pick < 0.6 ? 'oak' : 'beech')
     // The trunk sits at the lowest ground under it, so no root hangs over a slope.
     const y = Math.min(
       ...[
@@ -1030,14 +1032,17 @@ function placeTrees(
           Math.hypot(profileX(a.x, mobile) - islet.x, a.z - islet.z) -
             Math.hypot(profileX(b.x, mobile) - islet.x, b.z - islet.z),
       )[0]
-    if (crown) plant(crown, -Infinity, ISLET_TREE_SCALE)
+    // A lone, round oak on each islet: the scene's small focal points.
+    if (crown) plant(crown, -Infinity, ISLET_TREE_SCALE, 'oak')
   }
   for (const site of midground) {
-    // Most trees go to the visible mid-ground islets; ridges take the rest.
-    if (trees.length >= cap * 0.7) break
+    // On desktop the mid-ground keeps open glades so the wooded ridges behind read as layers,
+    // and the ridges take most of the forest. The narrow portrait frame sees little past the
+    // mid-ground, so phones keep most of their trees there.
+    if (trees.length >= cap * (mobile ? 0.7 : 0.38)) break
     plant(site, 0.3)
   }
-  for (const site of midground.concat(ridges)) plant(site, 0.45)
+  for (const site of mobile ? midground.concat(ridges) : ridges.concat(midground)) plant(site, 0.45)
   return trees
 }
 
