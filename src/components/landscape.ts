@@ -1,16 +1,16 @@
 import type { WebGPURenderer } from 'three/webgpu'
 
-import { cleanSceneUrl, debugParams, sceneParams } from '../scene-params'
+import { debugParams, sceneParams } from '../scene-params'
 import { loadPhysics } from '../scene/physics-world'
-import { prepareWorldAsync } from '../scene/prepare-world'
 import { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
 import { preloadSceneWeather } from '../weather/scene'
 import type { SceneWeather } from '../weather/scene'
 import { initAmbientSound } from './ambient-sound'
 import { initSceneCursor } from './scene-cursor'
 import { initSceneInfo } from './scene-info'
+import { prepareNextWorld } from './scene-world'
+import type { SceneWorld } from './scene-world'
 
-const seeds = new WeakMap<HTMLDivElement, number>()
 const weatherSnapshots = new WeakMap<HTMLDivElement, SceneWeather>()
 
 export async function initLandscape(
@@ -20,17 +20,15 @@ export async function initLandscape(
   onFirstFrame: () => void,
   onFailure: () => void,
   autoplay: boolean,
+  world: SceneWorld,
 ): Promise<() => void> {
-  const url = cleanSceneUrl(new URL(location.href))
-  if (url.href !== location.href) history.replaceState(history.state, '', url)
   const params = sceneParams(location.search)
-  const seed = seeds.get(host) ?? params.seed ?? crypto.getRandomValues(new Uint32Array(1))[0] ?? 0
-  seeds.set(host, seed)
+  const { seed } = world
   // The engine reuses this cached promise; starting it here overlaps the
   // deferred physics download and instantiation with world preparation.
   void loadPhysics()
   const [prepared, snapshot] = await Promise.all([
-    prepareWorldAsync(seed, innerWidth < 768, signal),
+    world.prepared,
     weatherSnapshots.get(host) ?? preloadSceneWeather({ seed, position: params.position, signal }),
   ])
   signal.throwIfAborted()
@@ -73,6 +71,7 @@ export async function initLandscape(
         onContextFailure: onFailure,
         onFirstFrame: () => {
           onFirstFrame()
+          prepareNextWorld(world, signal)
           // Let the completed scene paint before opening the browser's audio device.
           if (autoplay)
             audioFrame = requestAnimationFrame(() => {

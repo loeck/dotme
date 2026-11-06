@@ -122,28 +122,66 @@ The first complete frame waits on three phases in turn: world data, collider and
 construction, then shader preparation. Each phase avoids work that another thread or
 pass already performs.
 
-World data is deterministic in its seed and layout, so two instances of the world worker
-each compose the lake again and derive disjoint halves: the smooth terrain mesh and
-boulders on one, lake surfaces, cloud noise and the static colliders on the other. The slower
-half bounds the wait instead of their sum. The second worker then grows the forest and posts it
-on its own, so world data does not wait for vegetation. The forest is still part of the first
+World preparation starts before the GPU device is requested, so the workers overlap device
+creation, the loader and the landscape download. World data is deterministic in its seed and
+layout, so three instances of the world worker each compose the lake again and derive disjoint
+parts: the smooth terrain mesh and boulders on one, lake surfaces, cloud noise and the static
+colliders on another, the forest on the third. The slowest part bounds the wait instead of their
+sum (the forest, about 0.9 s after composing the lake, used to follow the surfaces on the same
+worker). The forest posts on its own, so world data does not wait for vegetation. The forest is still part of the first
 frame: the engine adds it after building the scene and compiles it for the main view, the mirror,
-the probe and the shadow maps in the same batch as the scene (`vegetation-ready` and
+the probe and the shadow maps in the same sequence as the scene (`vegetation-ready` and
 `vegetation-presented` marks). Rapier only creates a heightfield and boulder hulls the worker
 prepared. The waterfall search reads the composed ground directly; the lake bed derives from the
 smooth ground ([terrain](terrain.md)). Generating the world takes about 0.3 to 0.5 s on desktop in
-Node, and each half of the world data finishes in under half a second. A loader frame separates collider
+Node; the forest alone takes about another 0.9 s. A loader frame separates collider
 creation from scene construction so neither forms one long task.
 
-Shader preparation is one batch. `compile:passes` issues the clouds, sky, rain, contrast,
-water-simulation and waterfall-fluid compiles; `compile:environment` establishes the probe
-texture before any lit variant is built; `compile:scene` issues the probe, shadow maps,
-submerged capture, main view, atmosphere and lens and settles every pass together, then
-compiles the mirror view; `compile:warmup` renders once offscreen. Three's `compileAsync`
-collects its render objects and restores renderer state synchronously, then builds node
-graphs and driver pipelines asynchronously, so passes issued back to back interleave their
-builds and the driver compiles their pipelines in parallel; awaiting them one at a time made
-the loader pay their sum instead.
+### World cache
+
+Production builds keep the prepared world between visits in the origin private file system
+(`world-cache.ts`), one file per part and profile (desktop or mobile): a JSON header naming the
+generator version and seed, then the part's typed arrays, aligned and raw. The version is the
+content-hashed URL of the worker bundle, so any change to the generator retires stored worlds.
+Each world worker reads its own part before generating it and transfers a hit like a generated
+part; reads, decoding and writes never run on the render thread. Development builds have no
+hashed worker and always generate.
+
+Four seconds after the first frame, once the main thread is idle, a single background worker
+prepares the world of the next visit and stores it with `createWritable`, which commits each file
+atomically. A random visit draws a new seed for it and remembers that seed in `localStorage` only
+once stored; the next visit consumes it, so every visit still shows a new world, and a visit that
+never stored one simply generates. A URL seed is stored as is, so its reload is cached too. A
+desktop world is about 80 MB on disk (mobile about 20 MB). An earlier IndexedDB store of the same
+values kept the browser busy long after the page had gone: a reload within seconds stalled its
+shader compiles for 10 to 40 s. Raw files showed no such stall. The `worldprep-cached` mark
+records a world served entirely from the cache; the benchmark reports it as `worldCached`.
+
+Open-Meteo reports current conditions per 15-minute slot, so the last response is kept in
+`localStorage` and reused while its slot is current; a reload then skips the weather request.
+Hashed assets are served `immutable` for a year (`vercel.json`), so a reload revalidates none of
+them.
+
+On the desktop AMD GPU used for the measurements above, reloading one tab every 12 s, with
+before/after runs interleaved: the previous build presented the scene after 4.1-4.4 s on every
+reload. Now a cached URL seed presents after 1.9-2.2 s (its world is ready about 0.1 s after the
+script starts, before the loader's first frame), a random visit served the world the previous
+one prepared after 2.5-3.0 s, and an uncached load after 2.9-3.7 s (forest on its own worker,
+three r187's faster compile). Shader preparation is now most of a cached load.
+
+Shader preparation is one sequence. `compile:passes` compiles the clouds, sky, rain, contrast,
+water-simulation and waterfall-fluid passes while the forest is still arriving;
+`compile:environment` establishes the probe texture before any lit variant is built;
+`compile:scene` compiles the probe, shadow maps, submerged capture, main view, atmosphere and
+lens, then the mirror view; `compile:warmup` renders once offscreen. Since three r187,
+`compileAsync` processes its render objects one by one under a frame budget and compiles their
+driver pipelines in parallel while it builds the next node graphs, but it keeps a single
+precompilation state on the renderer: two calls in flight that share a node build swap each
+other's render target and context, which fails the load. Calls therefore run one at a time,
+and each task sets up its scene state (hidden water, shadow override material) when it runs
+rather than when it is queued. On r186 the same passes were issued back to back so their builds
+interleaved; r187's in-call parallelism made the sequence faster than that batch (scene stage
+about 1.0 s instead of 1.6 s on the first, uncached load).
 
 The lake reflection renders as a top-level pass immediately before the main view
 (`LakeReflector.renderReflection`), not from inside it. Three keys render contexts by
@@ -151,7 +189,7 @@ attachment state and call depth: nested inside the view, the mirror had a contex
 whose node graphs `compileAsync` (always at depth zero) could not prepare, so the warmup
 rebuilt about forty of them synchronously and minted vertex-stage duplicate programs. At depth
 zero the mirror target's attachments match the main view's, so both passes share one render
-context, node graphs and pipelines; the mirror compile runs after the batch and mostly hits
+context, node graphs and pipelines; the mirror compile runs after the main view and mostly hits
 the cache. Lantern glows likewise share one material with a per-object strength uniform;
 per-lamp node graphs produced identical shaders but each cost a build.
 

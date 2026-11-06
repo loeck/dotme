@@ -5,7 +5,7 @@ The profile, links and metadata are HTML and remain available without JavaScript
 
 ## Development
 
-Use Node.js 24.21.0 and pnpm 12.5.1, pinned in `mise.toml` and `package.json`. With
+Use Node.js 26.13.0 and pnpm 12.5.1, pinned in `mise.toml` and `package.json`. With
 [mise](https://mise.jdx.dev), `mise install` provides both and `mise run setup` installs
 dependencies and Playwright's Chromium.
 

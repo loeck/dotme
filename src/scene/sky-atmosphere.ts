@@ -338,10 +338,11 @@ export class SkyAtmosphere {
     return this.radiance(direction, float(0.02))
   }
 
+  /** One pass at a time: three keeps a single precompilation state per renderer. */
   async compileAsync() {
-    await Promise.all(
-      this.passes.map((pass, index) => pass.compileAsync(this.targets[index] ?? null)),
-    )
+    for (const [index, pass] of this.passes.entries())
+      // eslint-disable-next-line no-await-in-loop -- sequential on purpose
+      await pass.compileAsync(this.targets[index] ?? null)
   }
 
   private draw(index: number) {

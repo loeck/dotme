@@ -1,10 +1,33 @@
-import { prepareWorldParts, worldTransfers } from './world-data'
-import type { WorldPart } from './world-data'
+import { readCachedPart, storeWorld } from './world-cache'
+import { prepareAllWorldParts, prepareWorldPart, worldTransfers } from './world-data'
+import type { WorldRequest } from './world-data'
 
-self.addEventListener(
-  'message',
-  (event: MessageEvent<{ seed: number; mobile: boolean; part: WorldPart }>) => {
-    for (const message of prepareWorldParts(event.data.seed, event.data.mobile, event.data.part))
-      self.postMessage(message, { transfer: worldTransfers(message) })
-  },
-)
+/**
+ * The content-hashed URL of this bundle in production: any change to the generator renames it,
+ * which retires every stored world.
+ */
+const version = new URL(import.meta.url).pathname
+
+async function handle({ seed, mobile, part, cache }: WorldRequest) {
+  if (part === 'store') {
+    await storeWorld(version, seed, mobile, prepareAllWorldParts(seed, mobile))
+    self.postMessage({ part: 'stored' }, { transfer: [] })
+    return
+  }
+  const cached = cache ? await readCachedPart(version, seed, mobile, part) : undefined
+  // Same shape as the generator's message: written by this very bundle for this seed.
+  const message: unknown =
+    cached === undefined
+      ? prepareWorldPart(seed, mobile, part)
+      : { part, data: cached, cached: true }
+  self.postMessage(message, { transfer: worldTransfers(message) })
+}
+
+self.addEventListener('message', (event: MessageEvent<WorldRequest>) => {
+  handle(event.data).catch((error: unknown) => {
+    // Surface as a worker error so the page fails or skips this preparation like any other.
+    setTimeout(() => {
+      throw error
+    })
+  })
+})
