@@ -2,6 +2,7 @@ import {
   asin,
   atan,
   clamp,
+  dot,
   exp,
   float,
   fract,
@@ -17,6 +18,8 @@ import {
 import type { Node } from 'three/webgpu'
 import { Vector3 } from 'three/webgpu'
 import type { PerspectiveCamera } from 'three/webgpu'
+
+import { horizonNoise } from './distant-horizon'
 
 function starRandom(seed: number) {
   let state = seed >>> 0
@@ -97,6 +100,74 @@ export interface StarUniforms {
   uMeteorEnd: Node<'vec3'>
   uMeteorAge: Node<'float'>
 }
+const skyPoint = (azimuth: number, elevation: number) =>
+  new Vector3(
+    Math.sin(azimuth) * Math.cos(elevation),
+    Math.sin(elevation),
+    -Math.cos(azimuth) * Math.cos(elevation),
+  )
+/**
+ * The galactic plane as a great circle rising from the left bank's horizon to the top of the
+ * frame left of centre, so on a desktop frame the band crosses the left half diagonally and
+ * passes beside the moon at midnight rather than through it. `GALAXY_FRONT` points along the band
+ * into the frame and the along-band angle wraps behind the camera, where its seam is unseen.
+ */
+const GALAXY_LOW = skyPoint(-0.62, 0.07)
+const GALAXY_NORMAL = new Vector3().crossVectors(GALAXY_LOW, skyPoint(-0.08, 0.6)).normalize()
+const GALAXY_FRONT = GALAXY_LOW.clone()
+  .addScaledVector(GALAXY_NORMAL, -GALAXY_LOW.dot(GALAXY_NORMAL))
+  .normalize()
+const GALAXY_SIDE = new Vector3().crossVectors(GALAXY_NORMAL, GALAXY_FRONT)
+const constant = (v: Vector3) => vec3(v.x, v.y, v.z)
+
+/**
+ * The Milky Way: a soft band of unresolved stars, mottled by star clouds and split by a dark
+ * dust rift along its core, warm at its centre and bluer at its edges. It comes out only once
+ * the faintest stars have, fades near the horizon and washes out close to the moon.
+ */
+export function milkyWay(direction: Node<'vec3'>, moonAngle: Node<'float'>, u: StarUniforms) {
+  const across = dot(direction, constant(GALAXY_NORMAL))
+  const along = atan(dot(direction, constant(GALAXY_SIDE)), dot(direction, constant(GALAXY_FRONT)))
+  const core = exp(across.div(0.1).pow2().negate())
+  const wide = exp(across.div(0.24).pow2().negate())
+  const cloudCoord = vec2(along.mul(9), across.mul(24)).add(u.uSeed)
+  const starClouds = horizonNoise(cloudCoord)
+    .mul(0.65)
+    .add(horizonNoise(cloudCoord.mul(2.3).add(5.1)).mul(0.35))
+  const rift = smoothstep(
+    0.5,
+    0.78,
+    horizonNoise(vec2(along.mul(16), across.mul(46)).add(u.uSeed.add(17))),
+  )
+    .mul(exp(across.div(0.05).pow2().negate()))
+    .mul(0.45)
+  // Unresolved stars: a fine powder, densest in the bright star clouds, so the band reads as
+  // stars rather than as a smooth haze. Each grain is a few pixels and never moves, so it
+  // cannot shimmer.
+  const grain = smoothstep(
+    0.8,
+    0.97,
+    horizonNoise(vec2(along.mul(260), across.mul(260)).add(u.uSeed.mul(7))),
+  )
+  const density = core
+    .mul(starClouds.mul(0.9).add(0.35))
+    .add(wide.mul(0.28))
+    .mul(rift.oneMinus())
+    .mul(grain.mul(starClouds).mul(2.5).add(0.7))
+  const visibility = smoothstep(
+    0,
+    NIGHT_FADE,
+    u.uSunDirection.y.negate().sub(NIGHT_START).sub(FAINT_DELAY),
+  )
+  const colour = mix(vec3(0.55, 0.68, 1), vec3(1, 0.85, 0.66), core.mul(starClouds))
+  return colour
+    .mul(density)
+    .mul(0.035)
+    .mul(visibility)
+    .mul(smoothstep(0.03, 0.3, direction.y))
+    .mul(mix(0.45, 1, smoothstep(0.05, 0.6, moonAngle)))
+}
+
 function normalizeStarVector(value: Node<'vec3'>) {
   return value.div(max(length(value), 0.000001))
 }

@@ -4,8 +4,16 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { cloudShadowFrame } from './cloud-shadows'
-import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
-import { parseInitialTime, SolarClock } from './solar-clock'
+import { fadeNightLight, mistFactor, MOON_SWEEP, moonPath, sampleLighting } from './lighting'
+import {
+  INTRO_ARC_SHARE,
+  INTRO_DURATION,
+  INTRO_HOLD,
+  introGap,
+  introRemaining,
+  parseInitialTime,
+  SolarClock,
+} from './solar-clock'
 import { parseWeather, WEATHER } from './weather'
 
 const fade = (from: number, target: number, fps: number) => {
@@ -41,6 +49,50 @@ describe('visitor solar clock', () => {
     expect(clock.seconds(clock.elapsed(31000))).toBe(20)
     expect(clock.elapsed(3_601_000)).toBe(3600)
     expect(new SolarClock(30000, true, 1000).elapsed(3_601_000)).toBe(0)
+  })
+  it('opens on the latest golden hour and lands on the real time', () => {
+    const solar = { sunrise: 7 * 3600, sunset: 19 * 3600 }
+    const lead = 12 * 3600 * INTRO_ARC_SHARE
+    // Mid-morning replays from the morning golden hour, a night from the evening one.
+    expect(introGap(10 * 3600, solar)).toBeCloseTo(3 * 3600 - lead, 6)
+    expect(introGap(23 * 3600, solar)).toBeCloseTo(4 * 3600 + lead, 6)
+    // Before sunrise the evening is the latest golden hour, across midnight.
+    expect(introGap(5 * 3600, solar)).toBeCloseTo(10 * 3600 + lead, 6)
+    // A visit already in the golden hour is not replayed.
+    expect(introGap(solar.sunset - lead + 300, solar)).toBe(0)
+    // Ill-formed endpoints fall back to the default day.
+    expect(introGap(10 * 3600, { sunrise: 5, sunset: 2 })).toBe(introGap(10 * 3600))
+    for (const now of [0, 3600, 30_000, 50_000, 86_399])
+      expect(introGap(now, solar)).toBeLessThan(86_400)
+
+    const now = 10 * 3600
+    const clock = new SolarClock(now, false, 1000, 1, introGap(now, solar))
+    const opening = clock.seconds(0)
+    expect(opening).toBeCloseTo(7 * 3600 + lead, 6)
+    // The opening holds, then the replay only ever moves forward.
+    expect(clock.seconds(INTRO_HOLD)).toBeCloseTo(opening + INTRO_HOLD, 6)
+    let previous = opening
+    for (let t = 0.25; t <= INTRO_DURATION + 2; t += 0.25) {
+      const value = clock.seconds(t)
+      expect(value).toBeGreaterThanOrEqual(previous)
+      previous = value
+    }
+    expect(clock.seconds(INTRO_DURATION)).toBeCloseTo(now + INTRO_DURATION, 6)
+    expect(clock.seconds(INTRO_DURATION + 60)).toBeCloseTo(now + INTRO_DURATION + 60, 6)
+    expect(introRemaining(0)).toBe(1)
+    expect(introRemaining(INTRO_DURATION)).toBe(0)
+  })
+  it('restarts the intro at the first frame and skips it with reduced motion', () => {
+    const clock = new SolarClock(36_000, false, 1000, 1, 3600)
+    const restarted = clock.restartIntro(6000)
+    // Loading time still counts towards the real time; the opening is replayed in full.
+    expect(restarted.seconds(0)).toBeCloseTo(36_005 - 3600, 6)
+    expect(restarted.seconds(INTRO_DURATION)).toBeCloseTo(36_005 + INTRO_DURATION, 6)
+    const plain = new SolarClock(36_000, false, 1000)
+    expect(plain.restartIntro(6000)).toBe(plain)
+    const frozen = new SolarClock(36_000, true, 1000, 1, 3600)
+    expect(frozen.introGap).toBe(0)
+    expect(frozen.seconds(0)).toBe(36_000)
   })
 })
 
@@ -83,6 +135,25 @@ describe('solar lighting and light-space projection', () => {
       expect(moon.y).toBeGreaterThan(0.15)
       expect(moon.y).toBeLessThan(0.6)
     }
+  })
+  it('crosses the frame with the moon over the night, right to left, without jumps', () => {
+    const azimuth = (v: Vector3) => Math.atan2(v.x, -v.z)
+    let previous = sampleLighting(18 * 3600).moonDirection
+    expect(azimuth(previous)).toBeCloseTo(MOON_SWEEP, 6)
+    expect(azimuth(sampleLighting(6 * 3600 - 1).moonDirection)).toBeCloseTo(-MOON_SWEEP, 3)
+    expect(sampleLighting(0).moonDirection.y).toBeGreaterThan(0.33)
+    for (let seconds = 18 * 3600 + 60; seconds < 30 * 3600; seconds += 60) {
+      const moon = sampleLighting(seconds % 86_400).moonDirection
+      expect(moon.length()).toBeCloseTo(1, 6)
+      expect(moon.z).toBeLessThan(0)
+      expect(moon.y).toBeGreaterThanOrEqual(0.08 - 1e-9)
+      expect(Math.abs(azimuth(moon))).toBeLessThanOrEqual(MOON_SWEEP + 1e-9)
+      expect(moon.angleTo(previous)).toBeLessThan(0.01)
+      previous = moon
+    }
+    // Through the day it returns unseen along the same arc, so sunset and sunrise join.
+    expect(moonPath(0).distanceTo(sampleLighting(18 * 3600).moonDirection)).toBeLessThan(1e-9)
+    expect(moonPath(1).distanceTo(sampleLighting(6 * 3600).moonDirection)).toBeLessThan(1e-9)
   })
   it('keeps late-September sun up at 18:26 instead of forcing night at 18:00', () => {
     const paris = { sunrise: 27_720, sunset: 71_040 }

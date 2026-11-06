@@ -45,6 +45,19 @@ describe('Last Signal scene look', () => {
     expect(night.tint[2]).toBeGreaterThan(night.tint[0])
   })
 
+  it('lets lamps glow at night and the low sun bloom at golden hour', () => {
+    const noon = sampleLook({ ...day, sunHeight: elevation(50) })
+    const golden = sampleLook({ ...day, sunHeight: elevation(8) })
+    const night = sampleLook({ daylight: 0, rain: 0, mist: 0, sunHeight: elevation(-30) })
+    expect(golden.glow).toBeGreaterThan(noon.glow)
+    expect(golden.split).toBeGreaterThan(noon.split)
+    expect(golden.glowThreshold).toBe(noon.glowThreshold)
+    expect(night.glowThreshold).toBeLessThan(noon.glowThreshold / 2)
+    expect(night.glow).toBeGreaterThan(noon.glow)
+    // Night is exposed longer, as a night photograph is.
+    expect(night.exposure).toBeGreaterThan(noon.exposure * 1.2)
+  })
+
   it('stays finite and bounded for any input', () => {
     for (const sunHeight of [-1, -0.2, 0, 0.1, 0.5, 1, 2, -2])
       for (const value of [0, 0.5, 1, 4, -1]) {

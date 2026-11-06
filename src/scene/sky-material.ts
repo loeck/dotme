@@ -30,10 +30,13 @@ import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { sampleMoonLight } from './moon-light'
 import type { SkyAtmosphere } from './sky-atmosphere'
-import { stellarRadiance } from './stars'
+import { milkyWay, stellarRadiance } from './stars'
 import type { VolumetricClouds } from './volumetric-clouds'
 
 const SUN_RADIUS = 0.0097
+/** About three times the real moon's angular radius: at 54° of field the true disc is a
+ * few pixels wide, too small for its maria to read. */
+const MOON_RADIUS = 0.013
 
 const luminanceOf = (value: Node<'vec3'>) => dot(value, vec3(0.2126, 0.7152, 0.0722))
 
@@ -120,14 +123,33 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .add(dimRadiance)
       .add(solarDisc(direction, u))
     const moonAngle = acos(clamp(direction.dot(u.uMoonDirection), -1, 1))
-    const disc = smoothstep(0.008, 0.01, moonAngle).oneMinus(),
-      halo = exp(moonAngle.pow(2).mul(-90)).mul(0.016)
+    const disc = smoothstep(MOON_RADIUS * 0.9, MOON_RADIUS, moonAngle).oneMinus()
+    // Maria and a little limb darkening in the disc's own east/north frame.
+    const east = normalize(cross(vec3(0, 1, 0), u.uMoonDirection)),
+      north = cross(u.uMoonDirection, east)
+    const face = vec2(dot(direction, east), dot(direction, north)).div(MOON_RADIUS)
+    const maria = horizonNoise(face.mul(2.2).add(11))
+      .mul(0.6)
+      .add(horizonNoise(face.mul(5.3).add(3)).mul(0.4))
+    const surface = mix(float(1), float(0.6), smoothstep(0.42, 0.68, maria)).mul(
+      float(1).sub(dot(face, face).mul(0.22)),
+    )
+    // A tight aureole round the disc and a wide, faint glow in the night air.
+    const halo = exp(moonAngle.pow(2).mul(-900))
+      .mul(0.05)
+      .add(exp(moonAngle.pow(2).mul(-60)).mul(0.02))
     color = color.add(
-      vec3(0.63, 0.77, 1).mul(disc.mul(2).mul(u.uShowMoon).add(halo)).mul(u.uMoonIntensity),
+      vec3(0.63, 0.77, 1)
+        .mul(disc.mul(surface).mul(2.2).mul(u.uShowMoon).add(halo))
+        .mul(u.uMoonIntensity),
     )
     const cloud = clouds.sample(direction)
     color = color
-      .add(stellarRadiance(direction, moonAngle, u).mul(smoothstep(0.65, 0.98, cloud.a)))
+      .add(
+        stellarRadiance(direction, moonAngle, u)
+          .add(milkyWay(direction, moonAngle, u))
+          .mul(smoothstep(0.65, 0.98, cloud.a)),
+      )
       .mul(cloud.a)
       .add(cloud.rgb)
     // Distant ridges and mist take the sky's own horizon light in their direction:

@@ -8,6 +8,19 @@ Fish follow seeded shoal paths over the lake bed. Pointer avoidance and dive beh
 CPU logic. Underwater appearance combines refraction, water clarity and wave-driven caustics.
 Fireflies react to nearby input at night. Shore wetness retains moisture after rain stops.
 
+A quick flick across the water throws a stone (`stone-skips.ts`). Its speed is read on the water
+plane from the newest pointer sample at least 40 ms before the release, or from the press (moves
+that arrive coalesced on a busy frame often sit on the release point and would read as no
+motion); below 5 m/s a drag only stirs the surface. The stone is lobbed from a hand low and
+right of the eye, lands where the flick ended and skips on in its direction: a first hop of 0.45
+m per m/s of flick (2–11 m), each hop 70% of the last and a little quicker, until a hop falls
+under half a metre or the next landing is not open water, where it sinks. Each touchdown is a
+bounded local impulse in the wave field and a splash burst with its droplets and sound, plus a
+tuned note (see [interaction sounds](living-landscape.md#interaction-sounds)) and, for a stone
+thrown by touch, a vibration of 6–20 ms. Seven seconds after the first frame, a scene nobody has
+pressed throws one stone by itself, with no text: the run across the lake is the invitation.
+Reduced motion throws nothing, and switching to it drops a stone in flight.
+
 The world seed can select a supported left-bank waterfall with a clear landing in the lake.
 An upstream rock basin contains a shallow pool and narrows into an open spillway at the lip.
 The basin floor and banks belong to the generated terrain; its water feeds a volume of seeded

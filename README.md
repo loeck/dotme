@@ -59,12 +59,12 @@ when the main module cannot load.
 
 The scene accepts four URL parameters:
 
-| Parameter     | Example          | Meaning                                              |
-| ------------- | ---------------- | ---------------------------------------------------- |
-| `seed`        | `42`             | Reproduce a landscape composition                    |
-| `coordinates` | `48.8566,2.3522` | Weather location; defaults to Paris                  |
-| `startTime`   | `08:30`          | Initial artistic solar clock; defaults to local time |
-| `timeScale`   | `20`             | Solar cycle multiplier, clamped to 1–100             |
+| Parameter     | Example          | Meaning                                                                                      |
+| ------------- | ---------------- | -------------------------------------------------------------------------------------------- |
+| `seed`        | `42`             | Reproduce a landscape composition                                                            |
+| `coordinates` | `48.8566,2.3522` | Weather location; defaults to Paris                                                          |
+| `startTime`   | `08:30`          | Initial artistic solar clock; defaults to a golden-hour intro that time-lapses to local time |
+| `timeScale`   | `20`             | Solar cycle multiplier, clamped to 1–100                                                     |
 
 Weather is live and independent of the artistic solar clock. Reduced motion renders a
 static TSL loader and freezes scene motion. Audio follows browser autoplay rules and

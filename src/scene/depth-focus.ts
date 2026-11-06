@@ -1,3 +1,5 @@
+import { bloom } from 'three/examples/jsm/tsl/display/BloomNode.js'
+import type BloomNode from 'three/examples/jsm/tsl/display/BloomNode.js'
 import {
   Fn,
   If,
@@ -22,7 +24,14 @@ import {
   vec4,
 } from 'three/tsl'
 import { DepthTexture, HalfFloatType, RenderTarget, UnsignedIntType, Vector2 } from 'three/webgpu'
-import type { DirectionalLight, Node, PerspectiveCamera, Scene, WebGPURenderer } from 'three/webgpu'
+import type {
+  DirectionalLight,
+  Node,
+  PerspectiveCamera,
+  Scene,
+  UniformNode,
+  WebGPURenderer,
+} from 'three/webgpu'
 
 import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
@@ -39,6 +48,30 @@ export const LENS_TARGET = 'Landscape lens color'
 
 const REC709 = vec3(0.2126, 0.7152, 0.0722)
 
+/**
+ * Bloom reads the graded radiance, so its threshold is in exposed units: ACES maps 1 to
+ * about 0.8 on screen, and only the sun, its glitter, lamps and fireflies pass it. The knee
+ * fades the threshold in over half its value instead of cutting it (a fixed knee would let
+ * the whole night frame into a low threshold and veil it), and the ceiling keeps the sun's
+ * half-float disc from washing the frame in a uniform glow.
+ */
+const BLOOM = { knee: 0.5, ceiling: 24, radius: 0.55 }
+
+/** Soft-knee bright pass (Karis): a quadratic ramp below the threshold, linear above it. */
+function brightPass(params: {
+  input: Node<'vec4'>
+  threshold: UniformNode<'float'>
+  smoothWidth: UniformNode<'float'>
+}) {
+  const colour = min(params.input.rgb, vec3(BLOOM.ceiling))
+  const brightness = max(colour.r, max(colour.g, colour.b))
+  const knee = params.threshold.mul(params.smoothWidth)
+  const soft = clamp(brightness.sub(params.threshold).add(knee), 0, knee.mul(2))
+  const ramp = soft.mul(soft).div(knee.mul(4).add(0.00001))
+  const share = max(ramp, brightness.sub(params.threshold)).div(max(brightness, 0.00001))
+  return vec4(colour.mul(share), 1)
+}
+
 /** Scene radiance and depth remain linear until the final output transform. */
 export class DepthFocus {
   readonly target = new RenderTarget(1, 1, {
@@ -52,6 +85,7 @@ export class DepthFocus {
   private readonly cssPixel = uniform(new Vector2(1, 1))
   private readonly bufferPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
+  private readonly glow: BloomNode
   constructor(renderer: WebGPURenderer, lowPower: boolean, grade: SceneGrade) {
     this.target.texture.name = LENS_TARGET
     const samples = lowPower ? 12 : 20
@@ -102,6 +136,17 @@ export class DepthFocus {
       // Flat regions keep the untouched pixel: no blur where there is no edge.
       return select(lMax.sub(lMin).lessThan(max(0.04, lMax.mul(0.125))), centre, blended)
     }
+    // Graded before the bright pass so the threshold follows exposure through the day and night.
+    this.glow = bloom(
+      vec4(grade.colour(this.color.rgb), 1),
+      grade.glow,
+      BLOOM.radius,
+      grade.glowThreshold,
+    )
+    this.glow.smoothWidth.value = BLOOM.knee
+    this.glow.highPassFn = brightPass
+    // The blur is wide and soft: a reduced chain costs a fraction of the full-resolution one.
+    this.glow.setResolutionScale(lowPower ? 0.25 : 0.5)
     this.pipeline = new FullscreenPass(
       renderer,
       Fn(() => {
@@ -136,7 +181,7 @@ export class DepthFocus {
           })
           color.divAssign(weight)
         })
-        return vec4(grade.colour(color).mul(grade.frameEdge(uv())), 1)
+        return vec4(grade.colour(color).add(this.glow.rgb).mul(grade.frameEdge(uv())), 1)
       })(),
       true,
       (display) => grade.finish(display),
@@ -151,6 +196,21 @@ export class DepthFocus {
     const depth = this.target.depthTexture
     if (!depth) throw new Error('Landscape depth texture is unavailable')
     return depth
+  }
+  /**
+   * Draws the lens once offscreen. The bloom's blur chain builds its own materials only when
+   * it first runs, which would otherwise stall the first presented frame.
+   */
+  warmup(renderer: WebGPURenderer) {
+    const previous = renderer.getRenderTarget()
+    const scratch = new RenderTarget(1, 1, { depthBuffer: false })
+    try {
+      renderer.setRenderTarget(scratch)
+      this.pipeline.render()
+    } finally {
+      renderer.setRenderTarget(previous)
+      scratch.dispose()
+    }
   }
   async compileAsync(renderer: WebGPURenderer, camera: PerspectiveCamera) {
     this.cameraRange.value.set(camera.near, camera.far)
@@ -188,6 +248,7 @@ export class DepthFocus {
     }
   }
   dispose() {
+    this.glow.dispose()
     this.target.dispose()
     this.pipeline.dispose()
   }

@@ -53,6 +53,25 @@ const skyLight = (c: Rgb, scale: number) => {
 /** How far the noon sun swings round from the frame's centre, radians. */
 export const MIDDAY_SWING = 2.25
 
+/** Half-width of the moon's sweep across the frame, radians of azimuth either side of centre. */
+export const MOON_SWEEP = 0.3
+/** Moon elevation (sine) at the ends of the night and its rise at midnight. */
+const MOON_LOW = 0.08
+const MOON_RISE = 0.28
+
+/**
+ * The moon is staged rather than opposite the sun: over the night it crosses the open valley
+ * from the right ridge to the left, a few degrees up at dusk and about 21° at midnight, so it
+ * and the glitter path it lays on the lake stay in frame. During the day it returns unseen.
+ */
+export function moonPath(nightProgress: number) {
+  const p = Math.max(0, Math.min(1, nightProgress))
+  const height = MOON_LOW + MOON_RISE * Math.sin(Math.PI * p)
+  const azimuth = MOON_SWEEP * (1 - 2 * p)
+  const flat = Math.sqrt(1 - height * height)
+  return new Vector3(Math.sin(azimuth) * flat, height, -Math.cos(azimuth) * flat)
+}
+
 /** Artistic orbit between sunrise and sunset. Directions always point FROM the scene TO the light. */
 export function sampleLighting(
   initialSeconds: number,
@@ -95,7 +114,7 @@ export function sampleLighting(
   const beam = diffuse ** 1.5
   const sunIntensity = 4.5 * smooth(0, Math.sin((2 * Math.PI) / 180), height) * beam
   const moonIntensity = 1.4 * (1 - smooth(-0.12, 0, height)) * beam
-  const moonDirection = sunDirection.clone().negate()
+  const moonDirection = moonPath(isDay ? 1 - angle / Math.PI : angle / Math.PI - 1)
   // Direct sunlight is the atmosphere's own transmittance, ozone included.
   const sunColor = desaturate(
     scaled(transmittance(EARTH.viewerHeight, height), adaptation / NOON_SUN),

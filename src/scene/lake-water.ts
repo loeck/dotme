@@ -515,13 +515,19 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       return total
     })()
     const foam = min(0.97, film.add(fragments.mul(0.8)).add(rain.a).add(wakeFoam).add(meniscus))
-    // Sun glitter as a glitter path (Cox and Munk): the shaded normal already carries the
-    // resolved waves, and the facets below a pixel spread around it with a slope variance, so
-    // the path is a smooth column under the sun rather than glints salting the whole lake.
+    // Sun and moon glitter as a glitter path (Cox and Munk): the shaded normal already carries
+    // the resolved waves, and the facets below a pixel spread around it with a slope variance,
+    // so the path is a smooth column under the light rather than glints salting the whole lake.
     const halfVector = normalize(u.uLightDirection.add(view))
     const cosHalf = clamp(normal.dot(halfVector), 0.05, 1)
     const tanHalf2 = float(1).sub(cosHalf.mul(cosHalf)).div(cosHalf.mul(cosHalf))
-    const slopeVariance = mix(0.006, 0.02, u.uWaterAgitation)
+    // The moon's path runs longer: it stands higher over the frame than the low sun, so the
+    // near water reflects it only through steeper facets.
+    const slopeVariance = mix(
+      mix(0.006, 0.02, u.uWaterAgitation),
+      mix(0.05, 0.09, u.uWaterAgitation),
+      u.uNight,
+    )
     const glitterPath = exp(tanHalf2.div(slopeVariance).negate()).div(cosHalf.pow(4))
     // Inside the path, the facets that face the sun exactly flash as short dashes along the
     // wave crests (across the view, so foreshortening leaves them flat), and they twinkle as
@@ -537,9 +543,8 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     const sparkle = mix(float(0.16), facets.mul(1.6), resolved)
     const glitter = glitterPath
       .mul(sparkle)
-      .mul(0.11)
+      .mul(mix(0.11, 0.3, u.uNight))
       .mul(u.uLightColor.rgb)
-      .mul(float(1).sub(u.uNight))
       .mul(sunlit)
       .mul(u.uDirectSun)
     const sssDepth = float(1).sub(smoothstep(0, 3.5, depth))

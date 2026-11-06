@@ -76,10 +76,13 @@ import { SceneGrade } from './scene-grade'
 import { sampleLook } from './scene-look'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
-import { DEFAULT_SOLAR, SolarClock, parseInitialTime } from './solar-clock'
+import { DEFAULT_SOLAR, SolarClock, introGap, parseInitialTime } from './solar-clock'
 import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
+import { stableShadowFilter } from './stable-shadow'
 import { ShootingStars } from './stars'
+import { SKIP, SkippingStone, flickOrigin, planSkips } from './stone-skips'
+import type { FlickSample } from './stone-skips'
 import { SubmergedScene } from './submerged-scene'
 import { TerrainSkyFill } from './terrain-detail'
 import { createBoulderMaterial, createTerrainMaterial } from './terrain-material'
@@ -98,6 +101,21 @@ import type { WindOptions } from './wind'
 import { createWindUniforms } from './wind-nodes'
 import type { VegetationPart } from './world-data'
 
+export type StoneTouchdownEvent = Readonly<{
+  /** 0 where the stone lands, then one per skip. */
+  index: number
+  /** The last touchdown, where the stone sinks. */
+  sinking: boolean
+  /** Splash energy in [0, 1]. */
+  energy: number
+  /** 0–1 after distance attenuation. */
+  intensity: number
+  /** -1 (left) to 1 (right). */
+  pan: number
+  /** Pointer type of the throw, or `demo` for the scene's own. */
+  pointerType: string
+}>
+
 export type VoxelLandscapeEngineOptions = Readonly<{
   container: HTMLDivElement
   renderer: WebGPURenderer
@@ -106,6 +124,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onEnvironment?: (state: AmbientEnvironment) => void
   /** Splashes, breaking waves and drops, attenuated by distance and placed in stereo. */
   onWaterSound?: (event: WaterSoundEvent) => void
+  /** Each touchdown of a thrown stone, placed in the view, for its note and haptics. */
+  onStoneTouchdown?: (event: StoneTouchdownEvent) => void
   reducedMotion?: boolean
   seed?: number
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
@@ -126,6 +146,15 @@ const smooth = (a: number, b: number, value: number) => {
 }
 
 const COMPILE_STAGES = ['passes', 'environment', 'scene', 'warmup'] as const
+/** Seconds after the first frame before an untouched scene skips a stone by itself. */
+const DEMO_DELAY = 7
+/** Screen points, as shares of the canvas, where the demonstration stone may land. */
+const DEMO_LANDINGS = [
+  [0.5, 0.74],
+  [0.42, 0.7],
+  [0.58, 0.7],
+  [0.5, 0.82],
+] as const
 
 function preparationFrame(signal: AbortSignal): Promise<void> {
   signal.throwIfAborted()
@@ -272,6 +301,16 @@ export class VoxelLandscapeEngine {
   private blockStrength = 0
   private readonly umbrella = { x: 0, y: 0, z: 0, radius: UMBRELLA_RADIUS }
   private bait: { x: number; z: number; born: number } | null = null
+  private readonly stone = new SkippingStone(WATER_LEVEL)
+  /** Recent screen positions of the dragging pointer, to read a flick's speed at release. */
+  private readonly flick: FlickSample[] = []
+  private readonly flickStart = new Vector3()
+  private readonly flickEnd = new Vector3()
+  private readonly stoneHand = new Vector3()
+  private stoneThrower = 'mouse'
+  /** True once the visitor has pressed the scene; until then a demonstration stone is due. */
+  private interacted = false
+  private demoThrown = false
   private readonly wind: WindModel
   private readonly windUniforms = createWindUniforms()
   private readonly clouds: VolumetricClouds
@@ -335,7 +374,7 @@ export class VoxelLandscapeEngine {
       await preparationFrame(signal)
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
       const initialLight = sampleLighting(
-        engine.solarClock.initialSeconds,
+        engine.solarClock.seconds(0),
         0,
         engine.weather,
         engine.solar,
@@ -408,13 +447,16 @@ export class VoxelLandscapeEngine {
     this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
     this.solar = options.solar ?? DEFAULT_SOLAR
+    const initialSeconds = params.startTime
+      ? parseInitialTime(params.startTime)
+      : (options.nowSeconds ?? parseInitialTime(null))
+    // An explicit start time is a request for that light: only the default opens on a golden hour.
     this.solarClock = new SolarClock(
-      params.startTime
-        ? parseInitialTime(params.startTime)
-        : (options.nowSeconds ?? parseInitialTime(null)),
+      initialSeconds,
       options.reducedMotion,
       performance.now(),
       params.timeScale,
+      params.startTime ? 0 : introGap(initialSeconds, this.solar),
     )
     this.weather = options.weather ?? 'partly-cloudy'
     this.showSun = true
@@ -464,6 +506,10 @@ export class VoxelLandscapeEngine {
     this.moon.shadow.camera.updateProjectionMatrix()
     this.moon.shadow.normalBias = 0.12
     this.moon.shadow.bias = -0.00015
+    // Anchored to the shadow map, so edges hold still while the view or the light moves.
+    Object.assign(this.moon.shadow, {
+      filterNode: stableShadowFilter(this.moon.shadow.mapSize.x, this.lowPower),
+    })
     this.scene.add(this.moon, this.moon.target)
 
     this.wind = new WindModel((options.seed ?? 0) >>> 0, options.wind)
@@ -582,6 +628,7 @@ export class VoxelLandscapeEngine {
     this.water.receiveShadow = true
     this.scene.add(this.water)
     this.objects.push(this.water)
+    this.scene.add(this.stone.mesh)
     this.geometries.push(waterGeometry)
 
     this.rain = this.resources.own(
@@ -806,7 +853,11 @@ export class VoxelLandscapeEngine {
       this.solarClock.timeScale,
     )
     this.reducedMotion = value
-    if (value) this.clouds.cursorTrace.clear()
+    if (value) {
+      this.clouds.cursorTrace.clear()
+      // A frozen frame must not hold a stone in mid-air.
+      this.stone.cancel()
+    }
     if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
     this.cancelFrame()
@@ -1049,6 +1100,7 @@ export class VoxelLandscapeEngine {
 
   private onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || !event.isPrimary) return
+    this.interacted = true
     this.setPrimaryMouseDown(event.pointerType === 'mouse')
     this.pointerType = event.pointerType
     this.pointerActive = true
@@ -1074,6 +1126,8 @@ export class VoxelLandscapeEngine {
     this.pointerClient.set(event.clientX, event.clientY)
     this.previousPointer = { x: event.clientX, y: event.clientY, time: event.timeStamp }
     this.pendingPointer = { x: event.clientX, y: event.clientY, time: event.timeStamp }
+    this.flick.length = 0
+    this.flick.push({ x: event.clientX, y: event.clientY, time: event.timeStamp })
     this.renderer.domElement.setPointerCapture(event.pointerId)
   }
 
@@ -1109,6 +1163,102 @@ export class VoxelLandscapeEngine {
       y: event.clientY,
       time: event.timeStamp,
     }
+    if (this.dragging) {
+      this.flick.push({ x: event.clientX, y: event.clientY, time: event.timeStamp })
+      if (this.flick.length > 12) this.flick.shift()
+    }
+  }
+
+  /**
+   * A quick flick across the water throws a stone: it lands where the gesture ended and skips
+   * on in the gesture's direction, further for a faster flick. Speed is read on the water plane
+   * over at least the gesture's last 40 ms, so a slow drag only stirs the surface.
+   */
+  private throwStone(event: PointerEvent) {
+    if (this.reducedMotion || this.disposed) return
+    // Measure from the newest sample at least 40 ms old, or from the press. The newest move
+    // often sits on the release point itself when events arrive coalesced on a busy frame.
+    const from = flickOrigin(this.flick, event.timeStamp)
+    this.flick.length = 0
+    const elapsed = from ? event.timeStamp - from.time : 0
+    if (!from || elapsed < 8 || elapsed > 300) return
+    const start = this.hitWater(from.x, from.y, this.flickStart)
+    const end = start && this.hitWater(event.clientX, event.clientY, this.flickEnd)
+    if (!start || !end) return
+    const seconds = elapsed / 1000
+    const dx = end.x - start.x,
+      dz = end.z - start.z
+    const speed = Math.hypot(dx, dz) / seconds
+    // A tap or a slow drag throws nothing.
+    if (!(speed >= SKIP.minSpeed)) return
+    this.throwFrom(end, { x: dx, z: dz }, speed, event.pointerType)
+  }
+
+  private throwFrom(
+    landing: Vector3,
+    direction: { x: number; z: number },
+    speed: number,
+    pointerType: string,
+  ) {
+    const plan = planSkips(landing, direction, speed, (x, z) => this.isOpenWater(x, z))
+    // From a hand low and a little right of the eye, as a right-handed skimmer throws.
+    this.stoneHand
+      .set(1.2, -0.9, -1.5)
+      .applyQuaternion(this.camera.quaternion)
+      .add(this.camera.position)
+    this.stoneThrower = pointerType
+    this.stone.throw(this.stoneHand, plan, this.elapsed)
+  }
+
+  private isOpenWater(x: number, z: number) {
+    const index = lakeIndex(this.bed, x, z)
+    return (
+      index >= 0 &&
+      Boolean(this.bed.water[index]) &&
+      (this.bed.obstacle[index] ?? -Infinity) < WATER_LEVEL
+    )
+  }
+
+  private updateStone() {
+    this.stone.update(this.elapsed, (touchdown, index, last) => {
+      const wind = this.wind.sample(this.elapsed)
+      const energy = last ? 0.5 : touchdown.energy
+      this.simulation.addImpulse(touchdown.x, touchdown.z, last ? 0.5 : 0.35, -0.09 * energy)
+      this.details?.pointerBurst(touchdown.x, touchdown.z, 0.3 + 0.35 * energy, this.elapsed, wind)
+      const listener = this.options.onStoneTouchdown
+      if (!listener) return
+      this.soundPosition.set(touchdown.x, WATER_LEVEL, touchdown.z)
+      const distance = this.soundPosition.distanceTo(this.camera.position)
+      const place = pointSound(distance, this.soundPosition.project(this.camera).x)
+      listener({
+        index,
+        sinking: last,
+        energy,
+        intensity: place.attenuation * this.intro,
+        pan: place.pan,
+        pointerType: this.stoneThrower,
+      })
+    })
+  }
+
+  /** Shows a first visitor that the water answers: one long run of skips across the lake. */
+  private throwDemo() {
+    this.demoThrown = true
+    const bounds = this.canvasBounds ?? this.renderer.domElement.getBoundingClientRect()
+    for (const [u, v] of DEMO_LANDINGS) {
+      const landing = this.hitWater(
+        bounds.left + u * bounds.width,
+        bounds.top + v * bounds.height,
+        this.flickEnd,
+      )
+      if (!landing) continue
+      const direction = {
+        x: landing.x - this.camera.position.x,
+        z: landing.z - this.camera.position.z,
+      }
+      this.throwFrom(landing, direction, 16, 'demo')
+      return
+    }
   }
 
   private onPointerUp = (event: PointerEvent) => {
@@ -1123,6 +1273,7 @@ export class VoxelLandscapeEngine {
       return
     }
     if (event.pointerId !== this.dragPointerId) return
+    if (event.type === 'pointerup') this.throwStone(event)
     this.dragging = false
     this.dragPointerId = -1
     if (event.type === 'pointercancel' || this.pointerType === 'touch') this.onPointerLeave()
@@ -1237,6 +1388,7 @@ export class VoxelLandscapeEngine {
       // canvas continues to contain the loader.
       if (this.details) this.details.warmup(render)
       else render()
+      this.depthFocus.warmup(this.renderer)
     } finally {
       this.renderer.setRenderTarget(target, face, mip)
     }
@@ -1663,7 +1815,10 @@ export class VoxelLandscapeEngine {
     const dt = Math.min(rainDelta, 0.05)
     this.lastFrameAt = now
     if (!this.reducedMotion) this.elapsed += dt
-    if (this.introStartedAt === null) this.introStartedAt = now
+    if (this.introStartedAt === null) {
+      this.introStartedAt = now
+      this.solarClock = this.solarClock.restartIntro(now)
+    }
     this.intro = this.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
     const atmosphereTime = this.solarClock.elapsed(now)
@@ -1798,6 +1953,9 @@ export class VoxelLandscapeEngine {
         typeof daylight === 'number' && Number.isFinite(daylight) ? daylight : light.daylight,
     })
     let bait: FishBait | null = null
+    this.updateStone()
+    if (!this.demoThrown && !this.interacted && !this.reducedMotion && this.introStartedAt !== null)
+      if (now - this.introStartedAt > DEMO_DELAY * 1000) this.throwDemo()
     if (this.bait && !this.reducedMotion) {
       const strength = Math.exp(-(this.elapsed - this.bait.born) / 6) * this.intro
       if (strength > 0.01) bait = { x: this.bait.x, z: this.bait.z, strength }
@@ -1997,6 +2155,8 @@ export class VoxelLandscapeEngine {
   dispose() {
     if (this.disposed) return
     this.disposed = true
+    this.stone.mesh.removeFromParent()
+    this.stone.dispose()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

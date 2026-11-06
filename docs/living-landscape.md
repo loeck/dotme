@@ -57,8 +57,25 @@ sprite, attenuated by distance and panned to their place in the view; drops are 
 three a second. Music is occasional: a first piece 30–50 s after sound starts, then 2.5–5
 minutes of silence (half as long again in rain), the day piece in dry daylight and the night
 piece otherwise. It streams through a media element, so it adds nothing to the decoded
-budget and is requested only when due; hiding the page stops the piece. There is no thunder,
-interface sound or meteor sound.
+budget and is requested only when due; hiding the page stops the piece. There is no thunder
+or meteor sound.
+
+### Interaction sounds
+
+Sounds may answer an interaction with the scene, provided they stay sober: quiet, short,
+placed where the interaction happens and tuned to the music, never a click or beep on a DOM
+control. The buttons, dialog and links remain silent. Today the only such sound is a skipping
+stone's note (`skip-notes.ts`): each touchdown rings a soft bell-like tone, a sine with a quiet
+octave and a faint twelfth, struck in 6 ms and ringing out over about a second, on top of the
+usual splash take. Successive skips climb the major pentatonic of the current mood and the stone
+sinks on the root an octave lower. A chromagram of the shipped pieces puts the day piece in
+C major (G, B, E and C strongest, F well above F♯) and the night piece in F major (F, C, A and
+D), so the notes use C major pentatonic from C5 in daylight and F major pentatonic from F4
+otherwise: neither scale holds a semitone against either piece. Notes are synthesised with
+oscillators, so they add nothing to the download or the decoded budget; they share the master
+gain and mute control, are attenuated and panned like the splashes, and stay silent while
+playback is paused or off. A new interaction sound should follow the same rules and be added to
+this section.
 
 The waterfall recording is loaded only when the generated world contains a waterfall and
 playback is enabled. Its loudness follows the fall's size and distance, with stereo placement

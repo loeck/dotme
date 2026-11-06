@@ -417,3 +417,52 @@ it('spreads each bed over two decorrelated passages, places calls and keeps owls
   expect(calls.every((voice) => voice.offset + voice.end - voice.at <= 16)).toBe(true)
   mixer.dispose()
 })
+
+it('rings a placed, tuned note for each stone touchdown, only while playing', async () => {
+  const { context, panners, mixer } = fixture()
+  class Oscillator extends Node {
+    frequency = new Param()
+    at = -1
+    end = -1
+    ended: (() => void) | undefined
+    start(at: number) {
+      this.at = at
+    }
+    stop(at: number) {
+      this.end = at
+    }
+    addEventListener(_: 'ended', listener: () => void) {
+      this.ended = listener
+    }
+  }
+  const oscillators: Oscillator[] = []
+  const withOscillators = Object.assign(context, {
+    createOscillator: () => {
+      const oscillator = new Oscillator()
+      oscillators.push(oscillator)
+      return oscillator
+    },
+  })
+  const playing = new AmbientMixer(withOscillators, 'mp3', { wide: false })
+  const touchdown = { index: 2, sinking: false, intensity: 0.8, pan: 0.4 }
+  playing.skipNote(touchdown)
+  expect(oscillators).toHaveLength(0)
+  playing.setEnvironment({ solarHour: 12, daylight: 1, windSpeed: 2, rainIntensity: 0 })
+  await playing.load()
+  playing.resume()
+  playing.skipNote(touchdown)
+  // E5 by day, with its octave and twelfth, struck now and rung out within a few seconds.
+  expect(oscillators.map((o) => Math.round(o.frequency.value))).toEqual([659, 1319, 1978])
+  for (const oscillator of oscillators) {
+    expect(oscillator.at).toBe(context.currentTime)
+    expect(oscillator.end).toBeGreaterThan(context.currentTime + 1)
+    expect(oscillator.end).toBeLessThan(context.currentTime + 4)
+  }
+  expect(required(panners.at(-1)).pan.value).toBe(0.4)
+  // Silent or distant touchdowns play nothing; a mixer without oscillators ignores notes.
+  playing.skipNote({ ...touchdown, intensity: 0 })
+  expect(oscillators).toHaveLength(3)
+  for (const oscillator of oscillators) oscillator.ended?.()
+  expect(required(panners.at(-1)).disconnect).toHaveBeenCalled()
+  expect(() => mixer.skipNote(touchdown)).not.toThrow()
+})

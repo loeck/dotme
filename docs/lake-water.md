@@ -42,8 +42,8 @@ foreshortening leaves them flat, as real glints look) and twinkle as two crossin
 move; once a dash falls below a pixel it resolves to its mean, so far water glows evenly instead
 of aliasing. The former glints, a per-cell jittered normal raised to the 350th power, salted the
 lake with isolated white pixels far outside the sun's path. A pale green subsurface glow sits on
-top of the reflected and transmitted light. At night the glitter and short capillary glints fade, leaving a softer
-moon reflection; the bed takes a dim tint that fades with depth, so only the shallows stay
+top of the reflected and transmitted light. At night the short capillary glints fade and the
+glitter follows the moon, with a wider slope variance (0.05–0.09) so its path runs long; the bed takes a dim tint that fades with depth, so only the shallows stay
 visible over near-black water. Shoreline
 foam is a bright animated band whose width follows wave arrival. Calm water leaves only a trace
 of it in patches; far away, where the band is held at a pixel and a half so it does not alias,

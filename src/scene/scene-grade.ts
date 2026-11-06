@@ -21,6 +21,9 @@ import type { SceneLook } from './scene-look'
 const REC709 = vec3(0.2126, 0.7152, 0.0722)
 /** Contrast pivots on scene middle grey so black stays black and highlights roll into ACES. */
 const MIDDLE_GREY = 0.18
+/** Split-tone targets, normalised to unit luminance so toning shifts hue, not brightness. */
+const SHADOW_TONE = vec3(0.9, 1.0, 1.12)
+const HIGHLIGHT_TONE = vec3(1.12, 1.0, 0.86)
 
 /** Last Signal's grade: HDR exposure, white balance, contrast, saturation and vignette before
  * tone mapping; film grain and dither after it, in display space. */
@@ -30,6 +33,10 @@ export class SceneGrade {
   private readonly saturation = uniform(1)
   private readonly tint = uniform(new Vector3(1, 1, 1))
   private readonly vignette = uniform(0)
+  private readonly split = uniform(0)
+  /** Bloom strength and threshold, read by the lens. */
+  readonly glow = uniform(0)
+  readonly glowThreshold = uniform(1)
   private readonly grain = uniform(0)
   private readonly frame = uniform(0)
   private readonly aspect = uniform(new Vector2(1, 1))
@@ -41,6 +48,9 @@ export class SceneGrade {
     this.saturation.value = look.saturation
     this.tint.value.set(...look.tint)
     this.vignette.value = look.vignette
+    this.split.value = look.split
+    this.glow.value = look.glow
+    this.glowThreshold.value = look.glowThreshold
     this.grain.value = look.grain
     // Reduced motion keeps one still grain pattern rather than a flickering one.
     this.frame.value = frame % 64
@@ -60,7 +70,15 @@ export class SceneGrade {
     const luminance = clamp(dot(exposed, REC709), 0.00001, 65504)
     const contrasted = exposed.mul(pow(luminance.div(MIDDLE_GREY), this.contrast.sub(1)))
     const grey = dot(contrasted, REC709)
-    return max(mix(vec3(grey), contrasted, this.saturation), vec3(0))
+    const saturated = max(mix(vec3(grey), contrasted, this.saturation), vec3(0))
+    // Shadows lean teal and highlights warm around middle grey, as in a film print.
+    const highlight = smoothstep(0.02, 1.2, grey)
+    const tone = mix(
+      SHADOW_TONE.div(dot(SHADOW_TONE, REC709)),
+      HIGHLIGHT_TONE.div(dot(HIGHLIGHT_TONE, REC709)),
+      highlight,
+    )
+    return saturated.mul(mix(vec3(1), tone, this.split))
   }
 
   /** Vignette after the colour grade, measured on the long axis so it stays round. */

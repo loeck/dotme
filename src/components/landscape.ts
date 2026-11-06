@@ -10,6 +10,7 @@ import { initSceneCursor } from './scene-cursor'
 import { initSceneInfo } from './scene-info'
 import { prepareNextWorld } from './scene-world'
 import type { SceneWorld } from './scene-world'
+import { stoneHaptics } from './stone-haptics'
 
 const weatherSnapshots = new WeakMap<HTMLDivElement, SceneWeather>()
 
@@ -82,6 +83,10 @@ export async function initLandscape(
         },
         onEnvironment: (state) => sound.setEnvironment(state),
         onWaterSound: (event) => sound.waterSound(event),
+        onStoneTouchdown: (event) => {
+          stoneHaptics(event)
+          sound.skipNote(event)
+        },
         reducedMotion: motion.matches,
         weather: snapshot.weather,
         wind: snapshot.wind,
