@@ -56,8 +56,11 @@ export type LookPreset = Readonly<{
   /** Rain drains colour and thickens the air. */
   rain: Readonly<Pick<SceneLook, 'saturation' | 'haze' | 'mist'>>
   /** Night keeps a deeper vignette and a cooler, slightly denser mist (tint is a target).
-   * Its glow and threshold are targets too: dark-adapted eyes see haloes round every lamp. */
-  night: Readonly<Pick<SceneLook, 'vignette' | 'tint' | 'mist' | 'glow' | 'glowThreshold'>>
+   * Its glow and threshold are targets too: dark-adapted eyes see haloes round every lamp.
+   * Exposure is a multiplier, as a night photograph is exposed longer than a day one. */
+  night: Readonly<
+    Pick<SceneLook, 'exposure' | 'vignette' | 'tint' | 'mist' | 'glow' | 'glowThreshold'>
+  >
   /** Morning mist on cloudy dawns, weighted by `mistFactor`. */
   dawnMist: number
 }>
@@ -93,7 +96,14 @@ export const LAST_SIGNAL_LOOK: LookPreset = {
     split: 1.5,
   },
   rain: { saturation: 0.9, haze: 1.7, mist: 1.6 },
-  night: { vignette: 0.36, tint: [0.96, 1, 1.06], mist: 1.3, glow: 0.9, glowThreshold: 0.3 },
+  night: {
+    exposure: 1.4,
+    vignette: 0.36,
+    tint: [0.96, 1, 1.06],
+    mist: 1.3,
+    glow: 0.9,
+    glowThreshold: 0.3,
+  },
   dawnMist: 2.2,
 }
 
@@ -130,7 +140,7 @@ export function sampleLook(inputs: LookInputs, look = LAST_SIGNAL_LOOK): SceneLo
   const channel = (index: 0 | 1 | 2) =>
     mix(mix(base.tint[index], goldenHour.tint[index], golden), night.tint[index], dark)
   return {
-    exposure: base.exposure * lift(goldenHour.exposure, golden),
+    exposure: base.exposure * lift(goldenHour.exposure, golden) * lift(night.exposure, dark),
     contrast: base.contrast * lift(goldenHour.contrast, golden),
     saturation: base.saturation * lift(goldenHour.saturation, golden) * lift(rain.saturation, wet),
     tint: [channel(0), channel(1), channel(2)],

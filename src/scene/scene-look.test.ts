@@ -54,6 +54,8 @@ describe('Last Signal scene look', () => {
     expect(golden.glowThreshold).toBe(noon.glowThreshold)
     expect(night.glowThreshold).toBeLessThan(noon.glowThreshold / 2)
     expect(night.glow).toBeGreaterThan(noon.glow)
+    // Night is exposed longer, as a night photograph is.
+    expect(night.exposure).toBeGreaterThan(noon.exposure * 1.2)
   })
 
   it('stays finite and bounded for any input', () => {

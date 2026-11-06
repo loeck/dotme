@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createCloudBodies } from './cloud-density'
 import { cloudShadowFrame } from './cloud-shadows'
-import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
+import { fadeNightLight, mistFactor, MOON_SWEEP, moonPath, sampleLighting } from './lighting'
 import {
   INTRO_ARC_SHARE,
   INTRO_DURATION,
@@ -135,6 +135,25 @@ describe('solar lighting and light-space projection', () => {
       expect(moon.y).toBeGreaterThan(0.15)
       expect(moon.y).toBeLessThan(0.6)
     }
+  })
+  it('crosses the frame with the moon over the night, right to left, without jumps', () => {
+    const azimuth = (v: Vector3) => Math.atan2(v.x, -v.z)
+    let previous = sampleLighting(18 * 3600).moonDirection
+    expect(azimuth(previous)).toBeCloseTo(MOON_SWEEP, 6)
+    expect(azimuth(sampleLighting(6 * 3600 - 1).moonDirection)).toBeCloseTo(-MOON_SWEEP, 3)
+    expect(sampleLighting(0).moonDirection.y).toBeGreaterThan(0.33)
+    for (let seconds = 18 * 3600 + 60; seconds < 30 * 3600; seconds += 60) {
+      const moon = sampleLighting(seconds % 86_400).moonDirection
+      expect(moon.length()).toBeCloseTo(1, 6)
+      expect(moon.z).toBeLessThan(0)
+      expect(moon.y).toBeGreaterThanOrEqual(0.08 - 1e-9)
+      expect(Math.abs(azimuth(moon))).toBeLessThanOrEqual(MOON_SWEEP + 1e-9)
+      expect(moon.angleTo(previous)).toBeLessThan(0.01)
+      previous = moon
+    }
+    // Through the day it returns unseen along the same arc, so sunset and sunrise join.
+    expect(moonPath(0).distanceTo(sampleLighting(18 * 3600).moonDirection)).toBeLessThan(1e-9)
+    expect(moonPath(1).distanceTo(sampleLighting(6 * 3600).moonDirection)).toBeLessThan(1e-9)
   })
   it('keeps late-September sun up at 18:26 instead of forcing night at 18:00', () => {
     const paris = { sunrise: 27_720, sunset: 71_040 }

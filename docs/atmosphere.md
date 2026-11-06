@@ -13,6 +13,29 @@ motion and an explicit `startTime` skip it. Clock speed affects the solar cycle 
 physical time steps. Reduced motion freezes the initial atmosphere while allowing resize
 and visibility refreshes.
 
+## Night
+
+The night is staged for a fixed camera rather than following the sky. The moon does not sit
+opposite the sun: over the night it crosses the open valley from the right ridge to the left
+(`moonPath` in `lighting.ts`, ±0.3 rad of azimuth), a few degrees up at dusk and about 21° at
+midnight, and returns unseen along the same arc by day, so dusk and dawn join without a jump.
+Opposite the sun it spent most of the night out of frame and lit the scene from behind the
+camera. In front, it backlights the woods into silhouettes, rims the crowns and lays a long
+glitter path on the lake: the water's Cox–Munk glitter now also takes the moon, with a wider
+slope variance (0.05–0.09) because the moon stands higher than the low sun. Its disc is drawn
+at about three times its true size, with noise maria, slight limb darkening, a tight aureole
+and a faint wide glow; the bloom rounds it off. Night is exposed 1.4 times longer, as a night
+photograph is, so the moonlit valley reads instead of sinking to black.
+
+The Milky Way (`milkyWay` in `stars.ts`) is a soft band along a fixed great circle that rises
+from the left bank's horizon to the top of the frame left of centre, so on a desktop frame it
+crosses the left half diagonally and passes beside the moon at midnight rather than through it.
+Two octaves of value noise mottle it into star clouds, a finer layer thresholded into a fixed
+powder of grains a few pixels wide makes it read as unresolved stars rather than haze, a gentle
+dust rift darkens its core, and it is warm at the centre and bluer at the edges. It appears with
+the faintest stars, fades towards the horizon and dims to 45% beside the moon; clouds hide it as
+they hide the stars.
+
 ## Sky and twilight
 
 The daytime sky follows Hillaire, _A Scalable and Production Ready Sky and Atmosphere
