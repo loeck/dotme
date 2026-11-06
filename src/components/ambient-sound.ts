@@ -1,5 +1,6 @@
 import type { AmbientMixer } from '../audio/ambient-mixer'
 import type { AmbientEnvironment } from '../audio/environment'
+import type { SkipNoteEvent } from '../audio/skip-notes'
 import type { WaterSoundEvent } from '../audio/water-sounds'
 
 export function initAmbientSound(autoplay = true) {
@@ -162,6 +163,9 @@ export function initAmbientSound(autoplay = true) {
     },
     waterSound(event: WaterSoundEvent) {
       mixer?.waterSound(event)
+    },
+    skipNote(event: SkipNoteEvent) {
+      mixer?.skipNote(event)
     },
     dispose() {
       lifetime.abort()

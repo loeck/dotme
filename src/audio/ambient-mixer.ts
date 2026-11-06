@@ -2,6 +2,8 @@ import { required } from '../invariant'
 import { ambientMix, birdChorus } from './environment'
 import type { AmbientEnvironment } from './environment'
 import { AmbientMusic } from './music'
+import { skipNote } from './skip-notes'
+import type { SkipNoteEvent } from './skip-notes'
 import { loopPhrase, pickPhrase, waterPhrase } from './water-phrases'
 import { WaterSoundPicker } from './water-sounds'
 import type { WaterSoundEvent } from './water-sounds'
@@ -20,6 +22,15 @@ export type AudioFormat = 'ogg' | 'mp3'
 const MASTER = 0.38
 /** Fixed level of the splash takes; each event already carries its distance attenuation. */
 const SPLASH_LEVEL = 0.3
+/** Peak gain of a skip note before the master: under the splash it rides on. */
+const SKIP_NOTE_LEVEL = 0.05
+/** Partials of a skip note: fundamental, a quiet octave and a faint twelfth. */
+const SKIP_PARTIALS = [
+  [1, 1],
+  [2, 0.28],
+  [3, 0.07],
+] as const
+const finiteOr = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
 /** Continuous beds; birds and owls are separate calls, and the waterfall is a point source. */
 const BEDS = ['water', 'wind', 'rain', 'insects'] as const
 /** Each bed plays two independent passages, one leaning to each side, for a wide field. */
@@ -70,6 +81,12 @@ interface MixerGain extends MixerNode {
 interface MixerPanner extends MixerNode {
   readonly pan: MixerParam
 }
+interface MixerOscillator extends MixerNode {
+  readonly frequency: MixerParam
+  start(time: number): void
+  stop(time: number): void
+  addEventListener(type: 'ended', listener: () => void, options: { once: boolean }): void
+}
 interface MixerSource extends MixerNode {
   buffer: AudioSample | null
   readonly playbackRate: MixerParam
@@ -86,6 +103,8 @@ export interface AmbientAudioContext {
   createStereoPanner(): MixerPanner
   createBufferSource(): MixerSource
   decodeAudioData(data: ArrayBuffer): Promise<AudioSample>
+  /** Optional: without oscillators a stone's skips keep their splashes but play no notes. */
+  createOscillator?(): MixerOscillator
 }
 
 /** One context is owned by the sound control. Everything else loads on demand. */
@@ -245,6 +264,55 @@ export class AmbientMixer {
         level: take.level,
       },
     )
+  }
+
+  /**
+   * A soft bell-like note for a stone's touchdown, tuned to the music (see `skipNote`): a sine
+   * with a quiet octave and twelfth, struck in 6 ms and ringing out over about a second, placed
+   * where the stone touched the water.
+   */
+  skipNote(event: SkipNoteEvent) {
+    const context = this.context
+    if (this.disposed || !this.active || context.state !== 'running' || !context.createOscillator)
+      return
+    const intensity = Math.max(0, Math.min(1, finiteOr(event.intensity, 0)))
+    if (intensity < 0.02) return
+    const at = context.currentTime
+    const frequency = skipNote(event.index, event.sinking, this.environment.daylight)
+    const envelope = context.createGain(),
+      panner = context.createStereoPanner()
+    panner.pan.value = Math.max(-1, Math.min(1, finiteOr(event.pan, 0)))
+    envelope.connect(panner)
+    panner.connect(this.master)
+    const peak = SKIP_NOTE_LEVEL * intensity * (event.sinking ? 0.7 : 1)
+    const ring = event.sinking ? 0.6 : 0.35
+    envelope.gain.setValueAtTime(0, at)
+    envelope.gain.linearRampToValueAtTime(peak, at + 0.006)
+    envelope.gain.setTargetAtTime(0, at + 0.006, ring)
+    const end = at + 0.006 + ring * 6
+    let pending = SKIP_PARTIALS.length
+    for (const [multiple, level] of SKIP_PARTIALS) {
+      const oscillator = context.createOscillator()
+      const partial = context.createGain()
+      oscillator.frequency.value = frequency * multiple
+      partial.gain.value = level
+      oscillator.connect(partial)
+      partial.connect(envelope)
+      oscillator.addEventListener(
+        'ended',
+        () => {
+          oscillator.disconnect()
+          partial.disconnect()
+          if (--pending === 0) {
+            envelope.disconnect()
+            panner.disconnect()
+          }
+        },
+        { once: true },
+      )
+      oscillator.start(at)
+      oscillator.stop(end)
+    }
   }
 
   private updateMix() {

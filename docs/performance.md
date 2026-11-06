@@ -218,7 +218,12 @@ desktop and 87k on phones, against 798k and 146k for the voxel terrain with its 
 ([terrain](terrain.md#shadows-and-cost)). Quads under the water are not meshed.
 
 Shadow casters live on a dedicated static layer, so the moon shadow map is re-rendered only when
-the light direction moves by more than about half a texel. The casters are depth-only twins of the
+the light direction moves by more than about half a texel. It is filtered by a fixed 3×3 grid of
+bilinear comparisons (centre and corners on low power, `stable-shadow.ts`) rather than three's
+default PCF, which rotates five taps by screen-space noise: that pattern stays on the screen
+while shadow edges slide under it, so edges shimmered whenever the view moved quickly or the
+intro's time-lapse swept the sun. The fixed grid is anchored to the map and costs four taps more
+per lit pixel on desktop. The casters are depth-only twins of the
 terrain and boulder meshes that share their geometry. Only the two brightest lanterns cast
 cube shadows (one on low power): each cube costs six caster renders and a cube sample in every
 lit pixel, and unshadowed lanterns still light the bank. Those two refresh once their lantern has
