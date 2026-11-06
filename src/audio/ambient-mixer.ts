@@ -4,6 +4,8 @@ import type { AmbientEnvironment } from './environment'
 import { AmbientMusic } from './music'
 import { skipNote } from './skip-notes'
 import type { SkipNoteEvent } from './skip-notes'
+import { thunderLevel, thunderSamples } from './thunder'
+import type { ThunderEvent } from './thunder'
 import { loopPhrase, pickPhrase, waterPhrase } from './water-phrases'
 import { WaterSoundPicker } from './water-sounds'
 import type { WaterSoundEvent } from './water-sounds'
@@ -24,6 +26,8 @@ const MASTER = 0.38
 const SPLASH_LEVEL = 0.3
 /** Peak gain of a skip note before the master: under the splash it rides on. */
 const SKIP_NOTE_LEVEL = 0.05
+/** Peak gain of thunder from a strike a kilometre away: a felt rumble under the rain bed. */
+const THUNDER_LEVEL = 0.55
 /** Partials of a skip note: fundamental, a quiet octave and a faint twelfth. */
 const SKIP_PARTIALS = [
   [1, 1],
@@ -87,6 +91,10 @@ interface MixerOscillator extends MixerNode {
   stop(time: number): void
   addEventListener(type: 'ended', listener: () => void, options: { once: boolean }): void
 }
+/** A buffer the mixer fills itself, as `AudioBuffer` is. */
+interface MixerBuffer extends AudioSample {
+  copyToChannel(source: Float32Array<ArrayBuffer>, channel: number): void
+}
 interface MixerSource extends MixerNode {
   buffer: AudioSample | null
   readonly playbackRate: MixerParam
@@ -105,6 +113,9 @@ export interface AmbientAudioContext {
   decodeAudioData(data: ArrayBuffer): Promise<AudioSample>
   /** Optional: without oscillators a stone's skips keep their splashes but play no notes. */
   createOscillator?(): MixerOscillator
+  /** Optional: without it storms stay silent. */
+  createBuffer?(channels: number, length: number, sampleRate: number): MixerBuffer
+  readonly sampleRate?: number
 }
 
 /** One context is owned by the sound control. Everything else loads on demand. */
@@ -313,6 +324,41 @@ export class AmbientMixer {
       oscillator.start(at)
       oscillator.stop(end)
     }
+  }
+
+  /**
+   * One peal of thunder, rendered for this strike and started when its sound arrives. Each
+   * peal is new noise, so no two strikes rumble alike.
+   */
+  thunder(event: ThunderEvent) {
+    const context = this.context
+    if (this.disposed || !this.active || context.state !== 'running' || !context.createBuffer)
+      return
+    const level = thunderLevel(event.distance, event.intensity) * THUNDER_LEVEL
+    if (level < 0.01) return
+    const rate = context.sampleRate ?? 32_000
+    const samples = thunderSamples(rate, event.distance)
+    const buffer = context.createBuffer(1, samples.length, rate)
+    buffer.copyToChannel(samples, 0)
+    const source = context.createBufferSource(),
+      envelope = context.createGain(),
+      panner = context.createStereoPanner()
+    source.buffer = buffer
+    envelope.gain.value = level
+    panner.pan.value = Math.max(-1, Math.min(1, finiteOr(event.pan, 0)))
+    source.connect(envelope)
+    envelope.connect(panner)
+    panner.connect(this.master)
+    source.addEventListener(
+      'ended',
+      () => {
+        source.disconnect()
+        envelope.disconnect()
+        panner.disconnect()
+      },
+      { once: true },
+    )
+    source.start(context.currentTime + Math.max(0, finiteOr(event.delay, 0)), 0)
   }
 
   private updateMix() {

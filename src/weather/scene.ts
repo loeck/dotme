@@ -17,6 +17,8 @@ export type SceneWeather = Readonly<{
   /** Location-local seconds past midnight at the snapshot time. */
   nowSeconds: number
   source: 'live' | 'random'
+  /** A thunderstorm is reported: the scene adds lightning, whatever the rain. */
+  storm?: boolean
 }>
 
 /** Artistic presets, not a physical precipitation or cloud simulation. */
@@ -79,6 +81,7 @@ export function weatherForScene(snapshot: WeatherSnapshot): SceneWeather {
       turnStrength: 0.15,
     },
     source: 'live',
+    storm: kind === 'thunderstorm',
   }
 }
 

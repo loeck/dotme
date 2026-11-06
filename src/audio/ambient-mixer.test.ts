@@ -466,3 +466,45 @@ it('rings a placed, tuned note for each stone touchdown, only while playing', as
   expect(required(panners.at(-1)).disconnect).toHaveBeenCalled()
   expect(() => mixer.skipNote(touchdown)).not.toThrow()
 })
+
+it('rolls thunder in after a strike, at the speed of sound, only while playing', async () => {
+  const { context, voices, panners, mixer } = fixture()
+  const buffers: Array<{ length: number; rate: number; data: Float32Array | null }> = []
+  const stormy = Object.assign(context, {
+    sampleRate: 32_000,
+    createBuffer: (channels: number, length: number, rate: number) => {
+      const record: { length: number; rate: number; data: Float32Array | null } = {
+        length,
+        rate,
+        data: null,
+      }
+      buffers.push(record)
+      return {
+        duration: length / rate,
+        length,
+        numberOfChannels: channels,
+        copyToChannel: (source: Float32Array) => {
+          record.data = source
+        },
+      }
+    },
+  })
+  const playing = new AmbientMixer(stormy, 'mp3', { wide: false })
+  const strike = { distance: 2000, delay: 2000 / 343, intensity: 0.8, pan: -0.3 }
+  playing.thunder(strike)
+  expect(buffers).toHaveLength(0)
+  await playing.load()
+  playing.resume()
+  const before = voices.length
+  playing.thunder(strike)
+  expect(buffers).toHaveLength(1)
+  const peal = required(voices.at(-1))
+  expect(voices.length).toBe(before + 1)
+  expect(peal.at).toBeCloseTo(context.currentTime + strike.delay, 9)
+  expect(required(panners.at(-1)).pan.value).toBe(-0.3)
+  expect(required(buffers[0]).rate).toBe(32_000)
+  // A strike too faint to hear renders nothing; a mixer without buffers ignores storms.
+  playing.thunder({ ...strike, intensity: 0 })
+  expect(buffers).toHaveLength(1)
+  expect(() => mixer.thunder(strike)).not.toThrow()
+})

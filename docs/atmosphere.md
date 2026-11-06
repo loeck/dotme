@@ -13,6 +13,15 @@ motion and an explicit `startTime` skip it. Clock speed affects the solar cycle 
 physical time steps. Reduced motion freezes the initial atmosphere while allowing resize
 and visibility refreshes.
 
+The visitor can run through the day (`time-scrub.ts`): the wheel over the scene moves the solar
+clock 18 s per pixel (30 minutes per 100 px notch, down runs forward), and a two-finger vertical
+drag on a touch screen 40 s per pixel of finger travel (both fingers up runs forward). The
+offset is added on top of the real clock and the shown time chases it at a rate of 5/s, so the
+sky time-lapses rather than jumps; music, birds and owls follow the scrubbed hour. Eight seconds
+after the last gesture the offset drifts back (rate 0.55/s) to the nearest whole day, so the
+scene returns to the honest local hour by the shortest way, forward or back. Ctrl + wheel
+(pinch-zoom) and horizontal swipes stay with the browser; reduced motion disables the scrub.
+
 ## Night
 
 The night is staged for a fixed camera rather than following the sky. The moon does not sit
@@ -35,6 +44,22 @@ powder of grains a few pixels wide makes it read as unresolved stars rather than
 dust rift darkens its core, and it is warm at the centre and bluer at the edges. It appears with
 the faintest stars, fades towards the horizon and dims to 45% beside the moon; clouds hide it as
 they hide the stars.
+
+Some landscapes have an aurora (`aurora.ts`): 30% of seeds, fixed by an integer hash of the seed
+so a shared link shows the same sky. Its curtains stand low over the far shore, right of centre
+to balance the Milky Way: a base line folded at two scales, fine rays bent along the folds, a
+sharp lower edge and long rays fading upward, oxygen green below turning to faint violet higher
+up, and slow surges along the arc. It only comes out in full night (sun more than about 7°
+down), the clouds in front hide it, and the lake reflects it with the rest of the sky.
+
+A thunderstorm, or rain at 75% intensity or more, brings lightning (`lightning.ts`): sheet
+flashes through the cloud rather than bolts, on average every 14 s (exponential gaps of at
+least 4 s). A flash lights the clouds, most where they are thick, and opens the exposure, up
+to 2.6 times at night and 1.7 times by day, decaying in 70 ms. Half the strikes add a fainter
+return stroke 0.35–0.5 s later: real return strokes are quicker, but two flashes per strike
+keep the scene under three flashes per second (WCAG 2.3.1). Each strike is 1–8 km away; its
+thunder (see [interaction sounds](living-landscape.md#thunder)) arrives after distance / 343 m/s.
+Reduced motion shows no lightning.
 
 ## Sky and twilight
 

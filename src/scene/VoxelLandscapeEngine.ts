@@ -41,6 +41,7 @@ import type { AmbientEnvironment } from '../audio/environment'
 import { pointSound, waterfallSound } from '../audio/environment'
 import type { WaterSoundEvent } from '../audio/water-sounds'
 import { sceneParams } from '../scene-params'
+import { BirdFlock, FLOCK } from './bird-flock'
 import { CAMERA_IDLE_DRIFT, CAMERA_REST, cameraTarget, ENVIRONMENT_PROBE } from './camera-rig'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { compileWithoutCulling } from './compile-scene'
@@ -59,6 +60,8 @@ import type { LakeReflector } from './lake-water'
 import type { LakeLamp, WaterfallSite } from './lake-world'
 import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
+import { LIGHTNING, Lightning } from './lightning'
+import type { Strike } from './lightning'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import type { PhysicsWorld } from './physics-world'
 import { PointerLight } from './pointer-light'
@@ -76,7 +79,7 @@ import { SceneGrade } from './scene-grade'
 import { sampleLook } from './scene-look'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
-import { DEFAULT_SOLAR, SolarClock, introGap, parseInitialTime } from './solar-clock'
+import { DEFAULT_SOLAR, SolarClock, introGap, parseInitialTime, wrapDay } from './solar-clock'
 import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { stableShadowFilter } from './stable-shadow'
@@ -86,6 +89,7 @@ import type { FlickSample } from './stone-skips'
 import { SubmergedScene } from './submerged-scene'
 import { TerrainSkyFill } from './terrain-detail'
 import { createBoulderMaterial, createTerrainMaterial } from './terrain-material'
+import { SCRUB, TimeScrub, wheelPixels } from './time-scrub'
 import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
@@ -126,6 +130,10 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onWaterSound?: (event: WaterSoundEvent) => void
   /** Each touchdown of a thrown stone, placed in the view, for its note and haptics. */
   onStoneTouchdown?: (event: StoneTouchdownEvent) => void
+  /** Each lightning strike's thunder, to be played when its sound arrives. */
+  onThunder?: (event: Strike) => void
+  /** A thunderstorm is reported: lightning whatever the rain (heavy rain brings it too). */
+  storm?: boolean
   reducedMotion?: boolean
   seed?: number
   /** Disable only the optional detail layer for controlled visual/performance comparisons. */
@@ -148,6 +156,9 @@ const smooth = (a: number, b: number, value: number) => {
 const COMPILE_STAGES = ['passes', 'environment', 'scene', 'warmup'] as const
 /** Seconds after the first frame before an untouched scene skips a stone by itself. */
 const DEMO_DELAY = 7
+/** Seconds into a visit before the first flock crosses the sky, then between flocks. */
+const FLOCK_FIRST = 22
+const FLOCK_GAP = [55, 95] as const
 /** Screen points, as shares of the canvas, where the demonstration stone may land. */
 const DEMO_LANDINGS = [
   [0.5, 0.74],
@@ -311,6 +322,18 @@ export class VoxelLandscapeEngine {
   /** True once the visitor has pressed the scene; until then a demonstration stone is due. */
   private interacted = false
   private demoThrown = false
+  /** The visitor's run through the day with the wheel or two fingers, over the real clock. */
+  private readonly scrub = new TimeScrub()
+  private readonly birds: BirdFlock
+  private readonly seed: number
+  /** Daylight of the last frame, for gestures between frames. */
+  private daylight = 0
+  private nextFlockAt = FLOCK_FIRST
+  private readonly lightning = new Lightning()
+  private flockCount = 0
+  private readonly flockStart = new Vector3()
+  /** Vertical positions of the touches on the scene, for the two-finger time scrub. */
+  private readonly touches = new Map<number, number>()
   private readonly wind: WindModel
   private readonly windUniforms = createWindUniforms()
   private readonly clouds: VolumetricClouds
@@ -482,7 +505,8 @@ export class VoxelLandscapeEngine {
     this.renderer.outputColorSpace = SRGBColorSpace
     this.renderer.toneMapping = ACESFilmicToneMapping
     this.renderer.domElement.className = 'block h-full w-full touch-none'
-    this.renderer.domElement.dataset.seed = String((options.seed ?? 0) >>> 0)
+    this.seed = (options.seed ?? 0) >>> 0
+    this.renderer.domElement.dataset.seed = String(this.seed)
     this.renderer.domElement.dataset.weather = this.weather
     this.renderer.domElement.dataset.generatorVersion = 'voxel-landscape-v1'
     this.scene.fog = this.fog
@@ -629,6 +653,8 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.water)
     this.objects.push(this.water)
     this.scene.add(this.stone.mesh)
+    this.birds = new BirdFlock(this.lowPower ? FLOCK.lowPowerSize : FLOCK.size)
+    this.scene.add(this.birds.group)
     this.geometries.push(waterGeometry)
 
     this.rain = this.resources.own(
@@ -664,6 +690,11 @@ export class VoxelLandscapeEngine {
     window.addEventListener('pointercancel', this.onPointerUp)
     this.renderer.domElement.addEventListener('pointerleave', this.onPointerLeave)
     this.renderer.domElement.addEventListener('lostpointercapture', this.onLostCapture)
+    this.renderer.domElement.addEventListener('wheel', this.onWheel, { passive: false })
+    this.renderer.domElement.addEventListener('pointerdown', this.onTouchDown)
+    window.addEventListener('pointermove', this.onTouchMove, { passive: true })
+    window.addEventListener('pointerup', this.onTouchUp)
+    window.addEventListener('pointercancel', this.onTouchUp)
     window.addEventListener('blur', this.onActivityChange)
     window.addEventListener('focus', this.onActivityChange)
     document.addEventListener('visibilitychange', this.onActivityChange)
@@ -854,9 +885,11 @@ export class VoxelLandscapeEngine {
     )
     this.reducedMotion = value
     if (value) {
+      this.scrub.reset()
       this.clouds.cursorTrace.clear()
-      // A frozen frame must not hold a stone in mid-air.
+      // A frozen frame must not hold a stone or a flock in mid-air.
       this.stone.cancel()
+      this.birds.cancel()
     }
     if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
@@ -1110,6 +1143,7 @@ export class VoxelLandscapeEngine {
       return
     }
     const point = this.hitWater(event.clientX, event.clientY, this.pressPoint)
+    if (!point && this.startleCrown()) return
     if (!point) {
       if (event.pointerType === 'touch') {
         this.skyPointerId = event.pointerId
@@ -1192,6 +1226,76 @@ export class VoxelLandscapeEngine {
     // A tap or a slow drag throws nothing.
     if (!(speed >= SKIP.minSpeed)) return
     this.throwFrom(end, { x: dx, z: dz }, speed, event.pointerType)
+  }
+
+  /**
+   * A press on a tree's crown startles a flock out of it, by day. The pointer ray is already
+   * set by the press; it must meet the crown before any ground or rock.
+   */
+  private startleCrown() {
+    if (this.birds.active || this.daylight < 0.2) return false
+    const ray = this.raycaster.ray
+    const solid = this.physics.castDistance(ray.origin, ray.direction, 130) ?? Infinity
+    const crown = raySpheres(ray.origin, ray.direction, this.vegetationPick, solid)
+    if (!(crown < solid)) return false
+    this.launchFlock(ray.at(crown, this.flockStart))
+    return true
+  }
+
+  private launchFlock(start: Vector3) {
+    this.flockCount++
+    this.birds.launch(
+      start,
+      this.camera.position,
+      ((this.seed ^ (this.flockCount * 0x9e37)) >>> 0) + 1,
+    )
+    this.nextFlockAt = this.elapsed + FLOCK_GAP[0] + Math.random() * (FLOCK_GAP[1] - FLOCK_GAP[0])
+  }
+
+  /**
+   * Now and then by day a flock leaves a crown in view on its own. Crowns are picked from the
+   * tall ones (trees, not shrubs) that project inside the frame.
+   */
+  private updateBirds(dt: number, rain: number) {
+    if (this.reducedMotion) {
+      if (this.birds.active) this.birds.cancel()
+      return
+    }
+    this.birds.update(dt)
+    if (this.birds.active || this.elapsed < this.nextFlockAt) return
+    if (this.daylight < 0.35 || rain > 0.3) {
+      this.nextFlockAt = this.elapsed + 10
+      return
+    }
+    const pick = this.vegetationPick
+    const crownTop = (i: number, target: Vector3) =>
+      target.set(pick[i] ?? 0, (pick[i + 1] ?? 0) + (pick[i + 3] ?? 0) * 0.6, pick[i + 2] ?? 0)
+    const crowns: number[] = []
+    for (let i = 0; i + 3 < pick.length; i += 4) {
+      // Broad bands high above the water: tree crowns, not shrubs.
+      if ((pick[i + 3] ?? 0) < 1.5 || (pick[i + 1] ?? 0) < WATER_LEVEL + 4) continue
+      const projected = crownTop(i, this.flockStart).project(this.camera)
+      if (Math.abs(projected.x) < 0.85 && Math.abs(projected.y) < 0.85 && projected.z < 1)
+        crowns.push(i)
+    }
+    const index = crowns[Math.floor(Math.random() * crowns.length)]
+    if (index === undefined) this.nextFlockAt = this.elapsed + 10
+    else this.launchFlock(crownTop(index, this.flockStart))
+  }
+
+  /**
+   * Lightning in a thunderstorm or very heavy rain: flashes light the clouds and the scene, and
+   * each strike's thunder goes to the sound. None under reduced motion, which also spares
+   * photosensitive visitors any flash.
+   */
+  private updateLightning() {
+    const stormy =
+      !this.reducedMotion &&
+      this.intro === 1 &&
+      (this.options.storm === true || this.rain.simulation.state.intensity >= LIGHTNING.stormRain)
+    const flash = this.lightning.update(this.elapsed, stormy, this.options.onThunder)
+    this.skyMaterial.uniforms.uFlash.value = flash
+    return flash
   }
 
   private throwFrom(
@@ -1279,6 +1383,45 @@ export class VoxelLandscapeEngine {
     if (event.type === 'pointercancel' || this.pointerType === 'touch') this.onPointerLeave()
     if (this.renderer.domElement.hasPointerCapture(event.pointerId))
       this.renderer.domElement.releasePointerCapture(event.pointerId)
+  }
+
+  /**
+   * The wheel runs the day forward (down) or back (up); the clock returns to the real hour on
+   * its own a few seconds after the last turn. Pinch-zoom (ctrl + wheel) and horizontal swipes
+   * are left to the browser.
+   */
+  private onWheel = (event: WheelEvent) => {
+    if (this.reducedMotion || event.ctrlKey || Math.abs(event.deltaY) < Math.abs(event.deltaX))
+      return
+    event.preventDefault()
+    this.interacted = true
+    this.scrub.scrub(
+      wheelPixels(event.deltaY, event.deltaMode) * SCRUB.wheelSeconds,
+      performance.now() / 1000,
+    )
+  }
+
+  /** A second finger turns the press into a time scrub: no stone, no stirring, no sky drag. */
+  private onTouchDown = (event: PointerEvent) => {
+    if (event.pointerType !== 'touch') return
+    this.touches.set(event.pointerId, event.clientY)
+    if (this.touches.size === 2) this.onPointerLeave()
+  }
+
+  private onTouchMove = (event: PointerEvent) => {
+    const previous = this.touches.get(event.pointerId)
+    if (previous === undefined) return
+    this.touches.set(event.pointerId, event.clientY)
+    if (this.touches.size !== 2 || this.reducedMotion) return
+    // Each finger carries half the swipe: dragging both up runs the day forward.
+    this.scrub.scrub(
+      ((previous - event.clientY) / 2) * SCRUB.touchSeconds,
+      performance.now() / 1000,
+    )
+  }
+
+  private onTouchUp = (event: PointerEvent) => {
+    this.touches.delete(event.pointerId)
   }
 
   private onLostCapture = () => {
@@ -1822,12 +1965,9 @@ export class VoxelLandscapeEngine {
     this.intro = this.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
     const atmosphereTime = this.solarClock.elapsed(now)
-    const light = sampleLighting(
-      this.solarClock.seconds(atmosphereTime),
-      0,
-      this.weather,
-      this.solar,
-    )
+    this.scrub.update(rainDelta, now / 1000)
+    const solarSeconds = this.solarClock.seconds(atmosphereTime) + this.scrub.offset
+    const light = sampleLighting(wrapDay(solarSeconds), 0, this.weather, this.solar)
     const host = this.lightingHost
     if (host) {
       const enabled = String(light.localLightStrength > 0)
@@ -1883,12 +2023,18 @@ export class VoxelLandscapeEngine {
       Math.max(0, (WEATHER[this.weather].diffuse - 0.5) / 0.5) *
       (1 - 0.5 * this.rain.simulation.state.intensity)
     const morningMist = mistFactor(light.sunDirection.y, light.weatherDiffuse)
-    const look = sampleLook({
+    const sampled = sampleLook({
       sunHeight: light.sunDirection.y,
       daylight: light.daylight,
       rain: this.rain.simulation.state.intensity,
       mist: morningMist,
     })
+    const flash = this.updateLightning()
+    // A flash opens the whole frame, far more at night when the eye has adapted to the dark.
+    const look =
+      flash > 0
+        ? { ...sampled, exposure: sampled.exposure * (1 + flash * (2.6 - 1.9 * light.daylight)) }
+        : sampled
     this.fog.density = this.baseFogDensity * (1 + morningMist * 1.4) * Math.sqrt(look.haze)
     this.atmosphere.update(light, look)
     if (!this.reducedMotion) this.gradeFrame++
@@ -1912,7 +2058,7 @@ export class VoxelLandscapeEngine {
         waterfall.intensity *= this.intro
       }
       this.options.onEnvironment?.({
-        solarHour: this.solarClock.seconds(atmosphereTime) / 3600,
+        solarHour: wrapDay(solarSeconds) / 3600,
         daylight: light.daylight,
         windSpeed: wind.speed,
         rainIntensity: this.rain.simulation.state.intensity,
@@ -1954,6 +2100,8 @@ export class VoxelLandscapeEngine {
     })
     let bait: FishBait | null = null
     this.updateStone()
+    this.daylight = light.daylight
+    this.updateBirds(rainDelta, this.rain.simulation.state.intensity)
     if (!this.demoThrown && !this.interacted && !this.reducedMotion && this.introStartedAt !== null)
       if (now - this.introStartedAt > DEMO_DELAY * 1000) this.throwDemo()
     if (this.bait && !this.reducedMotion) {
@@ -2147,6 +2295,11 @@ export class VoxelLandscapeEngine {
     window.removeEventListener('pointercancel', this.onPointerUp)
     this.renderer.domElement.removeEventListener('pointerleave', this.onPointerLeave)
     this.renderer.domElement.removeEventListener('lostpointercapture', this.onLostCapture)
+    this.renderer.domElement.removeEventListener('wheel', this.onWheel)
+    this.renderer.domElement.removeEventListener('pointerdown', this.onTouchDown)
+    window.removeEventListener('pointermove', this.onTouchMove)
+    window.removeEventListener('pointerup', this.onTouchUp)
+    window.removeEventListener('pointercancel', this.onTouchUp)
     window.removeEventListener('blur', this.onActivityChange)
     window.removeEventListener('focus', this.onActivityChange)
     document.removeEventListener('visibilitychange', this.onActivityChange)
@@ -2157,6 +2310,8 @@ export class VoxelLandscapeEngine {
     this.disposed = true
     this.stone.mesh.removeFromParent()
     this.stone.dispose()
+    this.birds.group.removeFromParent()
+    this.birds.dispose()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

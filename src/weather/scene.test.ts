@@ -66,6 +66,8 @@ describe('scene weather mapping', () => {
       const mapped = weatherForScene(await fetchWeather())
       expect(mapped.weather).toBe('overcast')
       expect(mapped.rain.intensity).toBe(0)
+      // A dry thunderstorm still brings lightning; snow does not.
+      expect(mapped.storm).toBe(weather_code === 95)
     }
   })
   it('keeps fallback presets coherent and repeatable for one visit', () => {
