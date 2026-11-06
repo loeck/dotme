@@ -21,6 +21,16 @@ thrown by touch, a vibration of 6–20 ms. Seven seconds after the first frame, 
 pressed throws one stone by itself, with no text: the run across the lake is the invitation.
 Reduced motion throws nothing, and switching to it drops a stone in flight.
 
+By day a small flock of birds (`bird-flock.ts`, nine, six on low power) crosses the sky: the
+first about 22 s into the visit, then every 55–95 s while daylight is above 0.35 and rain below
+0.3, each leaving a tall crown that projects inside the frame. A press on a crown (the pointer
+ray meeting a crown's pick sphere before any ground) startles a flock out of that tree instead.
+The leader climbs away from the viewer, turns wide over the lake and leaves over the far hills;
+each bird steers toward a jittered slot of a loose wedge with its own response, so the flock
+stretches and bunches in turns. Birds are unlit dark silhouettes made of two hinged wings,
+beating faster while climbing and gliding in between, banking into turns; a flock fades in at
+the crown and out after 24 s. Reduced motion shows no birds.
+
 The world seed can select a supported left-bank waterfall with a clear landing in the lake.
 An upstream rock basin contains a shallow pool and narrows into an open spillway at the lip.
 The basin floor and banks belong to the generated terrain; its water feeds a volume of seeded

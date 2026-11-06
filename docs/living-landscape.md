@@ -77,6 +77,17 @@ gain and mute control, are attenuated and panned like the splashes, and stay sil
 playback is paused or off. A new interaction sound should follow the same rules and be added to
 this section.
 
+### Thunder
+
+Thunder is a weather sound, not an interaction sound, but it is synthesised the same way and
+shares the master gain and mute control (`thunder.ts`). Each strike renders five seconds of new
+mono noise, so no two peals sound alike: brown noise under a one-pole low-pass shaped into a
+crack (only for strikes nearer than 3 km) and three to six rolling swells that die away over a
+few seconds; distance lowers the cut-off from 350 Hz to 90 Hz, as air absorbs the highs of a far
+strike. The peal starts when the sound would arrive (distance / 343 m/s after the flash), is
+panned where the strike was, and peaks at 0.55 for a strike a kilometre away, falling as
+(1 km / distance)^0.8.
+
 The waterfall recording is loaded only when the generated world contains a waterfall and
 playback is enabled. Its loudness follows the fall's size and distance, with stereo placement
 following its position in the camera view. Three-second loop crossfades and smoothed gains

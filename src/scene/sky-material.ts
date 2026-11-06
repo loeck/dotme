@@ -25,6 +25,7 @@ import {
 import { BackSide, Color, MeshBasicNodeMaterial, Vector3 } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
+import { aurora, hasAurora } from './aurora'
 import { distantPeaks, horizonNoise } from './distant-horizon'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
@@ -63,6 +64,10 @@ function skyUniforms(seed: number, mobile: boolean) {
     uMobile: uniform(mobile ? 1 : 0),
     uWeatherLight: uniform(1),
     uOvercast: uniform(0),
+    /** 1 on the landscapes whose clear nights carry an aurora. */
+    uAurora: uniform(hasAurora(seed) ? 1 : 0),
+    /** Lightning inside the clouds, 0 when dark. */
+    uFlash: uniform(0),
   }
 }
 type SkyUniforms = ReturnType<typeof skyUniforms>
@@ -148,10 +153,13 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .add(
         stellarRadiance(direction, moonAngle, u)
           .add(milkyWay(direction, moonAngle, u))
-          .mul(smoothstep(0.65, 0.98, cloud.a)),
+          .mul(smoothstep(0.65, 0.98, cloud.a))
+          .add(aurora(direction, u)),
       )
       .mul(cloud.a)
       .add(cloud.rgb)
+      // Lightning glows through the cloud deck: brightest where the cloud is thick.
+      .add(vec3(0.62, 0.68, 0.85).mul(u.uFlash.mul(cloud.a.oneMinus().mul(0.8).add(0.08))))
     // Distant ridges and mist take the sky's own horizon light in their direction:
     // warm towards the sun, rose and blue under the Earth's shadow.
     const air = sky.horizon(direction).mul(u.uWeatherLight)

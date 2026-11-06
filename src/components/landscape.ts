@@ -87,6 +87,8 @@ export async function initLandscape(
           stoneHaptics(event)
           sound.skipNote(event)
         },
+        onThunder: (event) => sound.thunder(event),
+        storm: snapshot.storm ?? false,
         reducedMotion: motion.matches,
         weather: snapshot.weather,
         wind: snapshot.wind,
