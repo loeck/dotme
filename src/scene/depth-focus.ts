@@ -35,6 +35,7 @@ import type {
 
 import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
+import { lensFlare } from './lens-flare'
 import type { SceneGrade } from './scene-grade'
 import type { VolumetricLight } from './volumetric-light'
 
@@ -86,6 +87,9 @@ export class DepthFocus {
   private readonly bufferPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
   private readonly glow: BloomNode
+  /** The sun's position on the frame (UV) and how strongly it may flare the lens. */
+  private readonly flareSun = uniform(new Vector2(0.5, 0.5))
+  private readonly flare = uniform(0)
   constructor(renderer: WebGPURenderer, lowPower: boolean, grade: SceneGrade) {
     this.target.texture.name = LENS_TARGET
     const samples = lowPower ? 12 : 20
@@ -181,7 +185,9 @@ export class DepthFocus {
           })
           color.divAssign(weight)
         })
-        return vec4(grade.colour(color).add(this.glow.rgb).mul(grade.frameEdge(uv())), 1)
+        const aspect = this.cssPixel.y.div(this.cssPixel.x)
+        const flare = lensFlare(uv(), this.flareSun, this.flare, aspect)
+        return vec4(grade.colour(color).add(this.glow.rgb).add(flare).mul(grade.frameEdge(uv())), 1)
       })(),
       true,
       (display) => grade.finish(display),
@@ -192,6 +198,12 @@ export class DepthFocus {
     this.bufferPixel.value.set(1 / bufferWidth, 1 / bufferHeight)
     this.cssPixel.value.set(1 / cssWidth, 1 / cssHeight)
   }
+  /** Places the sun for the flare: `uv` on the frame (y up), `strength` from `flareStrength`. */
+  setFlare(x: number, y: number, strength: number) {
+    this.flareSun.value.set(x, y)
+    this.flare.value = Number.isFinite(strength) ? Math.max(0, strength) : 0
+  }
+
   get depthTexture() {
     const depth = this.target.depthTexture
     if (!depth) throw new Error('Landscape depth texture is unavailable')

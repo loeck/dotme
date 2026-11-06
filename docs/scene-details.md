@@ -30,6 +30,14 @@ spot, the ring runs out to 7 m and fades in 0.7 s, the fish lose their bait, a l
 sounds and, on touch, the hand gets a 20–50 ms buzz. A press that moves first stays a drag or a
 flick, and a release under 15% charge is an ordinary tap. Reduced motion has no charge.
 
+At night (daylight under 0.25) a double tap or double click on the water sets a paper lantern
+afloat there (`lake-lanterns.ts`): a small drum that glows warm through the middle of its paper,
+bright enough to bloom, and that the lake mirror reflects. Lanterns drift downwind at 3.5 cm/s
+per m/s of wind, bob on the waves, turn slowly and stay put rather than ground on a bank. Six can
+float at once, a seventh replacing the oldest; they kindle over about a second and are gone by
+day. They light nothing around them, as a real light each would cost too much. A tap that throws
+a stone or releases a wave does not count toward a double tap; reduced motion places none.
+
 At night a mouse cursor held still for 1.2 s over the scene gathers the fireflies within 18 m
 (`lake-fireflies.ts`): each fly blends from its flight path into its own small orbit about
 0.9 m above what the cursor points at (radius 0.45–1 m, its own pace and height), joining at a

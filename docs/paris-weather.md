@@ -55,10 +55,13 @@ it does not trigger the random fallback. Completed snapshots survive motion pref
 bfcache restores for the same page. There is no polling or persistent cache.
 
 Cloud cover selects clear (<20%), partly cloudy (<55%), cloudy (<85%) or overcast. Rain implies at
-least a cloudy sky; fog, snow and thunderstorm codes use overcast. Liquid precipitation is converted
+least a cloudy sky; fog, snow and thunderstorm codes use overcast. A dry overcast sky (no
+precipitation, fog, snow or storm) is shown as cloudy instead: a flat grey deck is the dullest
+frame the scene can open on, so it keeps its cloud but breaks up and lets the light reach the lake. Liquid precipitation is converted
 from its reported interval to mm/hour, then mapped to the artistic rain intensity (0.12–1, saturated
 at 8 mm/hour). WMO rain/drizzle codes supply an intensity when reported amounts are zero. Snow-only
-conditions do not create rain. Snowflakes, lightning and weather-driven fog are not implemented.
+conditions do not create rain. Snowflakes and weather-driven fog are not implemented; thunderstorms bring lightning (see
+[atmosphere](atmosphere.md)).
 
 Wind bearing and speed drive the rain and shared atmospheric/water wind model. Rain wind is capped
 at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
