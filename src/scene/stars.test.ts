@@ -54,3 +54,35 @@ it('keeps seeded 90–180 second attempts independent of solar speed, with one s
   expect(stars.remaining).toBe(remaining)
   expect(stars.age).toBe(2)
 })
+
+it('answers a wish on the night sky with a short run of meteors from that point', () => {
+  const camera = new PerspectiveCamera(54, 16 / 9, 0.1, 500)
+  camera.position.set(0, 2.3, 16)
+  camera.lookAt(0, 7.3, -25)
+  camera.updateMatrixWorld()
+  const stars = new ShootingStars(7)
+  const scheduled = stars.remaining
+  expect(stars.wish(0.3, 0.5)).toBe(true)
+  // A second wish while the first is falling is ignored.
+  expect(stars.wish(-0.3, 0.5)).toBe(false)
+  const starts: Array<{ x: number; y: number }> = []
+  for (let i = 0; i < 60 * 6; i++) {
+    stars.advance(1 / 60, -0.5, false, false, camera)
+    if (stars.age === 0) starts.push(stars.start.clone().add(camera.position).project(camera))
+  }
+  // Each falls from near the wished point.
+  for (const start of starts) {
+    expect(Math.abs(start.x - 0.3)).toBeLessThan(0.1)
+    expect(Math.abs(start.y - 0.5)).toBeLessThan(0.1)
+  }
+  const launches = starts.length
+  expect(launches).toBe(3)
+  // Wishes do not count against, or delay, the sky's own meteors beyond the time that passed.
+  expect(stars.remaining).toBeLessThan(scheduled)
+  expect(stars.attempts).toBe(0)
+  // Daylight or clouds drop a pending wish.
+  stars.wish(0, 0.5)
+  stars.advance(1 / 60, 0.3, false, false, camera)
+  for (let i = 0; i < 600; i++) stars.advance(1 / 60, -0.5, false, false, camera)
+  expect(stars.attempts).toBe(0)
+})

@@ -21,6 +21,22 @@ thrown by touch, a vibration of 6–20 ms. Seven seconds after the first frame, 
 pressed throws one stone by itself, with no text: the run across the lake is the invitation.
 Reduced motion throws nothing, and switching to it drops a stone in flight.
 
+A long, still press on the water charges a wave (`water-shockwave.ts`). After 0.45 s without
+moving more than 12 px, a glowing ring gathers under the pointer, growing from 0.3 to 1.6 m over
+1.6 s while faint ripples pulse under it every 0.3 s (the fish, drawn by the press, gather too).
+Letting go releases one broad impulse in the wave field, 1.2–2.8 m wide and stronger for a fuller
+charge, which rolls out to the banks and lifts what floats; six to ten splash bursts ring the
+spot, the ring runs out to 7 m and fades in 0.7 s, the fish lose their bait, a low tuned note
+sounds and, on touch, the hand gets a 20–50 ms buzz. A press that moves first stays a drag or a
+flick, and a release under 15% charge is an ordinary tap. Reduced motion has no charge.
+
+At night a mouse cursor held still for 1.2 s over the scene gathers the fireflies within 18 m
+(`lake-fireflies.ts`): each fly blends from its flight path into its own small orbit about
+0.9 m above what the cursor points at (radius 0.45–1 m, its own pace and height), joining at a
+rate of 0.45/s and leaving at 1.2/s, so the swarm forms slowly and turns as a loose ball. While
+gathered they no longer shy from the cursor. A click scatters them: each gathered fly gets an
+outward kick and drifts home along its path. Reduced motion never gathers them.
+
 By day a small flock of birds (`bird-flock.ts`, nine, six on low power) crosses the sky: the
 first about 22 s into the visit, then every 55–95 s while daylight is above 0.35 and rain below
 0.3, each leaving a tall crown that projects inside the frame. A press on a crown (the pointer

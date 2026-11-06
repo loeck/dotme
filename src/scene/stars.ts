@@ -42,6 +42,10 @@ export function starVisibility(sunHeight: number, brightness = 1) {
   return t * t * (3 - 2 * t)
 }
 
+/** Meteors in a wish, and seconds from one to the next (each lives about 1.15 s). */
+const WISH_METEORS = 3
+const WISH_SPACING = 1.2
+
 /** Counts only active, visible night seconds. Missed/covered attempts never queue. */
 export class ShootingStars {
   private readonly random: () => number
@@ -50,6 +54,9 @@ export class ShootingStars {
   attempts = 0
   readonly start = new Vector3()
   readonly end = new Vector3()
+  /** Meteors still due from a wish, and the screen point (NDC) they fall from. */
+  private wishes = 0
+  private readonly wishFrom = { x: 0, y: 0 }
   constructor(seed: number) {
     this.random = starRandom(seed ^ 0x57a25)
     this.remaining = this.interval()
@@ -66,12 +73,25 @@ export class ShootingStars {
   ) {
     if (frozen) {
       this.age = 2
+      this.wishes = 0
       return
     }
     const delta = Math.max(0, dt)
     this.age += delta
     if (starVisibility(sunHeight) < 0.95 || covered) {
       this.age = 2
+      this.wishes = 0
+      return
+    }
+    if (this.wishes > 0) {
+      // One wish meteor at a time: the next leaves once the last has burnt out.
+      if (this.age < WISH_SPACING) return
+      this.wishes--
+      this.launch(
+        this.wishFrom.x + (this.random() - 0.5) * 0.12,
+        this.wishFrom.y + (this.random() - 0.5) * 0.08,
+        camera,
+      )
       return
     }
     this.remaining -= delta
@@ -79,8 +99,23 @@ export class ShootingStars {
     this.remaining = this.interval()
     this.attempts++
     // Upper third of the current frustum, comfortably above distant relief.
-    const x = (this.random() - 0.5) * 0.9,
-      y = 0.45 + this.random() * 0.3
+    this.launch((this.random() - 0.5) * 0.9, 0.45 + this.random() * 0.3, camera)
+  }
+
+  /**
+   * A wish made on the night sky at a screen point (NDC): a short run of meteors falls from
+   * there, one after another. Ignored while a wish is still falling.
+   */
+  wish(x: number, y: number, count = WISH_METEORS) {
+    if (this.wishes > 0 || !Number.isFinite(x + y)) return false
+    this.wishFrom.x = Math.max(-0.9, Math.min(0.9, x))
+    this.wishFrom.y = Math.max(-0.2, Math.min(0.9, y))
+    this.wishes = count
+    this.age = Math.max(this.age, WISH_SPACING)
+    return true
+  }
+
+  private launch(x: number, y: number, camera: PerspectiveCamera) {
     const sign = this.random() > 0.5 ? 1 : -1
     this.start.set(x, y, 0.5).unproject(camera).sub(camera.position).normalize()
     this.end

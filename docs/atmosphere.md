@@ -45,6 +45,12 @@ dust rift darkens its core, and it is warm at the centre and bluer at the edges.
 the faintest stars, fades towards the horizon and dims to 45% beside the moon; clouds hide it as
 they hide the stars.
 
+A press on the clear night sky (no cloud preset, daylight under 5%, the pointer ray meeting no
+ground or crown) makes a wish (`ShootingStars.wish` in `stars.ts`): three shooting stars fall one
+after another, 1.2 s apart, from near the pressed point, then the sky's own 90–180 s schedule
+resumes. A second wish while one is falling is ignored; daylight, clouds or reduced motion drop
+a pending one.
+
 Some landscapes have an aurora (`aurora.ts`): 30% of seeds, fixed by an integer hash of the seed
 so a shared link shows the same sky. Its curtains stand low over the far shore, right of centre
 to balance the Milky Way: a base line folded at two scales, fine rays bent along the folds, a
