@@ -50,6 +50,10 @@ export function weatherForScene(snapshot: WeatherSnapshot): SceneWeather {
   const intensity =
     rate > 0 ? Math.min(1, Math.max(0.12, rate / 8)) : (codeIntensity[snapshot.weatherCode] ?? 0)
   if (intensity > 0 && ['clear', 'partly-cloudy'].includes(weather)) weather = 'cloudy'
+  // A dry grey sky is the dullest frame the scene can open on: it keeps its cloud but breaks
+  // up, so the light still finds the lake. Rain, fog, snow and storms keep their full deck.
+  const dry = !['fog', 'snow', 'thunderstorm', 'rain', 'drizzle'].includes(kind)
+  if (weather === 'overcast' && intensity === 0 && dry) weather = 'cloudy'
   // Meteorological bearings describe where wind comes from. Scene +z is south.
   const direction = (snapshot.windDirectionDegrees * Math.PI) / 180
   const speed = Math.min(20, snapshot.windSpeedMs)

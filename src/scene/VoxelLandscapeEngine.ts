@@ -55,9 +55,11 @@ import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
+import { LakeLanterns, isDoubleTap } from './lake-lanterns'
 import { createLakeReflector } from './lake-water'
 import type { LakeReflector } from './lake-water'
 import type { LakeLamp, WaterfallSite } from './lake-world'
+import { flareStrength } from './lens-flare'
 import { fadeNightLight, mistFactor, sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { LIGHTNING, Lightning } from './lightning'
@@ -102,6 +104,7 @@ import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-f
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 import { WindModel, updateWindUniforms } from './wind'
+import type { WindState } from './wind'
 import type { WindOptions } from './wind'
 import { createWindUniforms } from './wind-nodes'
 import type { VegetationPart } from './world-data'
@@ -351,6 +354,12 @@ export class VoxelLandscapeEngine {
   /** When the mouse last moved or pressed, in ms: a still cursor gathers the fireflies. */
   private pointerStillSince = 0
   private readonly gatherPoint = new Vector3()
+  private readonly flarePoint = new Vector3()
+  private readonly lanterns = new LakeLanterns()
+  /** The last tap on the water that threw nothing, for a double tap to set a lantern afloat. */
+  private lastTap: { x: number; y: number; time: number } | null = null
+  private readonly lanternPoint = new Vector3()
+  private flareLevel = 0
   private nextShockRipple = 0
   private readonly lightning = new Lightning()
   private flockCount = 0
@@ -677,6 +686,7 @@ export class VoxelLandscapeEngine {
     this.objects.push(this.water)
     this.scene.add(this.stone.mesh)
     this.scene.add(this.shockwave.mesh)
+    this.scene.add(this.lanterns.mesh)
     this.birds = new BirdFlock(this.lowPower ? FLOCK.lowPowerSize : FLOCK.size)
     this.scene.add(this.birds.group)
     this.geometries.push(waterGeometry)
@@ -1244,24 +1254,35 @@ export class VoxelLandscapeEngine {
    * on in the gesture's direction, further for a faster flick. Speed is read on the water plane
    * over at least the gesture's last 40 ms, so a slow drag only stirs the surface.
    */
-  private throwStone(event: PointerEvent) {
-    if (this.reducedMotion || this.disposed) return
+  private throwStone(event: PointerEvent): boolean {
+    if (this.reducedMotion || this.disposed) return false
     // Measure from the newest sample at least 40 ms old, or from the press. The newest move
     // often sits on the release point itself when events arrive coalesced on a busy frame.
     const from = flickOrigin(this.flick, event.timeStamp)
     this.flick.length = 0
     const elapsed = from ? event.timeStamp - from.time : 0
-    if (!from || elapsed < 8 || elapsed > 300) return
+    if (!from || elapsed < 8 || elapsed > 300) return false
     const start = this.hitWater(from.x, from.y, this.flickStart)
     const end = start && this.hitWater(event.clientX, event.clientY, this.flickEnd)
-    if (!start || !end) return
+    if (!start || !end) return false
     const seconds = elapsed / 1000
     const dx = end.x - start.x,
       dz = end.z - start.z
     const speed = Math.hypot(dx, dz) / seconds
     // A tap or a slow drag throws nothing.
-    if (!(speed >= SKIP.minSpeed)) return
+    if (!(speed >= SKIP.minSpeed)) return false
     this.throwFrom(end, { x: dx, z: dz }, speed, event.pointerType)
+    return true
+  }
+
+  /** A double tap on the night lake sets a paper lantern afloat where it landed. */
+  private tapWater(event: PointerEvent) {
+    const tap = { x: event.clientX, y: event.clientY, time: event.timeStamp }
+    const double = isDoubleTap(this.lastTap, tap)
+    this.lastTap = double ? null : tap
+    if (!double || this.daylight > 0.25) return
+    const point = this.hitWater(event.clientX, event.clientY, this.lanternPoint)
+    if (point) this.lanterns.place(point.x, point.z, this.elapsed)
   }
 
   /**
@@ -1373,6 +1394,40 @@ export class VoxelLandscapeEngine {
     listener({ charge: wave.charge, intensity: place.attenuation, pan: place.pan, pointerType })
   }
 
+  /** Places the sun's lens flare: where its disc projects on the frame, and how strongly. */
+  private updateFlare(light: LightingState) {
+    const ndc = this.flarePoint
+      .copy(light.sunApparent)
+      .multiplyScalar(400)
+      .add(this.camera.position)
+      .project(this.camera)
+    const target = this.showSun
+      ? flareStrength(ndc, light.sunDirection.y) * this.sunInView(light) * light.weatherDiffuse ** 4
+      : 0
+    // Eases in and out over a few frames, so a crown swaying across the disc does not blink it.
+    this.flareLevel += (target - this.flareLevel) * (this.reducedMotion ? 1 : 0.2)
+    this.depthFocus.setFlare((ndc.x + 1) / 2, (ndc.y + 1) / 2, this.flareLevel * this.intro)
+  }
+
+  /** 1 when nothing solid (ground, rock, crown) stands between the eye and the sun, else 0. */
+  private sunInView(light: LightingState) {
+    const origin = this.camera.position,
+      direction = light.sunApparent
+    if (this.physics.castDistance(origin, direction, 400) !== null) return 0
+    return raySpheres(origin, direction, this.vegetationPick, Infinity) < Infinity ? 0 : 1
+  }
+
+  private updateLanterns(wind: WindState, daylight: number) {
+    this.lanterns.update(
+      this.elapsed,
+      wind,
+      1 - daylight,
+      (x, z) => this.simulation.contact.sample(x, z, this.elapsed, wind)[0],
+      (x, z) => this.isOpenWater(x, z),
+      this.reducedMotion,
+    )
+  }
+
   /** While a press charges, faint ripples gather under it. */
   private updateShockwave(seconds: number) {
     const pressed = this.shockwave.pressed
@@ -1466,7 +1521,7 @@ export class VoxelLandscapeEngine {
     const wave =
       event.type === 'pointerup' ? this.shockwave.release(performance.now() / 1000) : null
     if (wave) this.releaseShockwave(wave, event.pointerType)
-    else if (event.type === 'pointerup') this.throwStone(event)
+    else if (event.type === 'pointerup' && !this.throwStone(event)) this.tapWater(event)
     this.dragging = false
     this.dragPointerId = -1
     if (event.type === 'pointercancel' || this.pointerType === 'touch') this.onPointerLeave()
@@ -2037,6 +2092,7 @@ export class VoxelLandscapeEngine {
     this.fog.color.copy(light.haze)
     this.fog.density = Math.sqrt(WEATHER[this.weather].extinction / 100)
     updateSkyLighting(this.skyMaterial, light, this.showSun)
+    this.updateFlare(light)
   }
 
   private render = (now: number) => {
@@ -2204,6 +2260,7 @@ export class VoxelLandscapeEngine {
     let bait: FishBait | null = null
     this.updateStone()
     this.updateShockwave(now / 1000)
+    this.updateLanterns(this.wind.sample(this.elapsed), light.daylight)
     this.daylight = light.daylight
     this.updateBirds(rainDelta, this.rain.simulation.state.intensity)
     if (!this.demoThrown && !this.interacted && !this.reducedMotion && this.introStartedAt !== null)
@@ -2417,6 +2474,8 @@ export class VoxelLandscapeEngine {
     this.stone.dispose()
     this.shockwave.mesh.removeFromParent()
     this.shockwave.dispose()
+    this.lanterns.mesh.removeFromParent()
+    this.lanterns.dispose()
     this.birds.group.removeFromParent()
     this.birds.dispose()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo

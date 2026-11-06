@@ -226,6 +226,15 @@ frame into the bright pass and veiled it. The grade also split-tones around midd
 lean teal and highlights warm, each tone normalised to unit luminance so only hue moves; golden
 hour strengthens it by half.
 
+When the sun's disc is in or near the frame, the lens throws a faint flare (`lens-flare.ts`):
+five soft ghosts along the line from the sun through the frame's centre, each tinted as a coated
+element would tint it, plus a small warm halo on the sun, all added to the graded radiance before
+the vignette. It fades out over the last 30% beyond the frame edge, is stronger for a low sun (up
+to 1.6 times), scales with the weather's diffuse light to the fourth power (so cloud cover all
+but removes it) and needs a clear line of sight: a ray from the eye toward the sun that meets the
+ground, a rock or a crown hides it. The level eases over a few frames, so a crown swaying across
+the disc does not blink it. In a bright golden frame the ghosts stay subtle by design.
+
 Indirect terrain light, local reflections and weather remain artistic approximations.
 Validate changes with seeded clear/cloudy captures at noon, sunrise (`startTime=06:00`),
 civil twilight (`05:45`, `18:10`) and night, plus reduced motion and resize. See

@@ -41,6 +41,20 @@ describe('scene weather mapping', () => {
     expect(mapped.wind.meanSpeed).toBe(5)
     expect(mapped.source).toBe('live')
   })
+  it('breaks a dry grey deck into clouds but keeps it for rain, fog, snow and storms', async () => {
+    for (const [weather_code, rain, expected] of [
+      [3, 0, 'cloudy'],
+      [3, 1, 'overcast'],
+      [45, 0, 'overcast'],
+    ] as const) {
+      const data = parisWeatherFixture()
+      Object.assign(data.current, { weather_code, cloud_cover: 100, rain })
+      respond(data)
+      // eslint-disable-next-line no-await-in-loop
+      const mapped = weatherForScene(await fetchWeather())
+      expect(mapped.weather).toBe(expected)
+    }
+  })
   it('maps sunrise, sunset and snapshot time to location-local solar seconds', async () => {
     respond()
     const mapped = weatherForScene(await fetchWeather())
