@@ -51,7 +51,15 @@ export type LakeFirefliesOptions = Readonly<{
   nightFactor?: number
   intensity?: number
   pointer?: FireflyPointer | null
+  /** Where a still cursor gathers the nearby flies at night; null lets them go home. */
+  gather?: Readonly<{ x: number; y: number; z: number }> | null
 }>
+
+/** Flies within this many metres of a still cursor come to it. */
+export const GATHER_REACH = 18
+/** Rates, per second, at which a fly joins the swarm and leaves it. */
+const GATHER_JOIN = 0.45
+const GATHER_LEAVE = 1.2
 
 /** Small seeded shoreline colonies, pooled in one GPU draw without local lights. */
 export class LakeFireflies {
@@ -69,6 +77,10 @@ export class LakeFireflies {
   private readonly target = new Vector3()
   private readonly cameraRight = new Vector3()
   private readonly cameraUp = new Vector3()
+  /** Per fly, 0 on its own flight path, 1 circling the cursor. */
+  private readonly gathered: Float64Array
+  private readonly gatherPoint = new Vector3()
+  private hasGatherPoint = false
 
   constructor(scene: Scene, bed: LakeBed, seed: number, mobile: boolean) {
     let state = (seed ^ 0xb017fa11) >>> 0
@@ -121,6 +133,7 @@ export class LakeFireflies {
     this.motions = new Float32Array(motions)
     this.offsets = new Float64Array(centers.length)
     this.velocities = new Float64Array(centers.length)
+    this.gathered = new Float64Array(centers.length / 3)
     geometry.setAttribute(
       'aCenter',
       new InstancedBufferAttribute(this.origins.slice(), 3).setUsage(DynamicDrawUsage),
@@ -184,6 +197,38 @@ export class LakeFireflies {
       this.mesh.geometry.instanceCount > 0 && required(uniforms.uIntensity).value > 0
   }
 
+  /**
+   * Blends fly `i` from its flight path toward a small orbit round the gather point: each fly
+   * keeps its own radius, height and pace, so the swarm turns as a loose ball, not a ring.
+   */
+  private swarmAround(
+    i: number,
+    phase: number,
+    time: number,
+    dt: number,
+    gather: Readonly<{ x: number; y: number; z: number }> | null,
+  ) {
+    const near =
+      gather !== null &&
+      Math.hypot(this.center.x - gather.x, this.center.z - gather.z) < GATHER_REACH
+    const weight = this.gathered[i] ?? 0
+    const goal = near ? 1 : 0
+    const rate = goal > weight ? GATHER_JOIN : GATHER_LEAVE
+    const next = weight + (goal - weight) * (1 - Math.exp(-rate * dt))
+    this.gathered[i] = next < 0.001 ? 0 : next
+    if (this.gathered[i] === 0 || !this.hasGatherPoint) return
+    const pace = 0.5 + 0.4 * Math.sin(phase * 3.1)
+    const angle = time * pace + phase * 2.3
+    const radius = 0.45 + 0.55 * (0.5 + 0.5 * Math.sin(phase * 5.7))
+    const point = this.gatherPoint
+    const s = smooth(0, 1, this.gathered[i] ?? 0)
+    this.center.set(
+      this.center.x + (point.x + Math.cos(angle) * radius - this.center.x) * s,
+      this.center.y + (point.y + Math.sin(time * 0.9 + phase) * 0.35 - this.center.y) * s,
+      this.center.z + (point.z + Math.sin(angle) * radius - this.center.z) * s,
+    )
+  }
+
   private updatePositions(
     time: number,
     dt: number,
@@ -212,6 +257,9 @@ export class LakeFireflies {
     const windZ = options.reducedMotion ? 0 : wind.displacement[1]
     const spring = 9
     const decay = Math.exp(-spring * dt)
+    const gather = options.reducedMotion ? null : (options.gather ?? null)
+    if (gather) this.gatherPoint.set(gather.x, gather.y, gather.z)
+    this.hasGatherPoint = this.hasGatherPoint || gather !== null
     for (let i = 0; i < centers.count; i++) {
       const start = i * 3
       const phase = required(this.motions[start])
@@ -237,8 +285,9 @@ export class LakeFireflies {
         this.center.z += Math.sin(angle) * distance + Math.cos(angle) * bend
         this.center.y += travel * (3.5 + 3 * (0.5 + 0.5 * Math.cos(phase)))
       }
+      this.swarmAround(i, phase, time, dt, gather)
       this.target.set(0, 0, 0)
-      if (pointer) {
+      if (pointer && !gather) {
         this.viewCenter.copy(this.center).applyMatrix4(pointer.camera.matrixWorldInverse)
         this.projected.copy(this.viewCenter).applyMatrix4(pointer.camera.projectionMatrix)
         // Measure from the unrepelled flight path. Measuring the displaced pose
@@ -281,6 +330,36 @@ export class LakeFireflies {
       )
     }
     centers.needsUpdate = true
+  }
+
+  /** How many flies are at least half-way into the swarm. */
+  get swarm() {
+    let count = 0
+    for (const weight of this.gathered) if (weight > 0.5) count++
+    return count
+  }
+
+  /**
+   * A click scatters the swarm: each gathered fly darts away from the cursor, then drifts back
+   * to its own flight path as the swarm lets go.
+   */
+  scatter() {
+    if (!this.hasGatherPoint) return
+    const centers = this.mesh.geometry.getAttribute('aCenter')
+    for (let i = 0; i < this.gathered.length; i++) {
+      const weight = this.gathered[i] ?? 0
+      if (weight < 0.05) continue
+      const dx = centers.getX(i) - this.gatherPoint.x,
+        dy = centers.getY(i) - this.gatherPoint.y,
+        dz = centers.getZ(i) - this.gatherPoint.z
+      const length = Math.hypot(dx, dy, dz) || 1
+      // The flight-path spring is stiff: a strong kick still travels only a metre or so.
+      const speed = 25 * weight
+      this.velocities[i * 3] = (this.velocities[i * 3] ?? 0) + (dx / length) * speed
+      this.velocities[i * 3 + 1] =
+        (this.velocities[i * 3 + 1] ?? 0) + (dy / length) * speed + weight
+      this.velocities[i * 3 + 2] = (this.velocities[i * 3 + 2] ?? 0) + (dz / length) * speed
+    }
   }
 
   get diagnostics(): Readonly<{ intensity: number; time: number }> {

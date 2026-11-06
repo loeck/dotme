@@ -71,7 +71,8 @@ usual splash take. Successive skips climb the major pentatonic of the current mo
 sinks on the root an octave lower. A chromagram of the shipped pieces puts the day piece in
 C major (G, B, E and C strongest, F well above F♯) and the night piece in F major (F, C, A and
 D), so the notes use C major pentatonic from C5 in daylight and F major pentatonic from F4
-otherwise: neither scale holds a semitone against either piece. Notes are synthesised with
+otherwise: neither scale holds a semitone against either piece. A long press released as a wave
+on the water rings the same low root as a sinking stone, louder for a fuller charge. Notes are synthesised with
 oscillators, so they add nothing to the download or the decoded budget; they share the master
 gain and mute control, are attenuated and panned like the splashes, and stay silent while
 playback is paused or off. A new interaction sound should follow the same rules and be added to

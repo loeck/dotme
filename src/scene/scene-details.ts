@@ -197,6 +197,7 @@ export class SceneDetails {
     intro: number,
     pointerLightStrength = 1,
     bait: FishBait | null = null,
+    gather: Readonly<{ x: number; y: number; z: number }> | null = null,
   ) {
     if (this.disposed) return
     const { daylight, rainIntensity } = this.environment
@@ -225,7 +226,13 @@ export class SceneDetails {
       nightFactor: 1 - daylight,
       intensity: intro * (1 - rainIntensity * 0.8),
       pointer: scenePointer,
+      gather,
     })
+  }
+
+  /** A click scatters the fireflies gathered round a still cursor. */
+  scatterFireflies() {
+    if (!this.disposed && !this.reducedMotion) this.fireflies.scatter()
   }
 
   private withFirefliesVisible<T>(action: () => T): T {

@@ -240,3 +240,30 @@ describe('lake atmosphere', () => {
     expect(scene.children).toHaveLength(0)
   })
 })
+
+describe('firefly swarm', () => {
+  it('gathers the nearby flies round a still cursor and scatters them on a click', () => {
+    const flies = new LakeFireflies(new Scene(), lakeBed(), 91, false)
+    const wind = new WindModel(1)
+    const start = firstFly(flies)
+    const point = { x: start.x + 3, y: start.y + 0.5, z: start.z }
+    let t = 0
+    for (; t < 1; t += 1 / 60) flies.update(t, wind.sample(t), { nightFactor: 1 })
+    expect(flies.swarm).toBe(0)
+    for (; t < 9; t += 1 / 60) flies.update(t, wind.sample(t), { nightFactor: 1, gather: point })
+    expect(flies.swarm).toBeGreaterThan(0)
+    // Gathered flies circle within a couple of metres of the cursor.
+    expect(firstFly(flies).distanceTo(new Vector3(point.x, point.y, point.z))).toBeLessThan(2.5)
+    const gathered = firstFly(flies)
+    flies.scatter()
+    for (let i = 0; i < 6; i++, t += 1 / 60) flies.update(t, wind.sample(t), { nightFactor: 1 })
+    expect(firstFly(flies).distanceTo(gathered)).toBeGreaterThan(0.3)
+    for (; t < 20; t += 1 / 60) flies.update(t, wind.sample(t), { nightFactor: 1 })
+    expect(flies.swarm).toBe(0)
+    // Reduced motion never gathers.
+    const still = new LakeFireflies(new Scene(), lakeBed(), 91, false)
+    for (let s = 0; s < 9; s += 1 / 60)
+      still.update(s, wind.sample(s), { nightFactor: 1, gather: point, reducedMotion: true })
+    expect(still.swarm).toBe(0)
+  })
+})

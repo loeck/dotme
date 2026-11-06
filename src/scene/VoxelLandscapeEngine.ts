@@ -95,6 +95,7 @@ import { VolumetricClouds } from './volumetric-clouds'
 import { VolumetricLight } from './volumetric-light'
 import { sampleWaterOptics } from './water-optics'
 import { waterStroke } from './water-pointer'
+import { WaterShockwave, shockImpulse } from './water-shockwave'
 import { WaterSimulation } from './water-simulation'
 import { createWaterGeometry } from './water-surface'
 import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
@@ -104,6 +105,17 @@ import { WindModel, updateWindUniforms } from './wind'
 import type { WindOptions } from './wind'
 import { createWindUniforms } from './wind-nodes'
 import type { VegetationPart } from './world-data'
+
+/** A long press on the water released as a wave, placed in the view. */
+export type ShockwaveEvent = Readonly<{
+  /** 0–1: how long the press was held. */
+  charge: number
+  /** 0–1 after distance attenuation. */
+  intensity: number
+  /** -1 (left) to 1 (right). */
+  pan: number
+  pointerType: string
+}>
 
 export type StoneTouchdownEvent = Readonly<{
   /** 0 where the stone lands, then one per skip. */
@@ -130,6 +142,8 @@ export type VoxelLandscapeEngineOptions = Readonly<{
   onWaterSound?: (event: WaterSoundEvent) => void
   /** Each touchdown of a thrown stone, placed in the view, for its note and haptics. */
   onStoneTouchdown?: (event: StoneTouchdownEvent) => void
+  /** A long press on the water released as a wave, for its note and haptics. */
+  onShockwave?: (event: ShockwaveEvent) => void
   /** Each lightning strike's thunder, to be played when its sound arrives. */
   onThunder?: (event: Strike) => void
   /** A thunderstorm is reported: lightning whatever the rain (heavy rain brings it too). */
@@ -156,6 +170,10 @@ const smooth = (a: number, b: number, value: number) => {
 const COMPILE_STAGES = ['passes', 'environment', 'scene', 'warmup'] as const
 /** Seconds after the first frame before an untouched scene skips a stone by itself. */
 const DEMO_DELAY = 7
+/** Seconds a cursor must rest at night before the fireflies come to it. */
+const FIREFLY_GATHER_DELAY = 1.2
+/** Seconds between the faint ripples a charging press draws on the water. */
+const SHOCK_RIPPLE = 0.3
 /** Seconds into a visit before the first flock crosses the sky, then between flocks. */
 const FLOCK_FIRST = 22
 const FLOCK_GAP = [55, 95] as const
@@ -329,6 +347,11 @@ export class VoxelLandscapeEngine {
   /** Daylight of the last frame, for gestures between frames. */
   private daylight = 0
   private nextFlockAt = FLOCK_FIRST
+  private readonly shockwave = new WaterShockwave(WATER_LEVEL)
+  /** When the mouse last moved or pressed, in ms: a still cursor gathers the fireflies. */
+  private pointerStillSince = 0
+  private readonly gatherPoint = new Vector3()
+  private nextShockRipple = 0
   private readonly lightning = new Lightning()
   private flockCount = 0
   private readonly flockStart = new Vector3()
@@ -653,6 +676,7 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.water)
     this.objects.push(this.water)
     this.scene.add(this.stone.mesh)
+    this.scene.add(this.shockwave.mesh)
     this.birds = new BirdFlock(this.lowPower ? FLOCK.lowPowerSize : FLOCK.size)
     this.scene.add(this.birds.group)
     this.geometries.push(waterGeometry)
@@ -890,6 +914,7 @@ export class VoxelLandscapeEngine {
       // A frozen frame must not hold a stone or a flock in mid-air.
       this.stone.cancel()
       this.birds.cancel()
+      this.shockwave.cancel()
     }
     if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
@@ -1001,7 +1026,7 @@ export class VoxelLandscapeEngine {
     nightStrength: number,
     dt: number,
   ) {
-    let contact = null
+    let contact: Vector3 | null = null
     if (nightStrength > 0 && pointerOnScene && this.pointerType === 'mouse' && this.focused) {
       const ray = this.raycaster.ray
       const solid = this.pointerSolidDistance()
@@ -1017,6 +1042,7 @@ export class VoxelLandscapeEngine {
       this.reducedMotion,
       this.raycaster.ray.origin,
     )
+    return contact
   }
 
   /** Cursor relief valves for the waterfall, clouds and rain; trails heal on their own. */
@@ -1134,6 +1160,8 @@ export class VoxelLandscapeEngine {
   private onPointerDown = (event: PointerEvent) => {
     if (event.button !== 0 || !event.isPrimary) return
     this.interacted = true
+    this.pointerStillSince = performance.now()
+    this.details?.scatterFireflies()
     this.setPrimaryMouseDown(event.pointerType === 'mouse')
     this.pointerType = event.pointerType
     this.pointerActive = true
@@ -1143,7 +1171,12 @@ export class VoxelLandscapeEngine {
       return
     }
     const point = this.hitWater(event.clientX, event.clientY, this.pressPoint)
-    if (!point && this.startleCrown()) return
+    // Off the water, the press may startle birds from a crown or make a wish on the night sky;
+    // both read the pointer ray, so it must have been cast for this very press.
+    if (!point && this.projectPointer(event.clientX, event.clientY)) {
+      if (this.startleCrown()) return
+      this.wishOnStar()
+    }
     if (!point) {
       if (event.pointerType === 'touch') {
         this.skyPointerId = event.pointerId
@@ -1162,6 +1195,7 @@ export class VoxelLandscapeEngine {
     this.pendingPointer = { x: event.clientX, y: event.clientY, time: event.timeStamp }
     this.flick.length = 0
     this.flick.push({ x: event.clientX, y: event.clientY, time: event.timeStamp })
+    this.shockwave.start(point.x, point.z, event.clientX, event.clientY, performance.now() / 1000)
     this.renderer.domElement.setPointerCapture(event.pointerId)
   }
 
@@ -1182,6 +1216,7 @@ export class VoxelLandscapeEngine {
     )
     if (this.pointerClient.x === event.clientX && this.pointerClient.y === event.clientY) return
     this.pointerClient.set(event.clientX, event.clientY)
+    this.pointerStillSince = performance.now()
     if (this.reducedMotion) {
       this.requestFrame()
       return
@@ -1198,6 +1233,7 @@ export class VoxelLandscapeEngine {
       time: event.timeStamp,
     }
     if (this.dragging) {
+      this.shockwave.move(event.clientX, event.clientY)
       this.flick.push({ x: event.clientX, y: event.clientY, time: event.timeStamp })
       if (this.flick.length > 12) this.flick.shift()
     }
@@ -1240,6 +1276,17 @@ export class VoxelLandscapeEngine {
     if (!(crown < solid)) return false
     this.launchFlock(ray.at(crown, this.flockStart))
     return true
+  }
+
+  /**
+   * A press on the clear night sky, where the pointer ray meets nothing, makes a wish: a few
+   * shooting stars fall from that point.
+   */
+  private wishOnStar() {
+    const ray = this.raycaster.ray
+    if (this.daylight > 0.05 || this.weather === 'cloudy' || this.weather === 'overcast') return
+    if (ray.direction.y < 0.03 || this.pointerSolidDistance() < Infinity) return
+    this.shootingStars.wish(this.rayNdc.x, this.rayNdc.y)
   }
 
   private launchFlock(start: Vector3) {
@@ -1296,6 +1343,45 @@ export class VoxelLandscapeEngine {
     const flash = this.lightning.update(this.elapsed, stormy, this.options.onThunder)
     this.skyMaterial.uniforms.uFlash.value = flash
     return flash
+  }
+
+  /**
+   * A long press let go: one broad wave rolls out from the spot to the banks, lifting what
+   * floats, with a ring of splashes, a low note and, on touch, a buzz in the hand.
+   */
+  private releaseShockwave(
+    wave: Readonly<{ x: number; z: number; charge: number }>,
+    pointerType: string,
+  ) {
+    const { radius, velocity } = shockImpulse(wave.charge)
+    this.simulation.addImpulse(wave.x, wave.z, radius, velocity)
+    const wind = this.wind.sample(this.elapsed)
+    const bursts = 6 + Math.round(4 * wave.charge)
+    for (let i = 0; i < bursts; i++) {
+      const angle = (i / bursts) * Math.PI * 2
+      const x = wave.x + Math.cos(angle) * radius,
+        z = wave.z + Math.sin(angle) * radius
+      if (this.isOpenWater(x, z))
+        this.details?.pointerBurst(x, z, 0.4 + 0.4 * wave.charge, this.elapsed, wind)
+    }
+    this.bait = null
+    const listener = this.options.onShockwave
+    if (!listener) return
+    this.soundPosition.set(wave.x, WATER_LEVEL, wave.z)
+    const distance = this.soundPosition.distanceTo(this.camera.position)
+    const place = pointSound(distance, this.soundPosition.project(this.camera).x)
+    listener({ charge: wave.charge, intensity: place.attenuation, pan: place.pan, pointerType })
+  }
+
+  /** While a press charges, faint ripples gather under it. */
+  private updateShockwave(seconds: number) {
+    const pressed = this.shockwave.pressed
+    const charge = this.shockwave.charge(seconds)
+    if (pressed && charge > 0 && seconds >= this.nextShockRipple) {
+      this.nextShockRipple = seconds + SHOCK_RIPPLE
+      this.simulation.addImpulse(pressed.x, pressed.z, 0.4, -0.03 * charge)
+    }
+    this.shockwave.update(seconds)
   }
 
   private throwFrom(
@@ -1377,7 +1463,10 @@ export class VoxelLandscapeEngine {
       return
     }
     if (event.pointerId !== this.dragPointerId) return
-    if (event.type === 'pointerup') this.throwStone(event)
+    const wave =
+      event.type === 'pointerup' ? this.shockwave.release(performance.now() / 1000) : null
+    if (wave) this.releaseShockwave(wave, event.pointerType)
+    else if (event.type === 'pointerup') this.throwStone(event)
     this.dragging = false
     this.dragPointerId = -1
     if (event.type === 'pointercancel' || this.pointerType === 'touch') this.onPointerLeave()
@@ -1429,6 +1518,7 @@ export class VoxelLandscapeEngine {
   }
 
   private onPointerLeave = () => {
+    this.shockwave.abort()
     const pointerId = this.dragPointerId >= 0 ? this.dragPointerId : this.skyPointerId
     this.setPrimaryMouseDown(false)
     this.skyPointerId = -1
@@ -1995,7 +2085,20 @@ export class VoxelLandscapeEngine {
     if (waterPoint)
       this.waterPointerTarget.set(waterPoint.x, waterPoint.z, light.pointerLightStrength)
     else this.waterPointerTarget.z = 0
-    this.updatePointerLight(pointerOnScene, waterPoint, light.pointerLightStrength, dt)
+    const contact = this.updatePointerLight(
+      pointerOnScene,
+      waterPoint,
+      light.pointerLightStrength,
+      dt,
+    )
+    // A cursor held still at night gathers the fireflies a little above what it points at.
+    const gather =
+      contact &&
+      light.pointerLightStrength > 0.3 &&
+      !this.primaryMouseDown &&
+      now - this.pointerStillSince > FIREFLY_GATHER_DELAY * 1000
+        ? this.gatherPoint.copy(contact).setY(contact.y + 0.9)
+        : null
     this.updateCursorWorld(pointerOnScene, waterPoint, dt, activeDelta)
     void this.processPointer().catch(() => {
       this.previousPointer = null
@@ -2100,6 +2203,7 @@ export class VoxelLandscapeEngine {
     })
     let bait: FishBait | null = null
     this.updateStone()
+    this.updateShockwave(now / 1000)
     this.daylight = light.daylight
     this.updateBirds(rainDelta, this.rain.simulation.state.intensity)
     if (!this.demoThrown && !this.interacted && !this.reducedMotion && this.introStartedAt !== null)
@@ -2119,6 +2223,7 @@ export class VoxelLandscapeEngine {
       this.intro,
       light.pointerLightStrength,
       bait,
+      gather,
     )
     const wake = this.details?.rayWake
     if (wake) {
@@ -2310,6 +2415,8 @@ export class VoxelLandscapeEngine {
     this.disposed = true
     this.stone.mesh.removeFromParent()
     this.stone.dispose()
+    this.shockwave.mesh.removeFromParent()
+    this.shockwave.dispose()
     this.birds.group.removeFromParent()
     this.birds.dispose()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo

@@ -10,7 +10,7 @@ import { initSceneCursor } from './scene-cursor'
 import { initSceneInfo } from './scene-info'
 import { prepareNextWorld } from './scene-world'
 import type { SceneWorld } from './scene-world'
-import { stoneHaptics } from './stone-haptics'
+import { shockwaveHaptics, stoneHaptics } from './stone-haptics'
 
 const weatherSnapshots = new WeakMap<HTMLDivElement, SceneWeather>()
 
@@ -86,6 +86,16 @@ export async function initLandscape(
         onStoneTouchdown: (event) => {
           stoneHaptics(event)
           sound.skipNote(event)
+        },
+        onShockwave: (event) => {
+          shockwaveHaptics(event)
+          // The wave rings the root of the current mood an octave down, as a sinking stone does.
+          sound.skipNote({
+            index: 0,
+            sinking: true,
+            intensity: event.intensity * (0.6 + 0.4 * event.charge),
+            pan: event.pan,
+          })
         },
         onThunder: (event) => sound.thunder(event),
         storm: snapshot.storm ?? false,
