@@ -230,7 +230,9 @@ lit pixel, and unshadowed lanterns still light the bank. Those two refresh once 
 drifted 8 cm (12 cm on low power), at most one per frame. The environment probe renders one cube
 face per interval (about 90 ms on a focused desktop, 200 ms on low power) and filters once all
 six are current; clock discontinuities restart the sweep, and the intro refreshes one face per
-frame. Capillary ripples and rain rings branch past components the pixel footprint has already
+frame. The lake's sky reflection does not wait for that sweep: a sky-only cube (the dome and
+its cloud lookup, no geometry, 128 px faces or 64 on low power, mipmapped instead of filtered)
+renders all six faces every frame inside the same `environment` diagnostics pass. Capillary ripples and rain rings branch past components the pixel footprint has already
 faded, and the rain simulation steps at the 60 Hz frame cap.
 
 The submerged lakebed capture renders on alternate frames, so its atlas is refreshed at 30 Hz:
