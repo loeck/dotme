@@ -159,7 +159,7 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .mul(cloud.a)
       .add(cloud.rgb)
       // Lightning glows through the cloud deck: brightest where the cloud is thick.
-      .add(vec3(0.62, 0.68, 0.85).mul(u.uFlash.mul(cloud.a.oneMinus().mul(0.8).add(0.08))))
+      .add(vec3(0.62, 0.68, 0.85).mul(u.uFlash.mul(cloud.a.oneMinus().mul(0.35).add(0.04))))
     // Distant ridges and mist take the sky's own horizon light in their direction:
     // warm towards the sun, rose and blue under the Earth's shadow.
     const air = sky.horizon(direction).mul(u.uWeatherLight)

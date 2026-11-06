@@ -69,7 +69,8 @@ down), the clouds in front hide it, and the lake reflects it with the rest of th
 A thunderstorm, or rain at 75% intensity or more, brings lightning (`lightning.ts`): sheet
 flashes through the cloud rather than bolts, on average every 14 s (exponential gaps of at
 least 4 s). A flash lights the clouds, most where they are thick, and opens the exposure, up
-to 2.6 times at night and 1.7 times by day, decaying in 70 ms. Half the strikes add a fainter
+to 2.1 times at night and 1.3 times by day, decaying in 70 ms; overlapping strokes never add up
+past one full flash. Stronger flashes (up to 4.9 times at night) whited out the sky and clouds. Half the strikes add a fainter
 return stroke 0.35–0.5 s later: real return strokes are quicker, but two flashes per strike
 keep the scene under three flashes per second (WCAG 2.3.1). Each strike is 1–8 km away; its
 thunder (see [interaction sounds](living-landscape.md#thunder)) arrives after distance / 343 m/s.

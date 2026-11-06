@@ -28,7 +28,7 @@ describe('lightning', () => {
     expect(strikes.length).toBeGreaterThan(600 / LIGHTNING.meanGap / 2)
     expect(strikes.length).toBeLessThan((600 / LIGHTNING.meanGap) * 2)
     expect(brightest).toBeGreaterThan(0.2)
-    expect(brightest).toBeLessThanOrEqual(1.5)
+    expect(brightest).toBeLessThanOrEqual(1)
     for (const strike of strikes) {
       expect(strike.distance).toBeGreaterThanOrEqual(1000)
       expect(strike.distance).toBeLessThanOrEqual(8000)
