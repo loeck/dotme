@@ -4,6 +4,7 @@ import {
   cameraPosition,
   cameraViewMatrix,
   clamp,
+  cubeTexture,
   dFdx,
   dFdy,
   dot,
@@ -11,6 +12,7 @@ import {
   sin,
   fwidth,
   float,
+  log2,
   max,
   min,
   mix,
@@ -31,9 +33,14 @@ import {
   vec4,
 } from 'three/tsl'
 import {
+  Camera,
   Color,
+  CubeCamera,
+  CubeRenderTarget,
   DataTexture,
   DoubleSide,
+  HalfFloatType,
+  LinearMipmapLinearFilter,
   Matrix4,
   Mesh,
   NodeFrame,
@@ -44,7 +51,7 @@ import {
   Vector3,
   Vector4,
 } from 'three/webgpu'
-import type { BufferGeometry, Camera, Node, Scene, WebGPURenderer } from 'three/webgpu'
+import type { BufferGeometry, Node, Scene, WebGPURenderer } from 'three/webgpu'
 
 import { clipDepth } from './backend-nodes'
 import { cloudShadow } from './cloud-shadows'
@@ -77,6 +84,17 @@ export class LakeWaterMaterial extends NodeMaterial {
   readonly waterLighting = new WaterLightingModel()
   emissiveNode: Node<'vec3'> | null = null
   private readonly empty = new DataTexture(new Uint8Array([0, 0, 0, 255]), 1, 1, RGBAFormat)
+  /**
+   * Sky-only cube re-rendered every frame. The landscape probe refreshes one face at a
+   * time and is filtered once per sweep, so sky seen through gaps in the planar mirror
+   * (clouds parting under the cursor, weather) would trail the visible sky by up to a second.
+   */
+  readonly skyTarget = new CubeRenderTarget(128, {
+    type: HalfFloatType,
+    generateMipmaps: true,
+    minFilter: LinearMipmapLinearFilter,
+    depthBuffer: false,
+  })
   private readonly waterlines = Array.from({ length: FLOATER_SLOTS }, () => new Vector4())
   readonly uniforms = {
     ...createWindNodes(),
@@ -130,6 +148,7 @@ export class LakeWaterMaterial extends NodeMaterial {
   override dispose() {
     super.dispose()
     this.uniforms.uEnvironment.dispose()
+    this.skyTarget.dispose()
     this.empty.dispose()
   }
 }
@@ -138,6 +157,7 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
   readonly reflectorNode
   constructor(geometry: BufferGeometry, lowPower: boolean, inputs?: LakeInputs) {
     const material = new LakeWaterMaterial()
+    if (lowPower) material.skyTarget.setSize(64, 64)
     super(geometry, material)
     this.reflectorNode = reflector({
       target: this,
@@ -311,10 +331,19 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
     // smears the sky across otherwise resolved wave slopes.
     u.uEnvironment.levelNode = roughness
     const environment = u.uEnvironment
+    // Plain mip chain instead of PMREM: one GGX lobe of width ~1.16·roughness rad
+    // spans roughness·size·1.5 texels of a 90° face.
+    const skySize = float(material.skyTarget.width)
+    const sky = cubeTexture(
+      material.skyTarget.texture,
+      reflected,
+      log2(max(1, roughness.mul(skySize).mul(1.5))),
+    )
     const localReflection = this.reflectorNode
+    // The mirror covers the scenery; sky shows through where it is transparent.
     const reflection = mix(
       environment,
-      localReflection.rgb.add(environment.mul(float(1).sub(clamp(localReflection.a, 0, 1)))),
+      localReflection.rgb.add(sky.rgb.mul(float(1).sub(clamp(localReflection.a, 0, 1)))),
       smoothstep(0, 0.06, mirrorEdge),
     )
     const bedDepthAt = (coordinate: typeof fieldUv) =>
@@ -567,6 +596,31 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
       .add(glitter.mul(float(1).sub(foam)).mul(lightGate))
       .add(sss.mul(float(1).sub(foam)).mul(lightGate))
       .add(shafts.mul(float(1).sub(foam)).mul(lightGate))
+  }
+
+  private readonly skyCamera = new CubeCamera(0.1, 10, this.material.skyTarget)
+  /** Renders `sky` (a scene holding only the sky dome) into the reflected-sky cube. */
+  captureSky(renderer: WebGPURenderer, sky: Scene) {
+    this.skyCamera.update(renderer, sky)
+  }
+  /** Prepares the sky cube's pipelines; the sky shares its material with the main view. */
+  compileSky(renderer: WebGPURenderer, sky: Scene) {
+    const camera = this.skyCamera.children[0]
+    if (!(camera instanceof Camera)) throw new Error('Missing sky cube camera')
+    if (this.skyCamera.coordinateSystem !== renderer.coordinateSystem) {
+      this.skyCamera.coordinateSystem = renderer.coordinateSystem
+      this.skyCamera.updateCoordinateSystem()
+    }
+    this.skyCamera.updateMatrixWorld()
+    const previous = renderer.getRenderTarget(),
+      face = renderer.getActiveCubeFace(),
+      mip = renderer.getActiveMipmapLevel()
+    try {
+      renderer.setRenderTarget(this.material.skyTarget, 0)
+      return renderer.compileAsync(sky, camera)
+    } finally {
+      renderer.setRenderTarget(previous, face, mip)
+    }
   }
 
   private readonly reflectionFrame = new NodeFrame()
