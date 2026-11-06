@@ -3,7 +3,13 @@
 The artistic solar clock supplies sunlight, moonlight, sky color and local-light intensity.
 Its orbit runs from the live weather's sunrise to its sunset (06:00–18:00 without live data),
 starting at the weather location's local snapshot time unless `startTime` overrides it.
-Clock speed affects the solar cycle only. Wind, rain, water and wildlife retain their own
+Without `startTime`, a visit opens on the latest golden hour instead (the sun about 8.5° up,
+5.5% of the day arc after sunrise or before sunset), holds it for 4 s and time-lapses forward
+to the real local time, landing there 22 s after the first frame (`introGap` in
+`solar-clock.ts`, quintic easing at both ends). A late-evening visit therefore watches the sun
+set and the stars come out; a visit already within ten minutes of that opening is not replayed.
+The intro restarts at the first presented frame, so loading never uses up the opening; reduced
+motion and an explicit `startTime` skip it. Clock speed affects the solar cycle only. Wind, rain, water and wildlife retain their own
 physical time steps. Reduced motion freezes the initial atmosphere while allowing resize
 and visibility refreshes.
 
@@ -154,6 +160,17 @@ aperture would; a stronger near blur smeared the fine grass blades into fur. The
 without MSAA, so the lens first antialiases the centre sample (FXAA, Lottes's console variant, on
 display-compressed luma): alpha-tested leaves, grass blades and twigs otherwise stepped on 1×
 screens. It measured within the noise of the lens pass (about 0.5 ms).
+
+The lens then adds bloom (three's `BloomNode`, five blurred mips at half the drawing buffer, a
+quarter on low-power devices) to the graded radiance before tone mapping. Its bright pass is a
+soft knee (Karis) whose width is half the threshold, on the brightest channel, with the input
+capped at 24 so the sun's half-float disc halos without flooding the frame. The threshold sits
+at 1.1 graded units by day, so only the sun, its glitter, the waterfall's foam and lamps pass;
+golden hour strengthens the glow by a third, and night lowers the threshold to 0.3, where
+dark-adapted eyes see haloes round lanterns and fireflies. A fixed knee at night let the whole
+frame into the bright pass and veiled it. The grade also split-tones around middle grey: shadows
+lean teal and highlights warm, each tone normalised to unit luminance so only hue moves; golden
+hour strengthens it by half.
 
 Indirect terrain light, local reflections and weather remain artistic approximations.
 Validate changes with seeded clear/cloudy captures at noon, sunrise (`startTime=06:00`),

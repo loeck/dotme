@@ -76,7 +76,7 @@ import { SceneGrade } from './scene-grade'
 import { sampleLook } from './scene-look'
 import { SkyAtmosphere } from './sky-atmosphere'
 import { createSkyMaterial, updateSkyLighting } from './sky-material'
-import { DEFAULT_SOLAR, SolarClock, parseInitialTime } from './solar-clock'
+import { DEFAULT_SOLAR, SolarClock, introGap, parseInitialTime } from './solar-clock'
 import type { SolarEndpoints } from './solar-clock'
 import { SPLASH_IMPACT_LAYER } from './splash-impacts'
 import { ShootingStars } from './stars'
@@ -333,7 +333,7 @@ export class VoxelLandscapeEngine {
       await preparationFrame(signal)
       engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
       const initialLight = sampleLighting(
-        engine.solarClock.initialSeconds,
+        engine.solarClock.seconds(0),
         0,
         engine.weather,
         engine.solar,
@@ -406,13 +406,16 @@ export class VoxelLandscapeEngine {
     this.lowPower = this.mobile || isLowPowerDevice()
     const params = sceneParams(window.location.search)
     this.solar = options.solar ?? DEFAULT_SOLAR
+    const initialSeconds = params.startTime
+      ? parseInitialTime(params.startTime)
+      : (options.nowSeconds ?? parseInitialTime(null))
+    // An explicit start time is a request for that light: only the default opens on a golden hour.
     this.solarClock = new SolarClock(
-      params.startTime
-        ? parseInitialTime(params.startTime)
-        : (options.nowSeconds ?? parseInitialTime(null)),
+      initialSeconds,
       options.reducedMotion,
       performance.now(),
       params.timeScale,
+      params.startTime ? 0 : introGap(initialSeconds, this.solar),
     )
     this.weather = options.weather ?? 'partly-cloudy'
     this.showSun = true
@@ -1232,6 +1235,7 @@ export class VoxelLandscapeEngine {
       // canvas continues to contain the loader.
       if (this.details) this.details.warmup(render)
       else render()
+      this.depthFocus.warmup(this.renderer)
     } finally {
       this.renderer.setRenderTarget(target, face, mip)
     }
@@ -1640,7 +1644,10 @@ export class VoxelLandscapeEngine {
     const dt = Math.min(rainDelta, 0.05)
     this.lastFrameAt = now
     if (!this.reducedMotion) this.elapsed += dt
-    if (this.introStartedAt === null) this.introStartedAt = now
+    if (this.introStartedAt === null) {
+      this.introStartedAt = now
+      this.solarClock = this.solarClock.restartIntro(now)
+    }
     this.intro = this.reducedMotion ? 1 : clamp((now - this.introStartedAt) / 2200, 0, 1)
 
     const atmosphereTime = this.solarClock.elapsed(now)

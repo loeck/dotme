@@ -27,6 +27,12 @@ export type SceneLook = Readonly<{
   mistTop: number
   /** Multiplier on in-scattered direct light: shafts and the sun's forward glow. */
   sunScattering: number
+  /** Strength of the lens bloom added to the graded radiance. */
+  glow: number
+  /** Graded radiance where the bloom's soft knee is centred. */
+  glowThreshold: number
+  /** Split toning: teal shadows and warm highlights, 0 for none. */
+  split: number
 }>
 
 export type LookPreset = Readonly<{
@@ -43,12 +49,15 @@ export type LookPreset = Readonly<{
       | 'hazeStart'
       | 'mist'
       | 'sunScattering'
+      | 'glow'
+      | 'split'
     >
   >
   /** Rain drains colour and thickens the air. */
   rain: Readonly<Pick<SceneLook, 'saturation' | 'haze' | 'mist'>>
-  /** Night keeps a deeper vignette and a cooler, slightly denser mist (tint is a target). */
-  night: Readonly<Pick<SceneLook, 'vignette' | 'tint' | 'mist'>>
+  /** Night keeps a deeper vignette and a cooler, slightly denser mist (tint is a target).
+   * Its glow and threshold are targets too: dark-adapted eyes see haloes round every lamp. */
+  night: Readonly<Pick<SceneLook, 'vignette' | 'tint' | 'mist' | 'glow' | 'glowThreshold'>>
   /** Morning mist on cloudy dawns, weighted by `mistFactor`. */
   dawnMist: number
 }>
@@ -67,6 +76,9 @@ export const LAST_SIGNAL_LOOK: LookPreset = {
     mist: 0.0035,
     mistTop: 2.6,
     sunScattering: 1,
+    glow: 0.3,
+    glowThreshold: 1.1,
+    split: 0.6,
   },
   goldenHour: {
     exposure: 1,
@@ -77,9 +89,11 @@ export const LAST_SIGNAL_LOOK: LookPreset = {
     hazeStart: 1,
     mist: 0.85,
     sunScattering: 1.1,
+    glow: 1.35,
+    split: 1.5,
   },
   rain: { saturation: 0.9, haze: 1.7, mist: 1.6 },
-  night: { vignette: 0.36, tint: [0.96, 1, 1.06], mist: 1.3 },
+  night: { vignette: 0.36, tint: [0.96, 1, 1.06], mist: 1.3, glow: 0.9, glowThreshold: 0.3 },
   dawnMist: 2.2,
 }
 
@@ -133,5 +147,8 @@ export function sampleLook(inputs: LookInputs, look = LAST_SIGNAL_LOOK): SceneLo
       (1 + look.dawnMist * clamp01(inputs.mist)),
     mistTop: base.mistTop,
     sunScattering: base.sunScattering * lift(goldenHour.sunScattering, golden),
+    glow: mix(base.glow * lift(goldenHour.glow, golden), night.glow, dark),
+    glowThreshold: mix(base.glowThreshold, night.glowThreshold, dark),
+    split: base.split * lift(goldenHour.split, golden),
   }
 }
