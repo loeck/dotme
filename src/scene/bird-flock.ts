@@ -17,10 +17,17 @@ export const FLOCK = {
   speed: 9,
   /** Seconds a flock stays in the air before it is gone. */
   lifetime: 24,
-  /** Wingbeats per second while climbing, and how long a glide lasts between bursts. */
-  flapRate: 7,
-  glideEvery: 2.6,
-  glideLength: 1.1,
+  /**
+   * Wingbeats per second in level flight (a crow or jackdaw beats three to four times a
+   * second; 7 read as a sparrow's buzz at this size), a little faster climbing, and how long a
+   * glide lasts between bursts.
+   */
+  flapRate: 3.2,
+  glideEvery: 2.8,
+  glideLength: 1.4,
+  /** Metres a bird keeps clear of a crown, and the height the flock clears the canopy by. */
+  crownMargin: 1.5,
+  canopyClearance: 4,
   /** Wing length in metres: a crow or a jackdaw, readable as a silhouette across the lake. */
   wing: 0.5,
 } as const
@@ -33,6 +40,8 @@ type Bird = {
   /** How quickly the bird answers its slot: lower birds lag and straggle. */
   response: number
   phase: number
+  /** Seconds into the flap-and-glide cycle at take-off, so the birds do not glide in step. */
+  rhythm: number
   bank: number
 }
 
@@ -54,12 +63,13 @@ export function flockRandom(seed: number) {
  * lake, then off over the far hills. The waypoints only steer the leader; the birds keep loose
  * slots around it, so the flock stretches and bunches as it turns.
  */
-export function flockRoute(start: Vector3, viewer: Vector3, turn: number) {
+export function flockRoute(start: Vector3, viewer: Vector3, turn: number, canopy = 0) {
   const away = new Vector3(start.x - viewer.x, 0, start.z - viewer.z)
   if (away.lengthSq() < 1e-6) away.set(0, 0, -1)
   away.normalize()
   const side = new Vector3().crossVectors(up, away).multiplyScalar(turn)
-  const rise = Math.max(start.y + 7, 10)
+  // Up over the tallest crowns around first, so the flock never flies through the woods.
+  const rise = Math.max(start.y + 7, 10, canopy + FLOCK.canopyClearance)
   return [
     start
       .clone()
@@ -99,6 +109,7 @@ export class BirdFlock {
   private readonly heading = new Vector3()
   private readonly leaderVelocity = new Vector3()
   private waypoint = 0
+  private obstacles: Float32Array = new Float32Array(0)
   private age = Infinity
   private readonly dummy = new Object3D()
   private readonly wingFrame = new Object3D()
@@ -137,6 +148,7 @@ export class BirdFlock {
         slot: new Vector3(),
         response: 1,
         phase: 0,
+        rhythm: 0,
         bank: 0,
       })
     this.group.visible = false
@@ -147,10 +159,33 @@ export class BirdFlock {
   }
 
   /** Startles the flock out of a crown at `start`, flying away from `viewer`. */
+  /**
+   * Crowns as pick spheres (x, y, z, radius per sphere): the flock climbs over the tallest near
+   * its tree and each bird steers clear of any it comes close to.
+   */
+  setObstacles(spheres: Float32Array) {
+    this.obstacles = spheres
+  }
+
+  /** Top of the highest crown within 60 m of (x, z), or 0 with none. */
+  private canopyNear(x: number, z: number) {
+    const spheres = this.obstacles
+    let top = 0
+    for (let i = 0; i + 3 < spheres.length; i += 4) {
+      const dx = (spheres[i] ?? 0) - x,
+        dz = (spheres[i + 2] ?? 0) - z
+      if (dx * dx + dz * dz < 3600)
+        top = Math.max(top, (spheres[i + 1] ?? 0) + (spheres[i + 3] ?? 0))
+    }
+    return top
+  }
+
   launch(start: Vector3, viewer: Vector3, seed: number) {
     const random = flockRandom(seed)
     this.route.length = 0
-    this.route.push(...flockRoute(start, viewer, random() < 0.5 ? -1 : 1))
+    this.route.push(
+      ...flockRoute(start, viewer, random() < 0.5 ? -1 : 1, this.canopyNear(start.x, start.z)),
+    )
     this.waypoint = 0
     this.age = 0
     this.leader.copy(start)
@@ -166,6 +201,7 @@ export class BirdFlock {
       )
       bird.response = 1.4 + random() * 1.4
       bird.phase = random() * Math.PI * 2
+      bird.rhythm = random() * FLOCK.glideEvery
       bird.bank = 0
       bird.position.set(
         start.x + (random() - 0.5) * 1.5,
@@ -217,6 +253,7 @@ export class BirdFlock {
       if (speed > FLOCK.speed * 1.5) desired.multiplyScalar((FLOCK.speed * 1.5) / speed)
       const before = Math.atan2(bird.velocity.x, bird.velocity.z)
       bird.velocity.lerp(desired, 1 - Math.exp(-dt * 2.2))
+      this.avoidCrowns(bird, dt)
       bird.position.addScaledVector(bird.velocity, dt)
       const after = Math.atan2(bird.velocity.x, bird.velocity.z)
       const turnRate = wrapAngle(after - before) / dt
@@ -242,12 +279,37 @@ export class BirdFlock {
     this.heading.normalize()
   }
 
+  /**
+   * A bird inside a crown's margin is pushed out and up, harder the deeper it is, so it skims
+   * over or around the tree rather than through it.
+   */
+  private avoidCrowns(bird: Bird, dt: number) {
+    const spheres = this.obstacles
+    const p = bird.position
+    for (let i = 0; i + 3 < spheres.length; i += 4) {
+      const dx = p.x - (spheres[i] ?? 0),
+        dy = p.y - (spheres[i + 1] ?? 0),
+        dz = p.z - (spheres[i + 2] ?? 0)
+      const reach = (spheres[i + 3] ?? 0) + FLOCK.crownMargin
+      const d2 = dx * dx + dy * dy + dz * dz
+      if (d2 >= reach * reach) continue
+      const d = Math.sqrt(d2) || 1e-3
+      const depth = (reach - d) / reach
+      const push = 30 * depth * dt
+      bird.velocity.x += (dx / d) * push
+      bird.velocity.y += (Math.max(0, dy / d) + 0.6) * push
+      bird.velocity.z += (dz / d) * push
+    }
+  }
+
   private placeBird(index: number, bird: Bird, dt: number) {
     // Bursts of beats, then a glide with the wings held a little up; faster beats when climbing.
     const climbing = bird.velocity.y > 1.5
-    const cycle = (this.age + bird.phase) % FLOCK.glideEvery
+    // The wing phase advances with every beat, so it cannot time the glides: each bird keeps its
+    // own fixed offset in the cycle instead.
+    const cycle = (this.age + bird.rhythm) % FLOCK.glideEvery
     const gliding = !climbing && cycle < FLOCK.glideLength
-    bird.phase += dt * FLOCK.flapRate * Math.PI * 2 * (gliding ? 0 : climbing ? 1.25 : 1)
+    bird.phase += dt * FLOCK.flapRate * Math.PI * 2 * (gliding ? 0 : climbing ? 1.2 : 1)
     const flap = gliding ? 0.12 : Math.sin(bird.phase) * 0.75 + 0.1
     // Fade in from the crown and out at the end of the flight.
     const presence = clamp(this.age / 0.4, 0, 1) * clamp((FLOCK.lifetime - this.age) / 2, 0, 1)
