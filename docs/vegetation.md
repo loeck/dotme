@@ -149,13 +149,13 @@ thin blades pass a little light only when the view faces a low sun.
 
 ## Loading
 
-The forest is part of the first frame, so trees never pop in after the loader. The world
-worker that builds the lake surfaces posts them first, then grows the forest and posts it as
-its own message; the engine waits for it after building the scene, adds the three meshes,
-gives their materials the scene's cloud shadows, pointer light and fog hand-off, and compiles
-them for every view that draws them (main view, mirror, environment probe and shadow maps) in
-the same batch as the scene's shaders. The forest message usually lands about 0.1 s after the
-world data, and its compiles run alongside the scene's, so the wait is short. On a failed
+The forest is part of the first frame, so trees never pop in after the loader. A world worker
+of its own grows the forest (or reads it from the world cache) alongside the terrain and lake
+surfaces and posts it as its own message; the engine waits for it after building the scene and
+compiling the offscreen passes, adds the three meshes, gives their materials the scene's cloud
+shadows, pointer light and fog hand-off, and compiles them for every view that draws them (main
+view, mirror, environment probe and shadow maps) in the same sequence as the scene's shaders.
+On a failed
 preparation the scene simply loads without vegetation.
 
 ## Cost

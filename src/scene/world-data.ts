@@ -59,14 +59,27 @@ export type VegetationPart = ReturnType<typeof prepareVegetation>
  * Everything the scene needs, with the forest as its own message: physics and scene
  * construction start without it, and the engine adds it before the scene compiles.
  */
-export type PreparedWorld = TerrainPart & SurfacePart & { vegetation: Promise<VegetationPart> }
-/** Worker requests; the `surfaces` worker also grows the forest afterwards. */
-export const WORLD_PARTS = ['terrain', 'surfaces'] as const
+export type PreparedWorld = TerrainPart &
+  SurfacePart & {
+    vegetation: Promise<VegetationPart>
+    /** Settles with the forest: whether every part came from the world cache. */
+    fromCache: Promise<boolean>
+  }
+/** Worker requests, one worker each; the forest is the longest and runs alongside the others. */
+export const WORLD_PARTS = ['terrain', 'surfaces', 'vegetation'] as const
 export type WorldPart = (typeof WORLD_PARTS)[number]
+export type WorldRequest = Readonly<{
+  seed: number
+  mobile: boolean
+  /** A part to deliver, or `store` to prepare every part and keep it for a later visit. */
+  part: WorldPart | 'store'
+  /** Whether the world cache may be read. */
+  cache: boolean
+}>
 export type WorldPartMessage =
-  | { part: 'terrain'; data: TerrainPart }
-  | { part: 'surfaces'; data: SurfacePart }
-  | { part: 'vegetation'; data: VegetationPart }
+  | { part: 'terrain'; data: TerrainPart; cached: boolean }
+  | { part: 'surfaces'; data: SurfacePart; cached: boolean }
+  | { part: 'vegetation'; data: VegetationPart; cached: boolean }
 
 export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
   const world = createLakeWorld(seed, mobile)
@@ -74,26 +87,29 @@ export function prepareWorld(seed: number, mobile: boolean): PreparedWorld {
     ...terrainPart(world, mobile),
     ...surfacePart(world, seed, mobile),
     vegetation: Promise.resolve(prepareVegetation(world, seed >>> 0, mobile)),
+    fromCache: Promise.resolve(false),
   }
 }
 
 /**
- * Generation is deterministic in (seed, mobile), so two workers each rebuild
- * the lake world and derive disjoint halves of the prepared data in parallel.
+ * Generation is deterministic in (seed, mobile), so each worker rebuilds the lake world and
+ * derives one disjoint part of the prepared data in parallel with the others.
  */
-export function* prepareWorldParts(
-  seed: number,
-  mobile: boolean,
-  part: WorldPart,
-): Generator<WorldPartMessage> {
+export function prepareWorldPart(seed: number, mobile: boolean, part: WorldPart): WorldPartMessage {
   const world = createLakeWorld(seed, mobile)
-  if (part === 'terrain') {
-    yield { part, data: terrainPart(world, mobile) }
-    return
+  if (part === 'terrain') return { part, data: terrainPart(world, mobile), cached: false }
+  if (part === 'surfaces') return { part, data: surfacePart(world, seed, mobile), cached: false }
+  return { part, data: prepareVegetation(world, seed >>> 0, mobile), cached: false }
+}
+
+/** Every part from one world, for the background preparation of a later visit. */
+export function prepareAllWorldParts(seed: number, mobile: boolean) {
+  const world = createLakeWorld(seed, mobile)
+  return {
+    terrain: terrainPart(world, mobile),
+    surfaces: surfacePart(world, seed, mobile),
+    vegetation: prepareVegetation(world, seed >>> 0, mobile),
   }
-  yield { part, data: surfacePart(world, seed, mobile) }
-  // The shorter half then grows the forest, once the world data is on its way.
-  yield { part: 'vegetation', data: prepareVegetation(world, seed >>> 0, mobile) }
 }
 
 /** Transfer ownership of every typed buffer, including bathymetry and BVH data. */

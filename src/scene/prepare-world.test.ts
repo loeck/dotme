@@ -32,46 +32,57 @@ afterEach(() => {
   FakeWorker.instances = []
 })
 describe('world preparation lifetime', () => {
-  it('splits generation across two workers and terminates both on unmount', async () => {
+  it('splits generation across three workers and terminates them on unmount', async () => {
     vi.stubGlobal('Worker', FakeWorker)
     const controller = new AbortController()
-    const promise = prepareWorldAsync(9182, false, controller.signal)
-    expect(FakeWorker.instances).toHaveLength(2)
+    const promise = prepareWorldAsync(9182, false, controller.signal, true)
+    expect(FakeWorker.instances).toHaveLength(3)
     expect(FakeWorker.instances.map((worker) => worker.postMessage.mock.calls[0]?.[0])).toEqual([
-      { seed: 9182, mobile: false, part: 'terrain' },
-      { seed: 9182, mobile: false, part: 'surfaces' },
+      { seed: 9182, mobile: false, part: 'terrain', cache: true },
+      { seed: 9182, mobile: false, part: 'surfaces', cache: true },
+      { seed: 9182, mobile: false, part: 'vegetation', cache: true },
     ])
     controller.abort()
     await expect(promise).rejects.toMatchObject({ name: 'AbortError' })
     expect(FakeWorker.instances.every((worker) => worker.terminated)).toBe(true)
   })
-  it('resolves the world from both parts, then streams the forest from the surfaces worker', async () => {
+  it('resolves the world from terrain and surfaces, then streams the forest', async () => {
     vi.stubGlobal('Worker', FakeWorker)
     const controller = new AbortController()
     const ready = prepareWorldAsync(0, true, controller.signal)
     const surfaces = workerFor('surfaces')
-    surfaces.deliver({ part: 'surfaces', data: { noise: 1 } })
-    // The surfaces worker stays alive to grow the forest.
-    expect(surfaces.terminated).toBe(false)
+    surfaces.deliver({ part: 'surfaces', data: { noise: 1 }, cached: false })
+    // Each worker stops once it delivered; the others keep working.
+    expect(surfaces.terminated).toBe(true)
     expect(workerFor('terrain').terminated).toBe(false)
-    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 } })
+    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 }, cached: false })
     expect(workerFor('terrain').terminated).toBe(true)
     const world = await ready
     expect(world).toMatchObject({ noise: 1, world: 2 })
-    surfaces.deliver({ part: 'vegetation', data: { trees: 3 } })
+    expect(workerFor('vegetation').terminated).toBe(false)
+    workerFor('vegetation').deliver({ part: 'vegetation', data: { trees: 3 }, cached: false })
     await expect(world.vegetation).resolves.toEqual({ trees: 3 })
+    await expect(world.fromCache).resolves.toBe(false)
     expect(FakeWorker.instances.every((worker) => worker.terminated)).toBe(true)
+  })
+  it('reports a world whose parts all came from the cache, in any order', async () => {
+    vi.stubGlobal('Worker', FakeWorker)
+    const controller = new AbortController()
+    const ready = prepareWorldAsync(0, false, controller.signal, true)
+    workerFor('vegetation').deliver({ part: 'vegetation', data: { trees: 3 }, cached: true })
+    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 }, cached: true })
+    workerFor('surfaces').deliver({ part: 'surfaces', data: { noise: 1 }, cached: true })
+    const world = await ready
+    await expect(world.fromCache).resolves.toBe(true)
   })
   it('keeps the terrain worker when the forest arrives first', async () => {
     vi.stubGlobal('Worker', FakeWorker)
     const controller = new AbortController()
     const ready = prepareWorldAsync(0, false, controller.signal)
-    const surfaces = workerFor('surfaces')
-    surfaces.deliver({ part: 'surfaces', data: { noise: 1 } })
-    surfaces.deliver({ part: 'vegetation', data: { trees: 3 } })
-    expect(surfaces.terminated).toBe(true)
+    workerFor('surfaces').deliver({ part: 'surfaces', data: { noise: 1 }, cached: false })
+    workerFor('vegetation').deliver({ part: 'vegetation', data: { trees: 3 }, cached: false })
     expect(workerFor('terrain').terminated).toBe(false)
-    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 } })
+    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 }, cached: false })
     const world = await ready
     await expect(world.vegetation).resolves.toEqual({ trees: 3 })
     expect(FakeWorker.instances.every((worker) => worker.terminated)).toBe(true)
@@ -80,9 +91,8 @@ describe('world preparation lifetime', () => {
     vi.stubGlobal('Worker', FakeWorker)
     const controller = new AbortController()
     const failed = prepareWorldAsync(0, false, controller.signal)
-    const surfaces = workerFor('surfaces')
-    surfaces.deliver({ part: 'surfaces', data: { noise: 1 } })
-    surfaces.deliver({ part: 'vegetation', data: { trees: 3 } })
+    workerFor('surfaces').deliver({ part: 'surfaces', data: { noise: 1 }, cached: false })
+    workerFor('vegetation').deliver({ part: 'vegetation', data: { trees: 3 }, cached: false })
     workerFor('terrain').dispatchEvent(
       Object.assign(new Event('error'), { message: 'terrain failed' }),
     )
@@ -93,8 +103,8 @@ describe('world preparation lifetime', () => {
     vi.stubGlobal('Worker', FakeWorker)
     const controller = new AbortController()
     const ready = prepareWorldAsync(0, true, controller.signal)
-    workerFor('surfaces').deliver({ part: 'surfaces', data: { noise: 1 } })
-    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 } })
+    workerFor('surfaces').deliver({ part: 'surfaces', data: { noise: 1 }, cached: false })
+    workerFor('terrain').deliver({ part: 'terrain', data: { world: 2 }, cached: false })
     const world = await ready
     controller.abort()
     await expect(world.vegetation).rejects.toMatchObject({ name: 'AbortError' })

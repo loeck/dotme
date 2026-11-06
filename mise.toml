@@ -1,6 +1,6 @@
 # Keep these equal to `engines.node` and `packageManager` in package.json and to CI.
 [tools]
-node = "24.21.0"
+node = "26.13.0"
 pnpm = "12.5.1"
 
 [tasks.setup]

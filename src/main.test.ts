@@ -37,6 +37,13 @@ const fake = vi.hoisted(() => {
 vi.mock('./components/gpu-runtime', () => ({ GpuRuntime: fake.Runtime }))
 vi.mock('./components/scene-loader', () => ({ initSceneLoader: fake.loader }))
 vi.mock('./components/landscape', () => ({ initLandscape: fake.landscape }))
+// World preparation has its own tests; the page lifecycle only hands it to the landscape.
+vi.mock('./components/scene-world', () => ({
+  startSceneWorld: () => {
+    const prepared = new Promise<never>(() => {})
+    return { seed: 1, mobile: false, requested: false, prepared }
+  },
+}))
 
 function deferred() {
   let release: (() => void) | undefined

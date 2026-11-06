@@ -2,14 +2,15 @@
 
 The static document fixes the background and full-screen canvas before JavaScript.
 A lightweight TSL material renders the loader using the initialized WebGPURenderer.
-Landscape imports begin after the loader's first frame. World preparation and weather
-can then proceed in parallel while the loader continues rendering. No minimum loading
+World preparation starts before the GPU device, so its workers (or the world cache) run
+while the device and the loader start. Landscape imports begin after the loader's first frame;
+weather then proceeds in parallel while the loader continues rendering. No minimum loading
 duration is imposed; reduced motion uses a static GPU image.
 
 The landscape shares the renderer and canvas. It prepares its materials asynchronously
 and presents its first complete frame before releasing the loader. Preparation runs in
-order: world data on two workers (Rapier loads and initializes meanwhile), collider
-creation, a loader frame, scene construction, then one compilation batch and a warmup
+order: world data on three workers (Rapier loads and initializes meanwhile), collider
+creation, a loader frame, scene construction, then one compilation sequence and a warmup
 render; [verification](performance.md#loading) describes the batch. Failure handling
 belongs to the page lifecycle: initialization is cancelled after 20 seconds, and an
 independent HTML deadline releases the profile even when the primary module fails.
@@ -21,11 +22,12 @@ compiled to GLSL; the page releases its static profile only when WebGL 2 is unav
 Device or context loss ends the graphics session and releases the profile. The water solver alternates two render targets; the CPU supplies bounded interactions, clock and weather
 state. Rapier owns collision queries and stepped rigid-body dynamics over the terrain
 colliders; analytic GPU flows and the wave solver stay custom. World generation is
-deterministic in its seed and layout, so two instances of the world worker each compose
-the lake again (`lake-world.ts`) and prepare disjoint halves in parallel: one builds the smooth terrain
-mesh and its boulders ([terrain](terrain.md)), the other prepares lake-bed geometry and normals,
+deterministic in its seed and layout, so three instances of the world worker each compose
+the lake again (`lake-world.ts`) and prepare disjoint parts in parallel: one builds the smooth terrain
+mesh and its boulders ([terrain](terrain.md)), one prepares lake-bed geometry and normals,
 water geometry, the half-float depth/shore atlas, the simulation mask, cloud noise and the
-static colliders (a heightfield and boulder hulls), and then grows the forest. The forest is a separate message:
+static colliders (a heightfield and boulder hulls), and one grows the forest. Each worker first
+looks its part up in the world cache ([loading](performance.md#loading)). The forest is a separate message:
 the world resolves without it, so physics and scene construction start sooner, and the
 engine adds and compiles it before the first frame (see [vegetation](vegetation.md#loading)). Every part transfers typed buffers; the render thread combines
 them and wraps those buffers in GPU resources and Rapier colliders without repeating
@@ -56,7 +58,5 @@ with `!`; native postfix-assertion rules do not cover those AST forms. `pnpm lin
 this audit across source, browser harnesses, scripts and configuration, and `pnpm check`
 runs it before tests, build and the compressed-size budget check.
 
-`skipLibCheck` is temporarily retained for `happy-dom@20.14.5`: its
-`BrowserWindow.d.ts` references `node:stream/web.UnderlyingDefaultSource`, which is absent
-from `@types/node@24.13.6`. Re-run `pnpm exec tsc --noEmit --skipLibCheck false` after
-upgrading those declarations; remove the exemption once that external incompatibility is fixed.
+Declaration files are type-checked too (no `skipLibCheck`), against `@types/node@26.6.6`
+for the Node 26 runtime.

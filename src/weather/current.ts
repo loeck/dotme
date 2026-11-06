@@ -220,6 +220,44 @@ export class WeatherHttpError extends Error {
   }
 }
 
+const CACHE_KEY = 'dotme:weather'
+
+function weatherStorage(): Storage | undefined {
+  try {
+    return typeof localStorage === 'undefined' ? undefined : localStorage
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The last response for this request while its 15-minute observation slot is current: a fresh
+ * request would return the same values, so reloads skip the network round trip.
+ */
+function cachedWeather(url: string, nowSeconds: number): WeatherSnapshot | undefined {
+  try {
+    const raw = weatherStorage()?.getItem(CACHE_KEY)
+    if (!raw) return undefined
+    const entry = object(JSON.parse(raw), 'cache')
+    if (entry.url !== url) return undefined
+    const snapshot = parseWeatherSnapshot(entry.data)
+    const start = snapshot.timestampUnixSeconds
+    return nowSeconds >= start && nowSeconds < start + snapshot.intervalSeconds
+      ? snapshot
+      : undefined
+  } catch {
+    return undefined
+  }
+}
+
+function rememberWeather(url: string, data: unknown) {
+  try {
+    weatherStorage()?.setItem(CACHE_KEY, JSON.stringify({ url, data }))
+  } catch {
+    /* Storage may be full or disabled; the next visit fetches again. */
+  }
+}
+
 /** On-demand only. Free API: non-commercial use; attribute Open-Meteo when integrating data. */
 export async function fetchWeather({
   signal,
@@ -255,11 +293,15 @@ export async function fetchWeather({
       precipitation_unit: 'mm',
       timeformat: 'unixtime',
     }).toString()
+    const cached = cachedWeather(url.href, Date.now() / 1000)
+    if (cached) return cached
     const response = await fetch(url, { signal: controller.signal })
     if (!response.ok) throw new WeatherHttpError(response.status)
     const data: unknown = await response.json()
     controller.signal.throwIfAborted()
-    return parseWeatherSnapshot(data)
+    const snapshot = parseWeatherSnapshot(data)
+    rememberWeather(url.href, data)
+    return snapshot
   } finally {
     clearTimeout(timeout)
     signal?.removeEventListener('abort', abort)

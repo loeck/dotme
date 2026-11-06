@@ -78,6 +78,7 @@ const runs: {
   p95Ms: number
   loaderMs: number
   readyMs: number
+  worldCached: boolean
   physicsMs: number | null
   worldPrepMs: number | null
   compileStages: Array<{ stage: string; ms: number | null; programs: number | null }>
@@ -235,6 +236,7 @@ try {
               })
             }
             return {
+              worldCached: performance.getEntriesByName('worldprep-cached').length > 0,
               physicsMs:
                 physicsStart === null || physicsReady === null ? null : physicsReady - physicsStart,
               worldPrepMs:
@@ -289,6 +291,7 @@ try {
             p95Ms: quantile(intervals, 0.95),
             loaderMs,
             readyMs,
+            worldCached: loadTimings.worldCached,
             physicsMs: loadTimings.physicsMs,
             worldPrepMs: loadTimings.worldPrepMs,
             compileStages: loadTimings.stages,

@@ -248,7 +248,7 @@ export class VoxelLandscapeEngine {
   private readonly environmentTarget: CubeRenderTarget
   private readonly environmentCamera: CubeCamera
   private readonly environmentFilter: PMREMGenerator
-  private filteredEnvironment: RenderTarget | undefined
+  private filteredEnvironment: CubeRenderTarget | undefined
   private readonly drawingBufferSize = new Vector2()
   private readonly water: LakeReflector
   private readonly simulation: WaterSimulation
@@ -1237,18 +1237,15 @@ export class VoxelLandscapeEngine {
     }
   }
 
-  /** Clouds, sky, rain, contrast, water simulation and waterfall fluid. */
-  private compilePasses(renderer: WebGPURenderer, light: LightingState) {
-    return Promise.all([
-      this.clouds.compileAsync(),
-      this.skyAtmosphere
-        .compileAsync()
-        .then(() => this.skyAtmosphere.update(light.sunDirection, light.skyExposure)),
-      this.compileRain(),
-      this.sceneContrast.compileAsync(renderer),
-      this.simulation.compileAsync(),
-      this.details?.prepareFluid(renderer, this.camera),
-    ])
+  /** Clouds, sky, rain, contrast, water simulation and waterfall fluid, one after another. */
+  private async compilePasses(renderer: WebGPURenderer, light: LightingState) {
+    await this.clouds.compileAsync()
+    await this.skyAtmosphere.compileAsync()
+    this.skyAtmosphere.update(light.sunDirection, light.skyExposure)
+    await this.compileRain()
+    await this.sceneContrast.compileAsync(renderer)
+    await this.simulation.compileAsync()
+    await this.details?.prepareFluid(renderer, this.camera)
   }
 
   private compileRain() {
@@ -1338,18 +1335,19 @@ export class VoxelLandscapeEngine {
 
   /**
    * Compiles the environment probe, the shadow maps and every remaining scene
-   * pass, together with the already issued offscreen `passes`. `compileAsync`
-   * collects its render objects and restores the renderer state synchronously,
-   * then builds node graphs and pipelines asynchronously, so issuing the passes
-   * back to back lets their builds interleave and the driver compile their
-   * pipelines in parallel; awaiting each pass in turn made the loader pay the
-   * sum of them instead of the longest.
+   * pass once the already issued offscreen `passes` have settled. Three's
+   * `compileAsync` keeps one precompilation state on the renderer, so calls run
+   * one at a time: overlapping calls that share a node build in flight swap each
+   * other's render state. Each call still compiles its pipelines in parallel
+   * while it builds the next node graphs.
    */
   private async compileScene(
     signal: AbortSignal,
     renderer: WebGPURenderer,
     passes: Promise<unknown>,
   ) {
+    await passes
+    signal.throwIfAborted()
     // Establish the final environment texture before building any lit material variant.
     this.renderer.initRenderTarget(this.environmentTarget)
     await this.environmentFilter.compileCubemapShader()
@@ -1363,8 +1361,9 @@ export class VoxelLandscapeEngine {
     this.environmentCamera.updateMatrixWorld()
     this.snapshotPrograms('environment')
 
-    const pending: Promise<unknown>[] = [passes]
-    const issue = (compile: () => Promise<unknown>) => pending.push(compile())
+    // Each task sets up its renderer and scene state when it runs, not when it is issued.
+    const tasks: (() => Promise<unknown>)[] = []
+    const issue = (compile: () => Promise<unknown>) => tasks.push(compile)
 
     // The probe's own traversal, with the planar water and the detail layer out:
     // those materials are invisible in the cube so compiling them would only mint
@@ -1372,20 +1371,20 @@ export class VoxelLandscapeEngine {
     performance.mark('compile:scene')
     const cubeCamera = this.environmentCamera.children.find((child) => child instanceof Camera)
     if (!cubeCamera) throw new Error('Missing environment cube camera')
-    this.water.visible = false
-    try {
-      // All six faces use the same lighting, layers and attachment formats. Include
-      // off-axis meshes once instead of compiling their cached variants on every face.
-      issue(() =>
-        compileWithoutCulling(this.scene, () => {
+    issue(() => {
+      this.water.visible = false
+      try {
+        // All six faces use the same lighting, layers and attachment formats. Include
+        // off-axis meshes once instead of compiling their cached variants on every face.
+        return compileWithoutCulling(this.scene, () => {
           const compile = () =>
             this.compileView(cubeCamera, this.environmentTarget, this.scene, 0, false)
           return this.details ? this.details.probeHidden(compile) : compile()
-        }),
-      )
-    } finally {
-      this.water.visible = true
-    }
+        })
+      } finally {
+        this.water.visible = true
+      }
+    })
 
     this.compileShadowMaps(issue)
     // The forest casts its own shadows; every other view reaches it through the scene.
@@ -1395,8 +1394,11 @@ export class VoxelLandscapeEngine {
     issue(() => this.compileView(this.camera, this.depthFocus.target))
     issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
     issue(() => this.depthFocus.compileAsync(renderer, this.camera))
-    await Promise.all(pending)
-    signal.throwIfAborted()
+    for (const task of tasks) {
+      // eslint-disable-next-line no-await-in-loop -- one compileAsync at a time, see above
+      await task()
+      signal.throwIfAborted()
+    }
 
     const reflected = this.water.getReflectionCamera(this.camera)
     reflected.copy(this.camera)
@@ -1571,20 +1573,22 @@ export class VoxelLandscapeEngine {
         camera.updateProjectionMatrix()
         camera.updateMatrixWorld()
       } else light.shadow.updateMatrices(light)
-      const material = this.scene.overrideMaterial,
-        background = this.scene.background
-      try {
-        const shadowMaterial = shadow(light).getShadowMaterial()
-        // Shadow rendering flips front-sided casters. Keep that same variant while
-        // compileAsync yields, rather than restoring its default front side.
-        shadowMaterial.side = BackSide
-        this.scene.overrideMaterial = shadowMaterial
-        this.scene.background = null
-        issue(() => this.compileView(light.shadow.camera, map, casters))
-      } finally {
-        this.scene.overrideMaterial = material
-        this.scene.background = background
-      }
+      issue(() => {
+        const material = this.scene.overrideMaterial,
+          background = this.scene.background
+        try {
+          const shadowMaterial = shadow(light).getShadowMaterial()
+          // Shadow rendering flips front-sided casters. Keep that same variant while
+          // compileAsync yields, rather than restoring its default front side.
+          shadowMaterial.side = BackSide
+          this.scene.overrideMaterial = shadowMaterial
+          this.scene.background = null
+          return this.compileView(light.shadow.camera, map, casters)
+        } finally {
+          this.scene.overrideMaterial = material
+          this.scene.background = background
+        }
+      })
     }
   }
 

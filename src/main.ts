@@ -1,5 +1,6 @@
 import { GpuRuntime } from './components/gpu-runtime'
 import { initSceneLoader } from './components/scene-loader'
+import { startSceneWorld } from './components/scene-world'
 import { debugParams } from './scene-params'
 
 let cleanup: (() => void) | undefined
@@ -72,6 +73,8 @@ function start(autoplay = true) {
     try {
       await releasing
       signal.throwIfAborted()
+      // World workers (or the world cache) run while the device and the loader start.
+      const world = startSceneWorld(host, signal)
       const creation = GpuRuntime.create(canvas, signal, debugParams(location.search).backend)
       pendingCreation = creation
       const instance = await creation
@@ -121,6 +124,7 @@ function start(autoplay = true) {
               if (active()) fail()
             },
             autoplay,
+            world,
           )
         })
         .then((teardown) => {
