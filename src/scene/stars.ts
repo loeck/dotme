@@ -176,19 +176,15 @@ export function milkyWay(direction: Node<'vec3'>, moonAngle: Node<'float'>, u: S
   )
     .mul(exp(across.div(0.05).pow2().negate()))
     .mul(0.45)
-  // Unresolved stars: a fine powder, densest in the bright star clouds, so the band reads as
-  // stars rather than as a smooth haze. Each grain is a few pixels and never moves, so it
-  // cannot shimmer.
-  const grain = smoothstep(
-    0.8,
-    0.97,
-    horizonNoise(vec2(along.mul(260), across.mul(260)).add(u.uSeed.mul(7))),
-  )
-  const density = core
-    .mul(starClouds.mul(0.9).add(0.35))
-    .add(wide.mul(0.28))
-    .mul(rift.oneMinus())
-    .mul(grain.mul(starClouds).mul(2.5).add(0.7))
+  const density = core.mul(starClouds.mul(0.9).add(0.35)).add(wide.mul(0.28)).mul(rift.oneMinus())
+  // Faint stars resolved out of the glow, 2.6 times denser than the sky's own and thickest in
+  // the bright star clouds, so the band reads as stars rather than as a smooth haze. They are
+  // drawn as round points in screen pixels, like the other stars: a thresholded noise grain
+  // here stretched into dashes, since the band's two coordinates do not share a scale.
+  const { random, pixels } = starPoint(starCells(direction, 2.6), u.uSeed.add(19))
+  const resolved = exp(pixels.dot(pixels).div(-2 * 0.5 * 0.5))
+    .mul(random.z.pow(3))
+    .mul(starClouds.mul(1.5).add(0.25))
   const visibility = smoothstep(
     0,
     NIGHT_FADE,
@@ -196,8 +192,7 @@ export function milkyWay(direction: Node<'vec3'>, moonAngle: Node<'float'>, u: S
   )
   const colour = mix(vec3(0.55, 0.68, 1), vec3(1, 0.85, 0.66), core.mul(starClouds))
   return colour
-    .mul(density)
-    .mul(0.035)
+    .mul(density.mul(0.03).add(density.mul(resolved).mul(0.09)))
     .mul(visibility)
     .mul(smoothstep(0.03, 0.3, direction.y))
     .mul(mix(0.45, 1, smoothstep(0.05, 0.6, moonAngle)))
@@ -207,35 +202,49 @@ function normalizeStarVector(value: Node<'vec3'>) {
   return value.div(max(length(value), 0.000001))
 }
 
+/** Sky coordinates of the star cells: about 200 per turn of azimuth, `density` times more. */
+function starCells(direction: Node<'vec3'>, density = 1) {
+  return vec2(
+    atan(direction.x, direction.z.negate()).mul(31.8309886 * density),
+    asin(clamp(direction.y, -1, 1)).mul(63.6619772 * density),
+  )
+}
+
+/**
+ * The star of the cell under `sky`: three hashes per cell, and the offset to its star in screen
+ * pixels. Each axis is divided by its own footprint, so a star stays round on screen even
+ * though the cells are twice as wide as they are tall and narrow toward the zenith.
+ */
+function starPoint(sky: Node<'vec2'>, seed: Node<'float'>) {
+  const cell = sky.floor()
+  const q0 = fract(
+    vec3(cell.x, cell.y, cell.x)
+      .mul(vec3(0.1031, 0.103, 0.0973))
+      .add(seed),
+  )
+  const q = q0.add(q0.dot(q0.yxz.add(33.33)))
+  const random = fract(q.xxy.add(q.yzz).mul(q.zyx))
+  const offset = fract(sky).sub(random.xy.mul(0.7).add(0.15))
+  return { random, pixels: offset.div(max(fwidth(sky), vec2(0.00001))) }
+}
+
 export function stellarRadiance(
   direction: Node<'vec3'>,
   moonAngle: Node<'float'>,
   u: StarUniforms,
 ) {
-  const sky = vec2(
-    atan(direction.x, direction.z.negate()).mul(31.8309886),
-    asin(clamp(direction.y, -1, 1)).mul(63.6619772),
-  )
-  const cell = sky.floor()
-  const q0 = fract(
-    vec3(cell.x, cell.y, cell.x)
-      .mul(vec3(0.1031, 0.103, 0.0973))
-      .add(u.uSeed),
-  )
-  const q = q0.add(q0.dot(q0.yxz.add(33.33)))
-  const random = fract(q.xxy.add(q.yzz).mul(q.zyx))
-  const offset = fract(sky).sub(random.xy.mul(0.7).add(0.15))
+  const { random, pixels } = starPoint(starCells(direction), u.uSeed)
   const brightness = random.z.pow(4.5)
   const visibility = smoothstep(
     0,
     NIGHT_FADE,
     u.uSunDirection.y.negate().sub(NIGHT_START).sub(brightness.oneMinus().mul(FAINT_DELAY)),
   )
-  const variance = mix(0.01, 0.032, brightness).pow(2)
-  const filtered = variance.add(fwidth(sky).dot(fwidth(sky)).div(12))
-  const point = exp(offset.dot(offset).negate().div(filtered.mul(2)))
-    .mul(variance)
-    .div(filtered)
+  // A point source a pixel or so across, the brightest a little wider as a lens spreads them.
+  const radius = mix(0.5, 0.85, brightness)
+  const point = exp(pixels.dot(pixels).negate().div(radius.pow2().mul(2))).mul(
+    mix(0.3, 0.8, brightness),
+  )
   const twinkle = sin(u.uStarTime.mul(random.y.mul(0.45).add(0.42)).add(random.x.mul(61)))
     .mul(0.055)
     .add(1)

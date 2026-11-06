@@ -39,11 +39,19 @@ photograph is, so the moonlit valley reads instead of sinking to black.
 The Milky Way (`milkyWay` in `stars.ts`) is a soft band along a fixed great circle that rises
 from the left bank's horizon to the top of the frame left of centre, so on a desktop frame it
 crosses the left half diagonally and passes beside the moon at midnight rather than through it.
-Two octaves of value noise mottle it into star clouds, a finer layer thresholded into a fixed
-powder of grains a few pixels wide makes it read as unresolved stars rather than haze, a gentle
+Two octaves of value noise mottle it into star clouds, a layer of faint point stars 2.6 times
+denser than the sky's own, thickest in the star clouds, makes it read as stars rather than haze
+(a thresholded noise grain stretched into dashes, as the band's coordinates do not share one
+scale), a gentle
 dust rift darkens its core, and it is warm at the centre and bluer at the edges. It appears with
 the faintest stars, fades towards the horizon and dims to 45% beside the moon; clouds hide it as
 they hide the stars.
+
+Stars are point sources drawn in screen pixels (`starPoint` in `stars.ts`): each sky cell holds
+one star whose offset is divided, axis by axis, by that axis's pixel footprint, so it stays a
+round dot about a pixel across (0.5–0.85 px radius, brighter stars a little wider) although the
+cells are twice as wide as tall and narrow toward the zenith. Filtering in cell units stretched
+them sideways.
 
 A press on the clear night sky (no cloud preset, daylight under 5%, the pointer ray meeting no
 ground or crown) makes a wish (`ShootingStars.wish` in `stars.ts`): three shooting stars fall one
