@@ -42,6 +42,7 @@ import type { LightingState } from './lighting'
 import type { PointerLightResponse } from './pointer-light'
 import type { MeshData } from './vegetation-meshes'
 import type { PreparedVegetation } from './vegetation-placement'
+import { WindGusts } from './wind-gusts'
 
 /** Shadow casters live on this layer; see the moon's shadow camera. */
 const SHADOW_LAYER = 5
@@ -72,6 +73,8 @@ export class Vegetation {
   /** How each mesh takes the night cursor's light; wood keeps the opaque default. */
   readonly pointerLight = new Map<Mesh, PointerLightResponse>()
   private readonly time = uniform(0)
+  /** Gusts the visitor raises by sweeping the pointer across the scene. */
+  readonly gusts = new WindGusts()
   private readonly wind = uniform(new Vector2(1, 0))
   private readonly strength = uniform(0)
   private readonly sunDirection = uniform(new Vector3(0, 1, 0))
@@ -171,7 +174,10 @@ export class Vegetation {
       this.time.mul(min(omega.mul(1.7), MAX_FLUTTER_OMEGA)).add(phase.mul(5.3)),
     ).mul(flutter.mul(this.strength.add(0.15)))
     const direction = vec3(this.wind.x, float(0), this.wind.y)
-    return direction.mul(lean.mul(bend).add(shiver)).add(vec3(0, shiver.mul(0.5), 0))
+    return direction
+      .mul(lean.mul(bend).add(shiver))
+      .add(vec3(0, shiver.mul(0.5), 0))
+      .add(this.gusts.sway(positionLocal, bend, phase, this.time))
   }
 
   private woodMaterial() {

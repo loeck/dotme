@@ -30,6 +30,15 @@ spot, the ring runs out to 7 m and fades in 0.7 s, the fish lose their bait, a l
 sounds and, on touch, the hand gets a 20–50 ms buzz. A press that moves first stays a drag or a
 flick, and a release under 15% charge is an ordinary tap. Reduced motion has no charge.
 
+A quick sweep of the pointer across the scene (at least 1400 CSS px/s, full strength at 3200) raises
+a gust (`wind-gusts.ts`): both ends of the frame's stroke are cast onto the ground, crowns or water,
+and a band of wind starts where the pointer is and runs on in the sweep's direction at the pointer's
+own pace over the ground (8–30 m/s, so the trees the sweep crosses are the ones that lean), 3.5 m
+deep and 7 m wide, leaning every blade, branch and leaf it passes by up to 1.8 bend units (a strong
+breeze leans about 0.7), wavering as it goes and fading out over 3.2 s. Three gusts can be in flight
+at once, at least 0.12 s apart; they ride the vegetation's existing sway, so grass and trees answer
+with no extra draw. Reduced motion raises none and clears any in flight.
+
 At night (daylight under 0.25) a double tap or double click on the water sets a paper lantern
 afloat there (`lake-lanterns.ts`): a small drum that glows warm through the middle of its paper,
 bright enough to bloom, and that the lake mirror reflects. Lanterns drift downwind at 3.5 cm/s
@@ -49,11 +58,14 @@ By day a small flock of birds (`bird-flock.ts`, nine, six on low power) crosses 
 first about 22 s into the visit, then every 55–95 s while daylight is above 0.35 and rain below
 0.3, each leaving a tall crown that projects inside the frame. A press on a crown (the pointer
 ray meeting a crown's pick sphere before any ground) startles a flock out of that tree instead.
-The leader climbs away from the viewer, turns wide over the lake and leaves over the far hills;
-each bird steers toward a jittered slot of a loose wedge with its own response, so the flock
-stretches and bunches in turns. Birds are unlit dark silhouettes made of two hinged wings,
-beating faster while climbing and gliding in between, banking into turns; a flock fades in at
-the crown and out after 24 s. Reduced motion shows no birds.
+The leader climbs away from the viewer, first above the tallest crown within 60 m by 4 m, turns
+wide over the lake and leaves over the far hills; each bird steers toward a jittered slot of a
+loose wedge with its own response, so the flock stretches and bunches in turns, and any bird
+within 1.5 m of a crown is pushed out and up, so the flock clears the woods rather than flying
+through them. Birds are unlit dark silhouettes made of two hinged wings, beating 3.2 times a
+second (a little faster climbing), as a crow or jackdaw does, and gliding for 1.4 s in every
+2.8 s, each bird on its own rhythm; they bank into turns, fade in at the crown and out after
+24 s. Reduced motion shows no birds.
 
 The world seed can select a supported left-bank waterfall with a clear landing in the lake.
 An upstream rock basin contains a shallow pool and narrows into an open spillway at the lip.

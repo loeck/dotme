@@ -106,6 +106,7 @@ import type { WeatherPreset } from './weather'
 import { WindModel, updateWindUniforms } from './wind'
 import type { WindState } from './wind'
 import type { WindOptions } from './wind'
+import { sweepStrength } from './wind-gusts'
 import { createWindUniforms } from './wind-nodes'
 import type { VegetationPart } from './world-data'
 
@@ -355,6 +356,11 @@ export class VoxelLandscapeEngine {
   private pointerStillSince = 0
   private readonly gatherPoint = new Vector3()
   private readonly flarePoint = new Vector3()
+  /** The pointer's client position last frame, for the screen speed of a sweep. */
+  private readonly sweepClient = new Vector2(Number.NaN, Number.NaN)
+  private readonly sweepFrom = new Vector3()
+  private readonly sweepTo = new Vector3()
+  private readonly waterHitScratch = new Vector3()
   private readonly lanterns = new LakeLanterns()
   /** The last tap on the water that threw nothing, for a double tap to set a lantern afloat. */
   private lastTap: { x: number; y: number; time: number } | null = null
@@ -925,6 +931,8 @@ export class VoxelLandscapeEngine {
       this.stone.cancel()
       this.birds.cancel()
       this.shockwave.cancel()
+      // Frozen time would hold a gust's lean in place.
+      this.vegetation?.gusts.clear()
     }
     if (this.lowPower && !value) this.tilt.start()
     this.lastFrameAt = now
@@ -1392,6 +1400,49 @@ export class VoxelLandscapeEngine {
     const distance = this.soundPosition.distanceTo(this.camera.position)
     const place = pointSound(distance, this.soundPosition.project(this.camera).x)
     listener({ charge: wave.charge, intensity: place.attenuation, pan: place.pan, pointerType })
+  }
+
+  /**
+   * A quick sweep of the pointer across the scene raises a gust that runs through the grass and
+   * trees in the sweep's direction. The direction is read on the ground: both ends of this
+   * frame's stroke are cast into the world, the newest last so the pointer ray stays current.
+   */
+  private updateGusts(pointerOnScene: boolean, dt: number) {
+    const previous = this.sweepClient
+    const current = this.pointerClient
+    const pixels = Math.hypot(current.x - previous.x, current.y - previous.y) / Math.max(dt, 1e-3)
+    const strength = dt > 0 ? sweepStrength(pixels) : 0
+    const vegetation = this.vegetation
+    const ready = pointerOnScene && !this.reducedMotion && vegetation && strength > 0
+    const from = ready && this.pointerWorld(previous.x, previous.y, this.sweepFrom)
+    const to = from && this.pointerWorld(current.x, current.y, this.sweepTo)
+    previous.copy(current)
+    if (!vegetation || !from || !to) return
+    const dx = to.x - from.x,
+      dz = to.z - from.z
+    const stroke = Math.hypot(dx, dz)
+    // The front runs on at the pointer's own pace over the ground.
+    if (stroke > 0.3)
+      vegetation.gusts.raise(
+        to.x,
+        to.z,
+        dx,
+        dz,
+        strength,
+        this.elapsed,
+        stroke / Math.max(dt, 1e-3),
+      )
+  }
+
+  /** The first solid, crown or water the pointer at a client position meets, or null. */
+  private pointerWorld(clientX: number, clientY: number, target: Vector3): Vector3 | null {
+    if (!this.projectPointer(clientX, clientY)) return null
+    const ray = this.raycaster.ray
+    const water = this.waterPointOnRay(this.waterHitScratch)
+    const solid = this.pointerSolidDistance()
+    if (solid < Infinity && (!water || solid < ray.origin.distanceTo(water)))
+      return ray.at(solid, target)
+    return water ? target.copy(water) : null
   }
 
   /** Places the sun's lens flare: where its disc projects on the frame, and how strongly. */
@@ -2000,6 +2051,7 @@ export class VoxelLandscapeEngine {
     const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
     this.vegetation = vegetation
     this.vegetationPick = data.pick
+    this.birds.setObstacles(data.pick)
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial)
         this.receiveSceneLight(mesh.material, vegetation.pointerLight.get(mesh))
@@ -2147,6 +2199,7 @@ export class VoxelLandscapeEngine {
       light.pointerLightStrength,
       dt,
     )
+    this.updateGusts(pointerOnScene, activeDelta)
     // A cursor held still at night gathers the fireflies a little above what it points at.
     const gather =
       contact &&

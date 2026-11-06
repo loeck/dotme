@@ -58,3 +58,39 @@ describe('bird flock', () => {
     expect(flockRandom(0)()).toBeGreaterThan(0)
   })
 })
+
+describe('bird flock among trees', () => {
+  it('climbs over the canopy and keeps out of the crowns it passes', () => {
+    // A wood of tall crowns between the take-off tree and the far hills.
+    const crowns: number[] = []
+    for (let x = -30; x <= 10; x += 6) for (let z = -60; z <= -14; z += 6) crowns.push(x, 14, z, 3)
+    const spheres = new Float32Array(crowns)
+    const flock = new BirdFlock(FLOCK.size)
+    flock.setObstacles(spheres)
+    flock.launch(crown, viewer, 11)
+    const inside = (p: Vector3) => {
+      for (let i = 0; i < spheres.length; i += 4) {
+        const d = Math.hypot(
+          p.x - (spheres[i] ?? 0),
+          p.y - (spheres[i + 1] ?? 0),
+          p.z - (spheres[i + 2] ?? 0),
+        )
+        if (d < (spheres[i + 3] ?? 0) * 0.8) return true
+      }
+      return false
+    }
+    let deepInside = 0
+    for (let t = 0; t < FLOCK.lifetime - 1; t += 1 / 60) {
+      flock.update(1 / 60)
+      // Past the first second (the take-off crown), nobody flies through a crown's heart.
+      if (t > 1.5 && inside(flock.centre())) deepInside++
+    }
+    expect(deepInside).toBe(0)
+    flock.dispose()
+  })
+
+  it('beats about three times a second, with glides between bursts', () => {
+    expect(FLOCK.flapRate).toBeGreaterThanOrEqual(2.5)
+    expect(FLOCK.flapRate).toBeLessThanOrEqual(4)
+  })
+})
