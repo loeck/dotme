@@ -2189,10 +2189,11 @@ export class VoxelLandscapeEngine {
       mist: morningMist,
     })
     const flash = this.updateLightning()
-    // A flash opens the whole frame, far more at night when the eye has adapted to the dark.
+    // A flash opens the whole frame, more at night when the eye has adapted to the dark, but
+    // never past about twice the exposure: a stronger flash whited the sky and clouds out.
     const look =
       flash > 0
-        ? { ...sampled, exposure: sampled.exposure * (1 + flash * (2.6 - 1.9 * light.daylight)) }
+        ? { ...sampled, exposure: sampled.exposure * (1 + flash * (1.1 - 0.8 * light.daylight)) }
         : sampled
     this.fog.density = this.baseFogDensity * (1 + morningMist * 1.4) * Math.sqrt(look.haze)
     this.atmosphere.update(light, look)

@@ -82,7 +82,8 @@ export class Lightning {
       if (age > LIGHTNING.decay * 8) this.strokes.splice(i, 1)
       else if (age >= 0) flash += stroke.peak * Math.exp(-age / LIGHTNING.decay)
     }
-    return Math.min(1.5, flash)
+    // Overlapping strokes never add up past one full flash.
+    return Math.min(1, flash)
   }
 
   reset(now: number) {
