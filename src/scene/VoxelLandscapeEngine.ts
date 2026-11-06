@@ -281,6 +281,8 @@ export class VoxelLandscapeEngine {
   private ambientStateAt = -Infinity
   private readonly skyMaterial: ReturnType<typeof createSkyMaterial>
   private readonly sky: Mesh<SphereGeometry, ReturnType<typeof createSkyMaterial>>
+  /** The sky dome alone, captured every frame for the lake's sky reflection. */
+  private readonly reflectedSky = new Scene()
   private readonly voxelGroup = new Group()
   private readonly shadowGroup = new Group()
   private frame = 0
@@ -496,6 +498,9 @@ export class VoxelLandscapeEngine {
     this.sky = new Mesh(skyGeometry, this.skyMaterial)
     this.sky.frustumCulled = false
     this.scene.add(this.sky)
+    const reflectedSky = new Mesh(skyGeometry, this.skyMaterial)
+    reflectedSky.frustumCulled = false
+    this.reflectedSky.add(reflectedSky)
     this.materials.push(this.skyMaterial)
     this.geometries.push(this.resources.own(skyGeometry))
 
@@ -1394,6 +1399,7 @@ export class VoxelLandscapeEngine {
     issue(() => this.compileView(this.camera, this.depthFocus.target))
     issue(() => this.atmosphere.compileAsync(this.depthFocus.target, this.camera, this.moon))
     issue(() => this.depthFocus.compileAsync(renderer, this.camera))
+    issue(() => this.water.compileSky(renderer, this.reflectedSky))
     for (const task of tasks) {
       // eslint-disable-next-line no-await-in-loop -- one compileAsync at a time, see above
       await task()
@@ -1422,6 +1428,7 @@ export class VoxelLandscapeEngine {
     this.renderEnvironmentFaces([0, 1, 2, 3, 4, 5])
     this.environmentFace = 0
     this.filterEnvironment()
+    this.captureReflectedSky()
     await preparationFrame(signal)
   }
 
@@ -1455,6 +1462,22 @@ export class VoxelLandscapeEngine {
     this.environmentFace = (face + 1) % 6
     if (this.environmentFace !== 0) return
     this.filterEnvironment()
+  }
+
+  /**
+   * The lake's sky reflection follows the visible sky frame by frame: clouds parting under
+   * the cursor or a weather change would otherwise wait for the next full probe sweep.
+   * Discs stay out as in the probe; the water lighting model reflects the sun and moon.
+   */
+  private captureReflectedSky() {
+    this.skyMaterial.uniforms.uShowSun.value = 0
+    this.skyMaterial.uniforms.uShowMoon.value = 0
+    try {
+      this.water.captureSky(this.renderer, this.reflectedSky)
+    } finally {
+      this.skyMaterial.uniforms.uShowSun.value = this.showSun ? 1 : 0
+      this.skyMaterial.uniforms.uShowMoon.value = 1
+    }
   }
 
   /** Renders probe faces with the direct disc and planar water masked out. */
@@ -1885,6 +1908,7 @@ export class VoxelLandscapeEngine {
     this.updateShadows()
     const probe = diagnostics.begin('environment', renderInfo.calls)
     this.updateEnvironment(now, atmosphereTime)
+    this.captureReflectedSky()
     diagnostics.end(probe, renderInfo.calls)
     const submerged = diagnostics.begin('submerged', renderInfo.calls)
     // The captured lakebed is static; only fish and caustics move in it, so both

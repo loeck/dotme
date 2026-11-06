@@ -60,7 +60,10 @@ Daylight god-ray shafts drift in the water column where the view looks down into
 The analytic wind field drives CPU motion, surface normals and caustics; the GPU field adds
 recent impulses to the visible surface. Reflection filtering follows
 the water roughness without an additional blur floor; the environment probe uses 256-pixel
-faces on desktop and 128-pixel faces on mobile.
+faces on desktop and 128-pixel faces on mobile. The probe refreshes one face at a time, so
+sky seen through the planar mirror comes instead from a sky-only cube (128-pixel faces, 64 on
+low power) rendered every frame: clouds the cursor clears show in the lake as soon as in the
+sky. The probe still fills the mirror's screen edges.
 
 The solver does not model nonlinear breaking waves or volumetric fluid flow. Its
 depth response is a bounded shallow-water approximation rather than a full dispersion
