@@ -68,14 +68,22 @@ tree trunks, other bushes and a step's last column. Up to 520 on desktop and 70 
 Wood is generalized cylinders: rings along each limb with parallel-transported frames, so tubes
 never twist, with eight sides on a trunk and three or four on a limb (six and three on phones).
 Only a mature spruce's main branches carry wood; the foliage hides its thin internodal ones and a sapling's branches. Bark colour
-is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
-birch's dashes and dark foot.
+is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, and
+the birch's pale skin and dark foot.
 The local CC0 [Bark Brown 01](https://polyhaven.com/a/bark_brown_01) scan by Rob Tuytel adds
-fine furrows, knots, roughness and shallow relief. Two upright projections around the trunk
-sample the baked rest positions, so the detail stays attached while the tree sways. The scan
-modulates each species' palette; pale birch bark retains much smoother relief and its light
-color. Surface-gradient relief fades by 42 m and uses the same mipmapped, anisotropic scan
-resources as the terrain.
+fine furrows, knots, roughness and shallow relief. The worker unwraps each tube around its
+circumference and along its centreline, so grain follows bent trunks and inclined branches.
+An integer number of wraps and duplicated seam vertices prevent a stretched stripe where
+the texture closes. Length coordinates scale with tree placement, and each tube starts at a
+different part of the scan. The coordinates remain attached during wind sway.
+The scan modulates each species' palette: oak and conifers keep coarse furrows, while beech
+and birch have shallower relief and a smoother finish. Species strength is explicit rather
+than inferred from colour. Birch lenticels are fine, scattered horizontal dashes in the material
+instead of broad, interpolated vertex bands; they repeat seamlessly and fade before they
+become smaller than a pixel. A restrained, irregular
+green patina darkens the first 90 cm above each root. Surface-gradient relief fades by 42 m
+and uses the same mipmapped, anisotropic scan resources as the terrain. No additional scan
+or draw is needed; duplicated seam vertices leave the triangle count unchanged.
 
 Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
@@ -86,7 +94,8 @@ as measured on conifer needles), since the sky light and grade already desaturat
 card's needle-to-needle tone stays within ±25%: a wider spread speckled sunlit tops pale.
 A spruce's leader
 is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
-cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
+cards the sky shows through. The material stays matte (roughness 0.84–0.98, a 45% sky reflection):
+the atlas relief gives leaf centres a slightly softer sheen than their dry edges.
 
 The atlas has twelve tiles (4 × 3): two oak sprays and two lime-and-beech sprays (twigs fanning up
 from the card's foot, clothed in alternate, overlapping broad leaves: smaller and lobed for the

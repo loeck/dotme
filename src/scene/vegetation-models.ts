@@ -107,6 +107,12 @@ export type VegetationGeometry = Readonly<{
   positions: Float32Array
   normals: Int8Array
   colors: Float32Array
+  /** Bark coordinates: integer wraps around each tube, metres along its centreline. */
+  uvs: Float32Array
+  /** Species-specific furrow strength, independent of the bark palette and dark marks. */
+  furrows: number
+  /** Fine horizontal lenticel marks, used by silver birch. */
+  lenticels: number
   /** Bend weight per vertex: 0 at the root, 1 at the top. */
   bend: Float32Array
   indices: Uint32Array
@@ -151,8 +157,16 @@ class WoodBuilder {
   private readonly positions: number[] = []
   private readonly normals: number[] = []
   private readonly colors: number[] = []
+  private readonly uvs: number[] = []
   private readonly indices: number[] = []
   private reference: Point = [1, 0, 0]
+  private readonly furrows: number
+  private readonly lenticels: number
+
+  constructor(furrows = 1, lenticels = 0) {
+    this.furrows = furrows
+    this.lenticels = lenticels
+  }
 
   /**
    * A tube through `points` with a radius per point. `colour(s, angle)` paints a vertex from
@@ -166,6 +180,13 @@ class WoodBuilder {
   ) {
     if (points.length < 2) return
     const first = this.positions.length / 3
+    // Integer wraps join the repeating scan at the seam. A duplicated seam vertex keeps
+    // triangles from interpolating backwards across the whole texture.
+    const stride = sides + 1
+    const wraps = Math.max(1, Math.round(Math.max(...radii) * TAU * 1.4))
+    const origin = points[0] ?? [0, 0, 0]
+    const offsetU = origin[0] * 1.73 + origin[2] * 0.91
+    const offsetV = origin[1] * 0.83 + origin[0] * 0.37
     let normal: Point | null = null
     let length = 0
     const lengths = [0]
@@ -187,7 +208,7 @@ class WoodBuilder {
       const binormal = cross(tangent, normal)
       const radius = radii[i] ?? 0
       const s = length > 0 ? (lengths[i] ?? 0) / length : 0
-      for (let side = 0; side < sides; side++) {
+      for (let side = 0; side <= sides; side++) {
         const angle = (side / sides) * TAU
         const out = add(scale(normal, Math.cos(angle)), binormal, Math.sin(angle))
         const q = add(p, out, radius)
@@ -195,14 +216,15 @@ class WoodBuilder {
         this.normals.push(out[0], out[1], out[2])
         const c = colour(s, angle)
         this.colors.push(c[0], c[1], c[2])
+        this.uvs.push((side / sides) * wraps + offsetU, (lengths[i] ?? 0) + offsetV)
       }
     }
     for (let i = 0; i < points.length - 1; i++)
       for (let side = 0; side < sides; side++) {
-        const a = first + i * sides + side
-        const b = first + i * sides + ((side + 1) % sides)
-        const c = a + sides,
-          d = b + sides
+        const a = first + i * stride + side
+        const b = a + 1
+        const c = a + stride,
+          d = b + stride
         // Counter-clockwise from outside: (ring i, a), (ring i, a + 1), (ring i + 1, a).
         this.indices.push(a, b, c, b, d, c)
       }
@@ -222,6 +244,9 @@ class WoodBuilder {
       positions: new Float32Array(this.positions),
       normals: new Int8Array(this.normals.map((v) => Math.round(v * 127))),
       colors: new Float32Array(this.colors),
+      uvs: new Float32Array(this.uvs),
+      furrows: this.furrows,
+      lenticels: this.lenticels,
       bend,
       indices: new Uint32Array(this.indices),
       height,
@@ -645,7 +670,7 @@ export function growPine(seed: number, detail: ModelDetail): TreeModel {
  */
 export function growBirch(seed: number, detail: ModelDetail): TreeModel {
   const random = mulberry32(seed)
-  const wood = new WoodBuilder()
+  const wood = new WoodBuilder(0.14, 1)
   const sprays: Spray[] = []
   const height = between(random, 5, 6.5)
   const trunk = trunkPath(random, height, 22, 0.07)
@@ -657,10 +682,10 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
     detail.trunkSides,
     (s, angle) => {
       const ring = Math.floor(s * 24)
-      // Lenticels: dark horizontal dashes on some rings and sides; a dark, fissured foot.
+      // Broad tone variation and a dark foot; fine lenticels are shaded per fragment.
       const dash = (marks[ring] ?? 0) < 0.4 && Math.sin(angle * 2 + ring * 1.7) > 0.2
       const foot = 1 - smooth01(0.03, 0.12, s)
-      const colour = dash ? P.birchMark : P.birchBark
+      const colour = scaleRgb(P.birchBark, dash ? 0.94 : 1)
       return mixRgb(colour, P.birchMark, foot * 0.85)
     },
   )
@@ -762,9 +787,9 @@ export function growBroadleaf(
   heights: readonly [number, number] = habit === 'oak' ? [6, 7.8] : [6.6, 8.4],
 ): TreeModel {
   const random = mulberry32(seed)
-  const wood = new WoodBuilder()
-  const sprays: Spray[] = []
   const oak = habit === 'oak'
+  const wood = new WoodBuilder(oak ? 1 : 0.22)
+  const sprays: Spray[] = []
   const height = between(random, heights[0], heights[1])
   const youth = Math.min(1, height / 5)
   const crownBase = height * (oak ? between(random, 0.18, 0.28) : between(random, 0.24, 0.34))

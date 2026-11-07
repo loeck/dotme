@@ -166,7 +166,7 @@ export function prepareVegetation(
 ): PreparedVegetation {
   const grid = mobile ? GRID.mobile : GRID.desktop
   const detail = mobile ? MODEL_DETAIL.mobile : MODEL_DETAIL.desktop
-  const wood = new MeshBuilder(false)
+  const wood = new MeshBuilder(true)
   const foliage = new MeshBuilder(true)
   const undergrowth = new MeshBuilder(false)
   const models = new Map<string, TreeModel>()

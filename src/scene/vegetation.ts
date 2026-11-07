@@ -4,12 +4,13 @@ import {
   cameraPosition,
   dot,
   float,
+  floor,
+  fract,
+  fwidth,
   min,
   mix,
   normalize,
-  normalWorldGeometry,
   positionLocal,
-  positionGeometry,
   positionView,
   positionWorld,
   pow,
@@ -146,6 +147,7 @@ export class Vegetation {
     geometry.setAttribute('color', new BufferAttribute(data.colors, 3))
     geometry.setAttribute('wind', new BufferAttribute(data.wind, 4))
     if (data.uvs.length) geometry.setAttribute('uv', new BufferAttribute(data.uvs, 2))
+    if (data.bark.length) geometry.setAttribute('bark', new BufferAttribute(data.bark, 3))
     geometry.setIndex(new BufferAttribute(data.indices, 1))
     geometry.computeBoundingSphere()
     // Sway and flutter reach a little beyond the rest bounds.
@@ -194,30 +196,41 @@ export class Vegetation {
       metalness: 0,
     })
     material.positionNode = positionLocal.add(this.sway())
+    const bark = attribute<'vec3'>('bark')
+    const grain = bark.x
+    const coordinates = uv().mul(vec2(1, 0.75))
+    // The worker's tube coordinates follow each limb and remain attached during wind sway.
+    // Smooth beech and birch retain their own finish, including the birch's dark markings.
+    const detail = scan ? texture(scan.surface, coordinates).rg : vec2(0.9, 0.5)
+    const scannedColor = scan ? texture(scan.color, coordinates).rgb : vec3(0.18)
+    const contrast = scannedColor
+      .dot(vec3(0.2126, 0.7152, 0.0722))
+      .div(0.18)
+      .clamp(0.4, 1.8)
+    const tone = mix(1, contrast, grain.mul(0.6).add(0.12))
+    // A broken, restrained green patina at ground contact grounds the trunks in the bank.
+    const foot = smoothstep(0.9, 0.08, bark.y)
+    const patina = scan ? foot.mul(smoothstep(0.28, 0.7, detail.g)).mul(0.32) : float(0)
+    // Birch's lenticels need fragment detail: painting a whole tube ring made blurred bands.
+    // Wrap the hash across U as well as the scan, and fade subpixel marks before they shimmer.
+    const marks = coordinates.mul(vec2(14, 18))
+    const cell = floor(marks)
+    const wrapped = vec2(cell.x.sub(floor(cell.x.div(14)).mul(14)), cell.y)
+    const random = fract(sin(wrapped.dot(vec2(127.1, 311.7))).mul(43758.5453))
+    const local = fract(marks)
+      .sub(vec2(fract(random.mul(7.13)).mul(0.46).add(0.27), random.mul(0.4).add(0.3)))
+      .abs()
+    const pixel = fwidth(marks).max(0.001)
+    const dash = smoothstep(random.mul(0.14).add(0.24), random.mul(0.06).add(0.08), local.x)
+      .mul(smoothstep(pixel.y.add(0.018), 0.018, local.y))
+      .mul(smoothstep(0.4, 0.6, random))
+      .mul(smoothstep(0.65, 0.15, pixel.y))
+      .mul(bark.z)
+    material.colorNode = mix(vec3(tone), vec3(0.66, 0.87, 0.48), patina).mul(dash.mul(-0.82).add(1))
+    material.roughnessNode = mix(0.76, detail.r.clamp(0.68, 0.98), grain).add(patina.mul(0.08))
     if (scan) {
-      // Sample the baked rest position so bark stays attached while branches sway.
-      // Side projections keep grooves upright around the trunk without a UV seam.
-      const p = positionGeometry
-      const axes = normalWorldGeometry.xz.abs().pow(4)
-      const across = axes.x.div(axes.x.add(axes.y).max(0.0001))
-      const first = vec2(p.z, p.y).mul(vec2(1.4, 0.75))
-      const second = vec2(p.x, p.y).mul(vec2(1.4, 0.75))
-      const colorMap = texture(scan.color)
-      const surfaceMap = texture(scan.surface)
-      const scannedColor = mix(colorMap.sample(second).rgb, colorMap.sample(first).rgb, across)
-      const detail = mix(surfaceMap.sample(second).rg, surfaceMap.sample(first).rg, across)
-      const paleBark = smoothstep(0.18, 0.36, vertexColor().rgb.dot(vec3(0.2126, 0.7152, 0.0722)))
-      const contrast = scannedColor
-        .dot(vec3(0.2126, 0.7152, 0.0722))
-        .div(0.18)
-        .clamp(0.45, 1.65)
-      material.colorNode = vec3(mix(1, contrast, paleBark.mul(-0.5).add(0.7)))
-      material.roughnessNode = mix(detail.r.clamp(0.65, 0.98), 0.82, paleBark)
       const near = smoothstep(42, 5, positionWorld.distance(cameraPosition))
-      material.normalNode = surfaceGradientNormal(
-        detail.g.mul(0.008),
-        near.mul(paleBark.mul(-0.75).add(1)),
-      )
+      material.normalNode = surfaceGradientNormal(detail.g.mul(0.012), near.mul(grain))
     }
     return material
   }
@@ -236,6 +249,8 @@ export class Vegetation {
     // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
     // fill their cards into squares.
     const coverage = sample.a
+    // Leaf centres catch a little more light than their dry edges without glazing the crown.
+    material.roughnessNode = mix(0.98, 0.84, smoothstep(0.12, 0.8, sample.g))
     material.alphaTest = 0.5
     // Needle-to-needle and leaf-to-leaf tone, kept within about ±35% of the palette: a wider
     // spread pushed sunlit leaves into the tone curve's shoulder, which washed them pale grey.
