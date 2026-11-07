@@ -208,3 +208,22 @@ leaflets add a light flutter that moves each piece rigidly at no more than about
 sway at most about 1.3 Hz. A per-vertex flutter at the plants' natural rates made the vegetation
 tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
 angular frequency. Reduced motion freezes the time, keeping only the static lean.
+
+## Roots and weathering
+
+Wood rings have a shallow elliptical/lobed profile and gradual swellings, strongest on
+fissured oak and conifer bark and subtler on beech and birch. Broadleaf and birch branch
+collars widen through an extra shoulder ring. Nearby mature broadleaf models also carry
+one or two short healed stubs with closed, lighter heartwood faces. The extra details retain
+continuous bark coordinates and the existing species-specific relief.
+
+Within 30 m of the resting camera (18 m on phones), exposed roots spread from the trunk's
+flared foot and follow the sampled terrain, with their tips buried in the soil. Paths reject
+water, steep/rocky ground and boulder footprints. Small grass tufts, folded brown leaves and
+short twigs gather around these roots; nearby stones receive litter too. These additions use
+the existing merged wood and undergrowth meshes rather than extra draws.
+
+Vegetation shares the shore's retained rain moisture: bark darkens and becomes less rough,
+while foliage darkens gently and gains a damp sheen. Patches follow the vegetation's rest
+positions through wind deformation. Soaking takes seconds and drying takes minutes, using
+the same clock and reduced-motion policy as the terrain.

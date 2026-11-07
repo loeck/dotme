@@ -2139,6 +2139,7 @@ export class VoxelLandscapeEngine {
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial)
         this.receiveSceneLight(mesh.material, vegetation.pointerLight.get(mesh))
+    this.details?.attachVegetation(vegetation.meshes)
     this.vegetationGroup.updateMatrixWorld(true)
     performance.mark('vegetation-presented')
   }

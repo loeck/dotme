@@ -143,6 +143,13 @@ export class SceneDetails {
     this.sand.applyTo(sand)
   }
 
+  /** Vegetation joins asynchronously, after its cloud and pointer lighting hooks. */
+  attachVegetation(meshes: readonly Mesh[]) {
+    for (const mesh of meshes)
+      if (mesh.material instanceof MeshStandardNodeMaterial)
+        this.wetness.applyTo(mesh.material, mesh.geometry.hasAttribute('bark') ? 'wood' : 'foliage')
+  }
+
   get impactSlopes() {
     return this.splashes.impacts.slopes
   }

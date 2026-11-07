@@ -67,6 +67,13 @@ second (a little faster climbing), as a crow or jackdaw does, and gliding for 1.
 2.8 s, each bird on its own rhythm; they bank into turns, fade in at the crown and out after
 24 s. Reduced motion shows no birds.
 
+Floating leaves slow down in sheltered shore pockets derived from the actual shoreline.
+Only nearby pockets with a clear water path can influence them; a bank-parallel current
+keeps a small gap from solid banks. Splash impulses can still disturb the leaves. The pool
+holds four leaves on phones and seven on desktop, plus the buoy, within the water material's
+eight contact slots. Shed leaves live for 100–130 seconds before fading and recycling, so
+several can collect between falls. Airborne flutter stops when a leaf rests on land.
+
 The world seed can select a supported left-bank waterfall with a clear landing in the lake.
 An upstream rock basin contains a shallow pool and narrows into an open spillway at the lip.
 The basin floor and banks belong to the generated terrain; its water feeds a volume of seeded

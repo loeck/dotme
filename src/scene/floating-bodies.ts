@@ -83,6 +83,7 @@ export class FloatingBodies {
   private readonly grabTarget = new Vector3()
   private readonly leafSources: Vector3[] = []
   private nextLeaf = 6
+  private readonly leafPockets: Array<{ x: number; z: number }> = []
 
   constructor(
     scene: Scene,
@@ -96,10 +97,12 @@ export class FloatingBodies {
     this.splashes = splashes
     this.bed = bed
     this.state = (seed ^ 0x3f10a7) >>> 0
+    this.findLeafPockets()
     const specs: FloaterSpec[] = [
       { radius: 0.075, density: 500, windage: 0.25, flatten: 1, color: 0x91625a },
     ]
-    const leaves = mobile ? 2 : 6
+    // Seven leaves plus the buoy fit the lake material's eight contact slots.
+    const leaves = mobile ? 4 : 7
     for (let i = 0; i < leaves; i++)
       specs.push({
         radius: 0.035 + this.random() * 0.015,
@@ -211,6 +214,73 @@ export class FloatingBodies {
     return null
   }
 
+  /** Concave banks and stone lees, limited to the visible part of the lake. */
+  private findLeafPockets() {
+    const candidates: Array<{ x: number; z: number; shelter: number }> = []
+    for (let z = -35; z < 12; z += 0.5)
+      for (let x = -22; x < 22; x += 0.5) {
+        const shore = sampleShore(this.bed, x, z)
+        const index = lakeIndex(this.bed, x, z)
+        if (shore < 0.18 || shore > 0.65 || index < 0 || !this.bed.water[index]) continue
+        let shelter = 0
+        for (let spoke = 0; spoke < 8; spoke++) {
+          const angle = (spoke * Math.PI) / 4
+          if (sampleShore(this.bed, x + Math.cos(angle) * 1.1, z + Math.sin(angle) * 1.1) < 0.08)
+            shelter++
+        }
+        if (shelter >= 3) candidates.push({ x, z, shelter })
+      }
+    candidates.sort((a, b) => b.shelter - a.shelter || b.z - a.z)
+    for (const candidate of candidates) {
+      if (this.leafPockets.length >= 48) break
+      if (this.leafPockets.every((p) => Math.hypot(p.x - candidate.x, p.z - candidate.z) > 1.2))
+        this.leafPockets.push(candidate)
+    }
+  }
+
+  private leafCurrent(x: number, z: number, driftX: number, driftZ: number) {
+    const shore = sampleShore(this.bed, x, z)
+    if (shore > 1.8) return { x: driftX, z: driftZ, damping: 0 }
+    let target: { x: number; z: number } | undefined
+    let distance = 1.6
+    for (const pocket of this.leafPockets) {
+      const d = Math.hypot(pocket.x - x, pocket.z - z)
+      if (d >= distance) continue
+      // A nearby pocket across a rock is not reachable by this local current.
+      let clear = true
+      for (let step = 1; step <= 8; step++)
+        if (
+          sampleShore(this.bed, x + ((pocket.x - x) * step) / 8, z + ((pocket.z - z) * step) / 8) <
+          0.09
+        ) {
+          clear = false
+          break
+        }
+      if (clear) {
+        target = pocket
+        distance = d
+      }
+    }
+    const shelter = target ? Math.max(0, 1 - distance / 1.6) : 0
+    let vx = driftX * (1 - shelter * 0.92) + (target ? (target.x - x) * 0.055 * shelter : 0)
+    let vz = driftZ * (1 - shelter * 0.92) + (target ? (target.z - z) * 0.055 * shelter : 0)
+    if (shore < 0.45) {
+      const dx = sampleShore(this.bed, x + 0.12, z) - sampleShore(this.bed, x - 0.12, z)
+      const dz = sampleShore(this.bed, x, z + 0.12) - sampleShore(this.bed, x, z - 0.12)
+      const length = Math.hypot(dx, dz)
+      if (length > 0.001) {
+        const nx = dx / length,
+          nz = dz / length
+        const inward = Math.min(0, vx * nx + vz * nz)
+        // Deflect into a bank-parallel flow and hold a small water gap at the edge.
+        const repel = Math.max(0, 0.18 - shore) * 0.7
+        vx += nx * (repel - inward)
+        vz += nz * (repel - inward)
+      }
+    }
+    return { x: vx, z: vz, damping: shelter * 1.5 }
+  }
+
   private surfaceAt(x: number, z: number, time: number, wind: WindState, footprint: number) {
     if (this.contact) return this.contact.sample(x, z, time, wind, footprint)
     const [height, dx, dz, speed] = sampleWaterContact(x, z, time, wind, footprint)
@@ -292,7 +362,7 @@ export class FloatingBodies {
     leaf.body.setAngvel({ x: 1.2, y: this.random() * 2 - 1, z: 0.6 }, true)
     leaf.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
     leaf.born = time
-    leaf.fadeAt = time + 45
+    leaf.fadeAt = time + 100 + this.random() * 30
     leaf.dry = true
   }
 
@@ -329,6 +399,13 @@ export class FloatingBodies {
           this.surfaceAt(position.x, position.z, stepTime, wind, floater.radius)[0] + floater.radius
         continue
       }
+      const leaf = floater.flatten < 1
+      const current = leaf
+        ? this.leafCurrent(position.x, position.z, driftX, driftZ)
+        : { x: driftX, z: driftZ, damping: 0 }
+      const onWater = lakeIndex(this.bed, position.x, position.z)
+      // The picking mask is conservative; the finer shoreline owns the actual water gap.
+      const afloat = onWater >= 0 && sampleShore(this.bed, position.x, position.z) > 0
       const push = (value: number) =>
         Math.max(-40, Math.min(40, Number.isFinite(value) ? value : 0)) * floater.mass
       let wet = 0
@@ -341,10 +418,9 @@ export class FloatingBodies {
           y = position.y + oy,
           z = position.z + oz
         const [surface, dx, dz, dhdt] = this.surfaceAt(x, z, stepTime, wind, floater.radius)
-        const submerged = Math.max(
-          0,
-          Math.min(1, (surface - y + floater.radius) / (2 * floater.radius)),
-        )
+        const submerged = afloat
+          ? Math.max(0, Math.min(1, (surface - y + floater.radius) / (2 * floater.radius)))
+          : 0
         wet += submerged * share
         if (submerged <= 0) continue
         const pointVx = velocity.x + angular.y * oz - angular.z * oy
@@ -353,13 +429,15 @@ export class FloatingBodies {
         body.addForceAtPoint(
           {
             x: push(
-              (-dx * GRAVITY * 0.9 + (driftX * floater.windage - pointVx) * 1.2) *
+              (-dx * GRAVITY * 0.9 +
+                (current.x * floater.windage - pointVx) * (1.2 + current.damping)) *
                 submerged *
                 share,
             ),
             y: push((2 * GRAVITY - (pointVy - dhdt) * 4) * submerged * share),
             z: push(
-              (-dz * GRAVITY * 0.9 + (driftZ * floater.windage - pointVz) * 1.2) *
+              (-dz * GRAVITY * 0.9 +
+                (current.z * floater.windage - pointVz) * (1.2 + current.damping)) *
                 submerged *
                 share,
             ),
@@ -368,7 +446,11 @@ export class FloatingBodies {
           false,
         )
       }
-      if (wet === 0 && floater.flatten < 1) {
+      const ground =
+        onWater >= 0
+          ? Math.max(WATER_LEVEL, this.bed.obstacle[onWater] ?? WATER_LEVEL)
+          : WATER_LEVEL
+      if (wet === 0 && leaf && position.y > ground + floater.radius * 2) {
         const phase = floater.home.x * 7 + floater.home.z * 3
         body.setAngvel(
           {
