@@ -76,14 +76,20 @@ circumference and along its centreline, so grain follows bent trunks and incline
 An integer number of wraps and duplicated seam vertices prevent a stretched stripe where
 the texture closes. Length coordinates scale with tree placement, and each tube starts at a
 different part of the scan. The coordinates remain attached during wind sway.
-The scan modulates each species' palette: oak and conifers keep coarse furrows, while beech
-and birch have shallower relief and a smoother finish. Species strength is explicit rather
-than inferred from colour. Birch lenticels are fine, scattered horizontal dashes in the material
-instead of broad, interpolated vertex bands; they repeat seamlessly and fade before they
-become smaller than a pixel. A restrained, irregular
-green patina darkens the first 90 cm above each root. Surface-gradient relief fades by 42 m
-and uses the same mipmapped, anisotropic scan resources as the terrain. No additional scan
-or draw is needed; duplicated seam vertices leave the triangle count unchanged.
+The scan modulates each species' palette. Two seam-periodic noise layers add broken plates,
+longitudinal furrows, weathered scars and pale lichen at a scale that remains visible across
+the lake, where the fine scan alone averages into a clean cylinder. The scan breaks up scar
+edges at close range. Oak and conifers keep deeper furrows; beech has shallower relief and
+birch has broader horizontal peeling patches, with a rougher foot. Species strength is
+explicit rather than inferred from colour. Birch lenticels remain fine, scattered horizontal
+dashes; they repeat seamlessly and fade before they become smaller than a pixel.
+An irregular green patina darkens the first 1.4 m above each root. Dry bark is matte, with a
+reduced sky reflection; rain still darkens it and lowers its roughness through the shared
+wetness treatment. Fine surface-gradient relief fades by 42 m, while coarse plate relief
+fades by 80 m. Screen-space derivatives fade unresolved patterns before they shimmer.
+Both layers remain attached during wind sway and work without a loaded scan. The scan
+keeps the same mipmapped, anisotropic resources as the terrain. No additional scan or draw
+is needed; duplicated seam vertices leave the triangle count unchanged.
 
 Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
