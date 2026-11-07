@@ -86,3 +86,4 @@ Project code is [MIT licensed](LICENSE). Preserve the [Three.js notice](public/l
 the recording provenance in [audio sources](public/audio/sources.json), and the visible
 [Open-Meteo attribution](docs/paris-weather.md). Those external assets and data retain
 their own license terms.
+The terrain uses [CC0 Poly Haven textures](public/textures/terrain/sources.json).

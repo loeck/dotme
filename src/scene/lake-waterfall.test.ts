@@ -17,7 +17,6 @@ import type { WaterfallSite } from './lake-world'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
 import type { Voxel } from './voxel-spatial'
-import { waterfallDrift } from './waterfall-flow'
 import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
 import { WindModel } from './wind'
 import type { WindState } from './wind'
@@ -146,7 +145,7 @@ describe('lake waterfall lifecycle', () => {
     waterfall.dispose()
   })
 
-  it('shows the mirror a ribbon along the sheet instead of the fluid, mist and spray', () => {
+  it('shows the mirror the curtain instead of the fluid capture, mist and spray', () => {
     const waterfall = new LakeWaterfall(
       new Scene(),
       fall,
@@ -172,19 +171,6 @@ describe('lake waterfall lifecycle', () => {
     )
     for (const name of ['waterfall-fluid', 'waterfall-mist', 'waterfall-droplets'])
       expect(seenBy(mirror)).not.toContain(name)
-    const ribbon = waterfall.group.getObjectByName('waterfall-reflection')
-    if (!(ribbon instanceof Mesh) || !(ribbon.geometry instanceof BufferGeometry))
-      throw new Error('Missing reflection ribbon')
-    const positions: unknown = ribbon.geometry.getAttribute('position')
-    if (!(positions instanceof BufferAttribute)) throw new Error('Missing ribbon positions')
-    const height = fall.top - waterfall.group.position.y
-    for (let i = 0; i < positions.count; i++) {
-      const y = positions.getY(i)
-      expect(y).toBeGreaterThanOrEqual(-1e-6)
-      expect(y).toBeLessThanOrEqual(height + 1e-6)
-      expect(positions.getZ(i)).toBeCloseTo(waterfallDrift(height, y), 5)
-      expect(Math.abs(positions.getX(i))).toBeLessThan(fall.width / 2 + 0.2)
-    }
     waterfall.dispose()
   })
 
@@ -226,7 +212,7 @@ describe('lake waterfall lifecycle', () => {
     expect(scene.children).toHaveLength(0)
   })
 
-  it('parts the curtain around the cursor blocker without penetrating its core', () => {
+  it('parts the reflected curtain around the cursor and fills its gap after release', () => {
     const scene = new Scene()
     const fragments: SplashJet[] = []
     const waterfall = new LakeWaterfall(
@@ -261,17 +247,21 @@ describe('lake waterfall lifecycle', () => {
       }
     }
     expect(outsideCapture).toBe(0)
-    const positions = streamed(waterfall, 'aBodyPosition')
     const foams = streamed(waterfall, 'aBodyFoam')
+    const mirror = waterfall.group.getObjectByName('waterfall-reflection')
+    if (!(mirror instanceof Mesh) || !(mirror.geometry instanceof BufferGeometry))
+      throw new Error('Missing reflected curtain')
+    const reflected: unknown = mirror.geometry.getAttribute('aBodyPosition')
+    if (!(reflected instanceof InstancedBufferAttribute))
+      throw new Error('Missing live reflected positions')
     let inBand = 0,
       foamed = 0,
       clearance = Infinity
     const depths: number[] = []
     for (let i = 0; i < foams.length; i++) {
-      const base = i * 3
-      const x = positions[base] ?? 0,
-        y = positions[base + 1] ?? 0,
-        z = positions[base + 2] ?? 0
+      const x = reflected.getX(i),
+        y = reflected.getY(i),
+        z = reflected.getZ(i)
       if (Math.abs(y - 1.5) > 0.16) continue
       inBand++
       depths.push(z)
@@ -294,10 +284,9 @@ describe('lake waterfall lifecycle', () => {
     }
     let restoredClearance = Infinity
     for (let i = 0; i < foams.length; i++) {
-      const base = i * 3
-      const x = positions[base] ?? 0,
-        y = positions[base + 1] ?? 0,
-        z = positions[base + 2] ?? 0
+      const x = reflected.getX(i),
+        y = reflected.getY(i),
+        z = reflected.getZ(i)
       if (Math.abs(y - 1.5) < 0.16)
         restoredClearance = Math.min(restoredClearance, Math.hypot(x, z - 0.69))
     }

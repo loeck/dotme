@@ -91,6 +91,8 @@ import type { FlickSample } from './stone-skips'
 import { SubmergedScene } from './submerged-scene'
 import { TerrainSkyFill } from './terrain-detail'
 import { createBoulderMaterial, createTerrainMaterial } from './terrain-material'
+import { loadTerrainTextures } from './terrain-textures'
+import type { TerrainTextures } from './terrain-textures'
 import { SCRUB, TimeScrub, wheelPixels } from './time-scrub'
 import { UNDERGROWTH_LAYER, Vegetation } from './vegetation'
 import { VolumetricClouds } from './volumetric-clouds'
@@ -266,6 +268,10 @@ export class VoxelLandscapeEngine {
   private readonly rayNdc = new Vector2()
   private readonly waterPlane = new Plane(new Vector3(0, 1, 0), -WATER_LEVEL)
   private readonly waterHit = new Vector3()
+  private readonly grabPlane = new Plane()
+  private readonly grabNormal = new Vector3()
+  private readonly grabPoint = new Vector3()
+  private grabPointerId = -1
   // Separate targets: processPointer() runs inside render() and must not overwrite the
   // frame's water point, nor a stroke's endpoints while it samples between them.
   private readonly frameWaterPoint = new Vector3()
@@ -426,6 +432,10 @@ export class VoxelLandscapeEngine {
     }
     signal.addEventListener('abort', abort, { once: true })
     try {
+      const terrainTextures = loadTerrainTextures(
+        resources,
+        Math.min(window.innerWidth < 768 ? 4 : 8, options.renderer.getMaxAnisotropy()),
+      )
       // Let the loader present between CPU preparation and material compilation.
       await preparationFrame(signal)
       signal.throwIfAborted()
@@ -433,7 +443,9 @@ export class VoxelLandscapeEngine {
       const physics = resources.own(createPhysicsWorld(await physicsModule, prepared.colliders))
       // Collider creation and scene construction are separate tasks for the loader.
       await preparationFrame(signal)
-      engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources)
+      const scans = await terrainTextures
+      signal.throwIfAborted()
+      engine = new VoxelLandscapeEngine({ ...options, prepared, physics }, resources, scans)
       const initialLight = sampleLighting(
         engine.solarClock.seconds(0),
         0,
@@ -476,12 +488,15 @@ export class VoxelLandscapeEngine {
   }
 
   private readonly resources: ResourceScope
+  private readonly terrainTextures: TerrainTextures | undefined
 
   private constructor(
     options: VoxelLandscapeEngineOptions & { prepared: PreparedWorld; physics: PhysicsWorld },
     resources: ResourceScope,
+    terrainTextures: TerrainTextures | undefined,
   ) {
     this.resources = resources
+    this.terrainTextures = terrainTextures
     const { prepared, physics, ...configuration } = options
     this.options = configuration
     // `create` already owns the physics world in this scope.
@@ -746,7 +761,10 @@ export class VoxelLandscapeEngine {
     const { world, terrain } = prepared
     const seed = world.seed
     const meshes = [
-      { data: terrain.surface, material: createTerrainMaterial(this.terrainSky) },
+      {
+        data: terrain.surface,
+        material: createTerrainMaterial(this.terrainSky, this.terrainTextures),
+      },
       { data: terrain.boulders, material: createBoulderMaterial(this.terrainSky) },
     ]
     for (const { data, material } of meshes) {
@@ -1188,6 +1206,29 @@ export class VoxelLandscapeEngine {
       this.requestFrame()
       return
     }
+    if (this.projectPointer(event.clientX, event.clientY)) {
+      const ray = this.raycaster.ray
+      const padding =
+        (2 *
+          Math.tan((this.camera.fov * Math.PI) / 360) *
+          (event.pointerType === 'touch' ? 18 : 10)) /
+        this.height
+      const solid = this.physics.castDistance(ray.origin, ray.direction, 130) ?? 130
+      const buoy = this.details?.grabFloater(ray, padding, solid)
+      if (buoy) {
+        this.grabPointerId = event.pointerId
+        this.grabPlane.setFromNormalAndCoplanarPoint(
+          this.camera.getWorldDirection(this.grabNormal),
+          buoy,
+        )
+        this.previousPointer = this.pendingPointer = null
+        this.pointerRevision += 1
+        this.lastTap = null
+        document.documentElement.dataset.sceneGrab = 'true'
+        this.renderer.domElement.setPointerCapture(event.pointerId)
+        return
+      }
+    }
     const point = this.hitWater(event.clientX, event.clientY, this.pressPoint)
     // Off the water, the press may startle birds from a crown or make a wish on the night sky;
     // both read the pointer ray, so it must have been cast for this very press.
@@ -1221,6 +1262,7 @@ export class VoxelLandscapeEngine {
     if (!this.focused || document.hidden) return
     if (
       !event.isPrimary ||
+      (this.grabPointerId >= 0 && event.pointerId !== this.grabPointerId) ||
       (this.dragging && event.pointerId !== this.dragPointerId) ||
       (this.skyPointerId >= 0 && event.pointerId !== this.skyPointerId)
     )
@@ -1228,6 +1270,12 @@ export class VoxelLandscapeEngine {
     this.pointerType = event.pointerType
     this.setPrimaryMouseDown(event.pointerType === 'mouse' && (event.buttons & 1) !== 0)
     this.pointerActive = event.pointerType !== 'touch' || event.buttons !== 0
+    if (this.grabPointerId >= 0) {
+      this.pointerClient.set(event.clientX, event.clientY)
+      this.moveGrabbedFloater()
+      if ((event.buttons & 1) === 0) this.onPointerLeave()
+      return
+    }
     this.target.set(
       clamp((event.clientX / this.width) * 2 - 1, -1, 1),
       clamp((event.clientY / this.height) * 2 - 1, -1, 1),
@@ -1560,6 +1608,15 @@ export class VoxelLandscapeEngine {
   private onPointerUp = (event: PointerEvent) => {
     if (!event.isPrimary) return
     if (event.button === 0 || event.type === 'pointercancel') this.setPrimaryMouseDown(false)
+    if (event.pointerId === this.grabPointerId) {
+      this.details?.releaseFloater(event.type === 'pointercancel')
+      this.grabPointerId = -1
+      delete document.documentElement.dataset.sceneGrab
+      if (this.renderer.domElement.hasPointerCapture(event.pointerId))
+        this.renderer.domElement.releasePointerCapture(event.pointerId)
+      if (event.pointerType === 'touch') this.onPointerLeave()
+      return
+    }
     if (event.pointerId === this.skyPointerId) {
       this.onPointerLeave()
       return
@@ -1620,12 +1677,26 @@ export class VoxelLandscapeEngine {
   }
 
   private onLostCapture = () => {
-    if (this.dragging || this.skyPointerId >= 0) this.onPointerLeave()
+    if (this.dragging || this.skyPointerId >= 0 || this.grabPointerId >= 0) this.onPointerLeave()
   }
 
-  private onPointerLeave = () => {
+  private onPointerLeave = (event?: PointerEvent) => {
+    if (
+      event?.type === 'pointerleave' &&
+      this.grabPointerId >= 0 &&
+      this.renderer.domElement.hasPointerCapture(this.grabPointerId)
+    )
+      return
     this.shockwave.abort()
-    const pointerId = this.dragPointerId >= 0 ? this.dragPointerId : this.skyPointerId
+    const pointerId =
+      this.grabPointerId >= 0
+        ? this.grabPointerId
+        : this.dragPointerId >= 0
+          ? this.dragPointerId
+          : this.skyPointerId
+    this.details?.releaseFloater(true)
+    this.grabPointerId = -1
+    delete document.documentElement.dataset.sceneGrab
     this.setPrimaryMouseDown(false)
     this.skyPointerId = -1
     this.pointerActive = false
@@ -1638,6 +1709,13 @@ export class VoxelLandscapeEngine {
     if (this.reducedMotion) this.requestFrame()
     if (pointerId >= 0 && this.renderer.domElement.hasPointerCapture(pointerId))
       this.renderer.domElement.releasePointerCapture(pointerId)
+  }
+
+  private moveGrabbedFloater() {
+    if (this.grabPointerId < 0 || !this.projectPointer(this.pointerClient.x, this.pointerClient.y))
+      return
+    const target = this.raycaster.ray.intersectPlane(this.grabPlane, this.grabPoint)
+    if (target) this.details?.moveFloater(target)
   }
 
   /** Background frames sleep between draws instead of waking on every display refresh. */
@@ -2051,6 +2129,7 @@ export class VoxelLandscapeEngine {
     const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
     this.vegetation = vegetation
     this.vegetationPick = data.pick
+    this.details?.setLeafSources(data.pick)
     this.birds.setObstacles(data.pick)
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial)
@@ -2185,9 +2264,11 @@ export class VoxelLandscapeEngine {
     this.camera.position.z = CAMERA_REST.z
     this.camera.lookAt(this.camera.position.x * 0.22, this.mobile ? 2.3 : 7.3, -25)
     this.camera.updateMatrixWorld()
+    this.moveGrabbedFloater()
     const pointerOnScene =
       this.pointerActive && this.projectPointer(this.pointerClient.x, this.pointerClient.y)
-    const waterPoint = pointerOnScene ? this.waterPointOnRay(this.frameWaterPoint) : null
+    const waterPoint =
+      pointerOnScene && this.grabPointerId < 0 ? this.waterPointOnRay(this.frameWaterPoint) : null
     // Snapshot before processPointer() reprojects pending events into the same scratch vector.
     if (pointerOnScene) this.detailPointerNdc.copy(this.rayNdc)
     if (waterPoint)
@@ -2524,6 +2605,7 @@ export class VoxelLandscapeEngine {
   dispose() {
     if (this.disposed) return
     this.disposed = true
+    this.onPointerLeave()
     this.stone.mesh.removeFromParent()
     this.stone.dispose()
     this.shockwave.mesh.removeFromParent()

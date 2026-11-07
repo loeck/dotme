@@ -189,6 +189,14 @@
   scale: 0.72;
   transition-duration: 70ms;
 }
+:root[data-scene-grab='true'] .scene-cursor-point {
+  scale: 2.4;
+  background: transparent;
+}
+:root[data-scene-grab='true'] .scene-cursor-ring {
+  scale: 1.4;
+  opacity: 0.7;
+}
 .scene-cursor[data-interactive='true'][data-pressed] .scene-cursor-point {
   scale: 0.4;
 }

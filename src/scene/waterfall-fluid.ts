@@ -52,7 +52,7 @@ export function scatterPhase(cosine: Node<'float'>, g: number) {
  * mist would only haze the reflection) and environment probes avoid self-refraction.
  */
 export const WATERFALL_FLUID_LAYER = 6
-/** Mirror only: a cheap stand-in for the falling sheet in the lake reflection. */
+/** Mirror only: low-poly parcels driven by the same live curtain as the fluid volume. */
 export const WATERFALL_REFLECTION_LAYER = 8
 
 /**

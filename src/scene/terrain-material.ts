@@ -10,6 +10,8 @@ import {
   positionView,
   positionWorld,
   smoothstep,
+  texture,
+  vec2,
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
@@ -17,9 +19,10 @@ import type { Node } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
 import type { TerrainSkyFill } from './terrain-detail'
+import type { TerrainTextures } from './terrain-textures'
 
 /*
- * Procedural, texture-free ground for the smooth terrain. Layers follow what a temperate lake in
+ * Scanned grass and forest litter over procedural ground. Layers follow what a temperate lake in
  * summer shows at this scale: lush meadow grass on gentle ground with drifts of buttercups,
  * rougher tussocky grass in patches, leaf litter under the trees, damp soil in hollows, pale
  * weathered limestone on steep faces and ridges, gravel then dark wet mud at the waterline, and
@@ -103,7 +106,10 @@ function limestoneColour(p: Vec3Node, pixel: FloatNode, tone: FloatNode): Vec3No
   return spotted.mul(streak.mul(0.3).oneMinus()).mul(joints.mul(0.42).oneMinus())
 }
 
-export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMaterial {
+export function createTerrainMaterial(
+  sky: TerrainSkyFill,
+  scans?: TerrainTextures,
+): MeshStandardNodeMaterial {
   const material = new MeshStandardNodeMaterial({
     roughness: 0.9,
     metalness: 0,
@@ -128,6 +134,22 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .add(octave(p, 8.5, pixel).mul(0.3))
     .add(octave(p, 21, pixel).mul(0.15))
   const tuft = octave(p, 1.4, pixel).mul(0.5).add(0.5)
+  // World-space mapping follows the heightfield without mesh UV seams. A second,
+  // rotated sample blends across broad patches to hide the scans' repeating tiles.
+  const coordinates = p.xz.mul(0.25)
+  const rotated = vec2(p.x.mul(0.8).sub(p.z.mul(0.6)), p.x.mul(0.6).add(p.z.mul(0.8)))
+    .mul(0.21)
+    .add(0.37)
+  const scan = (maps: TerrainTextures['grass']) => {
+    const color = texture(maps.color)
+    const detail = texture(maps.surface)
+    return {
+      color: mix(color.sample(coordinates).rgb, color.sample(rotated).rgb, patch),
+      surface: mix(detail.sample(coordinates).rg, detail.sample(rotated).rg, patch),
+    }
+  }
+  const grassScan = scans && scan(scans.grass)
+  const forestScan = scans && scan(scans.forest)
 
   // Meadow grass: a fresh, yellow-green sward, brighter where open sky and sun reach it.
   let ground: Vec3Node = mix(
@@ -158,6 +180,7 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .mul(0.5)
     .add(octave(p, 13, pixel).mul(0.25))
   ground = mix(ground, rough.mul(clumps.mul(0.35).add(1)), roughGrass.mul(0.55))
+  if (grassScan) ground = mix(ground, grassScan.color.mul(vec3(0.78, 1, 0.65)), float(0.72))
   // Buttercups in drifts over the open meadow: yellow heads a few centimetres across, which
   // blend to a faint golden cast where the heads fall below a pixel.
   // Drifts reuse the slow tint and the patch octave: every Perlin octave costs on a field
@@ -178,7 +201,7 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   )
   // Last year's leaf litter under the trees' drip lines.
   const needles = smoothstep(0.25, 0.75, litter.add(grain.mul(0.18)))
-  ground = mix(ground, linear(0.085, 0.06, 0.03), needles)
+  ground = mix(ground, forestScan?.color ?? linear(0.085, 0.06, 0.03), needles)
 
   // Rock where the ground is steep, on ridges and where the composition put stone.
   // Bare rock shows on steep faces, on convex knobs and where the composition placed stone,
@@ -231,20 +254,24 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   albedo = albedo.mul(macro.mul(0.24).add(0.88))
   material.colorNode = albedo
 
-  const roughness = mix(
-    mix(mix(float(0.96), float(0.86), needles), float(0.8), gravel),
-    float(0.68),
-    rock,
-  )
+  const groundRoughness =
+    grassScan && forestScan
+      ? mix(grassScan.surface.r, forestScan.surface.r, needles).clamp(0.58, 0.98)
+      : mix(float(0.96), float(0.86), needles)
+  const roughness = mix(mix(groundRoughness, float(0.8), gravel), float(0.68), rock)
   // Wet silt, not a mirror: glossier, it caught the whole sky at grazing view like concrete.
   material.roughnessNode = mix(roughness, float(0.62), mud)
   material.aoNode = skyVisibility
 
   // Detail relief: grass tufts on the ground, cracks and grain on stone, pebbles at the shore.
   const near = smoothstep(42, 5, distance)
-  const groundRelief = octave(p, 2.2, pixel)
+  let groundRelief = octave(p, 2.2, pixel)
     .mul(0.014)
     .add(octave(p, 7, pixel).mul(0.006))
+  if (grassScan && forestScan)
+    groundRelief = groundRelief.add(
+      mix(grassScan.surface.g, forestScan.surface.g, needles).mul(0.035),
+    )
   const rockRelief = octave(p, 1.1, pixel)
     .mul(0.05)
     .add(octave(p, 3.4, pixel).mul(0.018))

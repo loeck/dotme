@@ -93,12 +93,11 @@ gestures cannot launch individual parcels across the scene.
 Capture textures stay fixed at 192 × 192 pixels on desktop and 128 × 128 on mobile; their crop
 follows the current parcel extents, including those displaced by the cursor. Only the main view
 renders the fluid volume. Environment probes omit it to avoid self-refraction, and the lake mirror
-sees a reflection-only ribbon instead: one small blended draw that follows the sheet's mean
-trajectory (`waterfallDrift`) and widening and carries the same streaks and core colour without
-the fine grain, lit by the scene's lights with the same forward scatter. Running the capture and
-filters again for a view the waves distort beyond recognition would roughly double the
-waterfall's cost. The ribbon does not part around the cursor. Mist and spray stay out of the
-mirror as well; the plunge foam and the basin still reflect.
+sees a low-poly instanced curtain instead: one draw sharing the live parcel positions,
+velocities and blocker foam, with the same streaks and core colour without the fine grain,
+lit by the scene's lights with the same forward scatter. The reflected curtain parts and
+closes around the cursor along with the main view. This avoids a second fluid capture and
+filter sequence. Mist and spray stay out of the mirror; plunge foam and the basin still reflect.
 This is an analytic flow representation, not a separate three-dimensional fluid solver.
 Grouped parcel arrivals feed the existing water-normal buffer, wave solver and recycled splash
 droplets. Cursor contact parts the curved flow and releases a few local fragments;
