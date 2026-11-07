@@ -3,18 +3,23 @@ import {
   dFdy,
   float,
   materialColor,
+  materialRoughness,
   max,
   mix,
   positionWorld,
+  normalView,
+  nodeObject,
   sin,
   smoothstep,
   vec2,
   vec3,
 } from 'three/tsl'
 import type { MeshStandardNodeMaterial } from 'three/webgpu'
+import { ConvertNode } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
 import { meadowOffset } from './lake-seabed'
+import { surfaceGradientNormal } from './surface-detail'
 import { contactNoise } from './water-noise'
 
 const RIPPLE_WAVELENGTH = 0.3
@@ -56,13 +61,34 @@ export class LakeSand {
       .mul(float(1).sub(meadow.mul(0.7)))
       .add(1)
     const previous = material.colorNode
+    const previousNormal = material.normalNode
+    const previousRoughness = material.roughnessNode
     const color = (previous ?? materialColor)
       .mul(factor)
       .mul(mix(vec3(1), vec3(0.32, 0.48, 0.3), meadow))
-    material.colorNode = color
+    const grainFade = smoothstep(0.012, 0.003, footprint)
+    const grain = contactNoise(positionWorld.xz.mul(95)).sub(0.5).mul(grainFade)
+    material.colorNode = color.mul(grain.mul(0.13).add(1))
+    const composedColor = material.colorNode
+    const baseNormal = previousNormal
+      ? nodeObject(new ConvertNode<'vec3'>(previousNormal, 'vec3'))
+      : normalView
+    const normal = surfaceGradientNormal(
+      stripes.mul(fade).mul(depthFade).mul(0.0035).add(grain.mul(0.0007)),
+      float(1),
+      baseNormal,
+    )
+    const roughness = previousRoughness
+      ? nodeObject(new ConvertNode<'float'>(previousRoughness, 'float'))
+      : materialRoughness
+    material.normalNode = normal
+    material.roughnessNode = roughness.mul(grain.mul(0.06).add(1)).clamp(0.65, 1)
+    const composedRoughness = material.roughnessNode
     material.needsUpdate = true
     this.restores.set(material, () => {
-      if (material.colorNode === color) material.colorNode = previous
+      if (material.colorNode === composedColor) material.colorNode = previous
+      if (material.normalNode === normal) material.normalNode = previousNormal
+      if (material.roughnessNode === composedRoughness) material.roughnessNode = previousRoughness
       material.needsUpdate = true
     })
   }

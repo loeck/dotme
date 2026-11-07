@@ -1,8 +1,10 @@
 import type { RigidBody } from '@dimforge/rapier3d-compat'
+import { attribute, float, fract, fwidth, mix, positionGeometry, smoothstep, vec3 } from 'three/tsl'
 import {
   Color,
   DynamicDrawUsage,
   InstancedMesh,
+  InstancedBufferAttribute,
   MeshStandardNodeMaterial,
   Object3D,
   Quaternion,
@@ -16,7 +18,9 @@ import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
 import type { LakeSplashes } from './lake-splashes'
 import type { PhysicsWorld } from './physics-world'
+import { surfaceGradientNormal } from './surface-detail'
 import type { WaterContact } from './water-contact'
+import { contactNoise } from './water-noise'
 import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
@@ -148,6 +152,26 @@ export class FloatingBodies {
     }
     const geometry = new SphereGeometry(1, 12, 8)
     const material = new MeshStandardNodeMaterial({ roughness: 0.55, metalness: 0 })
+    geometry.setAttribute(
+      'aLeaf',
+      new InstancedBufferAttribute(
+        Float32Array.from(placed, ({ spec }) => (spec.flatten < 1 ? 1 : 0)),
+        1,
+      ),
+    )
+    const leaf = attribute('aLeaf', 'float')
+    const q = positionGeometry
+    const pixel = fwidth(q).length()
+    const resolved = smoothstep(0.12, 0.025, pixel)
+    const grain = contactNoise(q.xz.mul(28)).sub(0.5).mul(resolved)
+    const midrib = smoothstep(pixel.add(0.055), pixel.mul(0.3).add(0.015), q.z.abs())
+    const veins = fract(q.x.mul(5).add(q.z.abs().mul(7)))
+    const sideVeins = smoothstep(0.13, 0.03, veins).mul(smoothstep(0.2, 0.02, pixel))
+    const leafTone = q.x.mul(0.08).add(0.94).add(midrib.mul(0.2)).add(sideVeins.mul(0.1))
+    material.colorNode = vec3(mix(grain.mul(0.12).add(1), leafTone, leaf))
+    material.roughnessNode = mix(grain.mul(0.12).add(0.43), float(0.88), leaf)
+    const relief = mix(grain.mul(0.00025), midrib.mul(0.0003).add(sideVeins.mul(0.00012)), leaf)
+    material.normalNode = surfaceGradientNormal(relief, float(1))
     this.mesh = new InstancedMesh(geometry, material, this.floaters.length)
     this.mesh.name = 'floating-bodies'
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)

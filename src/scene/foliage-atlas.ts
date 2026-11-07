@@ -184,7 +184,12 @@ class TileCanvas {
         if (lobes > 0) half *= 0.72 + 0.28 * Math.abs(Math.cos(Math.PI * lobes * t))
         return Math.abs(ly) - half
       },
-      tone,
+      (u, v) => {
+        const across = -(u - base[0]) * s + (v - base[1]) * c
+        const fold = Math.max(0, 1 - Math.abs(across) / (width * 0.5))
+        const midrib = Math.max(0, 1 - Math.abs(across) * this.size * 0.65)
+        return Math.min(1, tone(u, v) * (0.9 + fold * 0.1) + midrib * 0.055)
+      },
     )
   }
   /** A pointed leaf: an ellipse-like lens from `base` along `angle`. */

@@ -76,6 +76,15 @@ World-space sampling blends two rotated scales to soften repetition. Scanned col
 roughness and relief follow the grass/litter masks; the distant canopy and wet banks retain
 their own shading. Maps repeat with mipmaps and bounded anisotropy on both backends.
 
+[Rock 01](https://polyhaven.com/a/rock_01) by Rob Tuytel adds weathered stone grain to the
+cliffs, boulders and waterfall face. Three world-space projections blend by the fourth power
+of the geometric normal, avoiding stretched cliff textures and visible projection seams.
+The same scan drives color, roughness and near-surface relief, under the existing lichen,
+joint, moss and wetness treatments. Moss caps pick up finer grass-scan texture. Grass uses
+the scan's luminance contrast over the summer palette instead of inheriting the dry scan's
+brown average, and forest litter is subdued to avoid bright orange islands under crowns.
+Each scan can fall back independently when one of its files is unavailable.
+
 `terrain-material.ts` builds the ground from what a temperate lake shows in summer at this scale,
 with albedos in measured visible-light ranges (green grass 0.06–0.14, soil about 0.1, weathered
 limestone 0.2–0.35):

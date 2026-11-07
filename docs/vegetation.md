@@ -70,6 +70,12 @@ never twist, with eight sides on a trunk and three or four on a limb (six and th
 Only a mature spruce's main branches carry wood; the foliage hides its thin internodal ones and a sapling's branches. Bark colour
 is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
 birch's dashes and dark foot.
+The local CC0 [Bark Brown 01](https://polyhaven.com/a/bark_brown_01) scan by Rob Tuytel adds
+fine furrows, knots, roughness and shallow relief. Two upright projections around the trunk
+sample the baked rest positions, so the detail stays attached while the tree sways. The scan
+modulates each species' palette; pale birch bark retains much smoother relief and its light
+color. Surface-gradient relief fades by 42 m and uses the same mipmapped, anisotropic scan
+resources as the terrain.
 
 Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
@@ -94,7 +100,9 @@ alpha scaled per tile so the same share of texels passes the cutout as at full r
 (Castaño, "Computing Alpha Mipmaps"): plain averaging thinned distant sprays into blur, and a
 shader boost had filled whole cards into squares. Each
 texel stores a palette-relative tone, a rounded relief (each needle and leaf a dome a few
-texels across) and cutout coverage. The relief's screen-space slope tilts each card's normal
+texels across) and cutout coverage. Broad leaves also shade their fold and central vein into
+the tone channel; this detail averages naturally through the existing mip chain. The relief's
+screen-space slope tilts each card's normal
 (the surface-gradient method of the terrain's detail relief), so a near spray shades as rounded
 shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test over that chain. Lighting adds a sky-light rim and
 back-light translucency, strongest at the crown rim and against a low sun; transmitted light is

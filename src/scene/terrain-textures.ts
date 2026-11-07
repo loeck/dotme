@@ -3,16 +3,16 @@ import type { Texture } from 'three/webgpu'
 
 import type { ResourceScope } from './resource-scope'
 
-export type TerrainTextures = Readonly<{
-  grass: { color: Texture; surface: Texture }
-  forest: { color: Texture; surface: Texture }
-}>
+export type SurfaceScan = Readonly<{ color: Texture; surface: Texture }>
+export type TerrainTextures = Readonly<
+  Record<'grass' | 'forest' | 'rock' | 'bark', SurfaceScan | undefined>
+>
 
 /** Local CC0 scans; surface packs linear roughness (R) and height (G). */
 export async function loadTerrainTextures(
   resources: ResourceScope,
   anisotropy: number,
-): Promise<TerrainTextures | undefined> {
+): Promise<TerrainTextures> {
   const loader = new TextureLoader()
   const load = async (name: string, color = false) => {
     const map = resources.own(
@@ -24,19 +24,23 @@ export async function loadTerrainTextures(
     if (color) map.colorSpace = SRGBColorSpace
     return map
   }
-  try {
-    const [grassColor, grassSurface, forestColor, forestSurface] = await Promise.all([
-      load('grass_ground-color', true),
-      load('grass_ground-surface'),
-      load('forest_floor-color', true),
-      load('forest_floor-surface'),
-    ])
-    return {
-      grass: { color: grassColor, surface: grassSurface },
-      forest: { color: forestColor, surface: forestSurface },
+  const pair = async (name: string): Promise<SurfaceScan | undefined> => {
+    try {
+      const [color, surface] = await Promise.all([
+        load(`${name}-color`, true),
+        load(`${name}-surface`),
+      ])
+      return { color, surface }
+    } catch {
+      // One missing material keeps its procedural fallback without losing the others.
+      return undefined
     }
-  } catch {
-    // A missing scan must not prevent the procedural landscape from starting.
-    return undefined
   }
+  const [grass, forest, rock, bark] = await Promise.all([
+    pair('grass_ground'),
+    pair('forest_floor'),
+    pair('rock_01'),
+    pair('bark_brown_01'),
+  ])
+  return { grass, forest, rock, bark }
 }

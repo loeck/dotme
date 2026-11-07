@@ -52,7 +52,8 @@ against the dark banks; the advancing front breaks into smaller fragments rather
 outlining every shore in white.
 
 The bed capture carries a simple seabed: dune relief in the depth field, wave-ripple
-stripes on the sand albedo, dark meadow patches aligned with instanced seagrass tufts that
+stripes and shallow normal relief on the sand, filtered fine grain in its color and roughness,
+and dark meadow patches aligned with instanced seagrass tufts that
 sway in the vertex shader between 0.8 and 2.6 m deep, instanced rocks from the lake-bed
 stones plus larger separated hero rocks, and a spotted ray gliding a deep-water circuit
 with damped vertical follow and a blob shadow on the sand. Bed props share the capture layer, lighting, cloud shadows
@@ -91,6 +92,9 @@ gravity, aerodynamic drag and wind, then sends a small ripple and floats with th
 Only crowns near the visible shore contribute; the same bounded pool of six leaves (two on
 mobile) recycles every 8–18 seconds, with a four-second fade at the end of each 45-second
 lifetime. Reduced motion freezes the leaves and disables shedding and grabbing.
+Leaf surfaces show a midrib and angled veins, while the buoy keeps a finer, smoother grain;
+their separate roughness and relief share one instanced material. Procedural details fade
+with the pixel footprint rather than flickering as the props recede.
 
 The waterfall's mirror draws low-poly parcels using the live curtain's position, velocity and
 foam streams. Cursor deflections and the closing gap therefore follow the visible fall,

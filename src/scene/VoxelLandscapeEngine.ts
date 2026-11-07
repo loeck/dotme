@@ -765,7 +765,10 @@ export class VoxelLandscapeEngine {
         data: terrain.surface,
         material: createTerrainMaterial(this.terrainSky, this.terrainTextures),
       },
-      { data: terrain.boulders, material: createBoulderMaterial(this.terrainSky) },
+      {
+        data: terrain.boulders,
+        material: createBoulderMaterial(this.terrainSky, this.terrainTextures),
+      },
     ]
     for (const { data, material } of meshes) {
       this.materials.push(this.resources.own(material))
@@ -2126,7 +2129,9 @@ export class VoxelLandscapeEngine {
       return
     }
     signal.throwIfAborted()
-    const vegetation = this.resources.own(new Vegetation(this.vegetationGroup, data))
+    const vegetation = this.resources.own(
+      new Vegetation(this.vegetationGroup, data, this.terrainTextures?.bark),
+    )
     this.vegetation = vegetation
     this.vegetationPick = data.pick
     this.details?.setLeafSources(data.pick)

@@ -5,17 +5,22 @@ import {
   dot,
   float,
   min,
+  mix,
   normalize,
+  normalWorldGeometry,
   positionLocal,
+  positionGeometry,
   positionView,
   positionWorld,
   pow,
   saturate,
   sin,
+  smoothstep,
   texture,
   transformNormalToView,
   uniform,
   uv,
+  vec2,
   vec3,
   vec4,
   vertexColor,
@@ -40,6 +45,8 @@ import type { Node, Object3D } from 'three/webgpu'
 
 import type { LightingState } from './lighting'
 import type { PointerLightResponse } from './pointer-light'
+import { surfaceGradientNormal } from './surface-detail'
+import type { SurfaceScan } from './terrain-textures'
 import type { MeshData } from './vegetation-meshes'
 import type { PreparedVegetation } from './vegetation-placement'
 import { WindGusts } from './wind-gusts'
@@ -82,7 +89,7 @@ export class Vegetation {
   private readonly ambient = uniform(new Color())
   private readonly disposables: Array<{ dispose(): void }> = []
 
-  constructor(parent: Object3D, prepared: PreparedVegetation) {
+  constructor(parent: Object3D, prepared: PreparedVegetation, bark?: SurfaceScan) {
     const atlas = new DataTexture(
       prepared.atlas.data,
       prepared.atlas.width,
@@ -99,7 +106,7 @@ export class Vegetation {
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
-    this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false, {})
+    this.add(parent, 'wood', prepared.wood, this.woodMaterial(bark), true, false, {})
     this.add(
       parent,
       'foliage',
@@ -180,13 +187,38 @@ export class Vegetation {
       .add(this.gusts.sway(positionLocal, bend, phase, this.time))
   }
 
-  private woodMaterial() {
+  private woodMaterial(scan?: SurfaceScan) {
     const material = new MeshStandardNodeMaterial({
       vertexColors: true,
       roughness: 0.92,
       metalness: 0,
     })
     material.positionNode = positionLocal.add(this.sway())
+    if (scan) {
+      // Sample the baked rest position so bark stays attached while branches sway.
+      // Side projections keep grooves upright around the trunk without a UV seam.
+      const p = positionGeometry
+      const axes = normalWorldGeometry.xz.abs().pow(4)
+      const across = axes.x.div(axes.x.add(axes.y).max(0.0001))
+      const first = vec2(p.z, p.y).mul(vec2(1.4, 0.75))
+      const second = vec2(p.x, p.y).mul(vec2(1.4, 0.75))
+      const colorMap = texture(scan.color)
+      const surfaceMap = texture(scan.surface)
+      const scannedColor = mix(colorMap.sample(second).rgb, colorMap.sample(first).rgb, across)
+      const detail = mix(surfaceMap.sample(second).rg, surfaceMap.sample(first).rg, across)
+      const paleBark = smoothstep(0.18, 0.36, vertexColor().rgb.dot(vec3(0.2126, 0.7152, 0.0722)))
+      const contrast = scannedColor
+        .dot(vec3(0.2126, 0.7152, 0.0722))
+        .div(0.18)
+        .clamp(0.45, 1.65)
+      material.colorNode = vec3(mix(1, contrast, paleBark.mul(-0.5).add(0.7)))
+      material.roughnessNode = mix(detail.r.clamp(0.65, 0.98), 0.82, paleBark)
+      const near = smoothstep(42, 5, positionWorld.distance(cameraPosition))
+      material.normalNode = surfaceGradientNormal(
+        detail.g.mul(0.008),
+        near.mul(paleBark.mul(-0.75).add(1)),
+      )
+    }
     return material
   }
 
