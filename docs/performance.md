@@ -106,8 +106,9 @@ physical transmission: it was the scene's only transmissive material, so it alon
 full-viewport framebuffer copy, a mip chain and bicubic backdrop taps every frame. Blending
 over the backdrop pays for the procedural streaks, plunge foam and mist that replaced it.
 
-The lake mirror shows the fall through a reflection-only ribbon (`WATERFALL_REFLECTION_LAYER`)
-rather than the fluid volume, and mist and spray left the mirror. On the same machine, with
+The lake mirror previously showed the fall through a reflection-only ribbon
+(`WATERFALL_REFLECTION_LAYER`) rather than the fluid volume, with mist and spray omitted.
+On the same machine, with
 interleaved before/after runs, the `Lake reflection` target stayed at about 1.36-1.56 ms on
 desktop and the summed GPU time per frame moved by under 0.1 ms; pairing each removal of the
 waterfall group with a fresh baseline gave about 2.8 ms for the group before and after on desktop
@@ -115,6 +116,9 @@ and 1.9-2.0 ms at noon in the Pixel 7 emulation. Emulated mobile runs use the de
 by more than 2 ms between runs and say nothing about a phone; measure there with `?perf=split`.
 The close-up foam octaves cost only where the foam covers enough pixels to show them. The ribbon
 adds two or three programs at the scene stage and none after the first presented frame.
+The current reflection uses a low-poly instanced curtain sharing the live parcel streams,
+so cursor deflections appear in the lake. It still avoids a second fluid capture, but the
+ribbon timings above do not measure this replacement.
 
 ## Loading
 

@@ -5,21 +5,23 @@ import {
   fwidth,
   mix,
   mx_noise_float,
-  normalView,
   normalWorldGeometry,
-  positionView,
   positionWorld,
   smoothstep,
+  texture,
+  vec2,
   vec3,
 } from 'three/tsl'
 import { MeshStandardNodeMaterial } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
+import { surfaceGradientNormal, triplanarScan } from './surface-detail'
 import type { TerrainSkyFill } from './terrain-detail'
+import type { SurfaceScan, TerrainTextures } from './terrain-textures'
 
 /*
- * Procedural, texture-free ground for the smooth terrain. Layers follow what a temperate lake in
+ * Scanned grass and forest litter over procedural ground. Layers follow what a temperate lake in
  * summer shows at this scale: lush meadow grass on gentle ground with drifts of buttercups,
  * rougher tussocky grass in patches, leaf litter under the trees, damp soil in hollows, pale
  * weathered limestone on steep faces and ridges, gravel then dark wet mud at the waterline, and
@@ -49,26 +51,22 @@ function octave(position: Vec3Node, frequency: number, pixel: FloatNode): FloatN
   return mx_noise_float(position.mul(frequency)).mul(fade)
 }
 
-/** Perturbed view-space normal from a world-space height (surface gradient method). */
-function bumpNormal(height: FloatNode, strength: FloatNode): Vec3Node {
-  const dpdx = positionView.dFdx()
-  const dpdy = positionView.dFdy()
-  const r1 = dpdy.cross(normalView)
-  const r2 = normalView.cross(dpdx)
-  const det = dpdx.dot(r1)
-  const gradient = det.sign().mul(height.dFdx().mul(r1).add(height.dFdy().mul(r2)))
-  return det.abs().mul(normalView).sub(gradient.mul(strength)).normalize()
-}
-
 /**
  * Weathered limestone, as on the outcrops of a temperate upland: pale warm grey with a fine
  * speckle, joint fissures a metre or two apart (visible from afar, so they live in the albedo
  * rather than only in the fading relief), pale lichen crusts and dark rain streaks down the faces.
  */
-function limestoneColour(p: Vec3Node, pixel: FloatNode, tone: FloatNode): Vec3Node {
-  const speckle = octave(p, 23, pixel)
-    .mul(0.5)
-    .add(octave(p, 61, pixel).mul(0.5))
+function limestoneColour(
+  p: Vec3Node,
+  pixel: FloatNode,
+  tone: FloatNode,
+  scan?: Vec3Node,
+): Vec3Node {
+  const speckle = scan
+    ? float(0)
+    : octave(p, 23, pixel)
+        .mul(0.5)
+        .add(octave(p, 61, pixel).mul(0.5))
   const blotch = octave(p, 0.9, pixel)
     .mul(0.6)
     .add(octave(p, 3.1, pixel).mul(0.4))
@@ -84,11 +82,9 @@ function limestoneColour(p: Vec3Node, pixel: FloatNode, tone: FloatNode): Vec3No
     octave(vec3(p.x.mul(2.6), p.y.mul(0.3), p.z.mul(2.6)), 1, pixel),
   )
   const crust = smoothstep(0.2, 0.62, octave(p, 1.9, pixel).add(octave(p, 6.5, pixel).mul(0.4)))
-  const base = mix(
-    linear(0.13, 0.122, 0.105),
-    linear(0.3, 0.285, 0.25),
-    tone.add(blotch.mul(0.3)).clamp(),
-  )
+  const base = scan
+    ? scan.mul(tone.mul(0.35).add(0.78))
+    : mix(linear(0.13, 0.122, 0.105), linear(0.3, 0.285, 0.25), tone.add(blotch.mul(0.3)).clamp())
   const speckled = base.mul(speckle.mul(0.2).add(1))
   // Crustose lichens: pale grey-green rosettes in patches, and rare orange ones (Xanthoria,
   // Caloplaca) that shore rocks carry; both make up much of what a granite boulder shows.
@@ -103,7 +99,10 @@ function limestoneColour(p: Vec3Node, pixel: FloatNode, tone: FloatNode): Vec3No
   return spotted.mul(streak.mul(0.3).oneMinus()).mul(joints.mul(0.42).oneMinus())
 }
 
-export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMaterial {
+export function createTerrainMaterial(
+  sky: TerrainSkyFill,
+  scans?: TerrainTextures,
+): MeshStandardNodeMaterial {
   const material = new MeshStandardNodeMaterial({
     roughness: 0.9,
     metalness: 0,
@@ -128,6 +127,23 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .add(octave(p, 8.5, pixel).mul(0.3))
     .add(octave(p, 21, pixel).mul(0.15))
   const tuft = octave(p, 1.4, pixel).mul(0.5).add(0.5)
+  // World-space mapping follows the heightfield without mesh UV seams. A second,
+  // rotated sample blends across broad patches to hide the scans' repeating tiles.
+  const coordinates = p.xz.mul(0.25)
+  const rotated = vec2(p.x.mul(0.8).sub(p.z.mul(0.6)), p.x.mul(0.6).add(p.z.mul(0.8)))
+    .mul(0.21)
+    .add(0.37)
+  const scan = (maps: SurfaceScan) => {
+    const color = texture(maps.color)
+    const detail = texture(maps.surface)
+    return {
+      color: mix(color.sample(coordinates).rgb, color.sample(rotated).rgb, patch),
+      surface: mix(detail.sample(coordinates).rg, detail.sample(rotated).rg, patch),
+    }
+  }
+  const grassScan = scans?.grass && scan(scans.grass)
+  const forestScan = scans?.forest && scan(scans.forest)
+  const rockScan = scans?.rock && triplanarScan(scans.rock, 0.65)
 
   // Meadow grass: a fresh, yellow-green sward, brighter where open sky and sun reach it.
   let ground: Vec3Node = mix(
@@ -158,6 +174,15 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .mul(0.5)
     .add(octave(p, 13, pixel).mul(0.25))
   ground = mix(ground, rough.mul(clumps.mul(0.35).add(1)), roughGrass.mul(0.55))
+  if (grassScan) {
+    // Keep the summer sward's pigment: the dry scan supplies blade/soil contrast,
+    // rather than replacing every patch with its baked brown average.
+    const detail = grassScan.color
+      .dot(vec3(0.2126, 0.7152, 0.0722))
+      .div(0.12)
+      .clamp(0.45, 1.8)
+    ground = ground.mul(detail.mul(0.8).add(0.2))
+  }
   // Buttercups in drifts over the open meadow: yellow heads a few centimetres across, which
   // blend to a faint golden cast where the heads fall below a pixel.
   // Drifts reuse the slow tint and the patch octave: every Perlin octave costs on a field
@@ -178,7 +203,10 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   )
   // Last year's leaf litter under the trees' drip lines.
   const needles = smoothstep(0.25, 0.75, litter.add(grain.mul(0.18)))
-  ground = mix(ground, linear(0.085, 0.06, 0.03), needles)
+  const litterColour = forestScan
+    ? forestScan.color.mul(vec3(0.65, 0.72, 0.65))
+    : linear(0.085, 0.06, 0.03)
+  ground = mix(ground, litterColour, needles.mul(0.85))
 
   // Rock where the ground is steep, on ridges and where the composition put stone.
   // Bare rock shows on steep faces, on convex knobs and where the composition placed stone,
@@ -194,7 +222,7 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   const ledges = smoothstep(0.75, 0.9, up).mul(smoothstep(0.45, 0.7, tuft))
   // Ivy, ferns and grass cling to the faces in ragged, mostly upright streaks.
   const clinging = smoothstep(0.15, 0.45, roughPatch.add(grain.mul(0.3))).mul(0.7)
-  const stone = mix(limestoneColour(p, pixel, macro), rough, clinging)
+  const stone = mix(limestoneColour(p, pixel, macro, rockScan?.color), rough, clinging)
 
   // The waterline: gravel and pebbles, then dark saturated mud, broken by noise.
   // A narrow strip a hand or two above the water: on a low, grassy bank the turf runs almost to
@@ -231,9 +259,14 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   albedo = albedo.mul(macro.mul(0.24).add(0.88))
   material.colorNode = albedo
 
+  const groundRoughness = mix(
+    grassScan?.surface.r ?? float(0.96),
+    forestScan?.surface.r ?? float(0.86),
+    needles,
+  ).clamp(0.58, 0.98)
   const roughness = mix(
-    mix(mix(float(0.96), float(0.86), needles), float(0.8), gravel),
-    float(0.68),
+    mix(groundRoughness, float(0.8), gravel),
+    rockScan?.surface.r.clamp(0.55, 0.95) ?? float(0.68),
     rock,
   )
   // Wet silt, not a mirror: glossier, it caught the whole sky at grazing view like concrete.
@@ -242,16 +275,23 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
 
   // Detail relief: grass tufts on the ground, cracks and grain on stone, pebbles at the shore.
   const near = smoothstep(42, 5, distance)
-  const groundRelief = octave(p, 2.2, pixel)
+  let groundRelief = octave(p, 2.2, pixel)
     .mul(0.014)
     .add(octave(p, 7, pixel).mul(0.006))
-  const rockRelief = octave(p, 1.1, pixel)
+  if (grassScan || forestScan)
+    groundRelief = groundRelief.add(
+      mix(grassScan?.surface.g ?? float(0.5), forestScan?.surface.g ?? float(0.5), needles).mul(
+        0.035,
+      ),
+    )
+  let rockRelief = octave(p, 1.1, pixel)
     .mul(0.05)
     .add(octave(p, 3.4, pixel).mul(0.018))
     .add(octave(p, 11, pixel).mul(0.005))
+  if (rockScan) rockRelief = rockRelief.add(rockScan.surface.g.mul(0.055))
   const pebbleRelief = octave(p, 13, pixel).abs().mul(0.012)
   const relief = mix(mix(groundRelief, pebbleRelief, gravel), rockRelief, rock)
-  material.normalNode = bumpNormal(relief, near)
+  material.normalNode = surfaceGradientNormal(relief, near)
   return material
 }
 
@@ -259,7 +299,10 @@ export function createTerrainMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
  * Limestone boulders and the waterfall's rock face: tone per stone, moss caps, lichen, a dark wet
  * band at the waterline, and darker, glossier stone where spray wets it.
  */
-export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMaterial {
+export function createBoulderMaterial(
+  sky: TerrainSkyFill,
+  scans?: TerrainTextures,
+): MeshStandardNodeMaterial {
   const material = new MeshStandardNodeMaterial({
     roughness: 0.7,
     metalness: 0,
@@ -280,17 +323,23 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
     .mul(0.6)
     .add(octave(p, 17, pixel).mul(0.4))
 
-  const stone = limestoneColour(p, pixel, tone.mul(0.7).add(0.15))
+  const rockScan = scans?.rock && triplanarScan(scans.rock, 0.65)
+  const mossScan = scans?.grass && {
+    color: texture(scans.grass.color, p.xz.mul(0.8)).rgb,
+    surface: texture(scans.grass.surface, p.xz.mul(0.8)).rg,
+  }
+  const stone = limestoneColour(p, pixel, tone.mul(0.7).add(0.15), rockScan?.color)
   // Grass and moss caps on the upper faces, away from the splash zone, more on some stones: an
   // outcrop in a meadow wears turf on every ledge, leaving its pale flanks bare.
   const moss = smoothstep(0.32, 0.62, up.add(mossBias.mul(0.35)).add(grain.mul(0.15)).sub(0.3)).mul(
     smoothstep(0.12, 0.35, above),
   )
-  const mossColour = mix(
+  let mossColour = mix(
     linear(0.045, 0.08, 0.018),
     linear(0.09, 0.135, 0.026),
     octave(p, 4, pixel).mul(0.5).add(0.5),
   )
+  if (mossScan) mossColour = mossColour.mul(mossScan.color.g.div(0.12).clamp(0.6, 1.45))
   // Waterline: a darker, slightly brown-green film where waves keep the stone wet.
   const waterline = smoothstep(0.16, 0.0, above.add(grain.mul(0.03)))
   // The buried foot gathers soil.
@@ -302,7 +351,11 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   albedo = albedo.mul(spray.mul(-0.45).add(1))
   material.colorNode = albedo
   material.roughnessNode = mix(
-    mix(mix(float(0.66), float(0.93), moss), float(0.3), waterline),
+    mix(
+      mix(rockScan?.surface.r.clamp(0.5, 0.95) ?? float(0.66), float(0.93), moss),
+      float(0.3),
+      waterline,
+    ),
     float(0.22),
     spray,
   )
@@ -311,11 +364,13 @@ export function createBoulderMaterial(sky: TerrainSkyFill): MeshStandardNodeMate
   const near = smoothstep(45, 3, distance)
   // Weathered granite: knobbly grain, and cracks cut in where a ridged field crosses zero.
   const crack = smoothstep(0.06, 0.0, octave(p, 1.6, pixel).abs()).mul(0.012)
-  const relief = octave(p, 2.3, pixel)
+  let relief = octave(p, 2.3, pixel)
     .mul(0.032)
     .add(octave(p, 7, pixel).mul(0.012))
     .add(octave(p, 19, pixel).mul(0.004))
     .sub(crack)
-  material.normalNode = bumpNormal(relief, near)
+  if (rockScan) relief = relief.add(rockScan.surface.g.mul(0.04))
+  if (mossScan) relief = relief.add(mossScan.surface.g.mul(moss).mul(0.012))
+  material.normalNode = surfaceGradientNormal(relief, near)
   return material
 }

@@ -3,6 +3,7 @@ import {
   float,
   smoothstep,
   positionWorld,
+  positionGeometry,
   normalWorld,
   mix,
   sin,
@@ -47,15 +48,19 @@ export class ShoreWetness {
   update(delta: number, rainIntensity: number) {
     this.setWetness(advanceShoreWetness(this.wetness, rainIntensity, delta))
   }
-  applyTo(material: MeshStandardNodeMaterial) {
+  applyTo(material: MeshStandardNodeMaterial, surface: 'ground' | 'wood' | 'foliage' = 'ground') {
     if (this.restores.has(material)) return
     const oldColor = material.colorNode,
       oldRoughness = material.roughnessNode
     const low = float(1).sub(smoothstep(WATER_LEVEL + 0.15, 2, positionWorld.y))
-    const exposure = mix(0.2, 1, smoothstep(0.1, 0.8, normalWorld.y)).mul(
-      smoothstep(-0.8, -0.1, normalWorld.y),
-    )
-    const patch = sin(positionWorld.x.mul(2.7).add(positionWorld.z.mul(1.3)))
+    const exposure = mix(
+      surface === 'wood' ? 0.65 : 0.2,
+      1,
+      smoothstep(0.1, 0.8, normalWorld.y),
+    ).mul(smoothstep(-0.8, -0.1, normalWorld.y))
+    // Merged vegetation positions are world-space at rest: patches stay attached in wind.
+    const position = surface === 'ground' ? positionWorld : positionGeometry
+    const patch = sin(position.x.mul(2.7).add(position.z.mul(1.3)))
       .mul(0.08)
       .add(0.92)
     const wet = this.amount
@@ -65,10 +70,18 @@ export class ShoreWetness {
     const baseRoughness = oldRoughness
       ? nodeObject(new ConvertNode<'float'>(oldRoughness, 'float'))
       : materialRoughness
-    const color = (oldColor ?? materialColor).mul(float(1).sub(wet.mul(0.28)))
+    const color = (oldColor ?? materialColor).mul(
+      float(1).sub(wet.mul(surface === 'foliage' ? 0.09 : 0.28)),
+    )
     const roughness = mix(
       baseRoughness,
-      min(baseRoughness, max(0.12, baseRoughness.mul(0.46))),
+      min(
+        baseRoughness,
+        max(
+          surface === 'foliage' ? 0.28 : 0.12,
+          baseRoughness.mul(surface === 'wood' ? 0.56 : 0.46),
+        ),
+      ),
       wet,
     )
     material.colorNode = color

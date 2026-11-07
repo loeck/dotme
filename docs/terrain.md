@@ -1,6 +1,6 @@
 # Terrain
 
-The ground is a smooth heightfield with limestone boulders, shaded by a texture-free layered
+The ground is a smooth heightfield with limestone boulders, shaded by a layered
 material. It is what the scene renders and collides with, and the lake, the waterfall's pool,
 the forest and the lanterns are all placed on it.
 
@@ -65,6 +65,25 @@ then recomputed from the final triangles. A vertex attribute carries four bytes:
 - needle and leaf litter under each tree's drip line.
 
 ## Material
+
+Local 1K CC0 scans from Poly Haven add grass blades, exposed earth and forest litter:
+[Grass Ground](https://polyhaven.com/a/grass_ground) by Charlotte Baglioni and
+[Forest Floor](https://polyhaven.com/a/forest_floor) by eye-candy.xyz. Their provenance and
+processing are recorded in `public/textures/terrain/sources.json`. Color uses sRGB WebP;
+linear roughness and displacement share a 512px lossless WebP's red and green channels. They load
+before material compilation, with procedural shading as a fallback if an asset is unavailable.
+World-space sampling blends two rotated scales to soften repetition. Scanned color,
+roughness and relief follow the grass/litter masks; the distant canopy and wet banks retain
+their own shading. Maps repeat with mipmaps and bounded anisotropy on both backends.
+
+[Rock 01](https://polyhaven.com/a/rock_01) by Rob Tuytel adds weathered stone grain to the
+cliffs, boulders and waterfall face. Three world-space projections blend by the fourth power
+of the geometric normal, avoiding stretched cliff textures and visible projection seams.
+The same scan drives color, roughness and near-surface relief, under the existing lichen,
+joint, moss and wetness treatments. Moss caps pick up finer grass-scan texture. Grass uses
+the scan's luminance contrast over the summer palette instead of inheriting the dry scan's
+brown average, and forest litter is subdued to avoid bright orange islands under crowns.
+Each scan can fall back independently when one of its files is unavailable.
 
 `terrain-material.ts` builds the ground from what a temperate lake shows in summer at this scale,
 with albedos in measured visible-light ranges (green grass 0.06–0.14, soil about 0.1, weathered

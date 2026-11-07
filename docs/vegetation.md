@@ -68,8 +68,28 @@ tree trunks, other bushes and a step's last column. Up to 520 on desktop and 70 
 Wood is generalized cylinders: rings along each limb with parallel-transported frames, so tubes
 never twist, with eight sides on a trunk and three or four on a limb (six and three on phones).
 Only a mature spruce's main branches carry wood; the foliage hides its thin internodal ones and a sapling's branches. Bark colour
-is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, the
-birch's dashes and dark foot.
+is per vertex: plates and furrows from the angle and height, the pine's orange upper trunk, and
+the birch's pale skin and dark foot.
+The local CC0 [Bark Brown 01](https://polyhaven.com/a/bark_brown_01) scan by Rob Tuytel adds
+fine furrows, knots, roughness and shallow relief. The worker unwraps each tube around its
+circumference and along its centreline, so grain follows bent trunks and inclined branches.
+An integer number of wraps and duplicated seam vertices prevent a stretched stripe where
+the texture closes. Length coordinates scale with tree placement, and each tube starts at a
+different part of the scan. The coordinates remain attached during wind sway.
+The scan modulates each species' palette. Two seam-periodic noise layers add broken plates,
+longitudinal furrows, weathered scars and pale lichen at a scale that remains visible across
+the lake, where the fine scan alone averages into a clean cylinder. The scan breaks up scar
+edges at close range. Oak and conifers keep deeper furrows; beech has shallower relief and
+birch has broader horizontal peeling patches, with a rougher foot. Species strength is
+explicit rather than inferred from colour. Birch lenticels remain fine, scattered horizontal
+dashes; they repeat seamlessly and fade before they become smaller than a pixel.
+An irregular green patina darkens the first 1.4 m above each root. Dry bark is matte, with a
+reduced sky reflection; rain still darkens it and lowers its roughness through the shared
+wetness treatment. Fine surface-gradient relief fades by 42 m, while coarse plate relief
+fades by 80 m. Screen-space derivatives fade unresolved patterns before they shimmer.
+Both layers remain attached during wind sway and work without a loaded scan. The scan
+keeps the same mipmapped, anisotropic resources as the terrain. No additional scan or draw
+is needed; duplicated seam vertices leave the triangle count unchanged.
 
 Foliage cards keep their place on their twig, in model space, rather than facing the camera. Each
 card's normal leans 65% toward the outside of its crown (from an axis through the crown's centre),
@@ -80,7 +100,8 @@ as measured on conifer needles), since the sky light and grade already desaturat
 card's needle-to-needle tone stays within ±25%: a wider spread speckled sunlit tops pale.
 A spruce's leader
 is a dense spire of ten sprays, so its tip reads as needles against the sky rather than a few
-cards the sky shows through. The material is matte (roughness 0.95, a 45% sky reflection).
+cards the sky shows through. The material stays matte (roughness 0.84–0.98, a 45% sky reflection):
+the atlas relief gives leaf centres a slightly softer sheen than their dry edges.
 
 The atlas has twelve tiles (4 × 3): two oak sprays and two lime-and-beech sprays (twigs fanning up
 from the card's foot, clothed in alternate, overlapping broad leaves: smaller and lobed for the
@@ -94,7 +115,9 @@ alpha scaled per tile so the same share of texels passes the cutout as at full r
 (Castaño, "Computing Alpha Mipmaps"): plain averaging thinned distant sprays into blur, and a
 shader boost had filled whole cards into squares. Each
 texel stores a palette-relative tone, a rounded relief (each needle and leaf a dome a few
-texels across) and cutout coverage. The relief's screen-space slope tilts each card's normal
+texels across) and cutout coverage. Broad leaves also shade their fold and central vein into
+the tone channel; this detail averages naturally through the existing mip chain. The relief's
+screen-space slope tilts each card's normal
 (the surface-gradient method of the terrain's detail relief), so a near spray shades as rounded
 shoots rather than a flat card; mip levels flatten it with distance. Cards use an alpha test over that chain. Lighting adds a sky-light rim and
 back-light translucency, strongest at the crown rim and against a low sun; transmitted light is
@@ -191,3 +214,22 @@ leaflets add a light flutter that moves each piece rigidly at no more than about
 sway at most about 1.3 Hz. A per-vertex flutter at the plants' natural rates made the vegetation
 tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
 angular frequency. Reduced motion freezes the time, keeping only the static lean.
+
+## Roots and weathering
+
+Wood rings have a shallow elliptical/lobed profile and gradual swellings, strongest on
+fissured oak and conifer bark and subtler on beech and birch. Broadleaf and birch branch
+collars widen through an extra shoulder ring. Nearby mature broadleaf models also carry
+one or two short healed stubs with closed, lighter heartwood faces. The extra details retain
+continuous bark coordinates and the existing species-specific relief.
+
+Within 30 m of the resting camera (18 m on phones), exposed roots spread from the trunk's
+flared foot and follow the sampled terrain, with their tips buried in the soil. Paths reject
+water, steep/rocky ground and boulder footprints. Small grass tufts, folded brown leaves and
+short twigs gather around these roots; nearby stones receive litter too. These additions use
+the existing merged wood and undergrowth meshes rather than extra draws.
+
+Vegetation shares the shore's retained rain moisture: bark darkens and becomes less rough,
+while foliage darkens gently and gains a damp sheen. Patches follow the vegetation's rest
+positions through wind deformation. Soaking takes seconds and drying takes minutes, using
+the same clock and reduced-motion policy as the terrain.

@@ -590,7 +590,7 @@ export class LakeWaterfall {
       // reflected fall and cost blended fragments in another pass.
       this.add(mistGeometry, mist, 'waterfall-mist').layers.set(WATERFALL_FLUID_LAYER)
       sprayMesh.layers.set(WATERFALL_FLUID_LAYER)
-      this.addReflectionSheet(sheet, mobile)
+      this.addReflectionSheet(sheet)
       scene.add(this.group)
     } catch (error) {
       this.resources.dispose()
@@ -601,62 +601,33 @@ export class LakeWaterfall {
   }
 
   /**
-   * The lake mirror sees this ribbon instead of the fluid volume: the fluid's
-   * capture and filter passes would have to run again for a view the waves
-   * distort beyond recognition. The ribbon follows the sheet's mean trajectory
-   * and widening and carries the same streaks without the fine grain, so the
-   * reflection costs one small blended draw.
+   * Render the live curtain as low-poly parcels in the mirror. They share the
+   * fluid capture's position, velocity and foam streams, including deflections
+   * and gaps under the cursor, without a second depth/thickness/filter pass.
    */
-  private addReflectionSheet(material: MeshStandardNodeMaterial, mobile: boolean) {
-    const columns = mobile ? 4 : 6
-    const rows = mobile ? 8 : 12
+  private addReflectionSheet(material: FallingWaterMaterial) {
+    const parcels = this.fluid.particles
+    const geometry = this.instanced(new SphereGeometry(1, 4, 3))
+    for (const name of ['aBodySize', 'aBodyPosition', 'aBodyVelocity', 'aBodyFoam'])
+      geometry.setAttribute(name, parcels.geometry.getAttribute(name))
+    geometry.instanceCount = parcels.count
+    geometry.boundingBox = parcels.bounds.clone()
+    geometry.boundingSphere = parcels.geometry.boundingSphere?.clone() ?? null
+    material.flowPosition = parcels.positionNode
     const height = this.sheetHeight
-    const halfWidth = (drop: number) =>
-      this.fall.width / 2 + 0.02 + 0.16 * Math.sqrt((2 * drop) / GRAVITY)
-    const positions: number[] = [],
-      normals: number[] = [],
-      indices: number[] = []
-    // Tilted skyward like the aerated sheet, which scatters the whole sky.
-    const tilt = Math.hypot(0.75, 1)
-    for (let row = 0; row <= rows; row++) {
-      const drop = (row / rows) * height
-      const y = height - drop
-      const z = waterfallDrift(height, y)
-      const half = halfWidth(drop)
-      for (let column = 0; column <= columns; column++) {
-        positions.push((column / columns - 0.5) * 2 * half, y, z)
-        normals.push(0, 0.75 / tilt, 1 / tilt)
-      }
-    }
-    for (let row = 0; row < rows; row++)
-      for (let column = 0; column < columns; column++) {
-        const a = row * (columns + 1) + column
-        const b = a + columns + 1
-        indices.push(a, b, a + 1, a + 1, b, b + 1)
-      }
-    const geometry = this.resources.own(new BufferGeometry())
-    geometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
-    geometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3))
-    geometry.setIndex(indices)
     const drop = float(height).sub(positionLocal.y).max(0)
     const across = positionLocal.x
     const { breakup, aerated } = fallStreaks(across, drop, this.patternTime, height, false)
-    const half = drop
-      .mul(2 / GRAVITY)
-      .sqrt()
-      .mul(0.16)
-      .add(this.fall.width / 2 + 0.02)
-    const inset = half.sub(across.abs())
-    const fringe = float(1)
-      .sub(smoothstep(0, 0.12, inset))
-      .mul(breakup)
-    const whitewater = aerated.mul(0.86).add(fringe.mul(0.55)).clamp(0, 1)
+    const whitewater = aerated
+      .mul(0.86)
+      .add(attribute('aBodyFoam', 'float').mul(breakup).mul(0.65))
+      .clamp(0, 1)
     material.colorNode = mix(fallCore(drop), vec3(0.68, 0.71, 0.7), whitewater)
     material.roughnessNode = mix(0.05, 0.38, whitewater)
     material.envMapIntensity = 1.6
-    material.opacityNode = smoothstep(0, 0.05, inset)
-      .mul(mix(0.66, 0.97, whitewater))
-      .mul(this.opacity)
+    material.opacityNode = mix(0.7, 0.98, whitewater).mul(this.opacity)
+    material.side = FrontSide
+    material.depthWrite = true
     material.emissiveNode = this.forwardGlow(
       0.55,
       mix(vec3(0.03, 0.04, 0.03), vec3(0.32, 0.33, 0.32), whitewater),

@@ -1,5 +1,5 @@
 import { Mesh, MeshStandardNodeMaterial } from 'three/webgpu'
-import type { Camera, Object3D, Scene, Vector3, Vector4, WebGPURenderer } from 'three/webgpu'
+import type { Camera, Object3D, Ray, Scene, Vector3, Vector4, WebGPURenderer } from 'three/webgpu'
 
 import type { FishBait } from './fish-pointer'
 import { PointerDisturbance } from './fish-pointer'
@@ -143,6 +143,13 @@ export class SceneDetails {
     this.sand.applyTo(sand)
   }
 
+  /** Vegetation joins asynchronously, after its cloud and pointer lighting hooks. */
+  attachVegetation(meshes: readonly Mesh[]) {
+    for (const mesh of meshes)
+      if (mesh.material instanceof MeshStandardNodeMaterial)
+        this.wetness.applyTo(mesh.material, mesh.geometry.hasAttribute('bark') ? 'wood' : 'foliage')
+  }
+
   get impactSlopes() {
     return this.splashes.impacts.slopes
   }
@@ -175,6 +182,23 @@ export class SceneDetails {
     if (this.disposed || this.reducedMotion) return
     this.splashes.spawnBurst(x, z, energy, time, wind)
     this.floating.splash(x, z, energy)
+  }
+
+  grabFloater(ray: Ray, padding: number, maxDistance: number) {
+    if (this.disposed || this.reducedMotion) return null
+    return this.floating.grab(ray, padding, maxDistance)
+  }
+
+  moveFloater(target: Vector3) {
+    this.floating.moveGrab(target)
+  }
+
+  releaseFloater(cancelled = false) {
+    this.floating.releaseGrab(cancelled)
+  }
+
+  setLeafSources(crowns: Float32Array) {
+    this.floating.setLeafSources(crowns)
   }
 
   setWaterfallBlock(across: number, height: number, radius: number, strength: number) {

@@ -4,7 +4,11 @@ import {
   cameraPosition,
   dot,
   float,
+  floor,
+  fract,
+  fwidth,
   min,
+  mix,
   normalize,
   positionLocal,
   positionView,
@@ -12,10 +16,12 @@ import {
   pow,
   saturate,
   sin,
+  smoothstep,
   texture,
   transformNormalToView,
   uniform,
   uv,
+  vec2,
   vec3,
   vec4,
   vertexColor,
@@ -40,8 +46,11 @@ import type { Node, Object3D } from 'three/webgpu'
 
 import type { LightingState } from './lighting'
 import type { PointerLightResponse } from './pointer-light'
+import { surfaceGradientNormal } from './surface-detail'
+import type { SurfaceScan } from './terrain-textures'
 import type { MeshData } from './vegetation-meshes'
 import type { PreparedVegetation } from './vegetation-placement'
+import { loopNoise } from './water-noise'
 import { WindGusts } from './wind-gusts'
 
 /** Shadow casters live on this layer; see the moon's shadow camera. */
@@ -82,7 +91,7 @@ export class Vegetation {
   private readonly ambient = uniform(new Color())
   private readonly disposables: Array<{ dispose(): void }> = []
 
-  constructor(parent: Object3D, prepared: PreparedVegetation) {
+  constructor(parent: Object3D, prepared: PreparedVegetation, bark?: SurfaceScan) {
     const atlas = new DataTexture(
       prepared.atlas.data,
       prepared.atlas.width,
@@ -99,7 +108,7 @@ export class Vegetation {
     atlas.needsUpdate = true
     this.disposables.push(atlas)
 
-    this.add(parent, 'wood', prepared.wood, this.woodMaterial(), true, false, {})
+    this.add(parent, 'wood', prepared.wood, this.woodMaterial(bark), true, false, {})
     this.add(
       parent,
       'foliage',
@@ -139,6 +148,7 @@ export class Vegetation {
     geometry.setAttribute('color', new BufferAttribute(data.colors, 3))
     geometry.setAttribute('wind', new BufferAttribute(data.wind, 4))
     if (data.uvs.length) geometry.setAttribute('uv', new BufferAttribute(data.uvs, 2))
+    if (data.bark.length) geometry.setAttribute('bark', new BufferAttribute(data.bark, 3))
     geometry.setIndex(new BufferAttribute(data.indices, 1))
     geometry.computeBoundingSphere()
     // Sway and flutter reach a little beyond the rest bounds.
@@ -180,13 +190,92 @@ export class Vegetation {
       .add(this.gusts.sway(positionLocal, bend, phase, this.time))
   }
 
-  private woodMaterial() {
+  private woodMaterial(scan?: SurfaceScan) {
     const material = new MeshStandardNodeMaterial({
       vertexColors: true,
-      roughness: 0.92,
+      roughness: 0.96,
       metalness: 0,
+      envMapIntensity: 0.45,
     })
     material.positionNode = positionLocal.add(this.sway())
+    const bark = attribute<'vec3'>('bark')
+    const grain = bark.x
+    const coordinates = uv().mul(vec2(1, 0.75))
+    // The worker's tube coordinates follow each limb and remain attached during wind sway.
+    // Every procedural layer repeats at integer U wraps, including the closing tube seam.
+    const detail = scan ? texture(scan.surface, coordinates).rg : vec2(0.9, 0.5)
+    const scannedColor = scan ? texture(scan.color, coordinates).rgb : vec3(0.18)
+    const contrast = scannedColor
+      .dot(vec3(0.2126, 0.7152, 0.0722))
+      .div(0.18)
+      .clamp(0.25, 1.9)
+    const scanTone = mix(1, contrast, grain.mul(0.45).add(0.45))
+    const foot = smoothstep(1.4, 0.1, bark.y)
+    const roughBark = grain.add(bark.z.mul(foot).mul(0.65)).clamp(0, 1)
+    // Broad weathering survives at the lake's normal viewing distance. Fine scan relief
+    // alone becomes an averaged, clean cylinder when a trunk is only a few pixels wide.
+    const coarseUV = coordinates.mul(vec2(3, bark.z.mul(5.5).add(4.5)))
+    const coarsePixel = fwidth(coarseUV)
+    const coarseResolved = smoothstep(1.8, 0.55, coarsePixel.x.max(coarsePixel.y))
+    const weather = loopNoise(coarseUV, [3, null])
+    const warp = sin(coordinates.y.mul(3.1)).mul(0.35).add(weather.mul(0.8))
+    const plateUV = vec2(coordinates.x.mul(5).add(warp), coordinates.y.mul(2.5))
+    const platePixel = fwidth(plateUV)
+    const plateResolved = smoothstep(1.3, 0.3, platePixel.x.max(platePixel.y))
+    const plate = loopNoise(plateUV, [5, null])
+    const groove = smoothstep(0.13, 0.035, plate.sub(0.48).abs()).mul(plateResolved).mul(roughBark)
+    // Broken scar edges and peeling patches need colour contrast as well as millimetric
+    // relief: the shadow of a fine groove alone disappears across the lake.
+    const scars = smoothstep(
+      0.49,
+      0.66,
+      weather.add(plate.sub(0.5).mul(0.35)).add(detail.g.sub(0.5).mul(0.25)),
+    ).mul(coarseResolved)
+    const plateTone = mix(1, mix(0.55, 1.22, smoothstep(0.2, 0.75, plate)), plateResolved)
+    const tone = scanTone
+      .mul(mix(1, plateTone, grain.mul(0.55).add(0.35)))
+      .mul(groove.mul(-0.65).add(1))
+    // Lichen and rain-darkened scars have their own hue, rather than a uniform green foot.
+    const lichen = smoothstep(0.22, 0.36, weather).oneMinus().mul(coarseResolved).mul(0.32)
+    const patina = foot.mul(mix(0.5, smoothstep(0.32, 0.64, weather), coarseResolved)).mul(0.35)
+    // Birch's lenticels need fragment detail: painting a whole tube ring made blurred bands.
+    // Wrap the hash across U as well as the scan, and fade subpixel marks before they shimmer.
+    const marks = coordinates.mul(vec2(14, 18))
+    const cell = floor(marks)
+    const wrapped = vec2(cell.x.sub(floor(cell.x.div(14)).mul(14)), cell.y)
+    const random = fract(sin(wrapped.dot(vec2(127.1, 311.7))).mul(43758.5453))
+    const local = fract(marks)
+      .sub(vec2(fract(random.mul(7.13)).mul(0.46).add(0.27), random.mul(0.4).add(0.3)))
+      .abs()
+    const pixel = fwidth(marks).max(0.001)
+    const dash = smoothstep(random.mul(0.14).add(0.24), random.mul(0.06).add(0.08), local.x)
+      .mul(smoothstep(pixel.y.add(0.018), 0.018, local.y))
+      .mul(smoothstep(0.4, 0.6, random))
+      .mul(smoothstep(0.65, 0.15, pixel.y))
+      .mul(bark.z)
+    const stain = mix(vec3(1), vec3(0.23, 0.25, 0.19), scars.mul(bark.z.mul(0.3).add(0.6)))
+    const aged = vec3(tone)
+      .mul(stain)
+      .mul(mix(vec3(1), vec3(1.22, 1.18, 0.96), lichen))
+    material.colorNode = aged
+      .mul(mix(vec3(1), vec3(0.57, 0.72, 0.42), patina))
+      .mul(dash.mul(-0.82).add(1))
+    material.roughnessNode = mix(0.9, detail.r.clamp(0.8, 0.99), grain)
+      .add(scars.mul(0.06))
+      .add(patina.mul(0.04))
+      .clamp(0.84, 1)
+    const distance = positionWorld.distance(cameraPosition)
+    const fineRelief = detail.g
+      .mul(0.012)
+      .mul(roughBark)
+      .mul(smoothstep(42, 5, distance))
+    const plateRelief = plate
+      .sub(groove)
+      .mul(0.025)
+      .mul(roughBark.mul(0.8).add(0.2))
+      .mul(plateResolved)
+      .mul(smoothstep(80, 12, distance))
+    material.normalNode = surfaceGradientNormal(fineRelief.add(plateRelief), float(1))
     return material
   }
 
@@ -204,6 +293,8 @@ export class Vegetation {
     // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
     // fill their cards into squares.
     const coverage = sample.a
+    // Leaf centres catch a little more light than their dry edges without glazing the crown.
+    material.roughnessNode = mix(0.98, 0.84, smoothstep(0.12, 0.8, sample.g))
     material.alphaTest = 0.5
     // Needle-to-needle and leaf-to-leaf tone, kept within about ±35% of the palette: a wider
     // spread pushed sunlit leaves into the tone curve's shoulder, which washed them pale grey.

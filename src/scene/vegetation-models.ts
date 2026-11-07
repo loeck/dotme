@@ -107,6 +107,12 @@ export type VegetationGeometry = Readonly<{
   positions: Float32Array
   normals: Int8Array
   colors: Float32Array
+  /** Bark coordinates: integer wraps around each tube, metres along its centreline. */
+  uvs: Float32Array
+  /** Species-specific furrow strength, independent of the bark palette and dark marks. */
+  furrows: number
+  /** Fine horizontal lenticel marks, used by silver birch. */
+  lenticels: number
   /** Bend weight per vertex: 0 at the root, 1 at the top. */
   bend: Float32Array
   indices: Uint32Array
@@ -147,12 +153,20 @@ export const MODEL_DETAIL = {
 } as const satisfies Record<string, ModelDetail>
 
 /** Wood as generalized cylinders: rings along a path with parallel-transported frames. */
-class WoodBuilder {
+export class WoodBuilder {
   private readonly positions: number[] = []
   private readonly normals: number[] = []
   private readonly colors: number[] = []
+  private readonly uvs: number[] = []
   private readonly indices: number[] = []
   private reference: Point = [1, 0, 0]
+  private readonly furrows: number
+  private readonly lenticels: number
+
+  constructor(furrows = 1, lenticels = 0) {
+    this.furrows = furrows
+    this.lenticels = lenticels
+  }
 
   /**
    * A tube through `points` with a radius per point. `colour(s, angle)` paints a vertex from
@@ -163,9 +177,17 @@ class WoodBuilder {
     radii: readonly number[],
     sides: number,
     colour: (s: number, angle: number) => Rgb,
+    cut?: Rgb,
   ) {
     if (points.length < 2) return
     const first = this.positions.length / 3
+    // Integer wraps join the repeating scan at the seam. A duplicated seam vertex keeps
+    // triangles from interpolating backwards across the whole texture.
+    const stride = sides + 1
+    const wraps = Math.max(1, Math.round(Math.max(...radii) * TAU * 1.4))
+    const origin = points[0] ?? [0, 0, 0]
+    const offsetU = origin[0] * 1.73 + origin[2] * 0.91
+    const offsetV = origin[1] * 0.83 + origin[0] * 0.37
     let normal: Point | null = null
     let length = 0
     const lengths = [0]
@@ -187,25 +209,82 @@ class WoodBuilder {
       const binormal = cross(tangent, normal)
       const radius = radii[i] ?? 0
       const s = length > 0 ? (lengths[i] ?? 0) / length : 0
-      for (let side = 0; side < sides; side++) {
+      // Elliptical growth and shallow lobes share the seam's periodicity. Smooth species
+      // keep rounder stems; older fissured bark follows stronger, slowly changing ribs.
+      const irregularity = 0.025 + this.furrows * 0.075
+      const phase = offsetU * 2.1
+      const swell = 1 + irregularity * 0.45 * Math.sin(s * 8 + phase)
+      const taper =
+        ((radii[Math.min(i + 1, radii.length - 1)] ?? radius) -
+          (radii[Math.max(0, i - 1)] ?? radius)) /
+        Math.max(0.001, Math.hypot(...sub(after, before)))
+      for (let side = 0; side <= sides; side++) {
         const angle = (side / sides) * TAU
         const out = add(scale(normal, Math.cos(angle)), binormal, Math.sin(angle))
-        const q = add(p, out, radius)
+        const lobes = Math.cos(angle * 2 + phase) * 0.65 + Math.sin(angle * 3 - s * 1.2) * 0.35
+        const shape = swell * (1 + irregularity * lobes)
+        const derivative =
+          (irregularity *
+            (-1.3 * Math.sin(angle * 2 + phase) + 1.05 * Math.cos(angle * 3 - s * 1.2))) /
+          (1 + irregularity * lobes)
+        const around = add(scale(normal, -Math.sin(angle)), binormal, Math.cos(angle))
+        const outward = normalize(add(add(out, around, -derivative), tangent, -taper))
+        const q = add(p, out, radius * shape)
         this.positions.push(q[0], q[1], q[2])
-        this.normals.push(out[0], out[1], out[2])
+        this.normals.push(outward[0], outward[1], outward[2])
         const c = colour(s, angle)
         this.colors.push(c[0], c[1], c[2])
+        this.uvs.push((side / sides) * wraps + offsetU, (lengths[i] ?? 0) + offsetV)
       }
     }
     for (let i = 0; i < points.length - 1; i++)
       for (let side = 0; side < sides; side++) {
-        const a = first + i * sides + side
-        const b = first + i * sides + ((side + 1) % sides)
-        const c = a + sides,
-          d = b + sides
+        const a = first + i * stride + side
+        const b = a + 1
+        const c = a + stride,
+          d = b + stride
         // Counter-clockwise from outside: (ring i, a), (ring i, a + 1), (ring i + 1, a).
         this.indices.push(a, b, c, b, d, c)
       }
+    if (cut) {
+      const end = points[points.length - 1] ?? origin
+      const tangent = normalize(sub(end, points[points.length - 2] ?? origin))
+      const centre = this.positions.length / 3
+      this.positions.push(...end)
+      this.normals.push(...tangent)
+      this.colors.push(...cut)
+      this.uvs.push(0.5, 0.5)
+      for (let side = 0; side <= sides; side++) {
+        const source = (first + (points.length - 1) * stride + side) * 3
+        this.positions.push(...this.positions.slice(source, source + 3))
+        this.normals.push(...tangent)
+        this.colors.push(...scaleRgb(cut, 0.64))
+        const angle = (side / sides) * TAU
+        this.uvs.push(0.5 + Math.cos(angle) * 0.45, 0.5 + Math.sin(angle) * 0.45)
+        if (side < sides) this.indices.push(centre, centre + side + 1, centre + side + 2)
+      }
+    }
+  }
+
+  /** An extra shoulder ring rounds the branch collar without changing its outer path. */
+  branch(
+    points: readonly Point[],
+    radii: readonly number[],
+    sides: number,
+    colour: (s: number, angle: number) => Rgb,
+  ) {
+    const from = points[0],
+      next = points[1]
+    if (!from || !next) return
+    const radius = radii[0] ?? 0
+    const distance = Math.hypot(...sub(next, from))
+    const t = Math.min(0.35, radius / Math.max(distance, 0.001))
+    this.tube(
+      [from, add(from, sub(next, from), t), ...points.slice(1)],
+      [radius * 1.45, radius * 1.18, ...radii.slice(1)],
+      sides,
+      colour,
+    )
   }
 
   build(bendFrom: number): VegetationGeometry {
@@ -222,6 +301,9 @@ class WoodBuilder {
       positions: new Float32Array(this.positions),
       normals: new Int8Array(this.normals.map((v) => Math.round(v * 127))),
       colors: new Float32Array(this.colors),
+      uvs: new Float32Array(this.uvs),
+      furrows: this.furrows,
+      lenticels: this.lenticels,
       bend,
       indices: new Uint32Array(this.indices),
       height,
@@ -645,7 +727,7 @@ export function growPine(seed: number, detail: ModelDetail): TreeModel {
  */
 export function growBirch(seed: number, detail: ModelDetail): TreeModel {
   const random = mulberry32(seed)
-  const wood = new WoodBuilder()
+  const wood = new WoodBuilder(0.14, 1)
   const sprays: Spray[] = []
   const height = between(random, 5, 6.5)
   const trunk = trunkPath(random, height, 22, 0.07)
@@ -653,14 +735,14 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
   const marks = Array.from({ length: 24 }, () => random())
   wood.tube(
     trunk,
-    trunk.map((_, i) => trunkRadius * (1 - (0.9 * i) / 22)),
+    trunk.map((_, i) => trunkRadius * (1 - (0.9 * i) / 22) * (i === 0 ? 1.25 : 1)),
     detail.trunkSides,
     (s, angle) => {
       const ring = Math.floor(s * 24)
-      // Lenticels: dark horizontal dashes on some rings and sides; a dark, fissured foot.
+      // Broad tone variation and a dark foot; fine lenticels are shaded per fragment.
       const dash = (marks[ring] ?? 0) < 0.4 && Math.sin(angle * 2 + ring * 1.7) > 0.2
       const foot = 1 - smooth01(0.03, 0.12, s)
-      const colour = dash ? P.birchMark : P.birchBark
+      const colour = scaleRgb(P.birchBark, dash ? 0.94 : 1)
       return mixRgb(colour, P.birchMark, foot * 0.85)
     },
   )
@@ -678,7 +760,7 @@ export function growBirch(seed: number, detail: ModelDetail): TreeModel {
     const elevation = ((62 - 24 * t) * Math.PI) / 180
     const path = limbPath(from, heading(yaw, elevation), reach, 4, 0.42, -0.12)
     const base = trunkRadius * (0.35 - 0.15 * t)
-    wood.tube(
+    wood.branch(
       path,
       path.map((_, i) => base * (1 - i / 4.6)),
       detail.limbSides,
@@ -762,9 +844,9 @@ export function growBroadleaf(
   heights: readonly [number, number] = habit === 'oak' ? [6, 7.8] : [6.6, 8.4],
 ): TreeModel {
   const random = mulberry32(seed)
-  const wood = new WoodBuilder()
-  const sprays: Spray[] = []
   const oak = habit === 'oak'
+  const wood = new WoodBuilder(oak ? 1 : 0.22)
+  const sprays: Spray[] = []
   const height = between(random, heights[0], heights[1])
   const youth = Math.min(1, height / 5)
   const crownBase = height * (oak ? between(random, 0.18, 0.28) : between(random, 0.24, 0.34))
@@ -776,13 +858,34 @@ export function growBroadleaf(
   const bark = oak ? P.oakBark : P.beechBark
   wood.tube(
     trunk,
-    trunk.map((_, i) => trunkRadius * (1 - (0.8 * i) / 12) * (i === 0 ? 1.35 : 1)),
+    trunk.map((_, i) => trunkRadius * (1 - (0.8 * i) / 12) * (i === 0 ? 1.55 : i === 1 ? 1.08 : 1)),
     youth > 0.5 ? detail.trunkSides : 5,
     (s, angle) =>
       oak
         ? scaleRgb(bark, (0.72 + 0.28 * Math.abs(Math.sin(angle * 5 + s * 9))) * (0.85 + 0.2 * s))
         : scaleRgb(bark, (0.92 + 0.08 * Math.sin(angle * 2 + s * 4)) * (0.8 + 0.25 * s)),
   )
+  if (detail.spacing < 2 && height > 4) {
+    // A separate stream preserves the crown's established scatter. Short healed stubs
+    // leave a dark collar and a smaller exposed heartwood face below the live crown.
+    const scars = mulberry32(seed ^ 0x48f17)
+    for (let stub = 0; stub < (oak ? 2 : 1); stub++) {
+      const from = along(trunk, 0.09 + ((scars() * crownBase) / height) * 0.65).p
+      const direction = heading(scars() * TAU, 0.12 + scars() * 0.35)
+      const radius = trunkRadius * (0.28 + scars() * 0.15)
+      wood.tube(
+        [
+          from,
+          add(from, direction, trunkRadius * 1.6),
+          add(from, direction, trunkRadius * (2.4 + scars())),
+        ],
+        [radius * 1.6, radius, radius * 0.62],
+        detail.trunkSides,
+        () => scaleRgb(bark, 0.72),
+        [0.22, 0.15, 0.082],
+      )
+    }
+  }
   const leaves = oak ? [P.oakLeaves, P.oakLeavesDeep] : [P.beechLeaves, P.beechLeavesDeep]
   const tiles = oak ? [ATLAS_TILES.oakA, ATLAS_TILES.oakB] : [ATLAS_TILES.limeA, ATLAS_TILES.limeB]
   /** A domed clump of sprays round `centre`, fuller toward the light and the crown's outside. */
@@ -838,7 +941,7 @@ export function growBroadleaf(
     const base = trunkRadius * (0.48 - 0.18 * t)
     // Past 50 m the crown hides all but the lowest limbs: a far tree keeps only those in wood.
     if (detail.spacing < 2 || t < 0.4)
-      wood.tube(
+      wood.branch(
         path,
         path.map((_, i) => base * (1 - i / 4.8)),
         detail.limbSides,

@@ -1,9 +1,9 @@
-import { Matrix4, Scene, Vector3, Vector4 } from 'three'
+import { Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
 import { FloatingBodies } from './floating-bodies'
-import { createLakeBed, WATER_LEVEL } from './lake-bed'
+import { createLakeBed, sampleShore, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { createVoxelIndex } from './voxel-spatial'
@@ -55,6 +55,126 @@ const run = async (seed: number, frames = 600) => {
 }
 
 describe('floating bodies', () => {
+  it('holds the picked buoy above water, then drops it into a splash and floats again', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      const [bx, by, bz] = required(positionsOf(floating)[0])
+      const ray = new Ray(new Vector3(bx, by + 3, bz), new Vector3(0, -1, 0))
+      expect(floating.grab(ray, 0.005, 1)).toBeNull() // Ground occludes the pick.
+      const miss = new Ray(new Vector3(bx + 0.5, by + 3, bz), new Vector3(0, -1, 0))
+      expect(floating.grab(miss, 0.005, 10)).toBeNull()
+      expect(floating.grab(ray, 0.005, 10)).not.toBeNull()
+      floating.moveGrab(new Vector3(bx + 0.6, 2, bz))
+      const advance = (from: number, to: number) => {
+        for (let frame = from; frame < to; frame++) {
+          const time = frame / 60
+          floating.update(time, calm.sample(time))
+          splashes.update(time, calm.sample(time))
+        }
+      }
+      advance(0, 120)
+      const held = required(positionsOf(floating)[0])
+      expect(held[0]).toBeCloseTo(bx + 0.6, 2)
+      expect(held[1]).toBeCloseTo(2, 2)
+      const waves: number[][] = []
+      floating.onWake = (...wave) => waves.push(wave)
+      floating.releaseGrab()
+      advance(120, 135)
+      expect(required(positionsOf(floating)[0])[1]).toBeLessThan(1.85)
+      advance(135, 480)
+      expect(Math.abs(required(required(positionsOf(floating)[0])[1]) - WATER_LEVEL)).toBeLessThan(
+        0.15,
+      )
+      expect(waves.some((wave) => required(wave[3]) < -0.025)).toBe(true)
+      expect(splashes.impacts.landed).toBeGreaterThan(0)
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
+  it('sheds occasional leaves from overhanging crowns into water and recycles a bounded pool', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      const [bx, , bz] = required(positionsOf(floating)[0])
+      const originalCount = floating.mesh.count
+      floating.setLeafSources(new Float32Array([bx, 4, bz, 1]))
+      const waves: number[][] = []
+      floating.onWake = (...wave) => waves.push(wave)
+      let airAt = -1
+      let landed = false
+      for (let frame = 0; frame < 3600; frame++) {
+        const time = frame / 60
+        floating.update(time, calm.sample(time))
+        splashes.update(time, calm.sample(time))
+        const firstLeaf = required(positionsOf(floating)[1])
+        if (required(firstLeaf[1]) > 3) airAt = time
+        if (airAt >= 0 && time > airAt + 1 && Math.abs(required(firstLeaf[1]) - WATER_LEVEL) < 0.12)
+          landed = true
+      }
+      expect(airAt).toBeGreaterThanOrEqual(6)
+      expect(landed).toBe(true)
+      expect(waves.some((wave) => required(wave[3]) < 0)).toBe(true)
+      expect(floating.mesh.count).toBe(originalCount)
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
+  it('keeps fallen leaves afloat in a sheltered inlet without carrying them through its banks', async () => {
+    const banks: Voxel[] = [
+      { x: 0, y: 0.5, z: 5, size: 2, color: 0 },
+      { x: 6, y: 0.5, z: 5, size: 2, color: 0 },
+      { x: 2, y: 0.5, z: 7, size: 2, color: 0 },
+      { x: 4, y: 0.5, z: 7, size: 2, color: 0 },
+    ]
+    const inlet = createLakeBed(banks, 42, false)
+    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex(banks))
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, inlet, 42, true, physics)
+    const floating = new FloatingBodies(scene, inlet, 42, true, physics, splashes)
+    floating.setLeafSources(new Float32Array([3, 2.5, 5.2, 0.7]))
+    try {
+      let airborne = false
+      let retained = 0
+      let closestBank = Infinity
+      for (let frame = 0; frame < 5100; frame++) {
+        const time = frame / 60
+        const wind = windy.sample(time)
+        floating.update(time, wind)
+        splashes.update(time, wind)
+        const [x, y, z] = required(positionsOf(floating)[1])
+        if (time >= 6 && y > 2) airborne = true
+        if (airborne && y < WATER_LEVEL + 0.1)
+          closestBank = Math.min(closestBank, sampleShore(inlet, x, z))
+        if (time > 30 && x > 1 && x < 5 && z > 3.9 && z < 6 && Math.abs(y - WATER_LEVEL) < 0.12)
+          retained++
+      }
+      expect(airborne).toBe(true)
+      expect(closestBank).toBeGreaterThan(0.03)
+      // At least forty of the last fifty-five seconds remain in the water pocket,
+      // despite a sustained crosswind pushing toward its right-hand wall.
+      expect(retained / 60).toBeGreaterThan(40)
+      const [x, , z] = required(positionsOf(floating)[1])
+      expect(sampleShore(inlet, x, z)).toBeGreaterThan(0.12)
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+
   it('reports a waterline circle for floaters resting on the surface', async () => {
     const physics = await physicsFor()
     const scene = new Scene()

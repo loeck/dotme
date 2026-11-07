@@ -13,8 +13,10 @@ export type MeshData = Readonly<{
   positions: Float32Array
   normals: Int8Array
   colors: Float32Array
-  /** Atlas coordinates; empty for untextured geometry. */
+  /** Atlas coordinates for foliage, tube coordinates for bark; empty for untextured geometry. */
   uvs: Float32Array
+  /** Wood only: furrow strength, height above the root in metres and lenticel strength. */
+  bark: Float32Array
   /** Per vertex: bend (metres of tip travel at full wind), phase, flutter (metres), ω (rad/s). */
   wind: Float32Array
   indices: Uint32Array
@@ -55,6 +57,7 @@ export class MeshBuilder {
   private readonly normals: number[] = []
   private readonly colors: number[] = []
   private readonly uvs: number[] = []
+  private readonly bark: number[] = []
   private readonly wind: number[] = []
   private readonly indices: number[] = []
   private readonly textured: boolean
@@ -91,7 +94,7 @@ export class MeshBuilder {
   /** Append a model's wood at a placement; its bend scales to `swayMetres`. */
   appendWood(geometry: VegetationGeometry, at: Placement, sway: Sway, swayMetres: number) {
     const base = this.vertexCount
-    const { positions, normals, colors, bend, indices } = geometry
+    const { positions, normals, colors, uvs, furrows, lenticels, bend, indices } = geometry
     for (let i = 0; i < bend.length; i++) {
       const p: Point = [positions[i * 3] ?? 0, positions[i * 3 + 1] ?? 0, positions[i * 3 + 2] ?? 0]
       const n: Point = [normals[i * 3] ?? 0, normals[i * 3 + 1] ?? 0, normals[i * 3 + 2] ?? 0]
@@ -100,7 +103,12 @@ export class MeshBuilder {
         rotateY(n, at.yaw),
         [colors[i * 3] ?? 0, colors[i * 3 + 1] ?? 0, colors[i * 3 + 2] ?? 0],
         [(bend[i] ?? 0) * swayMetres, sway.phase, 0, sway.omega],
+        [
+          (uvs[i * 2] ?? 0) + at.x * 0.13 + at.z * 0.17,
+          (uvs[i * 2 + 1] ?? 0) * at.scale + at.z * 0.29,
+        ],
       )
+      this.bark.push(furrows, Math.max(0, p[1] * at.scale), lenticels)
     }
     for (const index of indices) this.indices.push(base + index)
   }
@@ -110,6 +118,7 @@ export class MeshBuilder {
       normals: new Int8Array(this.normals),
       colors: new Float32Array(this.colors),
       uvs: new Float32Array(this.uvs),
+      bark: new Float32Array(this.bark),
       wind: new Float32Array(this.wind),
       indices: new Uint32Array(this.indices),
     }

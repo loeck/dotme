@@ -1,6 +1,7 @@
 import { CAMERA_REST } from './camera-rig'
 import { bakeFoliageAtlas } from './foliage-atlas'
 import type { FoliageAtlas } from './foliage-atlas'
+import { appendForestFloor } from './forest-floor'
 import { appendClump } from './grass'
 import type { GrassForm } from './grass'
 import { WATER_LEVEL } from './lake-bed'
@@ -166,7 +167,7 @@ export function prepareVegetation(
 ): PreparedVegetation {
   const grid = mobile ? GRID.mobile : GRID.desktop
   const detail = mobile ? MODEL_DETAIL.mobile : MODEL_DETAIL.desktop
-  const wood = new MeshBuilder(false)
+  const wood = new MeshBuilder(true)
   const foliage = new MeshBuilder(true)
   const undergrowth = new MeshBuilder(false)
   const models = new Map<string, TreeModel>()
@@ -508,6 +509,15 @@ export function prepareVegetation(
       0.0013 * distance,
     )
   }
+
+  appendForestFloor(
+    wood,
+    undergrowth,
+    world,
+    seed,
+    mobile,
+    (x, z) => tops.at(x, z)?.ground ?? false,
+  )
 
   return {
     wood: wood.build(),

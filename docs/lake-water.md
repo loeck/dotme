@@ -47,11 +47,13 @@ glitter follows the moon, with a wider slope variance (0.05–0.09) so its path 
 visible over near-black water. Shoreline
 foam is a bright animated band whose width follows wave arrival. Calm water leaves only a trace
 of it in patches; far away, where the band is held at a pixel and a half so it does not alias,
-its strength falls in proportion, so the foam keeps its true amount instead of outlining every
-shore in white.
+its coverage falls gradually. Between crests, irregular retained rafts keep the foam visible
+against the dark banks; the advancing front breaks into smaller fragments rather than
+outlining every shore in white.
 
 The bed capture carries a simple seabed: dune relief in the depth field, wave-ripple
-stripes on the sand albedo, dark meadow patches aligned with instanced seagrass tufts that
+stripes and shallow normal relief on the sand, filtered fine grain in its color and roughness,
+and dark meadow patches aligned with instanced seagrass tufts that
 sway in the vertex shader between 0.8 and 2.6 m deep, instanced rocks from the lake-bed
 stones plus larger separated hero rocks, and a spotted ray gliding a deep-water circuit
 with damped vertical follow and a blob shadow on the sand. Bed props share the capture layer, lighting, cloud shadows
@@ -79,6 +81,25 @@ shove a floater only when the impact footprint touches its hull. Propagating wav
 floaters through buoyancy as they arrive. Floaters
 join the fish capture, so their submerged half refracts through the surface, and each reports its
 waterline circle so the lake draws a thin meniscus ring where it crosses the moving surface.
+The buoy can be picked with mouse, touch or pen, using a small screen-space hit tolerance.
+A damped spring follows a camera-facing drag plane while terrain collision remains active.
+Releasing restores gravity and bounded throw momentum; cancellation, capture loss and blur
+release it safely. A dry buoy re-entering the lake sends a wave and droplets back to the shared
+surface. Grabbing takes priority over the lake's hold, flick and double-tap gestures.
+
+Occasionally a leaf detaches from a rendered crown over open water, flutters down under
+gravity, aerodynamic drag and wind, then sends a small ripple and floats with the surface.
+Only crowns near the visible shore contribute; the same bounded pool of six leaves (two on
+mobile) recycles every 8–18 seconds, with a four-second fade at the end of each 45-second
+lifetime. Reduced motion freezes the leaves and disables shedding and grabbing.
+Leaf surfaces show a midrib and angled veins, while the buoy keeps a finer, smoother grain;
+their separate roughness and relief share one instanced material. Procedural details fade
+with the pixel footprint rather than flickering as the props recede.
+
+The waterfall's mirror draws low-poly parcels using the live curtain's position, velocity and
+foam streams. Cursor deflections and the closing gap therefore follow the visible fall,
+without rerunning the fluid capture and filters for the reflection camera.
+
 Shore splashes and pointer bursts fly droplets as dynamic
 bodies whose water landings return impulses to the field. Terrain collision events supply
 near-shore impacts. The buoy and drifting leaves receive buoyancy and drag at several body

@@ -76,6 +76,33 @@ describe('lake-shore vegetation', () => {
     },
   )
 
+  it('keeps bark coordinates continuous around trunks and inclined limbs after placement', () => {
+    const wood = new MeshBuilder(true)
+    for (const [index, model] of Object.values(models).entries()) {
+      wood.appendWood(
+        model.wood,
+        { x: index * 3, y: 2, z: -4, yaw: index * 0.7, scale: 1.3 },
+        { phase: 0.5, omega: 2 },
+        0.2,
+      )
+    }
+    const mesh = wood.build()
+    expect(mesh.uvs.length).toBe((mesh.positions.length / 3) * 2)
+    // A wrap interpolated from its last U back to its first reverses the UV triangle,
+    // smearing a whole tile over one strip. Axial and circumferential texels must keep
+    // the same orientation through every triangle, including each closing strip.
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const a = (mesh.indices[i] ?? 0) * 2
+      const b = (mesh.indices[i + 1] ?? 0) * 2
+      const c = (mesh.indices[i + 2] ?? 0) * 2
+      const du1 = (mesh.uvs[b] ?? 0) - (mesh.uvs[a] ?? 0)
+      const dv1 = (mesh.uvs[b + 1] ?? 0) - (mesh.uvs[a + 1] ?? 0)
+      const du2 = (mesh.uvs[c] ?? 0) - (mesh.uvs[a] ?? 0)
+      const dv2 = (mesh.uvs[c + 1] ?? 0) - (mesh.uvs[a + 1] ?? 0)
+      expect(du1 * dv2 - du2 * dv1).toBeGreaterThan(0)
+    }
+  })
+
   it('shapes each species by its habit', () => {
     const crownBottom = (model: TreeModel) =>
       Math.min(...model.sprays.map((spray) => spray.center[1])) / model.height

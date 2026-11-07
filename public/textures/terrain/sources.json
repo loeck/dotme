@@ -1,0 +1,56 @@
+{
+  "license": "CC0-1.0",
+  "licenseUrl": "https://polyhaven.com/license",
+  "assets": [
+    {
+      "id": "grass_ground",
+      "name": "Grass Ground",
+      "author": "Charlotte Baglioni",
+      "url": "https://polyhaven.com/a/grass_ground",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/grass_ground/grass_ground_disp_1k.jpg"
+      ]
+    },
+    {
+      "id": "forest_floor",
+      "name": "Forest Floor",
+      "author": "eye-candy.xyz",
+      "url": "https://polyhaven.com/a/forest_floor",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_floor/forest_floor_disp_1k.jpg"
+      ]
+    },
+    {
+      "id": "rock_01",
+      "name": "Rock 01",
+      "author": "Rob Tuytel",
+      "url": "https://polyhaven.com/a/rock_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_01/rock_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_01/rock_01_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rock_01/rock_01_disp_1k.jpg"
+      ]
+    },
+    {
+      "id": "bark_brown_01",
+      "name": "Bark Brown 01",
+      "author": "Rob Tuytel",
+      "url": "https://polyhaven.com/a/bark_brown_01",
+      "sourceFiles": [
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_01/bark_brown_01_diff_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_01/bark_brown_01_rough_1k.jpg",
+        "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/bark_brown_01/bark_brown_01_disp_1k.jpg"
+      ]
+    }
+  ],
+  "processing": {
+    "colorResolution": 1024,
+    "surfaceResolution": 512,
+    "color": "sRGB RGB WebP, quality 84, method 6",
+    "surface": "Lanczos downsample to 512px; linear lossless RGB WebP, method 6; R = roughness, G = displacement, B = 0"
+  }
+}

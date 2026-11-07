@@ -1,22 +1,26 @@
 import type { RigidBody } from '@dimforge/rapier3d-compat'
+import { attribute, float, fract, fwidth, mix, positionGeometry, smoothstep, vec3 } from 'three/tsl'
 import {
   Color,
   DynamicDrawUsage,
   InstancedMesh,
+  InstancedBufferAttribute,
   MeshStandardNodeMaterial,
   Object3D,
   Quaternion,
   SphereGeometry,
   Vector3,
 } from 'three/webgpu'
-import type { Scene, Vector4 } from 'three/webgpu'
+import type { Ray, Scene, Vector4 } from 'three/webgpu'
 
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
 import type { LakeSplashes } from './lake-splashes'
 import type { PhysicsWorld } from './physics-world'
+import { surfaceGradientNormal } from './surface-detail'
 import type { WaterContact } from './water-contact'
+import { contactNoise } from './water-noise'
 import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
@@ -46,6 +50,9 @@ type Floater = {
   flatten: number
   home: { x: number; z: number }
   wakeAt: number
+  dry: boolean
+  born: number
+  fadeAt: number
 }
 
 type FloaterSpec = {
@@ -69,7 +76,14 @@ export class FloatingBodies {
   private time = 0
   private state: number
   private readonly physics: PhysicsWorld
+  private readonly splashes: LakeSplashes
+  private readonly bed: LakeBed
   private contact?: WaterContact
+  private held: Floater | null = null
+  private readonly grabTarget = new Vector3()
+  private readonly leafSources: Vector3[] = []
+  private nextLeaf = 6
+  private readonly leafPockets: Array<{ x: number; z: number }> = []
 
   constructor(
     scene: Scene,
@@ -80,17 +94,21 @@ export class FloatingBodies {
     splashes: LakeSplashes,
   ) {
     this.physics = physics
+    this.splashes = splashes
+    this.bed = bed
     this.state = (seed ^ 0x3f10a7) >>> 0
+    this.findLeafPockets()
     const specs: FloaterSpec[] = [
       { radius: 0.075, density: 500, windage: 0.25, flatten: 1, color: 0x91625a },
     ]
-    const leaves = mobile ? 2 : 6
+    // Seven leaves plus the buoy fit the lake material's eight contact slots.
+    const leaves = mobile ? 4 : 7
     for (let i = 0; i < leaves; i++)
       specs.push({
-        radius: 0.02,
+        radius: 0.035 + this.random() * 0.015,
         density: 350,
         windage: 1,
-        flatten: 0.4,
+        flatten: 0.12,
         color: LEAF_COLORS[i % LEAF_COLORS.length] ?? 0x4a7c3a,
       })
     const { ColliderDesc, RigidBodyDesc } = physics.rapier
@@ -130,10 +148,33 @@ export class FloatingBodies {
         flatten: spec.flatten,
         home,
         wakeAt: -Infinity,
+        dry: false,
+        born: -Infinity,
+        fadeAt: Infinity,
       })
     }
     const geometry = new SphereGeometry(1, 12, 8)
     const material = new MeshStandardNodeMaterial({ roughness: 0.55, metalness: 0 })
+    geometry.setAttribute(
+      'aLeaf',
+      new InstancedBufferAttribute(
+        Float32Array.from(placed, ({ spec }) => (spec.flatten < 1 ? 1 : 0)),
+        1,
+      ),
+    )
+    const leaf = attribute('aLeaf', 'float')
+    const q = positionGeometry
+    const pixel = fwidth(q).length()
+    const resolved = smoothstep(0.12, 0.025, pixel)
+    const grain = contactNoise(q.xz.mul(28)).sub(0.5).mul(resolved)
+    const midrib = smoothstep(pixel.add(0.055), pixel.mul(0.3).add(0.015), q.z.abs())
+    const veins = fract(q.x.mul(5).add(q.z.abs().mul(7)))
+    const sideVeins = smoothstep(0.13, 0.03, veins).mul(smoothstep(0.2, 0.02, pixel))
+    const leafTone = q.x.mul(0.08).add(0.94).add(midrib.mul(0.2)).add(sideVeins.mul(0.1))
+    material.colorNode = vec3(mix(grain.mul(0.12).add(1), leafTone, leaf))
+    material.roughnessNode = mix(grain.mul(0.12).add(0.43), float(0.88), leaf)
+    const relief = mix(grain.mul(0.00025), midrib.mul(0.0003).add(sideVeins.mul(0.00012)), leaf)
+    material.normalNode = surfaceGradientNormal(relief, float(1))
     this.mesh = new InstancedMesh(geometry, material, this.floaters.length)
     this.mesh.name = 'floating-bodies'
     this.mesh.instanceMatrix.setUsage(DynamicDrawUsage)
@@ -173,10 +214,156 @@ export class FloatingBodies {
     return null
   }
 
+  /** Concave banks and stone lees, limited to the visible part of the lake. */
+  private findLeafPockets() {
+    const candidates: Array<{ x: number; z: number; shelter: number }> = []
+    for (let z = -35; z < 12; z += 0.5)
+      for (let x = -22; x < 22; x += 0.5) {
+        const shore = sampleShore(this.bed, x, z)
+        const index = lakeIndex(this.bed, x, z)
+        if (shore < 0.18 || shore > 0.65 || index < 0 || !this.bed.water[index]) continue
+        let shelter = 0
+        for (let spoke = 0; spoke < 8; spoke++) {
+          const angle = (spoke * Math.PI) / 4
+          if (sampleShore(this.bed, x + Math.cos(angle) * 1.1, z + Math.sin(angle) * 1.1) < 0.08)
+            shelter++
+        }
+        if (shelter >= 3) candidates.push({ x, z, shelter })
+      }
+    candidates.sort((a, b) => b.shelter - a.shelter || b.z - a.z)
+    for (const candidate of candidates) {
+      if (this.leafPockets.length >= 48) break
+      if (this.leafPockets.every((p) => Math.hypot(p.x - candidate.x, p.z - candidate.z) > 1.2))
+        this.leafPockets.push(candidate)
+    }
+  }
+
+  private leafCurrent(x: number, z: number, driftX: number, driftZ: number) {
+    const shore = sampleShore(this.bed, x, z)
+    if (shore > 1.8) return { x: driftX, z: driftZ, damping: 0 }
+    let target: { x: number; z: number } | undefined
+    let distance = 1.6
+    for (const pocket of this.leafPockets) {
+      const d = Math.hypot(pocket.x - x, pocket.z - z)
+      if (d >= distance) continue
+      // A nearby pocket across a rock is not reachable by this local current.
+      let clear = true
+      for (let step = 1; step <= 8; step++)
+        if (
+          sampleShore(this.bed, x + ((pocket.x - x) * step) / 8, z + ((pocket.z - z) * step) / 8) <
+          0.09
+        ) {
+          clear = false
+          break
+        }
+      if (clear) {
+        target = pocket
+        distance = d
+      }
+    }
+    const shelter = target ? Math.max(0, 1 - distance / 1.6) : 0
+    let vx = driftX * (1 - shelter * 0.92) + (target ? (target.x - x) * 0.055 * shelter : 0)
+    let vz = driftZ * (1 - shelter * 0.92) + (target ? (target.z - z) * 0.055 * shelter : 0)
+    if (shore < 0.45) {
+      const dx = sampleShore(this.bed, x + 0.12, z) - sampleShore(this.bed, x - 0.12, z)
+      const dz = sampleShore(this.bed, x, z + 0.12) - sampleShore(this.bed, x, z - 0.12)
+      const length = Math.hypot(dx, dz)
+      if (length > 0.001) {
+        const nx = dx / length,
+          nz = dz / length
+        const inward = Math.min(0, vx * nx + vz * nz)
+        // Deflect into a bank-parallel flow and hold a small water gap at the edge.
+        const repel = Math.max(0, 0.18 - shore) * 0.7
+        vx += nx * (repel - inward)
+        vz += nz * (repel - inward)
+      }
+    }
+    return { x: vx, z: vz, damping: shelter * 1.5 }
+  }
+
   private surfaceAt(x: number, z: number, time: number, wind: WindState, footprint: number) {
     if (this.contact) return this.contact.sample(x, z, time, wind, footprint)
     const [height, dx, dz, speed] = sampleWaterContact(x, z, time, wind, footprint)
     return [WATER_LEVEL + height, dx, dz, speed] as const
+  }
+
+  /** A screen-sized tolerance makes the small buoy usable with mouse, pen and touch. */
+  grab(ray: Ray, padding: number, maxDistance: number): Vector3 | null {
+    for (const floater of this.floaters) {
+      if (floater.flatten < 1) continue
+      const position = this.point.copy(floater.body.translation())
+      const along = position.clone().sub(ray.origin).dot(ray.direction)
+      if (
+        along < 0 ||
+        along > maxDistance ||
+        ray.distanceToPoint(position) > floater.radius + along * padding
+      )
+        continue
+      this.held = floater
+      this.grabTarget.copy(position)
+      floater.body.setGravityScale(0, true)
+      return position.clone()
+    }
+    return null
+  }
+
+  moveGrab(target: Vector3) {
+    if (!this.held || !Number.isFinite(target.x + target.y + target.z)) return
+    this.grabTarget.set(
+      Math.max(-LAKE_BOUNDS.size / 2 + 6, Math.min(LAKE_BOUNDS.size / 2 - 6, target.x)),
+      Math.max(WATER_LEVEL, Math.min(WATER_LEVEL + 6, target.y)),
+      Math.max(LAKE_BOUNDS.minZ + 6, Math.min(12, target.z)),
+    )
+  }
+
+  releaseGrab(cancelled = false) {
+    const floater = this.held
+    if (!floater) return
+    this.held = null
+    floater.body.setGravityScale(1, true)
+    const velocity = this.point.copy(floater.body.linvel()).clampLength(0, 6)
+    if (cancelled) velocity.set(0, 0, 0)
+    floater.body.setLinvel(velocity, true)
+  }
+
+  /** Crown volumes come from the rendered trees; only overhanging water can shed here. */
+  setLeafSources(crowns: Float32Array) {
+    this.leafSources.length = 0
+    for (let i = 0; i + 3 < crowns.length; i += 4) {
+      const x = crowns[i] ?? 0,
+        y = crowns[i + 1] ?? 0,
+        z = crowns[i + 2] ?? 0,
+        radius = crowns[i + 3] ?? 0
+      if (y < WATER_LEVEL + 2 || y - radius * 0.35 > 12 || radius < 0.6 || z < -38) continue
+      for (let spoke = 0; spoke < 8; spoke++) {
+        const angle = (spoke * Math.PI) / 4
+        const px = x + Math.cos(angle) * radius * 0.75
+        const pz = z + Math.sin(angle) * radius * 0.75
+        const index = lakeIndex(this.bed, px, pz)
+        if (index < 0 || !this.bed.water[index] || sampleShore(this.bed, px, pz) < 0.3) continue
+        this.leafSources.push(new Vector3(px, y - radius * 0.35, pz))
+      }
+    }
+    this.leafSources.sort((a, b) => b.z - a.z)
+    this.leafSources.length = Math.min(48, this.leafSources.length)
+  }
+
+  private shedLeaf(time: number) {
+    if (time < this.nextLeaf || this.leafSources.length === 0) return
+    this.nextLeaf = time + 8 + this.random() * 10
+    const leaf =
+      this.floaters.find((floater) => floater.flatten < 1 && time > floater.fadeAt) ??
+      this.floaters.find((floater) => floater.flatten < 1 && floater.born === -Infinity)
+    const source = this.leafSources[Math.floor(this.random() * this.leafSources.length)]
+    if (!leaf || !source) return
+    leaf.body.setEnabled(true)
+    leaf.body.setTranslation(source, true)
+    leaf.body.setLinvel({ x: 0.1, y: -0.15, z: 0.1 }, true)
+    leaf.body.setAngvel({ x: 1.2, y: this.random() * 2 - 1, z: 0.6 }, true)
+    leaf.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+    leaf.born = time
+    leaf.fadeAt = time + 100 + this.random() * 30
+    leaf.dry = true
   }
 
   private applyStepForces(stepTime: number) {
@@ -185,6 +372,7 @@ export class FloatingBodies {
     const driftX = wind.direction[0] * wind.speed * 0.03
     const driftZ = wind.direction[1] * wind.speed * 0.03
     for (const floater of this.floaters) {
+      if (floater.fadeAt <= this.time) continue
       const { body } = floater
       const position = body.translation()
       const velocity = body.linvel()
@@ -194,6 +382,30 @@ export class FloatingBodies {
       const points = floater.radius > 0.05 ? BUOY_POINTS : LEAF_POINTS
       const share = 1 / points.length
       body.resetForces(false)
+      body.resetTorques(false)
+      if (floater === this.held) {
+        const force = (delta: number, speed: number) =>
+          Math.max(-100, Math.min(100, delta * 180 - speed * 26)) * floater.mass
+        body.addForce(
+          {
+            x: force(this.grabTarget.x - position.x, velocity.x),
+            y: force(this.grabTarget.y - position.y, velocity.y),
+            z: force(this.grabTarget.z - position.z, velocity.z),
+          },
+          true,
+        )
+        floater.dry =
+          position.y >
+          this.surfaceAt(position.x, position.z, stepTime, wind, floater.radius)[0] + floater.radius
+        continue
+      }
+      const leaf = floater.flatten < 1
+      const current = leaf
+        ? this.leafCurrent(position.x, position.z, driftX, driftZ)
+        : { x: driftX, z: driftZ, damping: 0 }
+      const onWater = lakeIndex(this.bed, position.x, position.z)
+      // The picking mask is conservative; the finer shoreline owns the actual water gap.
+      const afloat = onWater >= 0 && sampleShore(this.bed, position.x, position.z) > 0
       const push = (value: number) =>
         Math.max(-40, Math.min(40, Number.isFinite(value) ? value : 0)) * floater.mass
       let wet = 0
@@ -206,10 +418,9 @@ export class FloatingBodies {
           y = position.y + oy,
           z = position.z + oz
         const [surface, dx, dz, dhdt] = this.surfaceAt(x, z, stepTime, wind, floater.radius)
-        const submerged = Math.max(
-          0,
-          Math.min(1, (surface - y + floater.radius) / (2 * floater.radius)),
-        )
+        const submerged = afloat
+          ? Math.max(0, Math.min(1, (surface - y + floater.radius) / (2 * floater.radius)))
+          : 0
         wet += submerged * share
         if (submerged <= 0) continue
         const pointVx = velocity.x + angular.y * oz - angular.z * oy
@@ -218,13 +429,15 @@ export class FloatingBodies {
         body.addForceAtPoint(
           {
             x: push(
-              (-dx * GRAVITY * 0.9 + (driftX * floater.windage - pointVx) * 1.2) *
+              (-dx * GRAVITY * 0.9 +
+                (current.x * floater.windage - pointVx) * (1.2 + current.damping)) *
                 submerged *
                 share,
             ),
             y: push((2 * GRAVITY - (pointVy - dhdt) * 4) * submerged * share),
             z: push(
-              (-dz * GRAVITY * 0.9 + (driftZ * floater.windage - pointVz) * 1.2) *
+              (-dz * GRAVITY * 0.9 +
+                (current.z * floater.windage - pointVz) * (1.2 + current.damping)) *
                 submerged *
                 share,
             ),
@@ -233,6 +446,36 @@ export class FloatingBodies {
           false,
         )
       }
+      const ground =
+        onWater >= 0
+          ? Math.max(WATER_LEVEL, this.bed.obstacle[onWater] ?? WATER_LEVEL)
+          : WATER_LEVEL
+      if (wet === 0 && leaf && position.y > ground + floater.radius * 2) {
+        const phase = floater.home.x * 7 + floater.home.z * 3
+        body.setAngvel(
+          {
+            x: Math.cos(stepTime * 2.3 + phase) * 0.8,
+            y: 1.1,
+            z: Math.sin(stepTime * 1.7 + phase) * 0.5,
+          },
+          false,
+        )
+        body.addForce(
+          {
+            x: push((driftX * 3 - velocity.x) * 2 + Math.sin(stepTime * 2.3 + phase) * 1.1),
+            y: push(-velocity.y * 7),
+            z: push((driftZ * 3 - velocity.z) * 2 + Math.cos(stepTime * 1.7 + phase) * 0.8),
+          },
+          false,
+        )
+      }
+      if (wet > 0 && floater.dry && velocity.y < -0.35) {
+        const energy = Math.min(0.9, -velocity.y * (floater.flatten < 1 ? 0.035 : 0.18))
+        this.onWake?.(position.x, position.z, 0.15 + floater.radius * 2, -energy * 0.08)
+        if (floater.flatten === 1)
+          this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
+      }
+      floater.dry = wet === 0
       const speed = Math.hypot(velocity.x, velocity.z)
       if (wet > 0.3 && speed > 0.15 && stepTime - floater.wakeAt > 0.4) {
         floater.wakeAt = stepTime
@@ -266,7 +509,12 @@ export class FloatingBodies {
     const rotation = floater.body.rotation()
     this.transform.position.set(position.x, position.y, position.z)
     this.transform.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w)
-    this.transform.scale.set(floater.radius, floater.radius * floater.flatten, floater.radius)
+    const fade = Math.max(0, Math.min(1, (floater.fadeAt - this.time) / 4))
+    this.transform.scale.set(
+      floater.radius * fade,
+      floater.radius * floater.flatten * fade,
+      floater.radius * (floater.flatten < 1 ? 0.55 : 1) * fade,
+    )
     this.transform.updateMatrix()
     this.mesh.setMatrixAt(index, this.transform.matrix)
   }
@@ -276,6 +524,7 @@ export class FloatingBodies {
     if (!Number.isFinite(x + z + energy) || energy <= 0) return
     const strength = Math.min(1, energy)
     for (const floater of this.floaters) {
+      if (floater === this.held || floater.fadeAt <= this.time) continue
       const position = floater.body.translation()
       const dx = position.x - x,
         dz = position.z - z
@@ -298,7 +547,7 @@ export class FloatingBodies {
     const wind = this.wind
     out.forEach((slot, i) => {
       const floater = this.floaters[i]
-      if (!floater || !wind) {
+      if (!floater || !wind || floater.fadeAt <= this.time) {
         slot.set(0, 0, 0, 0)
         return
       }
@@ -317,8 +566,14 @@ export class FloatingBodies {
   update(time: number, wind: WindState, reducedMotion = false) {
     this.wind = wind
     this.time = time
+    if (!reducedMotion) this.shedLeaf(time)
     this.floaters.forEach((floater, i) => {
-      if (!reducedMotion && this.escaped(floater)) this.reset(floater, time, wind)
+      if (!reducedMotion && floater.fadeAt <= time) floater.body.setEnabled(false)
+      if (!reducedMotion && floater !== this.held && this.escaped(floater)) {
+        // Shed leaves that settle on land or leave the scene fade there, then recycle.
+        if (floater.born > -Infinity) floater.fadeAt = Math.min(floater.fadeAt, time + 4)
+        else this.reset(floater, time, wind)
+      }
       this.place(i, floater)
     })
     this.mesh.instanceMatrix.needsUpdate = true
@@ -329,6 +584,7 @@ export class FloatingBodies {
   }
 
   dispose() {
+    this.releaseGrab(true)
     this.releaseHook()
     for (const floater of this.floaters) this.physics.world.removeRigidBody(floater.body)
     this.floaters.length = 0
