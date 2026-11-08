@@ -211,7 +211,7 @@ export class Vegetation {
     return direction
       .mul(lean.mul(bend).add(shiver))
       .add(vec3(0, shiver.mul(0.5), 0))
-      .add(this.gusts.sway(positionLocal, bend, phase, flutter, this.time, gustScale))
+      .add(this.gusts.sway(positionLocal, bend, gustScale))
   }
 
   private woodMaterial(scan?: SurfaceScan) {

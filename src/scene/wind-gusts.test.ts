@@ -1,44 +1,85 @@
 import { describe, expect, it } from 'vitest'
 
-import { GUST, WindGusts, gustEnvelope, sweepStrength } from './wind-gusts'
+import { GUST, WindGusts } from './wind-gusts'
 
-describe('wind gusts', () => {
-  it('needs a quick sweep, and grows with its speed', () => {
-    expect(sweepStrength(GUST.minSweep - 1)).toBe(0)
-    expect(sweepStrength(Number.NaN)).toBe(0)
-    expect(sweepStrength(GUST.minSweep)).toBeGreaterThan(0)
-    expect(sweepStrength(GUST.fullSweep)).toBeCloseTo(1, 9)
-    expect(sweepStrength(10_000)).toBe(1)
-  })
+const stroke = { x: 0, z: 0, dx: 1, dz: 0, pixelsPerSecond: GUST.fullSweep }
+const push: [number, number] = [0, 0]
 
-  it('runs a band down the sweep that fades over its life', () => {
-    // At the start the push sits at the origin, then moves on at the gust speed.
-    expect(gustEnvelope(0, 0, 0, 12)).toBeCloseTo(1, 9)
-    const t = 1
-    const ahead = gustEnvelope(12 * t, 0, t, 12)
-    expect(ahead).toBeGreaterThan(gustEnvelope(0, 0, t, 12))
-    expect(ahead).toBeGreaterThan(gustEnvelope(12 * t, GUST.width * 2, t, 12))
-    expect(ahead).toBeLessThan(1)
-    expect(gustEnvelope(12 * GUST.life, 0, GUST.life, 12)).toBe(0)
-    expect(gustEnvelope(0, 0, -0.1, 12)).toBe(0)
-  })
-
-  it('keeps a few gusts in flight, spaced out, along the sweep direction', () => {
+describe('cursor wind', () => {
+  it('eases into a steady lean and settles without oscillating when the cursor stops', () => {
     const gusts = new WindGusts()
-    expect(gusts.raise(0, 0, 1, 0, 1, 10)).toBe(true)
-    // Too soon after the last one.
-    expect(gusts.raise(5, 5, 1, 0, 1, 10.1)).toBe(false)
-    expect(gusts.raise(0, 0, 0, 0, 1, 11)).toBe(false)
-    // It pushes downwind of its origin as it travels, not upwind.
-    expect(gusts.at(GUST.minSpeed, 0, 11)).toBeGreaterThan(gusts.at(-GUST.minSpeed, 0, 11))
-    for (let i = 0; i < GUST.slots + 2; i++) gusts.raise(100 + i * 10, 0, 0, 1, 1, 20 + i)
-    // A fast sweep's front keeps pace with it, within the bounds.
-    const fast = new WindGusts()
-    fast.raise(0, 0, 1, 0, 1, 0, 25)
-    expect(fast.at(25, 0, 1)).toBeGreaterThan(fast.at(GUST.minSpeed, 0, 1))
-    // The first gust has been replaced.
-    expect(gusts.at(GUST.minSpeed, 0, 11)).toBe(0)
+    gusts.update(stroke, 1 / 60)
+    const first = gusts.pushAt(0, 0, push)
+    expect(first).toBeGreaterThan(0)
+    expect(first).toBeLessThan(0.05)
+    let previous = first
+    for (let frame = 1; frame < 120; frame++) {
+      gusts.update(stroke, 1 / 60)
+      const current = gusts.pushAt(0, 0, push)
+      expect(current).toBeGreaterThanOrEqual(previous)
+      expect(current).toBeLessThanOrEqual(1)
+      previous = current
+    }
+    expect(previous).toBeGreaterThan(0.99)
+    for (let frame = 0; frame < 180; frame++) {
+      gusts.update(null, 1 / 60)
+      const current = gusts.pushAt(0, 0, push)
+      expect(current).toBeLessThanOrEqual(previous)
+      expect(push[0]).toBeGreaterThanOrEqual(0)
+      previous = current
+    }
+    expect(previous).toBeLessThan(0.0001)
+    expect(gusts.active()).toBe(false)
+  })
+
+  it('responds proportionally to slow and fast motion, locally and in the stroke direction', () => {
+    const slow = new WindGusts(),
+      fast = new WindGusts()
+    for (let frame = 0; frame < 120; frame++) {
+      slow.update({ ...stroke, pixelsPerSecond: 100, dx: 0, dz: -1 }, 1 / 60)
+      fast.update({ ...stroke, pixelsPerSecond: 400, dx: 0, dz: -1 }, 1 / 60)
+    }
+    const gentle = slow.pushAt(0, 0, push)
+    expect(gentle).toBeGreaterThan(0)
+    expect(push[0]).toBe(0)
+    expect(push[1]).toBeLessThan(0)
+    const brisk = fast.pushAt(0, 0, push)
+    expect(brisk / gentle).toBeCloseTo(4)
+    expect(fast.pushAt(GUST.radius * 3, 0, push)).toBeLessThan(brisk * 0.01)
+    // Moving the cursor's contact must not teleport a full-strength wind patch.
+    fast.update({ ...stroke, x: GUST.radius * 2, pixelsPerSecond: 400, dx: 0, dz: -1 }, 1 / 60)
+    expect(fast.pushAt(0, 0, push)).toBeGreaterThan(brisk * 0.95)
+  })
+
+  it('keeps momentum through a direction reversal and clears for reduced motion', () => {
+    const gusts = new WindGusts()
+    for (let frame = 0; frame < 60; frame++) gusts.update(stroke, 1 / 60)
+    gusts.update({ ...stroke, dx: -1 }, 1 / 60)
+    gusts.pushAt(0, 0, push)
+    expect(push[0]).toBeGreaterThan(0.9)
+    for (let frame = 0; frame < 60; frame++) gusts.update({ ...stroke, dx: -1 }, 1 / 60)
+    gusts.pushAt(0, 0, push)
+    expect(push[0]).toBeLessThan(-0.9)
     gusts.clear()
-    expect(gusts.at(100, GUST.minSpeed, 21)).toBe(0)
+    expect(gusts.pushAt(0, 0, push)).toBe(0)
+    expect(gusts.active()).toBe(false)
+  })
+
+  it('keeps the same response at different frame rates, including a stop and reversal', () => {
+    const results = [30, 60, 144].map((fps) => {
+      const gusts = new WindGusts()
+      for (let frame = 0; frame < fps; frame++) gusts.update(stroke, 1 / fps)
+      for (let frame = 0; frame < fps / 2; frame++)
+        gusts.update({ ...stroke, x: 9, pixelsPerSecond: 0 }, 1 / fps)
+      for (let frame = 0; frame < fps; frame++)
+        gusts.update({ ...stroke, x: 9, dx: 0, dz: -1 }, 1 / fps)
+      const value: [number, number] = [0, 0]
+      gusts.pushAt(9, 0, value)
+      return value
+    })
+    for (const result of results.slice(1)) {
+      expect(result[0]).toBeCloseTo(results[0]?.[0] ?? 0, 10)
+      expect(result[1]).toBeCloseTo(results[0]?.[1] ?? 0, 10)
+    }
   })
 })

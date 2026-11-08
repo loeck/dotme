@@ -241,7 +241,7 @@ export class FallingLeaves {
     const sources = this.sources
     if (sources.length === 0) return
     const [dx, dz] = wind.direction
-    const cursor = gusts?.active(time) ?? false
+    const cursor = gusts?.active() ?? false
     const ambientScale = breeze * 0.6 + 0.5
     for (let i = 0; i + 3 < sources.length; i += 4) {
       const x = sources[i] ?? 0,
@@ -249,7 +249,7 @@ export class FallingLeaves {
         z = sources[i + 2] ?? 0,
         r = sources[i + 3] ?? 0
       let rate = 0
-      if (cursor && gusts) rate += LEAVES.cursorRate * r * gusts.pushAt(x, z, time, this.push)
+      if (cursor && gusts) rate += LEAVES.cursorRate * r * gusts.pushAt(x, z, this.push)
       const ambient = ambientGust(x, z, time, dx, dz) * ambientScale
       if (ambient > LEAVES.ambientThreshold)
         rate += LEAVES.ambientRate * r * (ambient - LEAVES.ambientThreshold)
@@ -326,7 +326,7 @@ export class FallingLeaves {
   private move(time: number, dt: number, wind: LeafWind, breeze: number, gusts?: WindGusts) {
     const [dx, dz] = wind.direction
     const response = 1 - Math.exp(-dt * 1.6)
-    const cursor = gusts?.active(time) ?? false
+    const cursor = gusts?.active() ?? false
     let alive = 0
     for (let i = 0; i < this.leaves.length; i++) {
       const leaf = this.leaves[i]
@@ -338,7 +338,7 @@ export class FallingLeaves {
         const drift = Math.min(wind.speed, 8) * 0.3 + breeze * 0.8 + gust * 2.2
         let tx = dx * drift,
           tz = dz * drift
-        if (cursor && gusts && gusts.pushAt(leaf.x, leaf.z, time, this.push) > 0) {
+        if (cursor && gusts && gusts.pushAt(leaf.x, leaf.z, this.push) > 0) {
           tx += this.push[0] * 7
           tz += this.push[1] * 7
         }
