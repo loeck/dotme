@@ -30,7 +30,13 @@ export async function initLandscape(
   void loadPhysics()
   const [prepared, snapshot] = await Promise.all([
     world.prepared,
-    weatherSnapshots.get(host) ?? preloadSceneWeather({ seed, position: params.position, signal }),
+    weatherSnapshots.get(host) ??
+      preloadSceneWeather({
+        seed,
+        position: params.position,
+        ...(params.weather ? { weather: params.weather } : {}),
+        signal,
+      }),
   ])
   signal.throwIfAborted()
   weatherSnapshots.set(host, snapshot)

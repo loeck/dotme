@@ -39,21 +39,43 @@ describe('public scene URLs', () => {
       startTime: '00:00',
     })
   })
-  it('falls back safely for malformed or out-of-range coordinates, seeds and hours', () => {
+  it('falls back safely for malformed or out-of-range coordinates, seeds, hours and weather', () => {
     for (const gps of ['91,0', '0,181', 'NaN,0', '1,', ',2', '1,2,3', ''])
       expect(sceneParams(`?coordinates=${gps}`).position).toEqual(PARIS)
     for (const seed of ['-1', '1.5', '4294967296', 'abc', ''])
       expect(sceneParams(`?seed=${seed}`).seed).toBeUndefined()
     for (const time of ['24:00', '12:60', '1:30', 'invalid', ''])
       expect(sceneParams(`?startTime=${time}`).startTime).toBeUndefined()
+    for (const weather of ['invalid', '', 'RAIN', 'snow', '__proto__', 'toString'])
+      expect(sceneParams(`?weather=${weather}`).weather).toBeUndefined()
   })
-  it('removes retired controls while preserving the four supported parameters and fragments', () => {
+  it('retains supported weather overrides when cleaning shared URLs', () => {
+    for (const weather of [
+      'clear',
+      'partly-cloudy',
+      'cloudy',
+      'overcast',
+      'rain',
+      'thunderstorm',
+    ]) {
+      const url = cleanSceneUrl(new URL(`https://example.com/?weather=${weather}&rain=off`))
+      expect(sceneParams(url.search).weather).toBe(weather)
+      expect(url.searchParams.has('rain')).toBe(false)
+    }
+  })
+  it('removes retired controls while preserving supported parameters and fragments', () => {
     const url = cleanSceneUrl(
       new URL(
         'https://example.com/?seed=42&coordinates=1,2&startTime=12:00&timeScale=20&weather=clear&rain=off&sun=hidden&windX=2&loader=loop#about',
       ),
     )
-    expect([...url.searchParams.keys()]).toEqual(['seed', 'coordinates', 'startTime', 'timeScale'])
+    expect([...url.searchParams.keys()]).toEqual([
+      'seed',
+      'coordinates',
+      'startTime',
+      'timeScale',
+      'weather',
+    ])
     expect(url.hash).toBe('#about')
   })
   it('keeps diagnostics parameters and bounds the pixel-ratio override', () => {

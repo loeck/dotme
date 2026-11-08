@@ -1,9 +1,12 @@
 import { required } from './invariant'
+import type { WeatherPreset } from './scene/weather'
+
 export type GpsPosition = Readonly<{ latitude: number; longitude: number }>
+export type WeatherOverride = WeatherPreset | 'rain' | 'thunderstorm'
 export const PARIS: GpsPosition = { latitude: 48.8566, longitude: 2.3522 }
 export const MIN_TIME_SCALE = 1
 export const MAX_TIME_SCALE = 100
-const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale'])
+const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale', 'weather'])
 // Diagnostics survive reloads on a phone but are not part of the public scene API.
 const DEBUG_KEYS = new Set(['perf', 'dpr', 'backend'])
 
@@ -28,7 +31,17 @@ export function sceneParams(search: string) {
   const timeScale = Number.isFinite(rawScale)
     ? Math.min(MAX_TIME_SCALE, Math.max(MIN_TIME_SCALE, rawScale))
     : 1
-  return { seed, position, startTime, timeScale }
+  const rawWeather = params.get('weather')
+  const weather: WeatherOverride | undefined =
+    rawWeather === 'clear' ||
+    rawWeather === 'partly-cloudy' ||
+    rawWeather === 'cloudy' ||
+    rawWeather === 'overcast' ||
+    rawWeather === 'rain' ||
+    rawWeather === 'thunderstorm'
+      ? rawWeather
+      : undefined
+  return { seed, position, startTime, timeScale, weather }
 }
 
 export function cleanSceneUrl(url: URL) {
