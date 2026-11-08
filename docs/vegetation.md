@@ -215,6 +215,15 @@ sway at most about 1.3 Hz. A per-vertex flutter at the plants' natural rates mad
 tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter. The per-vertex `wind` attribute stores bend, phase, flutter and
 angular frequency. Reduced motion freezes the time, keeping only the static lean.
 
+The lean strength is 0.25 in a calm (leaves are never quite still) plus the wind speed over
+7 m/s, up to 1.4. The models' tip travel (2.5–5% of the height) is right up close but read as no
+wind at all forty metres away, where most of the wood stands, so wood and foliage take 2.4 times
+it (one gain, so leaves stay on their twigs) and the sward its own. Over the breeze, gust patches
+(`wind-field.ts`) roll downwind through the wood at 9 m/s, 55 m apart and broken up across the
+wind, leaning and tossing the crowns they cross; they come in spells of a few tens of seconds
+(two slow sines) with calmer lulls between. A soft ceiling (`x / (1 + 0.35x)`) keeps the
+strongest gusts from folding a crown over.
+
 ## Roots and weathering
 
 Wood rings have a shallow elliptical/lobed profile and gradual swellings, strongest on

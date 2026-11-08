@@ -176,7 +176,12 @@ echo; touch and coarse pointers keep their native behaviour.
 
 At night the cursor carries a lantern. The surface under it receives a soft pool of
 irradiance (`pointer-light.ts`); when the cursor crosses a silhouette and the surface beneath
-jumps in depth, the pool rekindles there instead of teleporting at full strength. Water is
+jumps in depth, the pool rekindles there instead of teleporting at full strength. Past 25 m the
+pool widens (4 cm per metre) and stretches along the view ray (with the fourth power of that
+widening): a crown is a loose cloud of cards and the ray stops on a pick sphere in front of most
+of them, so a pool sized for the near bank lit only that sphere's few cards and a far tree under
+the cursor often stayed dark. Far away the ray also hops between crowns and the ridge behind as
+the cursor moves; those hops dim the pool over a fifth of the distance rather than 6 m. Water is
 almost purely specular and barely shows that diffuse pool, so the lake shader also reflects a
 small lantern hanging 35 cm above the point: a glint just below it on screen that the waves
 break into a short shimmering streak, the way the bank's lamps reflect. It is a few
