@@ -103,6 +103,24 @@ describe('scene weather mapping', () => {
 })
 
 describe('weather preload deadline', () => {
+  it.each([
+    ['clear', 'clear', 0, false],
+    ['partly-cloudy', 'partly-cloudy', 0, false],
+    ['cloudy', 'cloudy', 0, false],
+    ['overcast', 'overcast', 0, false],
+    ['rain', 'overcast', 0.55, false],
+    ['thunderstorm', 'overcast', 1, true],
+  ] as const)('forces %s without fetching live weather', async (weather, sky, intensity, storm) => {
+    await expect(
+      preloadSceneWeather({ seed: 42, weather, signal: new AbortController().signal }),
+    ).resolves.toMatchObject({
+      source: 'override',
+      weather: sky,
+      rain: { intensity },
+      storm,
+    })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
   it('uses a successful response', async () => {
     respond()
     await expect(start()).resolves.toMatchObject({

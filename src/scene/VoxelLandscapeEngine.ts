@@ -109,7 +109,6 @@ import type { WeatherPreset } from './weather'
 import { WindModel, updateWindUniforms } from './wind'
 import type { WindState } from './wind'
 import type { WindOptions } from './wind'
-import { sweepStrength } from './wind-gusts'
 import { createWindUniforms } from './wind-nodes'
 import type { VegetationPart } from './world-data'
 
@@ -1468,35 +1467,42 @@ export class VoxelLandscapeEngine {
   }
 
   /**
-   * A quick sweep of the pointer across the scene raises a gust that runs through the grass and
-   * trees in the sweep's direction. The direction is read on the ground: both ends of this
-   * frame's stroke are cast into the world, the newest last so the pointer ray stays current.
+   * A local, damped breeze follows the screen velocity. Project both ends at the current
+   * contact depth so crossing a crown's silhouette cannot invent a large movement in depth.
    */
   private updateGusts(pointerOnScene: boolean, dt: number) {
     const previous = this.sweepClient
     const current = this.pointerClient
     const pixels = Math.hypot(current.x - previous.x, current.y - previous.y) / Math.max(dt, 1e-3)
-    const strength = dt > 0 ? sweepStrength(pixels) : 0
     const vegetation = this.vegetation
-    const ready = pointerOnScene && !this.reducedMotion && vegetation && strength > 0
-    const from = ready && this.pointerWorld(previous.x, previous.y, this.sweepFrom)
+    const ready =
+      !!vegetation &&
+      pointerOnScene &&
+      !this.reducedMotion &&
+      dt > 0 &&
+      pixels > 0 &&
+      Number.isFinite(pixels)
+    const from = ready && this.projectPointer(previous.x, previous.y)
+    if (from) this.sweepFrom.copy(this.raycaster.ray.direction)
+    // Cast the newest ray last: the rest of this frame's interactions use it.
     const to = from && this.pointerWorld(current.x, current.y, this.sweepTo)
-    previous.copy(current)
-    if (!vegetation || !from || !to) return
-    const dx = to.x - from.x,
-      dz = to.z - from.z
-    const stroke = Math.hypot(dx, dz)
-    // The front runs on at the pointer's own pace over the ground.
-    if (stroke > 0.3)
-      vegetation.gusts.raise(
-        to.x,
-        to.z,
-        dx,
-        dz,
-        strength,
-        this.elapsed,
-        stroke / Math.max(dt, 1e-3),
+    if (to && vegetation) {
+      this.sweepFrom
+        .multiplyScalar(this.raycaster.ray.origin.distanceTo(to))
+        .add(this.raycaster.ray.origin)
+      vegetation.gusts.update(
+        {
+          x: to.x,
+          z: to.z,
+          dx: to.x - this.sweepFrom.x,
+          dz: to.z - this.sweepFrom.z,
+          pixelsPerSecond: pixels,
+        },
+        Math.min(dt, 0.1),
       )
+    } else vegetation?.gusts.update(null, Math.min(dt, 0.1))
+    if (pointerOnScene) previous.copy(current)
+    else previous.set(Number.NaN, Number.NaN)
   }
 
   /** The first solid, crown or water the pointer at a client position meets, or null. */
@@ -1726,6 +1732,7 @@ export class VoxelLandscapeEngine {
     this.setPrimaryMouseDown(false)
     this.skyPointerId = -1
     this.pointerActive = false
+    this.sweepClient.set(Number.NaN, Number.NaN)
     this.dragging = false
     this.dragPointerId = -1
     this.previousPointer = null

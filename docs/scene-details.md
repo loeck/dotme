@@ -30,18 +30,15 @@ spot, the ring runs out to 7 m and fades in 0.7 s, the fish lose their bait, a l
 sounds and, on touch, the hand gets a 20–50 ms buzz. A press that moves first stays a drag or a
 flick, and a release under 15% charge is an ordinary tap. Reduced motion has no charge.
 
-A quick sweep of the pointer across the scene (at least 450 CSS px/s, an ordinary brisk swipe,
-full strength at 2200; 1400 px/s before rarely happened) raises
-a gust (`wind-gusts.ts`): both ends of the frame's stroke are cast onto the ground, crowns or water,
-and a band of wind starts where the pointer is and runs on in the sweep's direction at the pointer's
-own pace over the ground (8–30 m/s, so the foliage the sweep crosses is what stirs), 4.5 m
-deep and 9 m wide, fading out over 3.2 s. It is light: the crowns it passes lean by at most 0.6
-bend units (a strong breeze leans about 0.7; the sward takes 45% of it), while each foliage card
-and blade rustles on its twig at a little over 2 Hz, by up to six times its own flutter. Wood has
-no flutter, so trunks and limbs stay put and the leaves shake, not the whole tree.
-Three gusts can be in flight at once, at least 0.1 s apart; they ride the vegetation's existing
-sway, so grass and trees answer with no extra draw. Reduced motion raises none and clears any in
-flight.
+Moving the pointer produces a soft, local wind patch (`wind-gusts.ts`), 9 m in radius. Its push
+follows screen velocity proportionally, up to full strength at 1600 CSS px/s, without a speed
+threshold or an initial kick. Critically damped springs smooth both its position and its push,
+preserving momentum through starts, stops and direction changes without oscillation. The stroke
+is projected at one contact depth, so crossing a tree's silhouette cannot create a false velocity
+along the view. A crown leans by at most 0.6 bend units (the sward takes 45%); the cursor adds no
+rapid per-card vibration. The natural breeze and leaf flutter continue independently. Grass,
+wood and foliage share the field with no extra draw. Reduced motion clears the push, and leaving
+the scene lets it settle gradually.
 
 Gusts tear leaves off the crowns (`falling-leaves.ts`): every crown band of the pick spheres
 (radius 0.6 m or more) sheds at a rate set by the cursor gusts and, above a threshold, the ambient

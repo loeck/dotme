@@ -57,17 +57,20 @@ validates the remote weather response; `src/audio/` handles decoded clips and sc
 Initialization has a 20-second deadline; the HTML bootstrap releases the profile even
 when the main module cannot load.
 
-The scene accepts four URL parameters:
+The scene accepts five URL parameters:
 
-| Parameter     | Example          | Meaning                                                                                      |
-| ------------- | ---------------- | -------------------------------------------------------------------------------------------- |
-| `seed`        | `42`             | Reproduce a landscape composition                                                            |
-| `coordinates` | `48.8566,2.3522` | Weather location; defaults to Paris                                                          |
-| `startTime`   | `08:30`          | Initial artistic solar clock; defaults to a golden-hour intro that time-lapses to local time |
-| `timeScale`   | `20`             | Solar cycle multiplier, clamped to 1–100                                                     |
+| Parameter     | Example          | Meaning                                                                                                |
+| ------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `seed`        | `42`             | Reproduce a landscape composition                                                                      |
+| `coordinates` | `48.8566,2.3522` | Weather location; defaults to Paris                                                                    |
+| `startTime`   | `08:30`          | Initial artistic solar clock; defaults to a golden-hour intro that time-lapses to local time           |
+| `timeScale`   | `20`             | Solar cycle multiplier, clamped to 1–100                                                               |
+| `weather`     | `rain`           | Force `clear`, `partly-cloudy`, `cloudy`, `overcast`, `rain` or `thunderstorm` instead of live weather |
 
-Weather is live and independent of the artistic solar clock. Reduced motion renders a
-static TSL loader and freezes scene motion. Audio follows browser autoplay rules and
+Weather defaults to live conditions and remains independent of the artistic solar clock.
+For example, `/?weather=rain&startTime=12:00` shows a rainy midday scene without requesting the
+weather API. Omit `weather` to return to live conditions; unknown values also use live weather.
+Reduced motion renders a static TSL loader and freezes scene motion. Audio follows browser autoplay rules and
 can be controlled by the speaker button.
 
 ## Contributing

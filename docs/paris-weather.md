@@ -70,9 +70,19 @@ mean with strong gusts still produces them. Rain keeps the reported wind and sca
 seconds past midnight and seed the solar clock and its orbit. Polar days without a sunrise
 before sunset keep live weather with the default 06:00–18:00 orbit.
 
-Only `seed`, `coordinates=latitude,longitude`, `startTime=HH:MM` and `timeScale=1..100` are public query parameters.
+The public query parameters are `seed`, `coordinates=latitude,longitude`, `startTime=HH:MM`,
+`timeScale=1..100` and `weather`.
 `startTime` overrides the snapshot-seeded clock; without it the scene starts at the weather
 location's local time rather than the visitor's.
+
+`weather=clear|partly-cloudy|cloudy|overcast|rain|thunderstorm` bypasses the API and selects an
+artistic preset. The four sky presets are dry; `rain` uses an overcast sky with rain intensity
+0.55, and `thunderstorm` uses an overcast sky with intensity 1 and lightning. Wind stays seeded
+for the visit. Forced weather uses the default solar orbit and the visitor's local time unless
+`startTime` is set. Missing or unknown `weather` values keep the normal live-weather and fallback
+path. Overrides survive URL cleanup and reloads, use `data-weather-source="override"`, and do not
+show the live-data attribution.
+
 The information button opens a dialog describing the scene and its libraries, including weather
 attribution when live API data is used.
 

@@ -1,6 +1,8 @@
 import {
   Fn,
   If,
+  dFdx,
+  dFdy,
   dot,
   exp,
   float,
@@ -346,15 +348,19 @@ export function rainRingsNode(
 ) {
   return Fn(() => {
     const result = vec4(0).toVar()
-    If(intensity.greaterThan(0).and(footprint.lessThan(RAIN_RING_CELL * 0.6)), () => {
+    // At grazing angles a pixel is long in depth but narrow across the lake.
+    // Filter each ring along its radial direction instead of erasing the
+    // entire impact using that pixel's longest dimension.
+    const pixelX = dFdx(p).toVar(),
+      pixelY = dFdy(p).toVar()
+    If(intensity.greaterThan(0).and(footprint.lessThan(RAIN_RING_CELL * 2)), () => {
       const slope = vec2(0).toVar()
-      const fade = float(1).sub(
+      const resolved = float(1).sub(
         smoothstep(RAIN_RING_WAVELENGTH * 0.3, RAIN_RING_WAVELENGTH * 2.5, footprint),
       )
-      const speck = max(0.02, footprint.mul(1.3))
-      const speckRange = float(1).sub(
-        smoothstep(RAIN_RING_CELL * 0.25, RAIN_RING_CELL * 0.6, footprint),
-      )
+      // Once a pixel spans several cells, the bounded neighbourhood no longer
+      // resolves individual impacts. Hand their energy to roughness smoothly.
+      const range = float(1).sub(smoothstep(RAIN_RING_CELL, RAIN_RING_CELL * 2, footprint))
       const specks = vec2(0).toVar()
       for (let layer = 0; layer < 2; layer++) {
         const q = p.div(RAIN_RING_CELL).add(vec2(layer * 0.5, layer * 0.5))
@@ -368,6 +374,15 @@ export function rainRingsNode(
           const shape = hash2(drop.mul(91.3))
           const d = q.sub(cell).sub(drop).mul(RAIN_RING_CELL)
           const r = length(d)
+          const radial = d.div(max(r, 0.0001))
+          const radialFootprint = length(vec2(radial.dot(pixelX), radial.dot(pixelY)))
+          const fade = float(1).sub(
+            smoothstep(RAIN_RING_WAVELENGTH * 0.3, RAIN_RING_WAVELENGTH * 2.5, radialFootprint),
+          )
+          const speck = max(0.02, radialFootprint.mul(1.3))
+          const speckRange = float(1).sub(
+            smoothstep(RAIN_RING_CELL * 0.25, RAIN_RING_CELL * 0.6, radialFootprint),
+          )
           const size = shape.x.mul(0.5).add(0.5)
           const ring = r.sub(phase.mul(RAIN_RING_CELL * 0.45).mul(size))
           const envelope = exp(
@@ -378,28 +393,28 @@ export function rainRingsNode(
           ).mul(phase.oneMinus().pow2())
           const wave = sin(ring.mul((Math.PI * 2) / RAIN_RING_WAVELENGTH))
           const falls = step(shape.y, intensity)
-          slope.addAssign(
-            d.div(max(r, 0.0001)).mul(wave).mul(envelope).mul(falls).mul(size.mul(0.45)),
-          )
+          slope.addAssign(radial.mul(wave).mul(envelope).mul(falls).mul(size.mul(0.45)).mul(fade))
           specks.addAssign(
             d
               .div(speck)
               .mul(exp(r.div(speck).pow2().negate()))
               .mul(smoothstep(0.25, 0, phase))
               .mul(falls)
-              .mul(0.5),
+              .mul(0.5)
+              .mul(fade.oneMinus())
+              .mul(speckRange),
           )
         }
       }
       result.assign(
         vec4(
-          slope.mul(fade).add(specks.mul(fade.oneMinus()).mul(speckRange)),
-          intensity.mul(mix(0.0025, 0.008, fade.oneMinus())),
+          slope.add(specks).mul(range),
+          intensity.mul(mix(0.0025, 0.008, resolved.oneMinus())),
           0,
         ),
       )
     })
-    If(intensity.greaterThan(0).and(footprint.greaterThanEqual(RAIN_RING_CELL * 0.6)), () => {
+    If(intensity.greaterThan(0).and(footprint.greaterThanEqual(RAIN_RING_CELL * 2)), () => {
       result.assign(vec4(0, 0, intensity.mul(0.008), 0))
     })
     return result

@@ -224,6 +224,11 @@ wind, leaning and tossing the crowns they cross; they come in spells of a few te
 (two slow sines) with calmer lulls between. A soft ceiling (`x / (1 + 0.35x)`) keeps the
 strongest gusts from folding a crown over.
 
+The cursor adds a separate local lean that follows its velocity through a critically damped
+response. Its centre also follows smoothly, with no abrupt gust births or cursor-driven flutter.
+Wood, foliage, undergrowth and falling leaves read the same field; stopping or reversing the
+mouse preserves momentum while the plants settle. See [scene interactions](scene-details.md).
+
 ## Roots and weathering
 
 Wood rings have a shallow elliptical/lobed profile and gradual swellings, strongest on

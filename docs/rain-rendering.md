@@ -11,7 +11,10 @@ state. Reduced motion suppresses rain; hidden pages pause updates.
 TSL composition handles depth occlusion and the appearance of impact waves on WebGPU. Water collision uses the shared CPU contact sampler, including bounded recent lake impulses,
 while visible surface effects follow the GPU wave field. Streak radiance follows the ambient environment
 plus moon and lamp glints, since a drop refracts most of its surroundings, and blends into the
-scene's exponential fog with distance so far rain reads as haze rather than dark streaks. The overlay
+scene's exponential fog with distance so far rain reads as haze rather than dark streaks. Streaks
+fade out between 3 m and 1.2 m of view depth (including the exposure tail), with projected motion
+bounded to 28 CSS pixels, width to 6 CSS pixels and a guarded perspective divide. Drops crossing
+the camera plane therefore cannot turn into bright lines across the viewport. The overlay
 blends premultiplied colour, since `renderOutput` unpremultiplies its input and premultiplies its
 result; straight alpha there darkens the background by the drop's coverage. Streaks are
 not reflected by the lake: drop reflections are practically invisible and read as dashes on the water. This is an artistic rain approximation, not
@@ -24,6 +27,11 @@ unnecessary simulation work. Disposal releases all owned geometry, materials and
 Unit tests cover wind response, deterministic stepping, segment collisions, shelters,
 impacts and bounded pools. Browser verification covers rainy scenes and reduced motion; explicit GPU tests validate the node pipeline. Prolonged sampling belongs in
 `pnpm benchmark:scene`.
+
+The water shader also supplies a dense background field of small rain rings. Its radial pixel
+filter retains impacts across a grazing view, and gradually transfers unresolved rings into
+surface roughness. GPU readbacks check that impacts remain distributed across the view on both
+WebGPU and WebGL, and that dry weather clears the field.
 
 References: [Garg and Nayar's rain streaks](https://cave.cs.columbia.edu/Statics/publications/pdfs/Garg_TOG06.pdf),
 [dynamic rain effects](https://seblagarde.wordpress.com/2013/01/03/water-drop-2b-dynamic-rain-and-its-effects/),

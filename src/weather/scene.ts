@@ -1,5 +1,5 @@
 import { required } from '../invariant'
-import type { GpsPosition } from '../scene-params'
+import type { GpsPosition, WeatherOverride } from '../scene-params'
 import type { RainState } from '../scene/rain-simulation'
 import { DEFAULT_SOLAR, parseInitialTime } from '../scene/solar-clock'
 import type { SolarEndpoints } from '../scene/solar-clock'
@@ -16,7 +16,7 @@ export type SceneWeather = Readonly<{
   solar: SolarEndpoints
   /** Location-local seconds past midnight at the snapshot time. */
   nowSeconds: number
-  source: 'live' | 'random'
+  source: 'live' | 'random' | 'override'
   /** A thunderstorm is reported: the scene adds lightning, whatever the rain. */
   storm?: boolean
 }>
@@ -121,15 +121,28 @@ export function randomSceneWeather(seed: number): SceneWeather {
 export async function preloadSceneWeather({
   seed,
   position,
+  weather,
   signal,
   timeoutMs = WEATHER_PRELOAD_TIMEOUT_MS,
 }: {
   seed: number
   position?: GpsPosition
+  weather?: WeatherOverride
   signal: AbortSignal
   timeoutMs?: number
 }): Promise<SceneWeather> {
   signal.throwIfAborted()
+  if (weather) {
+    const preset = randomSceneWeather(seed)
+    const wet = weather === 'rain' || weather === 'thunderstorm'
+    return {
+      ...preset,
+      weather: wet ? 'overcast' : weather,
+      rain: { ...preset.rain, intensity: weather === 'thunderstorm' ? 1 : wet ? 0.55 : 0 },
+      storm: weather === 'thunderstorm',
+      source: 'override',
+    }
+  }
   const controller = new AbortController()
   const abort = () => controller.abort(signal.reason)
   signal.addEventListener('abort', abort, { once: true })

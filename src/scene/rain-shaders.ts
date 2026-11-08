@@ -193,14 +193,15 @@ export function createRainParticleMaterial(
   const tailClip = cameraProjectionMatrix.mul(vec4(head.xyz.sub(motion), 1)),
     headClip = cameraProjectionMatrix.mul(head)
   const screenMotion = headClip.xy
-      .div(headClip.w)
-      .sub(tailClip.xy.div(tailClip.w))
+      .div(max(headClip.w, 0.05))
+      .sub(tailClip.xy.div(max(tailClip.w, 0.05)))
       .mul(u.uResolution)
       .mul(0.5),
-    streak = length(screenMotion)
-  const direction = streak
+    projectedLength = length(screenMotion),
+    streak = kind === 'streak' ? min(projectedLength, u.uPixelRatio.mul(28)) : projectedLength
+  const direction = projectedLength
     .greaterThan(0.001)
-    .select(screenMotion.div(max(streak, 0.001)), vec2(0, -1))
+    .select(screenMotion.div(max(projectedLength, 0.001)), vec2(0, -1))
   const physical = drop.w
     .mul(cameraProjectionMatrix.mul(vec4(0, 1, 0, 0)).y)
     .mul(u.uResolution.y)
@@ -209,7 +210,13 @@ export function createRainParticleMaterial(
   const coc = clamp(float(5).div(max(head.z.negate(), 0.4)).sub(0.6), 0, 14)
     .mul(u.uPixelRatio)
     .mul(kind === 'spray' ? 0.22 : 1)
-  const width = sqrt(physical.pow(2).add(u.uPixelRatio.pow2().mul(6.25)).add(coc.pow(2).mul(4)))
+  const opticalWidth = sqrt(
+    physical.pow(2).add(u.uPixelRatio.pow2().mul(6.25)).add(coc.pow(2).mul(4)),
+  )
+  const width = kind === 'streak' ? min(opticalWidth, u.uPixelRatio.mul(6)) : opticalWidth
+  // A drop crossing the eye plane projects to an enormous segment. Fade out
+  // that near volume before perspective diverges, including the exposure tail.
+  const nearFade = varying(smoothstep(1.2, 3, min(head.z.negate(), head.z.sub(motion.z).negate())))
   const lengthPx = max(streak, 1).add(width),
     side = vec2(direction.y.negate(), direction.x)
   const offset = side
@@ -249,6 +256,7 @@ export function createRainParticleMaterial(
             .mul(min(0.65, max(coverage.mul(4.8), floor)))
             .mul(ends)
             .mul(clarity)
+            .mul(nearFade)
             .mul(lobes)
             .mul(glint)
             .mul(u.uOpacity)

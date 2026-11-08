@@ -64,9 +64,7 @@ test('times out and retains random weather after a late API reply', async ({ pag
   await expect(page.locator('[data-weather-credit]')).toBeHidden()
 })
 
-test('HTTP errors fall back and unsupported URL controls cannot override live weather', async ({
-  page,
-}) => {
+test('HTTP errors and invalid weather overrides retain automatic fallback', async ({ page }) => {
   let requests = 0
   await page.route('https://api.open-meteo.com/**', (route) => {
     requests++
@@ -74,13 +72,39 @@ test('HTTP errors fall back and unsupported URL controls cannot override live we
   })
   await page.goto('/?seed=42')
   await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'random')
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
   expect(requests).toBe(1)
-  await page.goto('/?seed=42&weather=clear&rain=off')
+  await page.goto('/?seed=42&weather=invalid&rain=off')
   await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
   await expect(page.locator('#landscape')).toHaveAttribute('data-weather-source', 'random')
-  expect(new URL(page.url()).searchParams.has('weather')).toBe(false)
+  expect(new URL(page.url()).searchParams.get('weather')).toBe('invalid')
   expect(new URL(page.url()).searchParams.has('rain')).toBe(false)
   expect(requests).toBe(2)
+})
+
+test('forces rain through the URL without live weather and retains it after reload', async ({
+  page,
+}) => {
+  let requests = 0
+  await page.route('https://api.open-meteo.com/**', (route) => {
+    requests++
+    return route.fulfill({ json: parisWeatherFixture() })
+  })
+  await page.goto('/?seed=42&weather=rain&startTime=12:00')
+  const scene = page.locator('#landscape')
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
+  await expect(scene).toHaveAttribute('data-weather-source', 'override')
+  await expect(scene).toHaveAttribute('data-weather', 'overcast')
+  await expect(scene).toHaveAttribute('data-rain-intensity', '0.55')
+  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-weather', 'overcast')
+  expect(new URL(page.url()).searchParams.get('weather')).toBe('rain')
+  await page.getByRole('button', { name: 'About this landscape' }).click()
+  await expect(page.locator('[data-weather-credit]')).toBeHidden()
+  await page.reload()
+  await expect(page.locator('.scene-loader')).toBeHidden({ timeout: 30_000 })
+  await expect(scene).toHaveAttribute('data-weather-source', 'override')
+  await expect(scene).toHaveAttribute('data-rain-intensity', '0.55')
+  expect(requests).toBe(0)
 })
 
 test('GPS selects the weather location while time independently selects night', async ({

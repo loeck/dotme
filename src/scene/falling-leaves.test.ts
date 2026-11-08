@@ -2,7 +2,7 @@ import { Vector3 } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
 import { FallingLeaves, LEAVES } from './falling-leaves'
-import { WindGusts } from './wind-gusts'
+import { GUST, WindGusts } from './wind-gusts'
 
 function seeded(seed: number) {
   let state = seed >>> 0 || 1
@@ -15,6 +15,7 @@ function seeded(seed: number) {
 }
 
 const calm = { direction: [1, 0], speed: 0 } as const
+const stroke = { x: 0, z: 0, dx: 1, dz: 0, pixelsPerSecond: GUST.fullSweep }
 
 function forest(onWater?: (x: number, z: number) => void, water = false) {
   const leaves = new FallingLeaves(
@@ -41,9 +42,9 @@ describe('falling leaves', () => {
   it('are torn off by a cursor gust, flutter down and land', () => {
     const leaves = forest()
     const gusts = new WindGusts()
-    gusts.raise(-4, 0, 1, 0, 1, 0, 8)
     let most = 0
     for (let t = 0; t < 1.5; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
       leaves.update(t, 1 / 60, calm, 0, gusts)
       most = Math.max(most, leaves.count)
     }
@@ -62,9 +63,10 @@ describe('falling leaves', () => {
     const ripples: number[] = []
     const leaves = forest((x) => ripples.push(x), true)
     const gusts = new WindGusts()
-    gusts.raise(-4, 0, 1, 0, 1, 0, 8)
-    for (let t = 0; t < 12; t += 1 / 60)
+    for (let t = 0; t < 12; t += 1 / 60) {
+      gusts.update(t < 2 ? stroke : null, 1 / 60)
       leaves.update(t, 1 / 60, calm, 0, t < 2 ? gusts : undefined)
+    }
     expect(ripples.length).toBeGreaterThan(0)
     expect(ripples.length).toBeLessThanOrEqual(Math.ceil(12 / LEAVES.rippleSpacing))
     leaves.dispose()
@@ -74,7 +76,7 @@ describe('falling leaves', () => {
     const leaves = forest()
     const gusts = new WindGusts()
     for (let t = 0; t < 4; t += 1 / 60) {
-      if (Math.round(t * 60) % 12 === 0) gusts.raise(-4, 0, 1, 0, 1, t, 8)
+      gusts.update(stroke, 1 / 60)
       leaves.update(t, 1 / 60, calm, 1.4, gusts)
     }
     expect(leaves.count).toBeLessThanOrEqual(32)

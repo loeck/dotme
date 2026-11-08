@@ -11,9 +11,19 @@ for (const backend of ['webgpu', 'webgl'] as const)
       const odd = await window.gpuWater.verify(1)
       const diagnostics = await window.gpuWater.verify(24)
       const wind = await window.gpuWater.verifyWind()
+      const rain = await window.gpuWater.verifyRain()
+      const streaks = await window.gpuWater.verifyRainStreaks()
       const shore = await window.gpuWater.verifyShore()
       await window.gpuWater.dispose()
-      return { backend: actualBackend, oddError: odd.maxError, wind, shore, ...diagnostics }
+      return {
+        backend: actualBackend,
+        oddError: odd.maxError,
+        wind,
+        rain,
+        streaks,
+        shore,
+        ...diagnostics,
+      }
     })
     expect(result.backend).toBe(backend)
     expect(result.finite).toBe(true)
@@ -25,6 +35,14 @@ for (const backend of ['webgpu', 'webgl'] as const)
     expect(result.laterEnergy).toBeLessThan(result.energy)
     expect(result.wind.samples).toBe(9216)
     for (const error of result.wind.maxErrors) expect(error).toBeLessThan(0.0001)
+    expect(result.rain.finite).toBe(true)
+    expect(result.rain.dryMaximum).toBe(0)
+    for (const active of result.rain.activeQuadrants) expect(active).toBeGreaterThan(30)
+    for (const streak of result.streaks) {
+      if (streak.depth <= 1) expect(streak.visiblePixels).toBe(0)
+      if (streak.depth === 6) expect(streak.visiblePixels).toBeGreaterThan(0)
+      expect(streak.span).toBeLessThan(48)
+    }
     expect(result.shore.finite).toBe(true)
     expect(result.shore.maskedHeight).toBe(0)
     expect(result.shore.height).toBeGreaterThan(0)
