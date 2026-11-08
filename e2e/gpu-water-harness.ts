@@ -19,7 +19,12 @@ import {
   WATER_DAMPING,
   WAVE_SPEED,
 } from '../src/scene/water-simulation'
-import { createWindNodes, sampleWindField, windFieldNode } from '../src/scene/water-surface'
+import {
+  createWindNodes,
+  rainRingsNode,
+  sampleWindField,
+  windFieldNode,
+} from '../src/scene/water-surface'
 import { updateWindUniforms, WindModel } from '../src/scene/wind'
 
 interface WaterVerification {
@@ -34,6 +39,7 @@ interface WaterVerification {
   }>
   dispose(): Promise<void>
   verifyWind(): Promise<{ samples: number; maxErrors: readonly number[] }>
+  verifyRain(): Promise<{ activeQuadrants: readonly number[]; dryMaximum: number; finite: boolean }>
   verifyShore(): Promise<{
     finite: boolean
     maskedHeight: number
@@ -85,6 +91,65 @@ async function main() {
     dx = LAKE_BOUNDS.size / n
   window.gpuWater = {
     backend,
+    async verifyRain() {
+      const size = 64
+      const target = new RenderTarget(size, size, { type: FloatType, depthBuffer: false })
+      const material = new MeshBasicNodeMaterial({ depthTest: false, depthWrite: false })
+      const geometry = new PlaneGeometry(2, 2)
+      const scene = new Scene()
+      const camera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+      const intensity = uniform(1)
+      const time = uniform(0)
+      // A grazing view still resolves centimetres across the lake while each
+      // pixel spans 28 cm in depth. Impacts must survive throughout that view.
+      material.vertexNode = vec4(positionLocal, 1)
+      material.fragmentNode = rainRingsNode(
+        uv()
+          .mul(vec2(size * 0.02, size * 0.28))
+          .add(vec2(-4, -20)),
+        uniform(0.28),
+        intensity,
+        time,
+      )
+      scene.add(new Mesh(geometry, material))
+      const activeQuadrants = [0, 0, 0, 0]
+      let dryMaximum = 0
+      let finite = true
+      try {
+        renderer.setRenderTarget(target)
+        await renderer.compileAsync(scene, camera)
+        /* eslint-disable no-await-in-loop */
+        for (const wet of [true, false]) {
+          intensity.value = wet ? 1 : 0
+          for (const instant of [0, 0.17, 0.39]) {
+            time.value = instant
+            renderer.render(scene, camera)
+            const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)
+            if (!(pixels instanceof Float32Array)) throw new Error('Expected float rain readback')
+            for (let row = 0; row < size; row++)
+              for (let col = 0; col < size; col++) {
+                const offset = (row * size + col) * 4
+                const x = required(pixels[offset]),
+                  y = required(pixels[offset + 1]),
+                  variance = required(pixels[offset + 2])
+                finite &&= Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(variance)
+                if (wet && Math.hypot(x, y) > 0.001) {
+                  const quadrant = (row < size / 2 ? 0 : 2) + (col < size / 2 ? 0 : 1)
+                  activeQuadrants[quadrant] = required(activeQuadrants[quadrant]) + 1
+                }
+                if (!wet) dryMaximum = Math.max(dryMaximum, Math.abs(x), Math.abs(y), variance)
+              }
+          }
+        }
+        /* eslint-enable no-await-in-loop */
+        return { activeQuadrants, dryMaximum, finite }
+      } finally {
+        renderer.setRenderTarget(null)
+        geometry.dispose()
+        material.dispose()
+        target.dispose()
+      }
+    },
     async verifyWind() {
       const size = 32
       const target = new RenderTarget(size, size, { type: FloatType, depthBuffer: false })

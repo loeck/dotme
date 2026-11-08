@@ -25,6 +25,11 @@ Unit tests cover wind response, deterministic stepping, segment collisions, shel
 impacts and bounded pools. Browser verification covers rainy scenes and reduced motion; explicit GPU tests validate the node pipeline. Prolonged sampling belongs in
 `pnpm benchmark:scene`.
 
+The water shader also supplies a dense background field of small rain rings. Its radial pixel
+filter retains impacts across a grazing view, and gradually transfers unresolved rings into
+surface roughness. GPU readbacks check that impacts remain distributed across the view on both
+WebGPU and WebGL, and that dry weather clears the field.
+
 References: [Garg and Nayar's rain streaks](https://cave.cs.columbia.edu/Statics/publications/pdfs/Garg_TOG06.pdf),
 [dynamic rain effects](https://seblagarde.wordpress.com/2013/01/03/water-drop-2b-dynamic-rain-and-its-effects/),
 [capillary rings](https://doi.org/10.1017/S0022112088003301).

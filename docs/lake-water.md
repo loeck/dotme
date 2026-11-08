@@ -21,7 +21,10 @@ near-saturated spectrum, so no crossing pair dominates the slope and draws a lat
 the pixel footprint, sharpen glints and break up reflections without changing the shared height field.
 Rain adds a jittered field of expanding rings whose density follows rain intensity, roughens the
 whole surface so reflections dull, and turns rings below a pixel into roughness and brief impact
-specks instead of aliasing. Sun glitter, subsurface glow and shafts are direct sun
+specks instead of aliasing. Each ring is filtered along its radial direction, preserving detail
+across the lake when perspective stretches pixels in depth. Individual impacts fade into
+roughness once a pixel spans several rain cells, rather than disappearing in a foreground band.
+Sun glitter, subsurface glow and shafts are direct sun
 and follow the cloud shadow. The water is a clear,
 temperate lake's: pure water absorbs red far more than green, and a little phytoplankton and
 dissolved matter take some blue, so clear water absorbs about (0.36, 0.16, 0.15) per metre in
