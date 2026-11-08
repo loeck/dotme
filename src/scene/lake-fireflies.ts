@@ -15,7 +15,6 @@ import {
   max,
 } from 'three/tsl'
 import {
-  AdditiveBlending,
   DoubleSide,
   DynamicDrawUsage,
   InstancedBufferAttribute,
@@ -28,6 +27,7 @@ import {
 import type { Camera, Scene } from 'three/webgpu'
 
 import { required } from '../invariant'
+import { GLOW_BLENDING } from './glow-blending'
 import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { fadeNightLight } from './lighting'
@@ -143,7 +143,7 @@ export class LakeFireflies {
     plane.dispose()
     const material = new MeshBasicNodeMaterial({
       transparent: true,
-      blending: AdditiveBlending,
+      ...GLOW_BLENDING,
       depthWrite: false,
       depthTest: true,
       side: DoubleSide,

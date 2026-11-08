@@ -19,11 +19,15 @@ export const GUST = {
   /** Shortest time between two gusts from one sweep, seconds. */
   spacing: 0.1,
   /**
-   * Bend added at full strength, in the vegetation's own bend units (a strong breeze leans ~0.7).
-   * A crown's tip travels only a few percent of its height at full wind, so the push has to be
-   * several breezes' worth for a sweep to visibly thrash the trees forty metres away.
+   * Lean added at full strength, in the vegetation's own bend units (a strong breeze leans ~0.7):
+   * a light nudge, so a sweep stirs the crown rather than bending the whole tree over.
    */
-  push: 6,
+  lean: 0.6,
+  /**
+   * Rustle at full strength, as a multiple of each card's or blade's own flutter (a few
+   * centimetres on a card): the foliage the sweep crosses shakes, piece by piece, on its twigs.
+   */
+  rustle: 6,
   /**
    * Screen speed of the pointer, CSS px/s, from which a sweep raises a gust, and full strength.
    * An ordinary brisk swipe is 600–1500 px/s; a gust that needed 1400 px/s rarely happened.
@@ -141,19 +145,21 @@ export class WindGusts {
   }
 
   /**
-   * World offset for a vertex at `position` (world XZ) with the sway attribute's `bend` and
-   * `phase`, at shader time `time`: the gusts' lean along their paths with a little buffeting.
-   * A lean far past a breeze's reads as the crown thrashing, so the buffeting grows with it.
+   * World offset for a vertex at `position` (world XZ) with the sway attribute's `bend`, `phase`
+   * and `flutter`, at shader time `time`: a light lean along the gusts' paths, and a quick rustle
+   * of each card and blade (wood has no flutter, so trunks and limbs barely move).
    */
   sway(
     position: Node<'vec3'>,
     bend: Node<'float'>,
     phase: Node<'float'>,
+    flutter: Node<'float'>,
     time: Node<'float'>,
-    /** Share of the push a draw takes: the sward is short and would lie flat under a full one. */
+    /** Share of the lean a draw takes: the sward is short and would lie flat under a full one. */
     scale = 1,
   ) {
-    let offset: Node<'vec3'> = vec3(0)
+    let push: Node<'vec3'> = vec3(0)
+    let stir: Node<'float'> = float(0)
     for (let i = 0; i < GUST.slots; i++) {
       const path = this.paths[i],
         state = this.states[i]
@@ -171,20 +177,15 @@ export class WindGusts {
         .mul(fade)
         .mul(alive)
         .mul(state.y)
-      // Buffeting as the front passes: the lean wavers rather than sliding smoothly.
-      const waver = sin(age.mul(11).add(phase.mul(3.1)))
-        .mul(0.3)
-        .add(sin(age.mul(17.3).add(phase.mul(5.7))).mul(0.15))
-        .add(1)
-      offset = offset.add(
-        vec3(path.z, float(0), path.w).mul(
-          envelope
-            .mul(waver)
-            .mul(bend)
-            .mul(GUST.push * scale),
-        ),
-      )
+      push = push.add(vec3(path.z, float(0), path.w).mul(envelope))
+      stir = stir.add(envelope)
     }
-    return offset
+    // Each piece shakes on its own phase, a little over 2 Hz, in all three directions.
+    const rustle = vec3(
+      sin(time.mul(13).add(phase.mul(5.3))),
+      sin(time.mul(10.7).add(phase.mul(7.9))).mul(0.6),
+      sin(time.mul(15.1).add(phase.mul(3.7))),
+    ).mul(stir.min(1.5).mul(flutter).mul(GUST.rustle))
+    return push.mul(bend.mul(GUST.lean * scale)).add(rustle)
   }
 }

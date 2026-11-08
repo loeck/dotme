@@ -34,9 +34,11 @@ A quick sweep of the pointer across the scene (at least 450 CSS px/s, an ordinar
 full strength at 2200; 1400 px/s before rarely happened) raises
 a gust (`wind-gusts.ts`): both ends of the frame's stroke are cast onto the ground, crowns or water,
 and a band of wind starts where the pointer is and runs on in the sweep's direction at the pointer's
-own pace over the ground (8–30 m/s, so the trees the sweep crosses are the ones that lean), 4.5 m
-deep and 9 m wide, leaning every branch and leaf it passes by up to 6 bend units (a strong
-breeze leans about 0.7; the sward takes 45% of it), tossing as it goes and fading out over 3.2 s.
+own pace over the ground (8–30 m/s, so the foliage the sweep crosses is what stirs), 4.5 m
+deep and 9 m wide, fading out over 3.2 s. It is light: the crowns it passes lean by at most 0.6
+bend units (a strong breeze leans about 0.7; the sward takes 45% of it), while each foliage card
+and blade rustles on its twig at a little over 2 Hz, by up to six times its own flutter. Wood has
+no flutter, so trunks and limbs stay put and the leaves shake, not the whole tree.
 Three gusts can be in flight at once, at least 0.1 s apart; they ride the vegetation's existing
 sway, so grass and trees answer with no extra draw. Reduced motion raises none and clears any in
 flight.

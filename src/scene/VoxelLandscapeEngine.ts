@@ -1,6 +1,5 @@
 import { exp, shadow, uniform, uv, vec4 } from 'three/tsl'
 import {
-  AdditiveBlending,
   AmbientLight,
   BackSide,
   BoxGeometry,
@@ -53,6 +52,7 @@ import { SceneRenderDiagnostics } from './diagnostics'
 import type { SceneElimination, SceneGpuInfo } from './diagnostics'
 import { FallingLeaves, LEAVES } from './falling-leaves'
 import type { FishBait } from './fish-pointer'
+import { GLOW_BLENDING } from './glow-blending'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER } from './lake-fish'
@@ -820,7 +820,7 @@ export class VoxelLandscapeEngine {
     const glowStrengths = new WeakMap<Object3D, { value: number }>()
     const glowMaterial = new MeshBasicNodeMaterial({
       transparent: true,
-      blending: AdditiveBlending,
+      ...GLOW_BLENDING,
       depthWrite: false,
       side: DoubleSide,
       // Fog would mix the opaque additive quad toward the fog colour and light up its square.

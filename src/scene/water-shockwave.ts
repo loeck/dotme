@@ -1,11 +1,7 @@
 import { exp, float, smoothstep, uniform, uv, vec3 } from 'three/tsl'
-import {
-  AdditiveBlending,
-  DoubleSide,
-  Mesh,
-  MeshBasicNodeMaterial,
-  PlaneGeometry,
-} from 'three/webgpu'
+import { DoubleSide, Mesh, MeshBasicNodeMaterial, PlaneGeometry } from 'three/webgpu'
+
+import { GLOW_BLENDING } from './glow-blending'
 
 export const SHOCK = {
   /** Seconds a still press must last before it starts to charge. */
@@ -54,7 +50,7 @@ export class WaterShockwave {
   constructor(waterLevel: number) {
     const material = new MeshBasicNodeMaterial({
       transparent: true,
-      blending: AdditiveBlending,
+      ...GLOW_BLENDING,
       depthWrite: false,
       side: DoubleSide,
     })
