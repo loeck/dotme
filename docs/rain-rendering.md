@@ -11,7 +11,10 @@ state. Reduced motion suppresses rain; hidden pages pause updates.
 TSL composition handles depth occlusion and the appearance of impact waves on WebGPU. Water collision uses the shared CPU contact sampler, including bounded recent lake impulses,
 while visible surface effects follow the GPU wave field. Streak radiance follows the ambient environment
 plus moon and lamp glints, since a drop refracts most of its surroundings, and blends into the
-scene's exponential fog with distance so far rain reads as haze rather than dark streaks. The overlay
+scene's exponential fog with distance so far rain reads as haze rather than dark streaks. Streaks
+fade out between 3 m and 1.2 m of view depth (including the exposure tail), with projected motion
+bounded to 28 CSS pixels, width to 6 CSS pixels and a guarded perspective divide. Drops crossing
+the camera plane therefore cannot turn into bright lines across the viewport. The overlay
 blends premultiplied colour, since `renderOutput` unpremultiplies its input and premultiplies its
 result; straight alpha there darkens the background by the drop's coverage. Streaks are
 not reflected by the lake: drop reflections are practically invisible and read as dashes on the water. This is an artistic rain approximation, not

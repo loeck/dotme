@@ -25,10 +25,17 @@ test('renders a visible production scene with a procedural waterfall using WebGP
   await page.mouse.move(760, 590, { steps: 8 })
   await page.mouse.up()
   await expect(page.locator('canvas')).toHaveCount(1)
-  const screenshot = await page.screenshot()
+  // The compositor can retain the loader in a headless screenshot even after
+  // the scene is ready. Read the actual canvas in its animation frame.
+  const screenshot = await page.locator('#scene-canvas').evaluate((element) => {
+    if (!(element instanceof HTMLCanvasElement)) throw new Error('Missing scene canvas')
+    return new Promise<string>((resolve) => {
+      requestAnimationFrame(() => resolve(element.toDataURL('image/png')))
+    })
+  })
   const skyLuminance = await page.evaluate(async (encoded) => {
     const image = new Image()
-    image.src = `data:image/png;base64,${encoded}`
+    image.src = encoded
     await image.decode()
     const sample = document.createElement('canvas')
     sample.width = image.width
@@ -47,7 +54,7 @@ test('renders a visible production scene with a procedural waterfall using WebGP
       total +=
         (pixels[i] ?? 0) * 0.2126 + (pixels[i + 1] ?? 0) * 0.7152 + (pixels[i + 2] ?? 0) * 0.0722
     return total / (pixels.length / 4)
-  }, screenshot.toString('base64'))
+  }, screenshot)
   // A successful submission with NaN sky values or a stale loader is not a ready landscape.
   expect(skyLuminance).toBeGreaterThan(40)
   expect(failures.filter((message) => !message.includes('net::ERR_FAILED'))).toEqual([])

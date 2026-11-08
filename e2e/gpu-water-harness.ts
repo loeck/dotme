@@ -1,10 +1,14 @@
 import { positionLocal, uniform, uv, vec2, vec4 } from 'three/tsl'
 import {
+  AmbientLight,
+  DirectionalLight,
+  FogExp2,
   DataUtils,
   FloatType,
   Mesh,
   MeshBasicNodeMaterial,
   OrthographicCamera,
+  PerspectiveCamera,
   PlaneGeometry,
   RenderTarget,
   Scene,
@@ -13,6 +17,8 @@ import {
 
 import { required } from '../src/invariant'
 import { createLakeBed, LAKE_BOUNDS } from '../src/scene/lake-bed'
+import { LakeWaterMaterial } from '../src/scene/lake-water'
+import { RainEffect, RAIN_LAYER } from '../src/scene/RainEffect'
 import {
   WaterSimulation,
   WATER_STEP,
@@ -40,6 +46,7 @@ interface WaterVerification {
   dispose(): Promise<void>
   verifyWind(): Promise<{ samples: number; maxErrors: readonly number[] }>
   verifyRain(): Promise<{ activeQuadrants: readonly number[]; dryMaximum: number; finite: boolean }>
+  verifyRainStreaks(): Promise<readonly { depth: number; visiblePixels: number; span: number }[]>
   verifyShore(): Promise<{
     finite: boolean
     maskedHeight: number
@@ -91,6 +98,79 @@ async function main() {
     dx = LAKE_BOUNDS.size / n
   window.gpuWater = {
     backend,
+    async verifyRainStreaks() {
+      const size = 1024
+      const target = new RenderTarget(size, size, { depthBuffer: false })
+      const surface = new LakeWaterMaterial()
+      const rain = new RainEffect(
+        () => Infinity,
+        true,
+        42,
+        [],
+        new DirectionalLight(0, 0),
+        false,
+        surface.uniforms,
+        false,
+        { ambient: new AmbientLight(0xffffff, 1), fog: new FogExp2(0, 0) },
+      )
+      const scene = new Scene()
+      scene.add(rain.group)
+      const camera = new PerspectiveCamera(54, 1, 0.05, 50)
+      camera.position.y = 2
+      camera.layers.enable(RAIN_LAYER)
+      rain.resize(size, size)
+      rain.setRainState({ intensity: 0.001, wind: { x: 0, z: 0 } })
+      const drop = required(rain.simulation.drops[0])
+      Object.assign(drop, {
+        alive: true,
+        x: 0,
+        y: 2,
+        vx: 1,
+        vy: -10,
+        vz: -10,
+        size: 0.004,
+        seed: 0.25,
+      })
+      const samples: { depth: number; visiblePixels: number; span: number }[] = []
+      try {
+        renderer.setRenderTarget(target)
+        await rain.compileAsync(renderer, camera)
+        /* eslint-disable no-await-in-loop */
+        for (const depth of [0.21, 1, 2, 6]) {
+          drop.z = -depth
+          rain.update(0, camera, 1)
+          renderer.render(scene, camera)
+          const pixels = await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size)
+          if (!(pixels instanceof Uint8Array)) throw new Error('Expected rain colour readback')
+          let visiblePixels = 0,
+            low = size,
+            high = -1
+          for (let row = 0; row < size; row++)
+            for (let col = 0; col < size; col++) {
+              const offset = (row * size + col) * 4
+              if (
+                Math.max(
+                  required(pixels[offset]),
+                  required(pixels[offset + 1]),
+                  required(pixels[offset + 2]),
+                ) > 2
+              ) {
+                visiblePixels++
+                low = Math.min(low, row)
+                high = Math.max(high, row)
+              }
+            }
+          samples.push({ depth, visiblePixels, span: Math.max(0, high - low + 1) })
+        }
+        /* eslint-enable no-await-in-loop */
+        return samples
+      } finally {
+        renderer.setRenderTarget(null)
+        rain.dispose()
+        surface.dispose()
+        target.dispose()
+      }
+    },
     async verifyRain() {
       const size = 64
       const target = new RenderTarget(size, size, { type: FloatType, depthBuffer: false })
