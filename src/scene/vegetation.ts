@@ -51,6 +51,7 @@ import type { SurfaceScan } from './terrain-textures'
 import type { MeshData } from './vegetation-meshes'
 import type { PreparedVegetation } from './vegetation-placement'
 import { loopNoise } from './water-noise'
+import { ambientGustNode } from './wind-field'
 import { WindGusts } from './wind-gusts'
 
 /** Shadow casters live on this layer; see the moon's shadow camera. */
@@ -59,7 +60,18 @@ const SHADOW_LAYER = 5
  * the environment probe and the shadow pass never draw it. */
 export const UNDERGROWTH_LAYER = 7
 /** Wind speed (m/s) at which vegetation reaches its full lean. */
-const FULL_LEAN_SPEED = 9
+const FULL_LEAN_SPEED = 7
+/** Lean that even a calm day keeps: leaves are never quite still. */
+const CALM_LEAN = 0.25
+/**
+ * Sway gain per draw. A crown's modelled tip travel (2.5–5% of its height at full wind) is right
+ * up close but reads as no wind at all forty metres away, where most of the wood stands.
+ * Wood and foliage share a gain so leaves stay on their twigs.
+ */
+const TREE_SWAY_GAIN = 2.4
+const UNDERGROWTH_SWAY_GAIN = 1
+/** Share of a cursor gust the sward takes; see `WindGusts.sway`. */
+const UNDERGROWTH_GUST_SCALE = 0.45
 /** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
 const RELIEF_METRES = 0.004
 /**
@@ -152,7 +164,7 @@ export class Vegetation {
     geometry.setIndex(new BufferAttribute(data.indices, 1))
     geometry.computeBoundingSphere()
     // Sway and flutter reach a little beyond the rest bounds.
-    if (geometry.boundingSphere) geometry.boundingSphere.radius += 0.5
+    if (geometry.boundingSphere) geometry.boundingSphere.radius += 1.5
     const mesh = new Mesh(geometry, material)
     mesh.name = `Vegetation ${name}`
     mesh.castShadow = castShadow
@@ -164,8 +176,12 @@ export class Vegetation {
     this.disposables.push(geometry, material)
   }
 
-  /** World-space wind offset from the per-vertex (bend, phase, flutter, ω) attribute. */
-  private sway(): Node<'vec3'> {
+  /**
+   * World-space wind offset from the per-vertex (bend, phase, flutter, ω) attribute: the breeze's
+   * lean and buffeting, the gust patches rolling through the wood (`wind-field.ts`) and the
+   * visitor's own gusts. `gain` scales the lean; `gustScale` the cursor gusts.
+   */
+  private sway(gain: number, gustScale = 1): Node<'vec3'> {
     const wind = attribute<'vec4'>('wind')
     const bend = wind.x,
       phase = wind.y,
@@ -176,18 +192,26 @@ export class Vegetation {
       .mul(0.5)
       .add(sin(t.mul(0.97).add(phase.mul(1.7))).mul(0.3))
       .add(sin(t.mul(1.61).add(phase.mul(2.3))).mul(0.2))
-    const lean = this.strength.mul(this.strength.mul(0.6).add(buffet.mul(0.25)).add(0.1))
+    // A patch of gust leans the crown further and makes it toss, then lets it spring back.
+    const gust = ambientGustNode(positionLocal, this.time, this.wind).mul(
+      this.strength.mul(0.6).add(0.5),
+    )
+    const raw = this.strength
+      .mul(this.strength.mul(0.6).add(buffet.mul(0.3)).add(0.12))
+      .add(gust.mul(buffet.mul(0.4).add(1.1)))
+    // Soft ceiling: the strongest gusts bend a crown further, but never fold it over.
+    const lean = raw.div(raw.abs().mul(0.35).add(1)).mul(gain)
     // Flutter moves each card, blade or leaflet as one piece (its vertices share the phase) at a
     // bounded rate. Varying it per vertex deformed cards, and tying it to fast natural rates made
     // the vegetation tremble, as Voxen's ADR 0110 found for a fixed 2 Hz flutter.
     const shiver = sin(
       this.time.mul(min(omega.mul(1.7), MAX_FLUTTER_OMEGA)).add(phase.mul(5.3)),
-    ).mul(flutter.mul(this.strength.add(0.15)))
+    ).mul(flutter.mul(this.strength.add(0.15).add(gust.mul(1.2))))
     const direction = vec3(this.wind.x, float(0), this.wind.y)
     return direction
       .mul(lean.mul(bend).add(shiver))
       .add(vec3(0, shiver.mul(0.5), 0))
-      .add(this.gusts.sway(positionLocal, bend, phase, this.time))
+      .add(this.gusts.sway(positionLocal, bend, phase, this.time, gustScale))
   }
 
   private woodMaterial(scan?: SurfaceScan) {
@@ -197,7 +221,7 @@ export class Vegetation {
       metalness: 0,
       envMapIntensity: 0.45,
     })
-    material.positionNode = positionLocal.add(this.sway())
+    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN))
     const bark = attribute<'vec3'>('bark')
     const grain = bark.x
     const coordinates = uv().mul(vec2(1, 0.75))
@@ -288,7 +312,7 @@ export class Vegetation {
       envMapIntensity: 0.45,
       side: DoubleSide,
     })
-    material.positionNode = positionLocal.add(this.sway())
+    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN))
     const sample = texture(atlas, uv())
     // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
     // fill their cards into squares.
@@ -342,7 +366,9 @@ export class Vegetation {
       envMapIntensity: 0.35,
       side: DoubleSide,
     })
-    material.positionNode = positionLocal.add(this.sway())
+    material.positionNode = positionLocal.add(
+      this.sway(UNDERGROWTH_SWAY_GAIN, UNDERGROWTH_GUST_SCALE),
+    )
     const normal = normalize(attribute<'vec3'>('normal'))
     material.normalNode = transformNormalToView(normal)
     const toEye = normalize(cameraPosition.sub(positionWorld))
@@ -351,6 +377,11 @@ export class Vegetation {
     // Only the thin, light upper blade passes much light; a whole bank glowing reads as straw.
     material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 6).mul(0.05))
     return material
+  }
+
+  /** The breeze's lean strength, 0.25 in a calm to 1.4 in a gale; falling leaves follow it. */
+  get breeze() {
+    return this.strength.value
   }
 
   /** `direction` is the world XZ wind direction; reduced motion freezes `elapsed`. */
@@ -362,7 +393,7 @@ export class Vegetation {
   ) {
     this.time.value = elapsed
     this.wind.value.set(direction[0], direction[1])
-    this.strength.value = Math.min(1.2, Math.max(0, speed) / FULL_LEAN_SPEED)
+    this.strength.value = Math.min(1.4, CALM_LEAN + Math.max(0, speed) / FULL_LEAN_SPEED)
     this.sunDirection.value.copy(light.direction)
     this.sunColour.value.copy(light.color).multiplyScalar(light.intensity)
     this.ambient.value.copy(light.ambient)

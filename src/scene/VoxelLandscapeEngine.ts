@@ -51,6 +51,7 @@ import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile
 import { DeviceTilt } from './device-tilt'
 import { SceneRenderDiagnostics } from './diagnostics'
 import type { SceneElimination, SceneGpuInfo } from './diagnostics'
+import { FallingLeaves, LEAVES } from './falling-leaves'
 import type { FishBait } from './fish-pointer'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
@@ -215,6 +216,8 @@ type Mote = Readonly<{
   speed: number
 }>
 
+const DOWN = new Vector3(0, -1, 0)
+
 /** Nearest entry of a ray (unit direction) into any sphere (x, y, z, radius), before `max`. */
 function raySpheres(
   origin: Vector3,
@@ -353,6 +356,8 @@ export class VoxelLandscapeEngine {
   /** The visitor's run through the day with the wheel or two fingers, over the real clock. */
   private readonly scrub = new TimeScrub()
   private readonly birds: BirdFlock
+  private readonly leaves: FallingLeaves
+  private readonly leafRayOrigin = new Vector3()
   private readonly seed: number
   /** Daylight of the last frame, for gestures between frames. */
   private daylight = 0
@@ -710,6 +715,14 @@ export class VoxelLandscapeEngine {
     this.scene.add(this.lanterns.mesh)
     this.birds = new BirdFlock(this.lowPower ? FLOCK.lowPowerSize : FLOCK.size)
     this.scene.add(this.birds.group)
+    this.leaves = new FallingLeaves(
+      this.mobile ? LEAVES.mobileCapacity : LEAVES.capacity,
+      this.camera.position,
+      (x, z, fromY) => this.leafGround(x, z, fromY),
+      (x, z) => this.simulation.addImpulse(x, z, 0.14, -0.05),
+    )
+    this.scene.add(this.leaves.mesh)
+    this.receiveSceneLight(this.leaves.mesh.material, { translucency: 0.6, gain: 2 })
     this.geometries.push(waterGeometry)
 
     this.rain = this.resources.own(
@@ -951,6 +964,7 @@ export class VoxelLandscapeEngine {
       // A frozen frame must not hold a stone or a flock in mid-air.
       this.stone.cancel()
       this.birds.cancel()
+      this.leaves.clear()
       this.shockwave.cancel()
       // Frozen time would hold a gust's lean in place.
       this.vegetation?.gusts.clear()
@@ -1557,6 +1571,15 @@ export class VoxelLandscapeEngine {
     this.stone.throw(this.stoneHand, plan, this.elapsed)
   }
 
+  /** Where a leaf falling at (x, z) from `fromY` comes to rest: the ground, or the lake. */
+  private leafGround(x: number, z: number, fromY: number) {
+    const origin = this.leafRayOrigin.set(x, fromY, z)
+    const hit = this.physics.castDistance(origin, DOWN, 60)
+    const ground = hit === null ? -Infinity : fromY - hit
+    if (ground < WATER_LEVEL && this.isOpenWater(x, z)) return { y: WATER_LEVEL, water: true }
+    return { y: Number.isFinite(ground) ? ground : WATER_LEVEL - 2, water: false }
+  }
+
   private isOpenWater(x: number, z: number) {
     const index = lakeIndex(this.bed, x, z)
     return (
@@ -2136,6 +2159,7 @@ export class VoxelLandscapeEngine {
     this.vegetationPick = data.pick
     this.details?.setLeafSources(data.pick)
     this.birds.setObstacles(data.pick)
+    this.leaves.setSources(data.pick)
     for (const mesh of vegetation.meshes)
       if (mesh.material instanceof MeshStandardNodeMaterial)
         this.receiveSceneLight(mesh.material, vegetation.pointerLight.get(mesh))
@@ -2367,6 +2391,14 @@ export class VoxelLandscapeEngine {
     }
     updateWindUniforms(this.windUniforms, wind)
     this.vegetation?.update(this.elapsed, wind.direction, wind.speed, light)
+    if (!this.reducedMotion && this.vegetation)
+      this.leaves.update(
+        this.elapsed,
+        rainDelta,
+        wind,
+        this.vegetation.breeze,
+        this.vegetation.gusts,
+      )
     const optics = sampleWaterOptics(
       this.rain.simulation.state.intensity,
       wind.speed,
@@ -2620,6 +2652,7 @@ export class VoxelLandscapeEngine {
     this.lanterns.dispose()
     this.birds.group.removeFromParent()
     this.birds.dispose()
+    this.leaves.dispose()
     if (this.gpuInfo && window.sceneGpuInfo === this.gpuInfo) delete window.sceneGpuInfo
     if (this.renderCaptureHook && window.sceneRenderCapture === this.renderCaptureHook)
       delete window.sceneRenderCapture

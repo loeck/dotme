@@ -104,3 +104,27 @@ it('keys each light response to its own material program', () => {
   )
   expect(new Set(keys).size).toBe(keys.length)
 })
+
+it('widens and deepens its pool on a far crown so the cards behind the pick still light', () => {
+  const origin = new Vector3(0, 2.3, 16)
+  const light = new PointerLight()
+  const reach = () => light.uniforms.uPointerLightReach.value
+  const near = new Vector3(0, 0.5, 6)
+  light.update(near, near.clone().sub(origin).normalize(), 1, 0, true, origin)
+  expect(reach().w).toBeCloseTo(4.5, 6)
+  const far = new Vector3(10, 12, -64)
+  const ray = far.clone().sub(origin).normalize()
+  light.update(far, ray, 1, 0, true, origin)
+  expect(reach().w).toBeGreaterThan(6)
+  expect(new Vector3(reach().x, reach().y, reach().z).distanceTo(ray)).toBeLessThan(1e-6)
+})
+
+it('dims less when a far cursor hops from a crown to the ridge behind it', () => {
+  const origin = new Vector3(0, 2.3, 16)
+  const light = new PointerLight()
+  const crown = new Vector3(0, 10, -60)
+  const ray = crown.clone().sub(origin).normalize()
+  light.update(crown, ray, 1, 0, true, origin)
+  light.update(crown.clone().addScaledVector(ray, 40), ray, 1, 1 / 60, false, origin)
+  expect(light.uniforms.uPointerLightStrength.value).toBeGreaterThan(0.2)
+})

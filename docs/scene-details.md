@@ -30,14 +30,27 @@ spot, the ring runs out to 7 m and fades in 0.7 s, the fish lose their bait, a l
 sounds and, on touch, the hand gets a 20–50 ms buzz. A press that moves first stays a drag or a
 flick, and a release under 15% charge is an ordinary tap. Reduced motion has no charge.
 
-A quick sweep of the pointer across the scene (at least 1400 CSS px/s, full strength at 3200) raises
+A quick sweep of the pointer across the scene (at least 450 CSS px/s, an ordinary brisk swipe,
+full strength at 2200; 1400 px/s before rarely happened) raises
 a gust (`wind-gusts.ts`): both ends of the frame's stroke are cast onto the ground, crowns or water,
 and a band of wind starts where the pointer is and runs on in the sweep's direction at the pointer's
-own pace over the ground (8–30 m/s, so the trees the sweep crosses are the ones that lean), 3.5 m
-deep and 7 m wide, leaning every blade, branch and leaf it passes by up to 1.8 bend units (a strong
-breeze leans about 0.7), wavering as it goes and fading out over 3.2 s. Three gusts can be in flight
-at once, at least 0.12 s apart; they ride the vegetation's existing sway, so grass and trees answer
-with no extra draw. Reduced motion raises none and clears any in flight.
+own pace over the ground (8–30 m/s, so the trees the sweep crosses are the ones that lean), 4.5 m
+deep and 9 m wide, leaning every branch and leaf it passes by up to 6 bend units (a strong
+breeze leans about 0.7; the sward takes 45% of it), tossing as it goes and fading out over 3.2 s.
+Three gusts can be in flight at once, at least 0.1 s apart; they ride the vegetation's existing
+sway, so grass and trees answer with no extra draw. Reduced motion raises none and clears any in
+flight.
+
+Gusts tear leaves off the crowns (`falling-leaves.ts`): every crown band of the pick spheres
+(radius 0.6 m or more) sheds at a rate set by the cursor gusts and, above a threshold, the ambient
+gust patches over it, so a sweep strips a flurry and a squally spell drops a few leaves on its
+own. Each leaf flutters down at 0.75–1.35 m/s, swinging side to side and sinking fastest through
+the bottom of each swing (about a third tumble end over end instead), drifts with the breeze, the
+gust patch and any cursor gust it meets, then lies on the ground, or floats and rings a faint
+ripple on the lake (at most one every 0.35 s), for 5–9 s and shrinks away. Leaves are mostly pale,
+yellowing greens with gold and a few brown, larger with distance past 14 m so a far wood's flecks
+still read. One instanced draw of up to 160 leaves (48 on phones), simulated on the CPU; the ground
+is cast once and again only after a 1.5 m drift. Reduced motion sheds none and clears them.
 
 At night (daylight under 0.25) a double tap or double click on the water sets a paper lantern
 afloat there (`lake-lanterns.ts`): a small drum that glows warm through the middle of its paper,

@@ -9,13 +9,24 @@ import {
   uniform,
   vec3,
 } from 'three/tsl'
-import { IrradianceNode, Vector3 } from 'three/webgpu'
+import { IrradianceNode, Vector3, Vector4 } from 'three/webgpu'
 import type { MeshStandardNodeMaterial, Node } from 'three/webgpu'
+/** Radius of the cursor's pool on a near surface, metres. */
+const POINTER_LIGHT_RADIUS = 4.5
+/**
+ * Past this distance the pool widens and stretches along the view ray: a crown is a loose cloud
+ * of cards, and the pick sphere the ray stops on sits in front of most of them. A pool sized for
+ * the near bank lit only the few cards on that sphere, so a far tree under the cursor stayed dark.
+ */
+const POINTER_LIGHT_NEAR = 25
+
 export function createPointerLightUniforms() {
   return {
     uPointerLightPosition: uniform(new Vector3()),
     uPointerLightSource: uniform(new Vector3()),
     uPointerLightStrength: uniform(0),
+    /** View-ray direction (xyz) and the pool's radius in metres (w). */
+    uPointerLightReach: uniform(new Vector4(0, 0, -1, POINTER_LIGHT_RADIUS)),
   }
 }
 
@@ -61,9 +72,18 @@ export class PointerLight {
         ? Math.min(rayOrigin.distanceTo(contact), rayOrigin.distanceTo(previous))
         : 0
       const threshold = Math.max(POINTER_LIGHT_JUMP, near * POINTER_LIGHT_JUMP_SHARE)
-      if (jump > threshold) strength.value *= Math.exp((threshold - jump) / 6)
+      // Far away the ray hops between crowns and the ridge behind them as the cursor moves;
+      // those hops dim it less, or a far wood flickered dark under a moving cursor.
+      if (jump > threshold) strength.value *= Math.exp((threshold - jump) / Math.max(6, near * 0.2))
     }
     if (contact) {
+      const distance = rayOrigin ? rayOrigin.distanceTo(contact) : 0
+      this.uniforms.uPointerLightReach.value.set(
+        rayDirection.x,
+        rayDirection.y,
+        rayDirection.z,
+        POINTER_LIGHT_RADIUS + Math.max(0, distance - POINTER_LIGHT_NEAR) * 0.04,
+      )
       this.uniforms.uPointerLightPosition.value.copy(contact)
       // Put a broad virtual emitter on the camera-facing side of the surface.
       this.uniforms.uPointerLightSource.value.copy(contact).addScaledVector(rayDirection, -1.8)
@@ -98,8 +118,14 @@ export function pointerLightAt(
   u: PointerLightUniforms,
   translucency = 0,
 ) {
-  const offset = world.sub(u.uPointerLightPosition),
-    radius2 = offset.dot(offset).div(20.25)
+  const offset = world.sub(u.uPointerLightPosition)
+  const ray = u.uPointerLightReach.xyz,
+    radius = u.uPointerLightReach.w
+  // Depth along the view ray counts for less on a far surface (see POINTER_LIGHT_NEAR).
+  const along = offset.dot(ray)
+  const depthScale = radius.div(POINTER_LIGHT_RADIUS).pow2().pow2()
+  const across = offset.sub(ray.mul(along))
+  const radius2 = across.dot(across).add(along.mul(along).div(depthScale)).div(radius.mul(radius))
   const falloff = exp(radius2.mul(-3.5)).mul(smoothstep(0.5, 1, radius2).oneMinus())
   const source = u.uPointerLightSource.sub(world),
     direction = source.div(max(source.length(), 0.001))

@@ -12,17 +12,24 @@ export const GUST = {
   minSpeed: 8,
   maxSpeed: 30,
   /** Half-thickness of the front along its travel, and half-width across it, metres. */
-  length: 3.5,
-  width: 7,
+  length: 4.5,
+  width: 9,
   /** Seconds a gust lasts, fading as it goes. */
   life: 3.2,
   /** Shortest time between two gusts from one sweep, seconds. */
-  spacing: 0.12,
-  /** Bend added at full strength, in the vegetation's own bend units (a strong breeze leans ~0.7). */
-  push: 1.8,
-  /** Screen speed of the pointer, CSS px/s, from which a sweep raises a gust, and full strength. */
-  minSweep: 1400,
-  fullSweep: 3200,
+  spacing: 0.1,
+  /**
+   * Bend added at full strength, in the vegetation's own bend units (a strong breeze leans ~0.7).
+   * A crown's tip travels only a few percent of its height at full wind, so the push has to be
+   * several breezes' worth for a sweep to visibly thrash the trees forty metres away.
+   */
+  push: 6,
+  /**
+   * Screen speed of the pointer, CSS px/s, from which a sweep raises a gust, and full strength.
+   * An ordinary brisk swipe is 600–1500 px/s; a gust that needed 1400 px/s rarely happened.
+   */
+  minSweep: 450,
+  fullSweep: 2200,
 } as const
 
 /** Strength of a gust for a pointer sweeping `pixelsPerSecond` across the screen, 0 below it. */
@@ -30,7 +37,7 @@ export function sweepStrength(pixelsPerSecond: number) {
   if (!(pixelsPerSecond >= GUST.minSweep)) return 0
   return Math.min(
     1,
-    0.35 + (0.65 * (pixelsPerSecond - GUST.minSweep)) / (GUST.fullSweep - GUST.minSweep),
+    0.45 + (0.55 * (pixelsPerSecond - GUST.minSweep)) / (GUST.fullSweep - GUST.minSweep),
   )
 }
 
@@ -102,6 +109,33 @@ export class WindGusts {
     return sum
   }
 
+  /**
+   * Horizontal push (strength × envelope along each gust's direction) at a point, summed over the
+   * gusts in flight, written into `out` as [x, z]; returns its magnitude. Falling leaves ride it.
+   */
+  pushAt(x: number, z: number, now: number, out: [number, number]) {
+    out[0] = 0
+    out[1] = 0
+    for (let i = 0; i < GUST.slots; i++) {
+      const path = this.paths[i]?.value,
+        state = this.states[i]?.value
+      if (!path || !state || state.y <= 0) continue
+      const ox = x - path.x,
+        oz = z - path.y
+      const push =
+        state.y *
+        gustEnvelope(ox * path.z + oz * path.w, ox * path.w - oz * path.z, now - state.x, state.z)
+      out[0] += path.z * push
+      out[1] += path.w * push
+    }
+    return Math.hypot(out[0], out[1])
+  }
+
+  /** Whether any gust may still be blowing at `now`. */
+  active(now: number) {
+    return this.states.some(({ value }) => value.y > 0 && now - value.x < GUST.life)
+  }
+
   clear() {
     for (const state of this.states) state.value.set(-1000, 0, 0, 0)
   }
@@ -109,8 +143,16 @@ export class WindGusts {
   /**
    * World offset for a vertex at `position` (world XZ) with the sway attribute's `bend` and
    * `phase`, at shader time `time`: the gusts' lean along their paths with a little buffeting.
+   * A lean far past a breeze's reads as the crown thrashing, so the buffeting grows with it.
    */
-  sway(position: Node<'vec3'>, bend: Node<'float'>, phase: Node<'float'>, time: Node<'float'>) {
+  sway(
+    position: Node<'vec3'>,
+    bend: Node<'float'>,
+    phase: Node<'float'>,
+    time: Node<'float'>,
+    /** Share of the push a draw takes: the sward is short and would lie flat under a full one. */
+    scale = 1,
+  ) {
     let offset: Node<'vec3'> = vec3(0)
     for (let i = 0; i < GUST.slots; i++) {
       const path = this.paths[i],
@@ -131,10 +173,16 @@ export class WindGusts {
         .mul(state.y)
       // Buffeting as the front passes: the lean wavers rather than sliding smoothly.
       const waver = sin(age.mul(11).add(phase.mul(3.1)))
-        .mul(0.2)
+        .mul(0.3)
+        .add(sin(age.mul(17.3).add(phase.mul(5.7))).mul(0.15))
         .add(1)
       offset = offset.add(
-        vec3(path.z, float(0), path.w).mul(envelope.mul(waver).mul(bend).mul(GUST.push)),
+        vec3(path.z, float(0), path.w).mul(
+          envelope
+            .mul(waver)
+            .mul(bend)
+            .mul(GUST.push * scale),
+        ),
       )
     }
     return offset

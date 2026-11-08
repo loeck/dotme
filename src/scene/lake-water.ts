@@ -128,6 +128,7 @@ export class LakeWaterMaterial extends NodeMaterial {
     uPointerLightPosition: uniform(new Vector3()),
     uPointerLightSource: uniform(new Vector3()),
     uPointerLightStrength: uniform(0),
+    uPointerLightReach: uniform(new Vector4(0, 0, -1, 4.5)),
     uWake: uniform(new Vector4(0, -400, 0, 1)),
     uWakeSpeed: uniform(0),
   }
