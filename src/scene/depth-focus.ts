@@ -37,6 +37,7 @@ import { SceneRenderDiagnostics } from './diagnostics'
 import { FullscreenPass } from './fullscreen-pass'
 import { lensFlare } from './lens-flare'
 import type { SceneGrade } from './scene-grade'
+import { ViewHistory } from './view-history'
 import type { VolumetricLight } from './volumetric-light'
 
 /** A surface whose planar reflection renders as its own pass ahead of the view. */
@@ -80,16 +81,26 @@ function brightPass(params: {
   return vec4(colour.mul(share), 1)
 }
 
+/**
+ * Multisampling of the view on capable devices. Alpha-tested crowns otherwise alias: sub-pixel
+ * holes and card rims switched between leaf and sky every frame as the cards swayed, which
+ * blinked against a bright sky. With samples, foliage writes alpha-to-coverage instead.
+ */
+const VIEW_SAMPLES = 4
+
 /** Scene radiance and depth remain linear until the final output transform. */
 export class DepthFocus {
-  readonly target = new RenderTarget(1, 1, {
-    type: HalfFloatType,
-    depthTexture: new DepthTexture(1, 1, UnsignedIntType),
-    stencilBuffer: false,
-  })
+  /**
+   * Multisampled on capable devices. WebGL resolves the depth into the depth texture (nearest
+   * sample); WebGPU keeps it multisampled and three reads its first sample (`textureLoad`), so
+   * the depth readers (lens, air, rain) need no separate depth pass either way.
+   */
+  readonly target: RenderTarget
   private readonly pipeline: FullscreenPass
-  private readonly color = texture(this.target.texture)
-  private readonly depth = texture(this.depthTexture)
+  /** Temporal stabiliser of the crowns' rims, with the multisampling (`view-history.ts`). */
+  private readonly history: ViewHistory | undefined
+  private readonly color: ReturnType<typeof texture<'vec4'>>
+  private readonly depth: ReturnType<typeof texture<'vec4'>>
   private readonly cssPixel = uniform(new Vector2(1, 1))
   private readonly bufferPixel = uniform(new Vector2(1, 1))
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
@@ -98,6 +109,15 @@ export class DepthFocus {
   private readonly flareSun = uniform(new Vector2(0.5, 0.5))
   private readonly flare = uniform(0)
   constructor(renderer: WebGPURenderer, lowPower: boolean, grade: SceneGrade) {
+    this.target = new RenderTarget(1, 1, {
+      type: HalfFloatType,
+      depthTexture: new DepthTexture(1, 1, UnsignedIntType),
+      stencilBuffer: false,
+      samples: lowPower ? 0 : VIEW_SAMPLES,
+    })
+    this.history = lowPower ? undefined : new ViewHistory(renderer)
+    this.color = texture(this.target.texture)
+    this.depth = texture(this.depthTexture)
     this.target.texture.name = LENS_TARGET
     const samples = lowPower ? 12 : 20
     const distance = (coord: Node<'vec2'>) => {
@@ -205,6 +225,7 @@ export class DepthFocus {
   }
   resize(bufferWidth: number, bufferHeight: number, cssWidth: number, cssHeight: number) {
     this.target.setSize(bufferWidth, bufferHeight)
+    this.history?.resize(bufferWidth, bufferHeight)
     this.bufferPixel.value.set(1 / bufferWidth, 1 / bufferHeight)
     this.cssPixel.value.set(1 / cssWidth, 1 / cssHeight)
   }
@@ -236,6 +257,7 @@ export class DepthFocus {
   }
   async compileAsync(renderer: WebGPURenderer, camera: PerspectiveCamera) {
     this.cameraRange.value.set(camera.near, camera.far)
+    await this.history?.compileAsync(this.target.texture)
     await this.pipeline.compileAsync(renderer.getRenderTarget())
   }
   render(
@@ -256,10 +278,11 @@ export class DepthFocus {
       renderer.render(scene, camera)
       SceneRenderDiagnostics.endActive(view, info.calls)
       const air = SceneRenderDiagnostics.beginActive('atmosphere', info.calls)
-      this.color.value =
+      const radiance =
         atmosphere && light
           ? atmosphere.render(renderer, this.target, camera, light)
           : this.target.texture
+      this.color.value = this.history ? this.history.render(renderer, radiance) : radiance
       SceneRenderDiagnostics.endActive(air, info.calls)
       const lens = SceneRenderDiagnostics.beginActive('lens', info.calls)
       renderer.setRenderTarget(previous)
@@ -272,6 +295,7 @@ export class DepthFocus {
   dispose() {
     this.glow.dispose()
     this.target.dispose()
+    this.history?.dispose()
     this.pipeline.dispose()
   }
 }
