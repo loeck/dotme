@@ -7,6 +7,9 @@ import {
   floor,
   fract,
   fwidth,
+  length,
+  log2,
+  max,
   min,
   mix,
   normalize,
@@ -91,6 +94,8 @@ const MAX_FLUTTER_OMEGA = 7
  * the crowns seemed to blink. The crown still leans and tosses with the wind as a whole.
  */
 const CROWN_FLUTTER = 0.25
+/** Coverage gained per atlas mip level a card is drawn at (see `foliageMaterial`). */
+const MIP_COVERAGE = 0.3
 
 /**
  * The forest as three draws: tube-meshed wood, foliage cards and procedural undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
@@ -323,9 +328,14 @@ export class Vegetation {
     })
     material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN, 1, CROWN_FLUTTER))
     const sample = texture(atlas, uv())
-    // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
-    // fill their cards into squares.
-    const coverage = sample.a
+    // Coverage grows with the mip level the card is drawn at (an alpha test with mip scaling, as
+    // in Ben Golus's "Anti-aliased Alpha Test"). Averaged mips leave a distant crown full of
+    // sub-pixel holes that switched between leaf and sky every frame as the cards moved, which
+    // blinked against a bright sky; scaled, the crown stays solid and only its rim is cut out.
+    const texel = uv().mul(vec2(atlas.image.width, atlas.image.height))
+    const footprint = max(length(texel.dFdx()), length(texel.dFdy()))
+    const mip = log2(max(footprint, 1))
+    const coverage = sample.a.mul(mip.mul(MIP_COVERAGE).add(1))
     material.alphaTest = 0.5
     // Needle-to-needle and leaf-to-leaf tone, kept within about ±35% of the palette: a wider
     // spread pushed sunlit leaves into the tone curve's shoulder, which washed them pale grey.
