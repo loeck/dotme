@@ -29,8 +29,6 @@ type Shape = Readonly<{
   reach: number
   length: number
   rise: number
-  /** Highest the spring may sit above the pool, where the ground itself is high. */
-  maxRise: number
 }>
 
 const streamShape = (mobile: boolean): Shape =>
@@ -44,7 +42,6 @@ const streamShape = (mobile: boolean): Shape =>
         reach: 1.8,
         length: 4,
         rise: 0.85,
-        maxRise: 1.3,
       }
     : {
         bed: 0.2,
@@ -55,7 +52,6 @@ const streamShape = (mobile: boolean): Shape =>
         reach: 2.4,
         length: 6,
         rise: 1.15,
-        maxRise: 1.7,
       }
 
 type Fall = Readonly<{
@@ -225,22 +221,20 @@ export function traceStream(
       { x: startX - nx * step * 2, z: startZ - nz * step * 2, ground: fall.top },
     ],
   }
-  // Water level upstream: an easing climb, or deeper into higher ground, never falling.
+  // Water level upstream: an even, gentle climb, so only the main fall drops steeply; where the
+  // ground is higher, the channel is simply cut deeper.
   const lengths = [0]
   for (let i = 1; i < course.points.length; i++) {
     const a = course.points[i - 1],
       b = course.points[i]
     lengths.push((lengths.at(-1) ?? 0) + (a && b ? Math.hypot(b.x - a.x, b.z - a.z) : 0))
   }
-  const length = lengths.at(-1) ?? 1
-  let level = fall.top
-  const upstream = course.points.map((point, i) => {
-    const t = (lengths[i] ?? 0) / length
-    const eased = fall.top + shape.rise * (length / shape.length) * t ** 1.3
-    const buried = Number.isNaN(point.ground) ? -Infinity : point.ground - shape.bank - 0.15
-    level = Math.max(level, Math.min(fall.top + shape.maxRise * t, Math.max(eased, buried)))
-    return { x: point.x, y: level, z: point.z, shown: 1 }
-  })
+  const upstream = course.points.map((point, i) => ({
+    x: point.x,
+    y: fall.top + ((lengths[i] ?? 0) * shape.rise) / shape.length,
+    z: point.z,
+    shown: 1,
+  }))
   return { points: upstream.toReversed(), width: 2 * (shape.bed + shape.wall * 0.5) }
 }
 
@@ -332,11 +326,12 @@ export function applyStream(
       const outer = near.facing
         ? mix(h, near.level + shape.bank * 0.6, fade)
         : Math.max(h, mix(h, near.level + shape.bank + shape.shoulder, fade))
-      // The spring's head is closed: no bed past the course's upstream end.
+      // The spring's head is closed by a rise, on every side: no bed past the course's upstream
+      // end, and no notch the camera could look through to the sky beyond.
       const wall = near.beyond
-        ? Math.max(h, near.level + shape.bank)
+        ? Math.max(h, mix(h, near.level + shape.bank + shape.shoulder, fade))
         : mix(bed, outer, smoothstep(shape.bed, shape.bed + shape.wall, near.distance))
-      const next = near.beyond ? Math.max(outer, wall) : wall
+      const next = wall
       heights[i] = pool ? Math.min(h, next) : next
     }
 }
