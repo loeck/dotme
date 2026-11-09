@@ -1,4 +1,4 @@
-import type { ShockwaveEvent, StoneTouchdownEvent } from '../scene/VoxelLandscapeEngine'
+import type { ShockwaveEvent, StoneTouchdownEvent } from '../scene/landscape-input'
 
 /** A stone the visitor threw by touch answers in the hand: a short buzz per touchdown. */
 export function stoneHaptics(event: StoneTouchdownEvent) {

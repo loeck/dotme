@@ -11,7 +11,6 @@ import {
   mix,
   normalize,
   positionLocal,
-  positionView,
   positionWorld,
   pow,
   saturate,
@@ -46,6 +45,10 @@ import type { Node, Object3D } from 'three/webgpu'
 
 import type { LightingState } from './lighting'
 import type { PointerLightResponse } from './pointer-light'
+import type { Season } from './season'
+import { SeasonTint, seasonalFoliage, seasonalUndergrowth } from './seasonal-vegetation'
+import { hash12 } from './shader-noise'
+import { SNOW_ROUGHNESS, snowAlbedo, snowShare } from './snow-cover'
 import { surfaceGradientNormal } from './surface-detail'
 import type { SurfaceScan } from './terrain-textures'
 import type { MeshData } from './vegetation-meshes'
@@ -72,8 +75,6 @@ const TREE_SWAY_GAIN = 2.4
 const UNDERGROWTH_SWAY_GAIN = 1
 /** Share of a cursor gust the sward takes; see `WindGusts.sway`. */
 const UNDERGROWTH_GUST_SCALE = 0.45
-/** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
-const RELIEF_METRES = 0.004
 /**
  * How the night cursor's lantern lights each draw. Leaves, needles and blades pass a good
  * share of a light to their far side, and a crown's cards face every way. Its leaves are
@@ -84,6 +85,12 @@ const FOLIAGE_POINTER_LIGHT: PointerLightResponse = { translucency: 0.6, gain: 4
 const UNDERGROWTH_POINTER_LIGHT: PointerLightResponse = { translucency: 0.5 }
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
+/**
+ * Share of the per-card flutter crowns keep. Each card fluttering on its own moved thousands of
+ * alpha-tested edges by a pixel or so every frame; without multisampling those edges crawled and
+ * the crowns seemed to blink. The crown still leans and tosses with the wind as a whole.
+ */
+const CROWN_FLUTTER = 0.25
 
 /**
  * The forest as three draws: tube-meshed wood, foliage cards and procedural undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
@@ -101,6 +108,8 @@ export class Vegetation {
   private readonly sunDirection = uniform(new Vector3(0, 1, 0))
   private readonly sunColour = uniform(new Color())
   private readonly ambient = uniform(new Color())
+  /** The season's palette and winter thinning; see `seasonal-vegetation.ts`. */
+  private readonly season = new SeasonTint()
   private readonly disposables: Array<{ dispose(): void }> = []
 
   constructor(parent: Object3D, prepared: PreparedVegetation, bark?: SurfaceScan) {
@@ -181,11 +190,11 @@ export class Vegetation {
    * lean and buffeting, the gust patches rolling through the wood (`wind-field.ts`) and the
    * visitor's own gusts. `gain` scales the lean; `gustScale` the cursor gusts.
    */
-  private sway(gain: number, gustScale = 1): Node<'vec3'> {
+  private sway(gain: number, gustScale = 1, flutterGain = 1): Node<'vec3'> {
     const wind = attribute<'vec4'>('wind')
     const bend = wind.x,
       phase = wind.y,
-      flutter = wind.z,
+      flutter = wind.z.mul(flutterGain),
       omega = wind.w
     const t = this.time.mul(omega)
     const buffet = sin(t.mul(0.53).add(phase))
@@ -267,7 +276,7 @@ export class Vegetation {
     const marks = coordinates.mul(vec2(14, 18))
     const cell = floor(marks)
     const wrapped = vec2(cell.x.sub(floor(cell.x.div(14)).mul(14)), cell.y)
-    const random = fract(sin(wrapped.dot(vec2(127.1, 311.7))).mul(43758.5453))
+    const random = hash12(wrapped)
     const local = fract(marks)
       .sub(vec2(fract(random.mul(7.13)).mul(0.46).add(0.27), random.mul(0.4).add(0.3)))
       .abs()
@@ -312,34 +321,38 @@ export class Vegetation {
       envMapIntensity: 0.45,
       side: DoubleSide,
     })
-    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN))
+    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN, 1, CROWN_FLUTTER))
     const sample = texture(atlas, uv())
-    // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
-    // fill their cards into squares.
     const coverage = sample.a
-    // Leaf centres catch a little more light than their dry edges without glazing the crown.
-    material.roughnessNode = mix(0.98, 0.84, smoothstep(0.12, 0.8, sample.g))
     material.alphaTest = 0.5
+    // On a multisampled view (`depth-focus.ts`) the cutout becomes coverage, a soft rim of
+    // samples rather than a hard per-pixel test; single-sampled passes (shadows, mirror, probe)
+    // keep the alpha test.
+    material.alphaToCoverage = true
     // Needle-to-needle and leaf-to-leaf tone, kept within about ±35% of the palette: a wider
     // spread pushed sunlit leaves into the tone curve's shoulder, which washed them pale grey.
-    const albedo = vertexColor().rgb.mul(sample.r.mul(0.6).add(0.55))
+    const tone = vertexColor().rgb.mul(sample.r.mul(0.6).add(0.55))
+    // Seasonal tint: a separate blend on the base colour and coverage (`seasonal-vegetation.ts`).
+    const seasonal = seasonalFoliage(this.season, tone, coverage)
+    const albedo = seasonal.albedo
     // Coverage rides in the colour's alpha: three's shadow pass multiplies by `colorNode.a` and
     // keeps `alphaTest`, so cards cast their cutout rather than square shadows.
-    material.colorNode = vec4(albedo, coverage)
+    // Snow lies on the cards facing up, the crown tops (`snow-cover.ts`).
+    const snow = snowShare(normalize(attribute<'vec3'>('normal')).y, sample.g.sub(0.5), 0.6)
+    const snowed = snowAlbedo(albedo, snow)
+    material.colorNode = vec4(snowed, seasonal.coverage)
+    // Leaf centres catch a little more light than their dry edges without glazing the crown;
+    // snow on them is matte, as on the ground.
+    material.roughnessNode = mix(
+      mix(0.98, 0.84, smoothstep(0.12, 0.8, sample.g)),
+      float(SNOW_ROUGHNESS),
+      snow,
+    )
     // Card normals lean toward the outside of their crown and must not flip on back faces.
+    // No per-pixel relief: a screen-space-derivative bump on small swaying cards changed sign
+    // and slope from frame to frame, so whole cards blinked light and dark.
     const normal = normalize(attribute<'vec3'>('normal'))
-    // Each needle and leaf is a small dome in the atlas: its screen-space slope tilts the normal
-    // (surface gradient, as the terrain's detail relief), so a near spray shades as rounded
-    // shoots rather than a flat card. Mip levels flatten the relief with distance on their own.
-    const base = transformNormalToView(normal).normalize()
-    const relief = sample.g.mul(RELIEF_METRES)
-    const dpdx = positionView.dFdx(),
-      dpdy = positionView.dFdy()
-    const r1 = dpdy.cross(base),
-      r2 = base.cross(dpdx)
-    const det = dpdx.dot(r1)
-    const gradient = det.sign().mul(relief.dFdx().mul(r1).add(relief.dFdy().mul(r2)))
-    material.normalNode = det.abs().mul(base).sub(gradient).normalize()
+    material.normalNode = transformNormalToView(normal).normalize()
     const toEye = normalize(cameraPosition.sub(positionWorld))
     const facing = abs(dot(normal, toEye)).oneMinus()
     // Sky-light rim and back-light translucency, strongest at the crown rim.
@@ -349,8 +362,9 @@ export class Vegetation {
       .mul(facing.mul(0.6).add(0.4))
     // Light through a leaf comes out a saturated yellow-green: chlorophyll passes green and
     // some red and absorbs blue, so back-lit crown rims glow rather than wash grey.
-    const transmitted = albedo.mul(vec3(1, 1.15, 0.45))
-    material.emissiveNode = albedo
+    // Snow lying on a card blocks that light, and its rim takes the snow's colour.
+    const transmitted = albedo.mul(vec3(1, 1.15, 0.45)).mul(snow.oneMinus())
+    material.emissiveNode = snowed
       .mul(this.ambient.mul(rim))
       .add(transmitted.mul(this.sunColour.mul(back)))
     return material
@@ -376,7 +390,14 @@ export class Vegetation {
     const into = saturate(dot(this.sunDirection.negate(), toEye))
     // Only the thin, light upper blade passes much light; a whole bank glowing reads as straw.
     material.emissiveNode = vertexColor().rgb.mul(this.sunColour).mul(pow(into, 6).mul(0.05))
+    // Seasonal tint: a factor three multiplies by the vertex colour (`seasonal-vegetation.ts`).
+    material.colorNode = seasonalUndergrowth(this.season, vertexColor().rgb)
     return material
+  }
+
+  /** Sets the season's palette: uniforms only, so no program changes. */
+  setSeason(season: Season) {
+    this.season.set(season)
   }
 
   /** The breeze's lean strength, 0.25 in a calm to 1.4 in a gale; falling leaves follow it. */

@@ -73,8 +73,65 @@ to 2.1 times at night and 1.3 times by day, decaying in 70 ms; overlapping strok
 past one full flash. Stronger flashes (up to 4.9 times at night) whited out the sky and clouds. Half the strikes add a fainter
 return stroke 0.35–0.5 s later: real return strokes are quicker, but two flashes per strike
 keep the scene under three flashes per second (WCAG 2.3.1). Each strike is 1–8 km away; its
-thunder (see [interaction sounds](living-landscape.md#thunder)) arrives after distance / 343 m/s.
-Reduced motion shows no lightning.
+thunder (see [thunder](living-landscape.md#thunder)) arrives after distance / 343 m/s.
+Reduced motion shows no lightning; the sound then rolls a distant rumble on its own every
+18–48 s instead, with no flash.
+
+Live weather also reports fog (WMO 45/48 or low visibility), snow, drizzle, temperature and
+humidity (see [weather](paris-weather.md)). Fog and snow have sky presets of their own,
+`?weather=fog` and `?weather=snow`. Snow keeps the overcast deck; its flakes and the cover they
+leave are described in [rain](rain-rendering.md#snow).
+
+## Fog
+
+Ground fog (`SceneWeather.fog`, 0–1) lives in the volumetric air (`volumetric-light.ts`), so it
+costs no pass of its own: each raymarch step adds a veil that thins upward over about 14 m
+(0.011 /m at full fog) and banks a few metres deep that pool over the lake and the low banks
+(up to 0.1 /m). The banks are two octaves of value noise whose tops wander between 1.4 and 7 m
+above the water; they creep with a fifth of the wind and slowly change shape, and freeze under
+reduced motion. Both grow with the square of `fog` and start half a metre from the eye. The fog
+scatters a greyed share of the horizon's light (the air's own colour, dimmer under cloud) and,
+more weakly, the sun through the shadow map, so low sun streams in beams through it. The whole
+term sits behind a uniform branch: clear air skips it.
+
+The `fog` preset now lies under a thin, broken deck (8% coverage against overcast's 35%), so a
+pale sun can show through: fog dims the direct sun and moon by up to half in the lighting, veils
+their discs (the sun to 18%) and spreads them into a soft glow in the sky shader, and removes the
+lens flare. The low sky greys toward the air's light, which also keeps the lake's mirror of the
+sky foggy, and the material fog that the mirror and the rain use thickens with it. Lanterns grow
+a wider, brighter halo (up to 2.6 times their glow's size), which the night bloom softens.
+
+## Rainbow
+
+After or during light rain, with the sun up but under 42°, the sky draws a rainbow
+(`rainbow.ts`): a primary bow at 40.6–42.2° and a secondary at 50.5–52.6° with its colours
+reversed and 38% of the strength, each three Gaussian bands, plus a faint brightening inside the
+primary. It is as bright as the sky round it, tinted by the sunlight, and fades into the horizon
+and above about 35° of elevation, where no rain falls. `rainbowFactor` (`weather-state.ts`) needs
+the sun between about 1° and 37° up and drops in the air: rain between 3% and 60% intensity, or a
+shower that ended in the last few minutes (the air's memory of rain decays over 150 s); a
+downpour, fog or snow shows none and a storm a third. The sky shader then scales it by how clear
+of cloud the sun itself is (30% behind the thickest deck), so `?weather=rain` near sunset shows a
+faint bow, and a live shower clearing at golden hour a bright one.
+
+A real bow stands round the anti-solar point, but the fixed camera faces the low sun at both ends
+of the day and has it behind its shoulder only near noon, when a bow is below the horizon: a true
+bow would never be in frame. Like the moon, it is staged (`stagedRainbowCentre`): centred 0.7 rad
+to the side away from the sun, as far below the horizon as the sun stands above it, so its height
+and size follow the sun as a real bow's do. The lake reflects it with the rest of the sky.
+
+## Weather refresh
+
+A long visit follows the live weather (`watchSceneWeather`, see [weather](paris-weather.md)):
+each new slot eases the scene over 60 s (`weather-blend.ts`, smoothstep) from the levels on
+screen to the new ones: cloud coverage, density and body size, air extinction, diffuse light, rain
+and its wind, fog and snowfall. Everything is a uniform, so nothing compiles: with live or
+fallback weather the engine compiles the cloud capture, rain and snow at load even when the
+opening weather hides them (`weatherMayChange`), and a forced `?weather=` compiles only what it
+shows. A deck that clears completely stops its capture and recaptures when cloud returns. The
+shared wind field (water, vegetation, clouds) keeps the visit's opening wind: it is analytic in
+time, and changing its speed would jump its integrated displacement; rain and snow follow the
+refreshed wind. Reduced motion applies a refresh at once.
 
 ## Sky and twilight
 

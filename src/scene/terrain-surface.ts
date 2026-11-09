@@ -1,6 +1,7 @@
 import { prepareGeometryBounds } from './geometry-bounds'
 import type { PreparedBounds } from './geometry-bounds'
 import { WATER_LEVEL } from './lake-bed'
+import { clamp, mix as lerp, smoothstep as smooth01 } from './math'
 import { vertexNormals } from './terrain-boulders'
 import type { PreparedBoulders } from './terrain-boulders'
 import { blurGrid } from './terrain-field'
@@ -24,16 +25,12 @@ export type PreparedTerrainSurface = {
   triangles: number
 }
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-
 function hash3(x: number, y: number, z: number) {
   let n = Math.imul(x | 0, 0x8da6b343) ^ Math.imul(y | 0, 0xd8163841) ^ Math.imul(z | 0, 0xcb1ab31f)
   n = Math.imul(n ^ (n >>> 13), 0x85ebca6b)
   n = Math.imul(n ^ (n >>> 16), 0xc2b2ae35)
   return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
 }
-
-const lerp = (a: number, b: number, t: number) => a + (b - a) * t
 
 /** Trilinear value noise in [-0.5, 0.5]. */
 function noise3(x: number, y: number, z: number) {
@@ -53,10 +50,6 @@ function noise3(x: number, y: number, z: number) {
       sz,
     )
   return lerp(plane(y0), plane(y0 + 1), sy) - 0.5
-}
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
 }
 
 /**

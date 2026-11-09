@@ -1,4 +1,5 @@
 import { WATER_LEVEL } from './lake-bed'
+import { clamp, smoothstep as smooth01 } from './math'
 
 /**
  * The smooth, natural ground of the lake. The world generator (`lake-world.ts`) composes the
@@ -48,12 +49,6 @@ export type ProtectedArea = Readonly<{
   radius: number
   mode?: 'exact' | 'raise' | 'water'
 }>
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
-}
 
 function hash(seed: number, x: number, z: number, stream: number) {
   let n =
@@ -113,7 +108,7 @@ export function blurGrid(values: Float32Array, columns: number, rows: number, ra
 }
 
 /** Two-sweep chamfer distance (world units) to cells where `seed` holds. */
-export function chamfer(seedMask: Uint8Array, columns: number, rows: number, cell: number) {
+function chamfer(seedMask: Uint8Array, columns: number, rows: number, cell: number) {
   const far = (columns + rows) * cell
   const distance = new Float32Array(columns * rows)
   for (let i = 0; i < distance.length; i++) distance[i] = seedMask[i] ? 0 : far
@@ -147,7 +142,7 @@ export function chamfer(seedMask: Uint8Array, columns: number, rows: number, cel
 }
 
 /** Depth of the lake bed below the water line at a distance from the shore (lake-bed.ts). */
-export const bedDepthAt = (distance: number) => Math.min(7.5, 0.12 + distance * 0.42)
+const bedDepthAt = (distance: number) => Math.min(7.5, 0.12 + distance * 0.42)
 
 export type TerrainFieldInput = Readonly<{
   grid: TerrainGrid

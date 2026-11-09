@@ -41,8 +41,6 @@ import type { LakeBed } from './lake-bed'
 import type { FireflyPointer } from './lake-fireflies'
 import type { PhysicsWorld } from './physics-world'
 
-export type { FishSpecies } from './fish-anatomy'
-
 export const FISH_LAYER = 3
 
 type WaterPointer = Readonly<{ x: number; z: number; strength?: number }>

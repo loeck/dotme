@@ -4,13 +4,9 @@ import type { Node } from 'three/webgpu'
 import { BoxGeometry, BufferGeometry, Color, Float32BufferAttribute } from 'three/webgpu'
 
 import { required } from '../invariant'
+import { smoothstep as smooth } from './math'
 
 export type FishSpecies = 'carp' | 'roach' | 'perch'
-
-const smooth = (a: number, b: number, value: number) => {
-  const t = Math.max(0, Math.min(1, (value - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
 
 /** Low-poly spindle, thin fins and a forked vertical tail. Local +Z is forward. */
 export function createFishGeometry(species: FishSpecies) {

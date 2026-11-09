@@ -1,9 +1,25 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
-  "buildCommand": "pnpm build",
+  "buildCommand": "pnpm build && rm -rf dist/.vite",
   "outputDirectory": "dist",
   "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' 'sha256-NnFc/EpJl+ssBq5Ux9kuyCNAnj3ImUWHddmR0fV24Pw=' 'wasm-unsafe-eval'; style-src 'self' 'sha256-bh+YfBV8xj33pZYRzE5pG8T0An/zAzf0vjJEccLuiz8='; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+        },
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+        },
+        { "key": "Cross-Origin-Opener-Policy", "value": "same-origin" }
+      ]
+    },
     {
       "source": "/assets/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }]
@@ -13,6 +29,16 @@
       "headers": [
         { "key": "Cache-Control", "value": "public, max-age=604800, stale-while-revalidate=86400" }
       ]
+    },
+    {
+      "source": "/(favicon\\.ico|favicon\\.svg|apple-touch-icon\\.png|icon-512\\.png|og-image\\.jpg|site\\.webmanifest)",
+      "headers": [
+        { "key": "Cache-Control", "value": "public, max-age=86400, stale-while-revalidate=604800" }
+      ]
+    },
+    {
+      "source": "/(robots\\.txt|sitemap\\.xml)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=3600" }]
     }
   ]
 }

@@ -26,9 +26,6 @@
     "noImplicitReturns": true,
     "noUncheckedSideEffectImports": true,
     "allowJs": true,
-    "checkJs": true,
-    "paths": {
-      "/audio-audit.js": ["./e2e/audio-audit-harness.ts"]
-    }
+    "checkJs": true
   }
 }

@@ -21,7 +21,7 @@ Done when every in-scope test file has a recorded baseline result.
 Split the surface into **lanes** along production owner boundaries, not file
 prefixes. For `src/scene` these might be water, rain, sky and lighting, fish,
 terrain, and shared harness. Include the subsystem's specs at shared e2e
-boundaries (`functional.spec.ts`, `rendering.spec.ts`) and every spec its
+boundaries (`home.spec.ts`, `functional.spec.ts`) and every spec its
 playwright configs route.
 
 Done when every test file and e2e spec the subsystem owns belongs to exactly

@@ -38,14 +38,16 @@ import type { DirectionalLight, Node, PerspectiveCamera, WebGPURenderer } from '
 
 import { celestialVisibility, cloudShadow } from './cloud-shadows'
 import type { CloudShadowUniforms } from './cloud-shadows'
+import { horizonNoise } from './distant-horizon'
 import { FullscreenPass } from './fullscreen-pass'
 import { WATER_LEVEL } from './lake-bed'
 import type { LightingState } from './lighting'
+import { smoothstep as smooth01 } from './math'
 import { LAST_SIGNAL_LOOK, goldenHourShare } from './scene-look'
 import type { SceneLook } from './scene-look'
 import type { SkyAtmosphere } from './sky-atmosphere'
 
-export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float'>) {
+function segmentIntegral(extinction: Node<'float'>, distance: Node<'float'>) {
   const tau = extinction.mul(distance)
   return tau
     .lessThan(0.001)
@@ -54,16 +56,12 @@ export function segmentIntegral(extinction: Node<'float'>, distance: Node<'float
       exp(tau.negate()).oneMinus().div(max(extinction, 0.0000001)),
     )
 }
-export function airPhase(cosine: Node<'float'>) {
+function airPhase(cosine: Node<'float'>) {
   return float(0.0795774715 * 0.64).div(float(1.36).sub(cosine.mul(1.2)).pow(1.5))
 }
 /** Moonlit air scatters less than sunlit air; day shafts keep full strength. */
 export function airSunScale(daylight: number) {
   return 0.35 + 0.65 * Math.max(0, Math.min(1, daylight))
-}
-const smooth01 = (edge0: number, edge1: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - edge0) / (edge1 - edge0)))
-  return t * t * (3 - 2 * t)
 }
 /**
  * Extinction of the fine aerosol near the ground (pollen, dust, humidity) that god rays show
@@ -81,6 +79,19 @@ export function airElevationScale(directionY: number, daylight: number) {
   const elevationGate = 1 - smooth01(0.2, 0.6, directionY) * 0.85
   return 1 - dayGate * (1 - elevationGate)
 }
+/**
+ * Ground fog at full density (`SceneWeather.fog` 1), per metre: a thin veil that thins upward
+ * over about 14 m, and banks a few metres deep that pool over the lake and the low banks.
+ */
+const FOG = {
+  veil: 0.011,
+  veilHeight: 14,
+  banks: 0.1,
+  /** Bank tops wander between these heights above the water, metres. */
+  bankTop: [1.4, 7] as const,
+  /** Noise scale of the banks, per metre. */
+  scale: 0.032,
+} as const
 /** Depth-buffer samples per pixel for the screen-space crepuscular rays. */
 const RAY_SAMPLES = 20
 
@@ -117,6 +128,12 @@ export class VolumetricLight {
   private readonly shafts = uniform(0)
   private readonly sunGlow = uniform(new Color())
   private readonly cameraRange = uniform(new Vector2(0.05, 500))
+  /** The weather's air extinction (`WEATHER[preset].extinction`), blended on refresh. */
+  private readonly extinction = uniform(0)
+  private readonly fog = uniform(0)
+  private readonly fogColor = uniform(new Color())
+  /** Where the banks' noise has drifted to with the wind, in noise units. */
+  private readonly fogDrift = uniform(new Vector2())
   private readonly airDivisor: number
   private readonly scatter: FullscreenPass
   private readonly composite: FullscreenPass
@@ -131,7 +148,8 @@ export class VolumetricLight {
     this.airDivisor = lowPower ? 3 : 2
     this.target.texture.name = 'Atmosphere composite'
     this.airTarget.texture.name = 'Air radiance / transmission'
-    const sigma = float(extinction)
+    this.extinction.value = extinction
+    const sigma = this.extinction
     this.scatter = new FullscreenPass(
       renderer,
       Fn(() => {
@@ -179,7 +197,28 @@ export class VolumetricLight {
               )
             // The beam aerosol hugs the ground and the water, from a couple of metres out.
             const aerosol = this.shafts.mul(exp(height.mul(-0.07))).mul(smoothstep(0.5, 3, along))
-            const totalExtinction = stepExtinction.add(aerosol)
+            // Ground fog: a veil thinning upward plus drifting banks lying on the lake. A
+            // uniform branch, so clear weather pays nothing for it.
+            const fog = float(0).toVar()
+            If(this.fog.greaterThan(0.001), () => {
+              const at = world.xz.mul(FOG.scale).add(this.fogDrift)
+              const bank = horizonNoise(at)
+                .mul(0.65)
+                .add(horizonNoise(at.mul(2.7).add(vec2(17.3, 5.1))).mul(0.35))
+              const top = bank.mul(FOG.bankTop[1] - FOG.bankTop[0]).add(FOG.bankTop[0])
+              const banks = smoothstep(top, top.mul(0.2), height).mul(smoothstep(0.32, 0.72, bank))
+              fog.assign(
+                this.fog
+                  .mul(this.fog)
+                  .mul(
+                    exp(height.mul(-1 / FOG.veilHeight))
+                      .mul(FOG.veil)
+                      .add(banks.mul(FOG.banks)),
+                  )
+                  .mul(smoothstep(0.4, 5, along)),
+              )
+            })
+            const totalExtinction = stepExtinction.add(aerosol).add(fog)
             const transmission = exp(totalExtinction.mul(segment).negate()),
               integral = segmentIntegral(totalExtinction, segment)
             const visible = float(0).toVar()
@@ -204,9 +243,18 @@ export class VolumetricLight {
             })
             // The aerosol scatters the sun into beams but adds little sky light: it must not
             // grey the air.
+            // Fog droplets scatter the whole sky's light (its own colour) and, more softly, the
+            // sun in the shadow map's beams.
             const source = ambient
               .mul(stepExtinction.add(aerosol.mul(0.2)))
-              .add(this.sunRadiance.rgb.mul(visible).mul(phase).mul(2).mul(totalExtinction))
+              .add(this.fogColor.rgb.mul(fog))
+              .add(
+                this.sunRadiance.rgb
+                  .mul(visible)
+                  .mul(phase)
+                  .mul(2)
+                  .mul(totalExtinction.sub(fog.mul(0.6))),
+              )
             radiance.addAssign(accumulated.mul(source).mul(integral))
             accumulated.mulAssign(transmission)
           })
@@ -341,6 +389,13 @@ export class VolumetricLight {
     const airDay = 1 - light.daylight * 0.7
     this.ambient.value.copy(light.nightHaze).multiplyScalar(airDay)
     this.skyAir.value = 0.5 * airDay
+  }
+  /** Air density and ground fog for the current weather: uniforms only. */
+  setWeather(extinction: number, fog: number, fogColor: Color, drift: Readonly<Vector2>) {
+    this.extinction.value = extinction
+    this.fog.value = Math.max(0, Math.min(1, fog))
+    this.fogColor.value.copy(fogColor)
+    this.fogDrift.value.copy(drift)
   }
   resize(width: number, height: number) {
     this.target.setSize(width, height)

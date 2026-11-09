@@ -7,6 +7,8 @@ import type { Touchdown } from './stone-skips'
 const openLake = () => true
 const hop = (a: Touchdown, b: Touchdown) => Math.hypot(b.x - a.x, b.z - a.z)
 
+const bank = (x: number) => x < 6
+
 describe('skipping stones', () => {
   it('skips further and more often for a faster flick, each hop shorter than the last', () => {
     const slow = planSkips({ x: 0, z: 0 }, { x: 0, z: -1 }, SKIP.minSpeed, openLake)
@@ -32,7 +34,6 @@ describe('skipping stones', () => {
   })
 
   it('sinks before the bank and treats a still flick as a plain drop', () => {
-    const bank = (x: number) => x < 6
     const plan = planSkips({ x: 0, z: 0 }, { x: 1, z: 0 }, 30, (x) => bank(x))
     for (const touchdown of plan) expect(bank(touchdown.x)).toBe(true)
     expect(plan.length).toBe(1)

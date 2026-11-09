@@ -39,6 +39,7 @@ import { required } from '../invariant'
 import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import type { PhysicsWorld } from './physics-world'
+import { hash12 } from './shader-noise'
 import { SplashImpacts } from './splash-impacts'
 import { createSplashProfile } from './splash-profile'
 import type { SplashProfile } from './splash-profile'
@@ -46,16 +47,14 @@ import type { WaterContact } from './water-contact'
 import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
-const hash = (q: Node<'vec2'>) => fract(sin(q.dot(vec2(127.1, 311.7))).mul(43758.5453))
-
 const noise = (point: Node<'vec2'>) => {
   const grid = floor(point),
     f0 = fract(point),
     f = f0.mul(f0).mul(vec2(3).sub(f0.mul(2)))
 
   return mix(
-    mix(hash(grid), hash(grid.add(vec2(1, 0))), f.x),
-    mix(hash(grid.add(vec2(0, 1))), hash(grid.add(1)), f.x),
+    mix(hash12(grid), hash12(grid.add(vec2(1, 0))), f.x),
+    mix(hash12(grid.add(vec2(0, 1))), hash12(grid.add(1)), f.x),
     f.y,
   )
 }
@@ -248,7 +247,7 @@ export class LakeSplashes {
       )
         this.contacts.push(candidate)
     }
-    // Smooth ellipsoids rather than faceted voxel debris. Their long axis follows
+    // Smooth ellipsoids rather than faceted cube debris. Their long axis follows
     // velocity and contracts near the apex, where surface tension rounds drops.
     const geometry = new SphereGeometry(1, 10, 7)
     geometry.setAttribute(

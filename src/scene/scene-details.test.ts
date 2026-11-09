@@ -1,12 +1,12 @@
 import { InstancedMesh, Matrix4, Scene, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { createLakeBed } from './lake-bed'
 import { LakeWaterMaterial } from './lake-water'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { SceneDetails, updateDetailEnvironment } from './scene-details'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { WindModel } from './wind'
 
 describe('detail environment bridge', () => {
@@ -31,7 +31,7 @@ describe('detail environment bridge', () => {
   })
 })
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
@@ -44,8 +44,8 @@ const firstInstance = (scene: Scene, name: string) => {
 }
 
 describe('details water layer', () => {
-  it('routes pointer bursts to splash impulses and advances floaters and foam', async () => {
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+  it('routes pointer bursts to splash impulses and advances floaters', async () => {
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
     const scene = new Scene()
     const material = new LakeWaterMaterial()
     const details = new SceneDetails(
@@ -62,7 +62,6 @@ describe('details water layer', () => {
         material.uniforms,
       )
       const floaterStart = firstInstance(scene, 'floating-bodies')
-      const foamStart = firstInstance(scene, 'drifting-foam')
       details.pointerBurst(5, -5, 0.55, 0, windy.sample(0))
       expect(returns[0]?.slice(0, 2)).toEqual([5, -5])
       for (let frame = 0; frame < 120; frame++) {
@@ -71,7 +70,6 @@ describe('details water layer', () => {
       }
       expect(returns.length).toBeGreaterThan(0)
       expect(firstInstance(scene, 'floating-bodies')).not.toEqual(floaterStart)
-      expect(firstInstance(scene, 'drifting-foam')).not.toEqual(foamStart)
     } finally {
       details.dispose()
       material.dispose()
@@ -80,7 +78,7 @@ describe('details water layer', () => {
   })
 
   it('holds pointer bursts still under reduced motion', async () => {
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
     const scene = new Scene()
     const details = new SceneDetails(
       scene,
@@ -95,14 +93,12 @@ describe('details water layer', () => {
         (x, z, radius, velocity) => returns.push([x, z, radius, velocity]),
         new LakeWaterMaterial().uniforms,
       )
-      const foamStart = firstInstance(scene, 'drifting-foam')
       details.pointerBurst(5, -5, 0.55, 0, windy.sample(0))
       for (let frame = 0; frame < 60; frame++) {
         const time = frame / 60
         details.update(time, 1 / 60, windy.sample(time), null, null, 0, 1)
       }
       expect(returns).toHaveLength(0)
-      expect(firstInstance(scene, 'drifting-foam')).toEqual(foamStart)
     } finally {
       details.dispose()
       physics.dispose()

@@ -1,3 +1,4 @@
+import { saturate as clamp01 } from './math'
 /**
  * A procedural botanical atlas, drawn once in the world worker: oak and lime-and-beech leaf
  * sprays, Norway spruce sprays with their hanging branchlets, Scots pine needle tufts, weeping
@@ -7,9 +8,9 @@
  * read as foliage rather than flat paint.
  */
 /** Tile edge in texels: phones draw smaller trees, so they bake a quarter of the texels. */
-export const atlasTile = (mobile: boolean) => (mobile ? 256 : 512)
-export const ATLAS_COLUMNS = 4
-export const ATLAS_ROWS = 3
+const atlasTile = (mobile: boolean) => (mobile ? 256 : 512)
+const ATLAS_COLUMNS = 4
+const ATLAS_ROWS = 3
 export const ATLAS_TILES = {
   spruceA: 0,
   spruceB: 1,
@@ -26,7 +27,7 @@ export const ATLAS_TILES = {
 } as const
 export type AtlasTile = (typeof ATLAS_TILES)[keyof typeof ATLAS_TILES]
 
-export type AtlasLevel = Readonly<{ width: number; height: number; data: Uint8Array }>
+type AtlasLevel = Readonly<{ width: number; height: number; data: Uint8Array }>
 /** The atlas and its full mip chain (level 0 first), each level keeping its tiles' coverage. */
 export type FoliageAtlas = AtlasLevel & Readonly<{ mipmaps: readonly AtlasLevel[] }>
 
@@ -220,7 +221,6 @@ class TileCanvas {
   }
 }
 
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
 type Uv = readonly [number, number]
 
 /** Points along a quadratic curve from `a` through control `c` to `b`. */

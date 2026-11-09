@@ -43,13 +43,27 @@ the scene lets it settle gradually.
 Gusts tear leaves off the crowns (`falling-leaves.ts`): every crown band of the pick spheres
 (radius 0.6 m or more) sheds at a rate set by the cursor gusts and, above a threshold, the ambient
 gust patches over it, so a sweep strips a flurry and a squally spell drops a few leaves on its
-own. Each leaf flutters down at 0.75–1.35 m/s, swinging side to side and sinking fastest through
-the bottom of each swing (about a third tumble end over end instead), drifts with the breeze, the
-gust patch and any cursor gust it meets, then lies on the ground, or floats and rings a faint
-ripple on the lake (at most one every 0.35 s), for 5–9 s and shrinks away. Leaves are mostly pale,
-yellowing greens with gold and a few brown, larger with distance past 14 m so a far wood's flecks
-still read. One instanced draw of up to 160 leaves (48 on phones), simulated on the CPU; the ground
-is cast once and again only after a 1.5 m drift. Reduced motion sheds none and clears them.
+own. Each leaf is a light plate integrated on the CPU (`leaf-physics.ts`): gravity, strong drag
+across the blade and little along it (its flat terminal speed 0.75–1.35 m/s), a moment turning
+the blade broadside to the airflow, vortex shedding that rocks it about its midrib and a little
+Magnus side force, so it rocks, glides to and fro and spirals down; about three in ten are driven
+past the broadside moment into autorotation and tumble end over end (spin capped at 16 rad/s).
+The air it rides is the breeze, the gust patch and any cursor gust, which also lifts it a little.
+The ground is cast against the Rapier statics (terrain heightfield and boulder hulls) when a leaf
+starts and again after each 1.2 m of drift, or 0.3 m when low: a leaf lands on the slope it
+meets, lying along it on the nearer face, and a strong cursor sweep lifts it off again. On the
+lake it rides the live contact surface (waves, ripples, pointer and splash rings), lies on its
+slope, slides down it and drifts with the wind and the cursor's gusts, rings a faint ripple as it
+lands (at most one every 0.35 s), strands if washed onto a bank, and sinks a few centimetres as
+it fades. Leaves rest 8–14 s, then shrink away over 1.6 s; when the pool is full the leaf
+closest to fading is recycled. Leaves are mostly pale, yellowing greens with gold and a few
+brown, larger with distance past 14 m so a far wood's flecks still read. One instanced draw of
+up to 150 leaves (48 on phones and low-power devices, which also integrate at 30 Hz instead of
+60 Hz), without per-frame allocation. Reduced motion sheds none and clears them.
+The season scales the fall: in autumn a gust strips three and a half times as many leaves, and
+every crown also lets a few go on its own (0.007 a second per metre of crown radius, more in a
+breeze), coloured from yellows, coppers and russets with a few late greens; a winter gust finds
+less than half as many, all dry browns ([seasons](vegetation.md#seasons)).
 
 At night (daylight under 0.25) a double tap or double click on the water sets a paper lantern
 afloat there (`lake-lanterns.ts`): a small drum that glows warm through the middle of its paper,
@@ -66,18 +80,70 @@ rate of 0.45/s and leaving at 1.2/s, so the swarm forms slowly and turns as a lo
 gathered they no longer shy from the cursor. A click scatters them: each gathered fly gets an
 outward kick and drifts home along its path. Reduced motion never gathers them.
 
-By day a small flock of birds (`bird-flock.ts`, nine, six on low power) crosses the sky: the
-first about 22 s into the visit, then every 55–95 s while daylight is above 0.35 and rain below
-0.3, each leaving a tall crown that projects inside the frame. A press on a crown (the pointer
-ray meeting a crown's pick sphere before any ground) startles a flock out of that tree instead.
-The leader climbs away from the viewer, first above the tallest crown within 60 m by 4 m, turns
-wide over the lake and leaves over the far hills; each bird steers toward a jittered slot of a
-loose wedge with its own response, so the flock stretches and bunches in turns, and any bird
-within 1.5 m of a crown is pushed out and up, so the flock clears the woods rather than flying
-through them. Birds are unlit dark silhouettes made of two hinged wings, beating 3.2 times a
-second (a little faster climbing), as a crow or jackdaw does, and gliding for 1.4 s in every
-2.8 s, each bird on its own rhythm; they bank into turns, fade in at the crown and out after
-24 s. Reduced motion shows no birds.
+By day a small flock of birds (`bird-flock.ts`) crosses the sky: the first about 22 s into the
+visit, then every 55–95 s while daylight is above 0.35 and rain below 0.3. Its species
+(`bird-species.ts`) is drawn by the season, the hour and the sky: crows and jackdaws (more in
+winter and under overcast), black-headed gulls (white, pale grey mantle, black wingtips; hooded in
+spring and summer), mallards (more within two hours of sunrise and sunset) and, in spring and
+summer, swifts, most in the last hours before sunset. Crows leave a tall crown that projects
+inside the frame, and a press on a crown (the pointer ray meeting a crown's pick sphere before
+any ground) startles crows out of that tree. The crow leader climbs away from the viewer, first
+above the tallest crown within 60 m by 4 m, turns wide over the lake and leaves over the far
+hills, the birds keeping jittered slots of a loose wedge. Gulls drift in from one side, circle a
+thermal 20–32 m out (all one way round, rising 0.25 m/s) and slide off over the hills after
+23 s; mallards cross the view 22–40 m out, 2.4–4 m over the water (lifting over ground), in a V
+or an echelon about a span apart, beating in step with the bird ahead a little later down the
+line; swifts sweep in from high up and hawk over the near water, dashing between points for
+20 s before climbing away.
+
+Every bird steers like a boid: its goal (slot, thermal, or the next dash), separation from
+flockmates within 1.8 spans (more for fast swifts), a little alignment and cohesion in the loose
+gull and swift flocks, out and up from any crown within 1.5 m, and never below the water's 1.4–3
+m floor; it cannot fly slower than half its cruise, and banks by its sideways acceleration
+(tan φ = a/g). Wings beat in bursts with glides between (crows 3.6 beats/s with short glides,
+gulls 2.8 with long glides on crooked wings, swifts 7 with sickle glides; mallards beat 5.2 times
+a second and never glide); the downstroke takes 45–50% of the beat, and on the upstroke the hand
+folds back and trails. Each bird has its own size (±10%), beat rate (±8%) and shade, and drakes,
+hens and jackdaws their own heads. Birds are drawn 1.15–1.45 times life size (the swift most) so
+a silhouette still reads at 20–40 m.
+
+All birds are one instanced draw of a 49-triangle bird (`bird-geometry.ts`): a four-ring body
+with a bill, a forked, square or rounded tail, and wings of an arm and a hand that the vertex
+shader hinges at the shoulder and the wrist from per-bird pose attributes. The species rewrites
+the vertex buffer and the plumage uniforms, never the program. The material (`bird-material.ts`)
+is lit by the sun and the sky like the leaves, two-sided with a paler underwing, painted by region
+(mantle, belly, head, bill, tail, dark wingtips); feathers are matte (grazing reflectance capped
+at 0.12, so an edge-on black wing never reads as a pale streak, with a faint blue-purple gloss
+on crows); thin wing feathers glow a little against the sun, a faint rim and a sky and water
+fill keep a white underside pale in shade. Wings are cambered (the leading edge a tenth of the
+chord up), so a wing seen edge-on stays a sliver. Birds take the scene's haze at 40% of its
+density (the fog is tuned for kilometre-distant hills; at full strength it lifted a crow at 50 m
+a third of the way to the sky's colour), so crows read near-black at noon and under overcast.
+Flocks fade in (from the crown for crows) and out at the end. Reduced motion shows no birds.
+`window.sceneFlock(species?, nearer?)` sends a flock at once for captures, like the benchmark
+hooks.
+
+### Seasonal wildlife
+
+The season ([seasons](vegetation.md#seasons)) decides who is about. Winter halves the flock and
+the rate flocks cross the sky (autumn takes 15% off). Fireflies glow on summer nights and at half
+strength in late spring, and not at all in autumn or winter.
+
+There are no bats: a few pixels of dark flapping at dusk read as stray leaves in the sky.
+
+On warm, dry, calm days (from 13 to 20 °C, wind under 3.5–6.5 m/s, daylight over 0.3; the
+season's typical temperature stands in when the weather reports none) a couple of dragonflies
+(one on low power) patrol the water just off the viewer's bank and a few midge swarms dance
+over the shallows (`lake-insects.ts`). A dragonfly holds a point, trembling a centimetre or two,
+for 0.7–2.6 s, then darts 1.2–3.6 m in a quarter to half a second and hovers again, never more
+than 3.5 m from its patch; seen level from the bank it would be a line under a pixel, so it is
+drawn tipped toward the viewer, a dark body with glassy wings a few pixels across. Midges loop
+and bob in columns 1.4–2.6 m up, entirely in the vertex shader; they are nearly invisible until
+the sun stands low ahead (forward scattering by their wings), when each catches the light as a
+faint warm fleck against the shaded banks. Insects keep to the warm season (fully in summer,
+60% in spring, 30% in autumn). Insects are main-view only (no mirror, probe or shadow
+draws), add two draws in all, compile with the scene before the first frame, and reduced motion
+shows none.
 
 Floating leaves slow down in sheltered shore pockets derived from the actual shoreline.
 Only nearby pockets with a clear water path can influence them; a bank-parallel current

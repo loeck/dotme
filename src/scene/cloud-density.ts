@@ -20,8 +20,8 @@ import { Color, Vector2, Vector3, Vector4 } from 'three/webgpu'
 import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 
-export const CLOUD_COUNT = 12
-export const CLOUD_PERIOD = 640
+const CLOUD_COUNT = 12
+const CLOUD_PERIOD = 640
 const CLOUD_BASE = 80
 const CLOUD_TOP = 140
 

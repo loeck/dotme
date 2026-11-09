@@ -7,7 +7,7 @@ import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 
 /** Transferable CPU data. BufferGeometry and textures are created only by the renderer. */
-export type PreparedLakeGeometry = {
+type PreparedLakeGeometry = {
   positions: Float32Array
   normals: Float32Array
   uv: Float32Array

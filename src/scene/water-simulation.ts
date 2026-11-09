@@ -49,7 +49,7 @@ import { WindModel, updateWindUniforms } from './wind'
 
 export const WATER_STEP = 1 / 60
 export const WAVE_SPEED = 2.4
-export const WATER_DAMPING = 0.65
+const WATER_DAMPING = 0.65
 export const MAX_WATER_STEPS = 4
 
 /** Shared clock: fixed physical time, bounded recovery after a hidden tab. */
@@ -70,6 +70,34 @@ export class WaterClock {
 }
 
 /** GPU-resident fragment passes advance the shared fixed-step water field. */
+/**
+ * An impulse as the field's splat takes it: (u, v) on the field, the radius in metres (at
+ * least a few cells, at most 3 m) and the bounded velocity; null off open water or for any
+ * non-finite input, which would otherwise poison the field for good.
+ */
+export function waterImpulse(
+  bed: LakeBed,
+  resolution: number,
+  x: number,
+  z: number,
+  radius: number,
+  velocity: number,
+) {
+  if (!Number.isFinite(x) || !Number.isFinite(z)) return null
+  if (!Number.isFinite(radius) || !Number.isFinite(velocity) || !(resolution > 0)) return null
+  const u = (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size,
+    v = (z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size
+  if (!(u >= 0 && u <= 1 && v >= 0 && v <= 1)) return null
+  const index = lakeIndex(bed, x, z)
+  if (index < 0 || !bed.water[index]) return null
+  return {
+    u,
+    v,
+    radius: Math.max((LAKE_BOUNDS.size / resolution) * 2.5, Math.min(3, radius)),
+    velocity: Math.max(-0.65, Math.min(0.65, velocity)),
+  }
+}
+
 export class WaterSimulation {
   readonly resolution: number
   readonly available = true
@@ -196,9 +224,13 @@ export class WaterSimulation {
         .add(laplacian.mul(speedScale.mul((WAVE_SPEED ** 2 * WATER_STEP) / dx ** 2)))
         .mul(decay)
       const height = state.x.add(velocity.mul(WATER_STEP)).mul(exp(sponge.mul(-8 * WATER_STEP)))
+      // A non-finite cell (NaN fails every comparison) restarts at rest instead of spreading
+      // through the field, the lake shading and the bloom for good.
+      const finite = height.abs().lessThan(1e3).and(velocity.abs().lessThan(1e3))
       return maskNode
         .sample(coordinate)
         .r.greaterThanEqual(0.5)
+        .and(finite)
         .select(vec4(clamp(height, -0.22, 0.22), clamp(velocity, -1.5, 1.5), 0, 0), vec4(0))
     })()
     const impulse = attribute('aImpulse', 'vec4')
@@ -257,23 +289,12 @@ export class WaterSimulation {
   }
 
   addImpulse(x: number, z: number, radius: number, velocity: number) {
-    if (this.disposed || this.pending.length >= 128 || !Number.isFinite(x + z + radius + velocity))
-      return
-    const index = lakeIndex(this.bed, x, z)
-    if (index < 0 || !this.bed.water[index]) return
-    const normalizedRadius = Math.max(
-      (LAKE_BOUNDS.size / this.resolution) * 2.5,
-      Math.min(3, radius),
-    )
-    const normalizedVelocity = Math.max(-0.65, Math.min(0.65, velocity))
-    this.contact.addImpulse(x, z, normalizedRadius, normalizedVelocity, this.surfaceTime)
+    if (this.disposed || this.pending.length >= 128) return
+    const splat = waterImpulse(this.bed, this.resolution, x, z, radius, velocity)
+    if (!splat) return
+    this.contact.addImpulse(x, z, splat.radius, splat.velocity, this.surfaceTime)
     this.pending.push(
-      new Vector4(
-        (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size,
-        (z - LAKE_BOUNDS.minZ) / LAKE_BOUNDS.size,
-        normalizedRadius / LAKE_BOUNDS.size,
-        normalizedVelocity,
-      ),
+      new Vector4(splat.u, splat.v, splat.radius / LAKE_BOUNDS.size, splat.velocity),
     )
   }
 

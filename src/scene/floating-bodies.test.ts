@@ -1,28 +1,31 @@
-import { Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
+import { Color, Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
-import { FloatingBodies } from './floating-bodies'
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
+import { FloatingBodies, GRAB, grabAcceleration } from './floating-bodies'
 import { createLakeBed, sampleShore, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
-const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
 
 const positionsOf = (floating: FloatingBodies) => {
   const matrix = new Matrix4(),
     position = new Vector3()
-  return Array.from({ length: floating.mesh.count }, (_, i) => {
+  // Hidden instances (pooled leaves waiting for a falling leaf) read as NaN.
+  return Array.from({ length: floating.mesh.count }, (_, i): [number, number, number] => {
     floating.mesh.getMatrixAt(i, matrix)
+    if (matrix.elements[0] === 0 && matrix.elements[5] === 0)
+      return [Number.NaN, Number.NaN, Number.NaN]
     return position.setFromMatrixPosition(matrix).toArray()
   })
 }
@@ -133,14 +136,14 @@ describe('floating bodies', () => {
   })
 
   it('keeps fallen leaves afloat in a sheltered inlet without carrying them through its banks', async () => {
-    const banks: Voxel[] = [
+    const banks: Box[] = [
       { x: 0, y: 0.5, z: 5, size: 2, color: 0 },
       { x: 6, y: 0.5, z: 5, size: 2, color: 0 },
       { x: 2, y: 0.5, z: 7, size: 2, color: 0 },
       { x: 4, y: 0.5, z: 7, size: 2, color: 0 },
     ]
     const inlet = createLakeBed(banks, 42, false)
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex(banks))
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex(banks))
     const scene = new Scene()
     const splashes = new LakeSplashes(scene, inlet, 42, true, physics)
     const floating = new FloatingBodies(scene, inlet, 42, true, physics, splashes)
@@ -232,6 +235,7 @@ describe('floating bodies', () => {
     const time = 599 / 60,
       wind = windy.sample(time)
     for (const [i, position] of end.entries()) {
+      if (Number.isNaN(position[0])) continue
       const [x, y, z] = [required(position[0]), required(position[1]), required(position[2])]
       expect(Number.isFinite(x + y + z)).toBe(true)
       const surface = WATER_LEVEL + sampleWindField(x, z, time, wind, 0.08)[0]
@@ -258,5 +262,140 @@ describe('floating bodies', () => {
     const first = await run(42)
     expect(await run(42)).toEqual(first)
     expect((await run(43)).end).not.toEqual(first.end)
+  })
+})
+
+const follow = (immersion: number, water = 0) => {
+  // A hand moving at 1 m/s; the body starts with it.
+  let x = 0,
+    v = 1,
+    lag = 0
+  for (let t = 0; t < 2; t += 1 / 120) {
+    v += grabAcceleration(t - x, v, water, immersion, false) / 120
+    x += v / 120
+    lag = t - x
+  }
+  return lag
+}
+
+describe('grab spring', () => {
+  it('lags the hand more through water than through air', () => {
+    expect(follow(0)).toBeLessThan(0.16)
+    expect(follow(1)).toBeGreaterThan(follow(0) * 1.2)
+  })
+
+  it('floats a wet body a little above the hand and carries it with the water', () => {
+    // At rest, wet: buoyancy balances the spring a few centimetres high.
+    const rise = (9.81 * 0.5) / GRAB.stiffness
+    expect(grabAcceleration(-rise, 0, 0, 0.5, true)).toBeCloseTo(0, 6)
+    expect(grabAcceleration(0, 0, 0.3, 1, false)).toBeGreaterThan(0)
+  })
+
+  it('bounds the pull', () => {
+    expect(grabAcceleration(100, 0, 0, 0, false)).toBe(GRAB.limit)
+  })
+})
+
+describe('held buoy in the water', () => {
+  it('lays one continuous wake, without spray or rings, while dragged along the lake', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    const contact = new WaterContact(bed)
+    splashes.setWaterContact(contact)
+    floating.setWaterContact(contact)
+    const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      const [bx, by, bz] = required(positionsOf(floating)[0])
+      const ray = new Ray(new Vector3(bx, by + 3, bz), new Vector3(0, -1, 0))
+      expect(floating.grab(ray, 0.005, 10)).not.toBeNull()
+      const wakes: number[][] = []
+      floating.onWake = (...wake) => wakes.push(wake)
+      let lowest = Infinity
+      for (let frame = 0; frame < 150; frame++) {
+        const time = frame / 60
+        // Swept back and forth along the waterline at up to ~2 m/s.
+        const x = bx + Math.sin(time * 3) * 0.7
+        floating.moveGrab(new Vector3(x, WATER_LEVEL - 0.03, bz))
+        floating.update(time, calm.sample(time))
+        splashes.update(time, calm.sample(time))
+        if (frame > 30) lowest = Math.min(lowest, required(required(positionsOf(floating)[0])[1]))
+      }
+      // Buoyancy holds it near the surface rather than at the hand's depth.
+      expect(lowest).toBeGreaterThan(WATER_LEVEL - 0.075)
+      const troughs = wakes.filter((wake) => required(wake[3]) < 0)
+      // A continuous furrow: troughs nearly every step, never more than a few per step.
+      expect(troughs.length).toBeGreaterThan(100)
+      expect(wakes.length).toBeLessThanOrEqual(150 * (GRAB.wakeSamples + 2))
+      // Broad, bounded troughs: the GPU field takes them without steepening.
+      const deepest = Math.min(...troughs.map((wake) => required(wake[3])))
+      expect(deepest).toBeLessThan(-0.01)
+      expect(deepest).toBeGreaterThanOrEqual(-GRAB.wakeDepth)
+      // Consecutive troughs lie along the path, a splat's width apart at most: no gaps.
+      let gap = 0
+      for (let i = 1; i < troughs.length; i++) {
+        const a = required(troughs[i - 1]),
+          b = required(troughs[i])
+        gap = Math.max(
+          gap,
+          Math.hypot(required(b[0]) - required(a[0]), required(b[1]) - required(a[1])),
+        )
+      }
+      expect(gap).toBeLessThan(GRAB.wakeRadius)
+      // Bobbing along the surface is neither a plunge nor a tear-out: no spray, no rising rings.
+      expect(splashes.emitted).toBe(0)
+      expect(wakes.filter((wake) => required(wake[3]) > 0)).toEqual([])
+      floating.releaseGrab()
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+})
+
+describe('caught falling leaves', () => {
+  it('float on the water like the buoy instead of sinking', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 7, true, physics)
+    const floating = new FloatingBodies(scene, bed, 7, true, physics, splashes)
+    const contact = new WaterContact(bed)
+    splashes.setWaterContact(contact)
+    floating.setWaterContact(contact)
+    floating.setCamera(new Vector3(0, 2.5, 16))
+    const calm = new WindModel(7, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      // Beside a resting leaf: open water, clear of the island.
+      const [bx, , bz] = required(positionsOf(floating)[1])
+      const before = positionsOf(floating)
+      const caught = floating.catchLeaf(
+        bx + 0.3,
+        WATER_LEVEL + 0.2,
+        bz,
+        { x: 0.2, y: -0.8, z: 0 },
+        0.2,
+        new Color(0xc0612b),
+      )
+      expect(caught).toBe(true)
+      for (let frame = 0; frame < 300; frame++) {
+        const time = frame / 60
+        floating.update(time, calm.sample(time))
+        splashes.update(time, calm.sample(time))
+      }
+      // The pooled leaf that was hidden before the catch.
+      const leaf = positionsOf(floating).find(
+        (p, i) => Number.isNaN(required(before[i])[0]) && !Number.isNaN(p[0]),
+      )
+      const [, y] = required(leaf)
+      // Afloat at the surface: neither sunk nor hovering.
+      expect(required(y)).toBeGreaterThan(WATER_LEVEL - 0.03)
+      expect(required(y)).toBeLessThan(WATER_LEVEL + 0.15)
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
   })
 })

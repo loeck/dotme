@@ -13,15 +13,15 @@
     "test:watch": "vitest",
     "e2e": "playwright test",
     "benchmark:scene": "node scripts/benchmark-scene.ts",
-    "lint": "oxlint --type-aware",
+    "lint": "oxlint --type-aware --deny-warnings",
     "lint:fix": "oxlint --type-aware --fix",
     "fmt": "oxfmt .",
     "fmt:check": "oxfmt --check .",
-    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm test && pnpm build && pnpm bundle:size",
+    "check": "pnpm typecheck && pnpm lint && pnpm fmt:check && pnpm knip && pnpm test && pnpm build && pnpm bundle:size && pnpm csp",
     "prepare": "husky",
     "bundle:size": "node scripts/bundle-size.ts",
-    "e2e:gpu": "playwright test --config playwright.gpu.config.ts",
-    "e2e:extended": "playwright test --config playwright.extended.config.ts"
+    "csp": "node scripts/csp.ts",
+    "knip": "knip"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "0.21.0",
@@ -32,7 +32,9 @@
     "@tailwindcss/vite": "4.3.4",
     "@types/node": "26.6.6",
     "@types/three": "0.187.0",
+    "happy-dom": "20.14.5",
     "husky": "9.1.7",
+    "knip": "6.44.2",
     "lint-staged": "17.6.0",
     "oxfmt": "0.76.0",
     "oxlint": "1.91.0",
@@ -44,7 +46,7 @@
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,cjs,mjs,cts,mts}": [
-      "oxlint --type-aware --fix",
+      "oxlint --type-aware --deny-warnings --fix",
       "oxfmt"
     ],
     "*.{json,jsonc,css,md,html}": [

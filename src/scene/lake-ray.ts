@@ -19,6 +19,7 @@ import { LAKE_BOUNDS, WATER_LEVEL, lakeIndex } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { FISH_LAYER, bedDepth } from './lake-fish'
 import { seabedHash } from './lake-seabed'
+import { clamp } from './math'
 import { contactNoise } from './water-noise'
 
 export type RayCircuit = Readonly<{
@@ -52,8 +53,6 @@ function rayFootprintDepth(bed: LakeBed, x: number, z: number) {
   }
   return depth
 }
-
-const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(high, value))
 
 export function selectRayCircuit(bed: LakeBed, seed: number): RayCircuit {
   let best: RayCircuit = { cx: 0, cz: -18, rx: 5, rz: 4, phase: 0, depth: 1.1 }

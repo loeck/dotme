@@ -1,7 +1,8 @@
-import { Vector3 } from 'three/webgpu'
+import { Matrix4, Quaternion, Vector3 } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
-import { FallingLeaves, LEAVES } from './falling-leaves'
+import { required } from '../invariant'
+import { FallingLeaves, LEAVES, paletteColour, seasonPalette } from './falling-leaves'
 import { GUST, WindGusts } from './wind-gusts'
 
 function seeded(seed: number) {
@@ -82,6 +83,140 @@ describe('falling leaves', () => {
     expect(leaves.count).toBeLessThanOrEqual(32)
     leaves.clear()
     expect(leaves.count).toBe(0)
+    leaves.dispose()
+  })
+})
+
+describe('seasonal leaf fall', () => {
+  it('lets autumn leaves go without a gust and colours them from the season', () => {
+    const leaves = forest()
+    leaves.setSeason({ rate: 3.5, trickle: 1, autumn: 1, winter: 0 })
+    let shed = 0
+    for (let t = 0; t < 600; t += 0.1) {
+      const before = leaves.count
+      leaves.update(t, 0.1, calm, 0.25, undefined)
+      shed += Math.max(0, leaves.count - before)
+    }
+    // About 0.008 leaves a second from a 2 m crown band in a light breeze.
+    expect(shed).toBeGreaterThan(0)
+    expect(shed).toBeLessThan(15)
+    leaves.dispose()
+  })
+
+  it('picks palettes by season weight', () => {
+    const summer = { rate: 1, trickle: 0, autumn: 0, winter: 0 }
+    const autumn = { rate: 3.5, trickle: 1, autumn: 1, winter: 0 }
+    const winter = { rate: 0.4, trickle: 0, autumn: 0, winter: 1 }
+    expect(seasonPalette(summer, 0.5)).not.toBe(seasonPalette(autumn, 0.5))
+    expect(seasonPalette(winter, 0.5)).not.toBe(seasonPalette(autumn, 0.5))
+    // A colour is always drawn from its palette, whatever the pick.
+    for (const pick of [0, 0.3, 0.999]) {
+      const palette = seasonPalette(autumn, 0.5)
+      expect(palette.map(([hex]) => hex)).toContain(paletteColour(palette, pick))
+    }
+  })
+})
+
+const surface = (x: number, _z: number, time: number) => 0.03 * Math.sin(x * 2 - time * 3)
+
+describe('leaves as bodies', () => {
+  it('rest on the ground below them and lie flat there', () => {
+    const leaves = forest()
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    for (let t = 1; t < 9; t += 1 / 30) leaves.update(t, 1 / 30, calm, 0, undefined)
+    expect(leaves.grounded).toBeGreaterThan(0)
+    const matrix = new Matrix4(),
+      position = new Vector3(),
+      rotation = new Quaternion(),
+      scale = new Vector3(),
+      normal = new Vector3()
+    for (let i = 0; i < leaves.mesh.count; i++) {
+      leaves.mesh.getMatrixAt(i, matrix)
+      matrix.decompose(position, rotation, scale)
+      if (scale.x === 0) continue
+      expect(position.y).toBeGreaterThanOrEqual(0)
+      expect(position.y).toBeLessThan(0.05)
+      expect(Math.abs(normal.set(0, 1, 0).applyQuaternion(rotation).y)).toBeGreaterThan(0.95)
+    }
+    leaves.dispose()
+  })
+
+  it('float on the live surface, riding its waves and drifting', () => {
+    const ripples: number[] = []
+    const leaves = new FallingLeaves(
+      32,
+      new Vector3(0, 2, 16),
+      () => ({ y: 0, water: true }),
+      (x) => ripples.push(x),
+      seeded(3),
+      {
+        water: (x, z, time, _wind, out) => {
+          out[0] = surface(x, z, time)
+          out[1] = 0.06 * Math.cos(x * 2 - time * 3)
+          out[2] = 0
+        },
+      },
+    )
+    leaves.setSources(Float32Array.from([0, 6, 0, 2]))
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    let t = 1
+    for (; t < 9; t += 1 / 60) leaves.update(t, 1 / 60, calm, 0, undefined)
+    expect(leaves.floating).toBeGreaterThan(0)
+    expect(ripples.length).toBeGreaterThan(0)
+    const matrix = new Matrix4(),
+      position = new Vector3()
+    for (let i = 0; i < leaves.mesh.count; i++) {
+      leaves.mesh.getMatrixAt(i, matrix)
+      position.setFromMatrixPosition(matrix)
+      if (matrix.elements[0] === 0 && matrix.elements[5] === 0) continue
+      // On the water, never under it: just above the displaced surface it rides.
+      const above = position.y - surface(position.x, position.z, t - 1 / 60)
+      expect(above).toBeGreaterThan(LEAVES.floatClearance)
+      // Plus the lift that keeps the near edge of a camera-tilted leaf out of the water.
+      expect(above).toBeLessThan(
+        0.05 + (LEAVES.size * 1.2 * Math.sin(LEAVES.floatTiltMax)) / 2 + 0.03,
+      )
+    }
+    leaves.dispose()
+  })
+
+  it('hand leaves reaching open water to the physical floaters', () => {
+    const caught: number[][] = []
+    const leaves = new FallingLeaves(
+      32,
+      new Vector3(0, 2, 16),
+      () => ({ y: 0, water: true }),
+      () => {},
+      seeded(3),
+      {
+        handOff: (x, y, z, velocity, width) => {
+          caught.push([x, y, z, velocity.y, width])
+          return true
+        },
+      },
+    )
+    leaves.setSources(Float32Array.from([0, 6, 0, 2]))
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    for (let t = 1; t < 9; t += 1 / 60) leaves.update(t, 1 / 60, calm, 0, undefined)
+    expect(caught.length).toBeGreaterThan(0)
+    // Taken at the water, and no longer drawn or floating here.
+    for (const [, y, , , width] of caught) {
+      expect(Math.abs(required(y))).toBeLessThan(0.1)
+      expect(required(width)).toBeGreaterThan(0)
+    }
+    expect(leaves.floating).toBe(0)
     leaves.dispose()
   })
 })

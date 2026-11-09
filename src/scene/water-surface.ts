@@ -30,7 +30,7 @@ import type { WindState } from './wind'
 
 // Crossing swells and directionally spread shorter wind waves. Band amplitudes
 // set the energy without one coherent family of parallel crests.
-export const WIND_WAVES = [
+const WIND_WAVES = [
   [0.55, 12.7, 0.017, 1.3],
   [1.92, 8.3, 0.011, 4.7],
   [1.15, 5.1, 0.01, 2.1],

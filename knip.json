@@ -1,0 +1,6 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["src/scene/world.worker.ts", "scripts/*.ts"],
+  "project": ["src/**/*.ts", "e2e/**/*.ts", "scripts/**/*.ts", "*.config.ts"],
+  "ignoreDependencies": ["tailwindcss"]
+}

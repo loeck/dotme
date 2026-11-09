@@ -1,7 +1,8 @@
 import { Data3DTexture, LinearFilter, RepeatWrapping, RGFormat } from 'three/webgpu'
 
+import { mix } from './math'
+
 const smooth = (t: number) => t * t * (3 - 2 * t)
-const mix = (a: number, b: number, t: number) => a + (b - a) * t
 const wrap = (x: number, period: number) => ((x % period) + period) % period
 function hash(x: number, y: number, z: number, seed: number, period: number) {
   let h =

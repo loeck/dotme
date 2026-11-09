@@ -4,7 +4,6 @@ import type { Camera, Object3D, Ray, Scene, Vector3, Vector4, WebGPURenderer } f
 import type { FishBait } from './fish-pointer'
 import { PointerDisturbance } from './fish-pointer'
 import { FloatingBodies } from './floating-bodies'
-import { FoamDrift } from './foam-drift'
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
@@ -55,7 +54,6 @@ export class SceneDetails {
   private readonly splashes: LakeSplashes
   private readonly floating: FloatingBodies
   private waterlines?: readonly Vector4[]
-  private readonly foam: FoamDrift
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
   private readonly wetness = this.resources.own(new ShoreWetness())
@@ -63,6 +61,8 @@ export class SceneDetails {
   /** Roots left out of the lighting probe's compile pass. */
   private readonly probeStates: Array<{ root: Object3D; visible: boolean }>
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
+  /** 0–1: fireflies glow on late-spring and summer nights only (`seasonalLife`). */
+  private fireflySeason = 1
 
   private readonly reducedMotion: boolean
 
@@ -90,7 +90,6 @@ export class SceneDetails {
     this.floating = this.resources.own(
       new FloatingBodies(scene, world.lakeBed, world.seed, mobile, physics, this.splashes),
     )
-    this.foam = this.resources.own(new FoamDrift(scene, world.lakeBed, world.seed, mobile))
     if (world.waterfall) {
       this.waterfall = this.resources.own(
         new LakeWaterfall(
@@ -112,7 +111,6 @@ export class SceneDetails {
       this.splashes.impacts.mesh,
       this.splashes.impacts.slopes,
       this.floating.mesh,
-      this.foam.mesh,
     ]
     if (this.waterfall) roots.push(this.waterfall.group)
     this.probeStates = roots.map((root) => ({ root, visible: root.visible }))
@@ -201,8 +199,22 @@ export class SceneDetails {
     this.floating.setLeafSources(crowns)
   }
 
+  /** See `FloatingBodies.catchLeaf`. */
+  catchLeaf(...leaf: Parameters<FloatingBodies['catchLeaf']>) {
+    if (this.disposed || this.reducedMotion) return false
+    return this.floating.catchLeaf(...leaf)
+  }
+
+  setFloaterCamera(camera: Vector3) {
+    this.floating.setCamera(camera)
+  }
+
   setWaterfallBlock(across: number, height: number, radius: number, strength: number) {
     this.waterfall?.setBlock(across, height, radius, strength)
+  }
+
+  setFireflySeason(share: number) {
+    this.fireflySeason = Number.isFinite(share) ? Math.max(0, Math.min(1, share)) : 1
   }
 
   setEnvironment(environment: Partial<DetailEnvironment>) {
@@ -240,7 +252,6 @@ export class SceneDetails {
     this.waterfall?.update(time, daylight, intro, wind)
     this.floating.update(time, wind, this.reducedMotion)
     if (this.waterlines) this.floating.waterlines(this.waterlines)
-    this.foam.update(time, wind, this.reducedMotion)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     // The shared world step is owned by splashes; curtain landings reach the lake next frame.
     if (!this.reducedMotion) this.waterfall?.syncCurtain()
@@ -248,7 +259,7 @@ export class SceneDetails {
     this.fireflies.update(time, wind, {
       reducedMotion: this.reducedMotion,
       nightFactor: 1 - daylight,
-      intensity: intro * (1 - rainIntensity * 0.8),
+      intensity: intro * (1 - rainIntensity * 0.8) * this.fireflySeason,
       pointer: scenePointer,
       gather,
     })

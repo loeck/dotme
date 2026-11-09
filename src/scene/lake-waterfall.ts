@@ -283,6 +283,7 @@ export class LakeWaterfall {
       const positions: number[] = [],
         normals: number[] = [],
         coordinates: number[] = [],
+        streams: number[] = [],
         indices: number[] = []
       const quad = (x0: number, z0: number, x1: number, z1: number, y0 = height, y1 = height) => {
         const start = positions.length / 3
@@ -295,6 +296,7 @@ export class LakeWaterfall {
           positions.push(x, y, z)
           normals.push(0, 1, 0)
           coordinates.push(x, z)
+          streams.push(0)
         }
         indices.push(start, start + 2, start + 1, start, start + 3, start + 2)
       }
@@ -323,14 +325,79 @@ export class LakeWaterfall {
       basinGeometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
       basinGeometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3))
       basinGeometry.setAttribute('uv', new BufferAttribute(new Float32Array(coordinates), 2))
+      basinGeometry.setAttribute('aStream', new BufferAttribute(new Float32Array(streams), 1))
+      basinGeometry.setAttribute(
+        'aShown',
+        new BufferAttribute(new Float32Array(streams.length).fill(1), 1),
+      )
       basinGeometry.setIndex(indices)
+      // The feeding stream: one ribbon down its channel into the pool, drawn with the pool's
+      // material. Its coordinates run along the course, so the filaments flow towards the
+      // pool; steeper reaches break into whiter water.
+      const course = fall.stream.points
+      const ribbon: number[] = [],
+        ribbonNormals: number[] = [],
+        ribbonCoordinates: number[] = [],
+        ribbonSlopes: number[] = [],
+        ribbonShown: number[] = [],
+        ribbonIndices: number[] = []
+      let travelled = 0
+      course.forEach((point, i) => {
+        const before = course[Math.max(0, i - 1)] ?? point,
+          after = course[Math.min(course.length - 1, i + 1)] ?? point
+        const dx = after.x - before.x,
+          dz = after.z - before.z
+        const span = Math.hypot(dx, dz) || 1
+        const half = fall.stream.width / 2
+        const slope = (before.y - after.y) / span
+        if (i > 0) {
+          const previous = course[i - 1] ?? point
+          travelled += Math.hypot(point.x - previous.x, point.z - previous.z)
+        }
+        const start = ribbon.length / 3
+        for (const side of [-1, 1]) {
+          const wx = point.x - fall.x + (dz / span) * half * side,
+            wz = point.z - fall.z - (dx / span) * half * side
+          ribbon.push(
+            wx * forwardZ - wz * forwardX,
+            point.y - WATER_LEVEL + 0.01,
+            wx * forwardX + wz * forwardZ,
+          )
+          ribbonNormals.push(0, 1, 0)
+          ribbonCoordinates.push(side * half, travelled)
+          ribbonSlopes.push(Math.min(1, 0.5 + slope * 2))
+          ribbonShown.push(point.shown)
+        }
+        if (i > 0) ribbonIndices.push(start - 2, start - 1, start + 1, start - 2, start + 1, start)
+      })
+      const streamGeometry = this.resources.own(new BufferGeometry())
+      streamGeometry.setAttribute('position', new BufferAttribute(new Float32Array(ribbon), 3))
+      streamGeometry.setAttribute('normal', new BufferAttribute(new Float32Array(ribbonNormals), 3))
+      streamGeometry.setAttribute('uv', new BufferAttribute(new Float32Array(ribbonCoordinates), 2))
+      streamGeometry.setAttribute('aStream', new BufferAttribute(new Float32Array(ribbonSlopes), 1))
+      streamGeometry.setAttribute('aShown', new BufferAttribute(new Float32Array(ribbonShown), 1))
+      streamGeometry.setIndex(ribbonIndices)
       const basinPoint = uv()
+      const stream = attribute('aStream', 'float')
       const approach = float(1).sub(smoothstep(0.1, 1.4, basinPoint.y.abs()))
       const flowWidth = basinPoint.y.abs().mul(0.35).add(1)
       const basinNoise = contactNoise(
         vec2(basinPoint.x.div(flowWidth).mul(6), basinPoint.y.mul(2).sub(this.time.mul(0.7))),
       )
-      const filament = smoothstep(0.55, 0.82, basinNoise).mul(approach)
+      // The stream breaks into soft, round foam drifting down its course rather than streaks
+      // along it, which a channel seen end-on would turn into vertical stripes. Seen from afar
+      // (a few pixels per metre) the foam resolves to its mean instead of aliasing.
+      const streamNoise = contactNoise(
+        vec2(basinPoint.x.mul(2.4), basinPoint.y.sub(this.time.mul(1.4)).mul(2.4)),
+      )
+      const streamDetail = float(1).sub(
+        smoothstep(0.15, 0.45, fwidth(basinPoint).length().mul(2.4)),
+      )
+      const streamFoam = mix(float(0.6), smoothstep(0.2, 0.75, streamNoise), streamDetail).mul(
+        stream,
+      )
+      const flowing = stream.ceil()
+      const filament = mix(smoothstep(0.55, 0.82, basinNoise).mul(approach), streamFoam, flowing)
       const ripple = sin(
         positionLocal.x.mul(4.7).add(positionLocal.z.mul(3.1)).sub(this.time.mul(1.3)),
       )
@@ -345,13 +412,28 @@ export class LakeWaterfall {
         .mul(sin(positionLocal.x.mul(9).sub(this.time.mul(3.1))))
         .mul(0.006)
       basin.flowPosition = positionLocal.add(vec3(0, ripple.add(lipMotion), 0))
-      basin.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
+      // Broken, tumbling water faces every way: lean the stream's normal towards the viewer,
+      // so its foam is lit rather than mirroring the trees and sky at a grazing angle.
+      basin.normalNode = normalize(
+        mix(
+          normalize(cross(dFdx(positionView), dFdy(positionView))),
+          normalize(positionView.negate()),
+          flowing.mul(0.6),
+        ),
+      )
       // Dark, turbid pool water that mirrors the sky, with pale filaments drawn
       // towards the lip.
-      basin.colorNode = mix(vec3(0.05, 0.065, 0.058), vec3(0.42, 0.46, 0.44), filament.mul(0.45))
-      basin.roughnessNode = mix(0.04, 0.3, filament)
-      basin.opacityNode = mix(0.86, 0.94, filament).mul(this.opacity)
+      basin.colorNode = mix(
+        mix(vec3(0.05, 0.065, 0.058), vec3(0.16, 0.19, 0.17), flowing),
+        mix(vec3(0.42, 0.46, 0.44), vec3(0.62, 0.66, 0.64), flowing),
+        filament.mul(mix(0.45, 1, flowing)),
+      )
+      basin.roughnessNode = mix(mix(0.04, 0.6, flowing), mix(0.3, 0.85, flowing), filament)
+      basin.opacityNode = mix(0.86, 0.94, filament)
+        .mul(this.opacity)
+        .mul(attribute('aShown', 'float'))
       this.add(basinGeometry, basin, 'waterfall-basin')
+      if (course.length > 1) this.add(streamGeometry, basin, 'waterfall-stream')
       const exitSpeed = 0.35
       const duration =
         (Math.sqrt(exitSpeed * exitSpeed + 2 * GRAVITY * height) - exitSpeed) / GRAVITY
@@ -825,6 +907,7 @@ export class LakeWaterfall {
     const extent = this.parcelExtent
     if (!active) this.clearPendingImpacts()
     let fragment: SplashJet | undefined
+    let foamChanged = false
     const count = this.born.length
     for (let i = 0; i < count; i++) {
       const base = i * 3
@@ -853,10 +936,15 @@ export class LakeWaterfall {
       this.velocities[base + 2] = dxn * vx + dzn * vz
       const proximity = this.blockerFoam(lx, ly, lz)
       const struckBlocker = active && proximity > 0.55 && this.blockerActive && this.struck[i] !== 0
-      this.foams[i] = Math.min(
+      const foam = Math.min(
         1,
         proximity + (struckBlocker ? Math.min(0.35, Math.hypot(vx, vy, vz) * 0.04) : 0),
       )
+      // Foam is zero away from the cursor's blocker: upload it only when some value changed.
+      if (this.foams[i] !== foam) {
+        this.foams[i] = foam
+        foamChanged = true
+      }
       const previous = required(this.previousHeights[i])
       this.previousHeights[i] = ly
       // Wind waves stay within this narrow band; avoid sampling their full
@@ -924,9 +1012,10 @@ export class LakeWaterfall {
         impact.speed = 0
       }
     }
+    // Every parcel moves each step, so positions and velocities upload whole.
     this.positionsAttribute.needsUpdate = true
     this.velocitiesAttribute.needsUpdate = true
-    this.foamsAttribute.needsUpdate = true
+    if (foamChanged) this.foamsAttribute.needsUpdate = true
   }
 
   private clearPendingImpacts() {

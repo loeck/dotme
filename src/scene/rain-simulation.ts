@@ -35,7 +35,7 @@ export function deflectDrop(
 const bounded = (n: number, fallback: number, min: number, max: number) =>
   Number.isFinite(n) ? Math.max(min, Math.min(max, n)) : fallback
 
-export function normalizeRainState(state: RainState): RainState {
+function normalizeRainState(state: RainState): RainState {
   return {
     intensity: bounded(state.intensity, DEFAULT_RAIN.intensity, 0, 1),
     wind: {

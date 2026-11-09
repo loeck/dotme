@@ -1,0 +1,14 @@
+{
+  "name": "Loëck",
+  "short_name": "Loëck",
+  "description": "Loëck builds some stuff in Paris.",
+  "start_url": "/",
+  "display": "browser",
+  "background_color": "#080a0d",
+  "theme_color": "#080a0d",
+  "icons": [
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" },
+    { "src": "/apple-touch-icon.png", "type": "image/png", "sizes": "180x180" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" }
+  ]
+}

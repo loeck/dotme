@@ -1,10 +1,11 @@
-import { attribute, cos, positionLocal, sin, uniform, vec3 } from 'three/tsl'
+import { attribute, cos, float, positionLocal, sin, uniform, uv, vec3, vec4 } from 'three/tsl'
 import {
   Color,
   DataTexture,
   DodecahedronGeometry,
   DoubleSide,
   Euler,
+  AlwaysDepth,
   HalfFloatType,
   InstancedBufferAttribute,
   InstancedMesh,
@@ -13,7 +14,9 @@ import {
   DepthTexture,
   Group,
   Mesh,
+  MeshBasicNodeMaterial,
   MeshStandardNodeMaterial,
+  NoBlending,
   OrthographicCamera,
   PerspectiveCamera,
   Matrix4,
@@ -29,7 +32,8 @@ import {
   Vector4,
   Vector2,
 } from 'three/webgpu'
-import type { Scene, WebGPURenderer } from 'three/webgpu'
+import { Scene } from 'three/webgpu'
+import type { WebGPURenderer } from 'three/webgpu'
 
 import { SceneRenderDiagnostics } from './diagnostics'
 import type { LakeBed } from './lake-bed'
@@ -88,6 +92,26 @@ export class SubmergedScene {
     emissive: 0x161f12,
   })
   private readonly grassTime = uniform(0)
+  /**
+   * Clears the fish region alone: attachment clears cover the whole atlas on WebGPU, which
+   * would also erase the bed between its refreshes. Transparent black at the far plane: the
+   * depth test stays on, always passing, because WebGL stops writing depth with it off.
+   */
+  private readonly regionClear = new Scene()
+  private readonly regionClearCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+  private readonly regionClearMaterial = new MeshBasicNodeMaterial({
+    blending: NoBlending,
+    depthTest: true,
+    depthFunc: AlwaysDepth,
+    depthWrite: true,
+    toneMapped: false,
+    fog: false,
+  })
+  private readonly regionClearGeometry = new PlaneGeometry(2, 2)
+  private readonly farDepth = uniform(1)
+  private readonly savedClearColor = new Color()
+  private readonly savedViewport = new Vector4()
+  private readonly savedScissor = new Vector4()
   private rockMesh: InstancedMesh | undefined
   private grassMesh: InstancedMesh | undefined
 
@@ -139,6 +163,12 @@ export class SubmergedScene {
       object.matrixAutoUpdate = object.matrixWorldAutoUpdate = false
     })
     scene.add(this.group)
+    this.regionClearMaterial.vertexNode = vec4(uv().mul(2).sub(1), 0, 1)
+    this.regionClearMaterial.fragmentNode = vec4(0)
+    this.regionClearMaterial.depthNode = float(this.farDepth)
+    const clear = new Mesh(this.regionClearGeometry, this.regionClearMaterial)
+    clear.frustumCulled = false
+    this.regionClear.add(clear)
   }
 
   private buildRocks(bed: LakeBed, seed: number) {
@@ -269,9 +299,23 @@ export class SubmergedScene {
     )
     this.inverseViewProjection.copy(this.viewProjection).invert()
     await compileCapture(this.fishCamera)
+    this.farDepth.value = renderer.reversedDepthBuffer ? 0 : 1
+    const previous = renderer.getRenderTarget()
+    let compiled: Promise<void>
+    try {
+      renderer.setRenderTarget(this.target)
+      compiled = renderer.compileAsync(this.regionClear, this.regionClearCamera)
+    } finally {
+      renderer.setRenderTarget(previous)
+    }
+    await compiled
   }
 
-  render(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera) {
+  /**
+   * Refreshes the fish region from `camera`, and with `bed` the static bed capture too (its
+   * seagrass sways and its caustics move, so it still refreshes, just less often).
+   */
+  render(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, bed = true) {
     if (this.camera.coordinateSystem !== renderer.coordinateSystem) {
       this.camera.coordinateSystem = renderer.coordinateSystem
       this.camera.updateProjectionMatrix()
@@ -283,32 +327,36 @@ export class SubmergedScene {
     }
     const previous = renderer.getRenderTarget()
     const background = scene.background
-    const clearColor = renderer.getClearColor(new Color())
+    const clearColor = renderer.getClearColor(this.savedClearColor)
     const clearAlpha = renderer.getClearAlpha()
-    const viewport = renderer.getViewport(new Vector4())
-    const scissor = renderer.getScissor(new Vector4())
+    const viewport = renderer.getViewport(this.savedViewport)
+    const scissor = renderer.getScissor(this.savedScissor)
     const scissorTest = renderer.getScissorTest()
     const autoClear = renderer.autoClear
     try {
-      // Attachment clears cover the entire texture on WebGPU, independent of
-      // the scissor. Clear the atlas once, then preserve both capture regions.
-      renderer.setScissorTest(false)
-      this.target.viewport.set(0, 0, this.target.width, this.target.height)
-      this.target.scissor.copy(this.target.viewport)
-      renderer.setRenderTarget(this.target)
       renderer.setClearColor(0, 0)
-      renderer.clear()
+      scene.background = null
+      if (bed) {
+        // Attachment clears cover the entire texture on WebGPU, independent of
+        // the scissor. Clear the atlas once, then preserve both capture regions.
+        renderer.setScissorTest(false)
+        this.target.viewport.set(0, 0, this.target.width, this.target.height)
+        this.target.scissor.copy(this.target.viewport)
+        renderer.setRenderTarget(this.target)
+        renderer.clear()
+      }
       renderer.autoClear = false
       renderer.setScissorTest(true)
-      scene.background = null
-      // Render-target regions use device pixels. Renderer.setViewport would
-      // multiply by DPR again and move the fish region off-atlas on mobile.
-      this.target.viewport.set(0, 0, this.bedSize, this.bedSize)
-      this.target.scissor.copy(this.target.viewport)
-      renderer.setRenderTarget(this.target)
-      const bed = SceneRenderDiagnostics.beginActive('submergedBed', renderer.info.render.calls)
-      renderer.render(scene, this.camera)
-      SceneRenderDiagnostics.endActive(bed, renderer.info.render.calls)
+      if (bed) {
+        // Render-target regions use device pixels. Renderer.setViewport would
+        // multiply by DPR again and move the fish region off-atlas on mobile.
+        this.target.viewport.set(0, 0, this.bedSize, this.bedSize)
+        this.target.scissor.copy(this.target.viewport)
+        renderer.setRenderTarget(this.target)
+        const pass = SceneRenderDiagnostics.beginActive('submergedBed', renderer.info.render.calls)
+        renderer.render(scene, this.camera)
+        SceneRenderDiagnostics.endActive(pass, renderer.info.render.calls)
+      }
       this.fishCamera.copy(camera)
       this.fishCamera.coordinateSystem = renderer.coordinateSystem
       this.fishCamera.updateProjectionMatrix()
@@ -318,11 +366,10 @@ export class SubmergedScene {
         this.fishCamera.matrixWorld,
         this.fishCamera.projectionMatrixInverse,
       )
-      scene.background = null
-      renderer.setClearColor(0, 0)
       this.target.viewport.set(0, this.bedSize, this.fishWidth, this.fishHeight)
       this.target.scissor.copy(this.target.viewport)
       renderer.setRenderTarget(this.target)
+      if (!bed) renderer.render(this.regionClear, this.regionClearCamera)
       const fish = SceneRenderDiagnostics.beginActive('submergedFish', renderer.info.render.calls)
       renderer.render(scene, this.fishCamera)
       SceneRenderDiagnostics.endActive(fish, renderer.info.render.calls)
@@ -347,5 +394,7 @@ export class SubmergedScene {
     this.grassMesh?.geometry.dispose()
     this.rockMaterial.dispose()
     this.grassMaterial.dispose()
+    this.regionClearMaterial.dispose()
+    this.regionClearGeometry.dispose()
   }
 }

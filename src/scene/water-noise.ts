@@ -24,6 +24,10 @@ export function tiledNoise(p: Node<'vec2'>, period: number) {
   return loopNoise(p, [period, period])
 }
 
+/** A lattice index wrapped into `[0, size)`, or left as is on an open axis (`null`). */
+const wrapAxis = (index: Node<'float'>, size: number | null) =>
+  size === null ? index : index.sub(floor(index.div(size)).mul(size))
+
 /**
  * Value noise whose lattice repeats every `period[0]` cells across and `period[1]`
  * cells down. A pattern scrolled by a wrapped clock stays seamless when each axis
@@ -34,9 +38,8 @@ export function loopNoise(p: Node<'vec2'>, period: readonly [number | null, numb
   const cell = floor(p),
     f0 = fract(p),
     f = f0.mul(f0).mul(vec2(3).sub(f0.mul(2)))
-  const axis = (index: Node<'float'>, size: number | null) =>
-    size === null ? index : index.sub(floor(index.div(size)).mul(size))
-  const wrap = (index: Node<'vec2'>) => vec2(axis(index.x, period[0]), axis(index.y, period[1]))
+  const wrap = (index: Node<'vec2'>) =>
+    vec2(wrapAxis(index.x, period[0]), wrapAxis(index.y, period[1]))
   const i0 = wrap(cell),
     i1 = wrap(cell.add(1))
   const key = vec2(127.1, 311.7)

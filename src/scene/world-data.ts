@@ -66,7 +66,7 @@ export type PreparedWorld = TerrainPart &
     fromCache: Promise<boolean>
   }
 /** Worker requests, one worker each; the forest is the longest and runs alongside the others. */
-export const WORLD_PARTS = ['terrain', 'surfaces', 'vegetation'] as const
+const WORLD_PARTS = ['terrain', 'surfaces', 'vegetation'] as const
 export type WorldPart = (typeof WORLD_PARTS)[number]
 export type WorldRequest = Readonly<{
   seed: number

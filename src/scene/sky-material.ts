@@ -30,6 +30,7 @@ import { distantPeaks, horizonNoise } from './distant-horizon'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { sampleMoonLight } from './moon-light'
+import { rainbowSpectrum, stagedRainbowCentre } from './rainbow'
 import type { SkyAtmosphere } from './sky-atmosphere'
 import { milkyWay, stellarRadiance } from './stars'
 import type { VolumetricClouds } from './volumetric-clouds'
@@ -68,6 +69,11 @@ function skyUniforms(seed: number, mobile: boolean) {
     uAurora: uniform(hasAurora(seed) ? 1 : 0),
     /** Lightning inside the clouds, 0 when dark. */
     uFlash: uniform(0),
+    /** Ground fog, 0–1: the sun and moon dim and spread into a glow, the horizon greys. */
+    uFog: uniform(0),
+    /** Rainbow strength (`rainbowFactor`) and its staged centre (`stagedRainbowCentre`). */
+    uRainbow: uniform(0),
+    uRainbowCentre: uniform(new Vector3(0, -1, 0)),
   }
 }
 type SkyUniforms = ReturnType<typeof skyUniforms>
@@ -83,7 +89,15 @@ function solarDisc(direction: Node<'vec3'>, u: SkyUniforms) {
   const limb = pow(sqrt(clamp(radius.mul(radius).oneMinus(), 0.0001, 1)), vec3(0.397, 0.503, 0.652))
   const disc = smoothstep(0.94, 1.06, radius).oneMinus().mul(front)
   const corona = exp(radius.mul(-1.6)).mul(0.006).mul(front)
-  return u.uSunDisc.rgb.mul(limb.mul(disc).add(corona)).mul(u.uShowSun)
+  // Fog scatters the disc into a soft, pale glow round a dim sun.
+  const veiled = float(1).sub(u.uFog.mul(0.82))
+  const angle = acos(clamp(direction.dot(sun), -1, 1))
+  const glow = exp(angle.pow2().mul(-260))
+    .mul(0.5)
+    .add(exp(angle.pow2().mul(-22)).mul(0.08))
+    .mul(u.uFog)
+    .mul(1 / 54)
+  return u.uSunDisc.rgb.mul(limb.mul(disc).add(corona).mul(veiled).add(glow)).mul(u.uShowSun)
 }
 
 export class SkyMaterial extends MeshBasicNodeMaterial {
@@ -145,7 +159,14 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
       .add(exp(moonAngle.pow(2).mul(-60)).mul(0.02))
     color = color.add(
       vec3(0.63, 0.77, 1)
-        .mul(disc.mul(surface).mul(2.2).mul(u.uShowMoon).add(halo))
+        .mul(
+          disc
+            .mul(surface)
+            .mul(2.2)
+            .mul(u.uShowMoon)
+            .mul(u.uFog.mul(-0.75).add(1))
+            .add(halo.mul(u.uFog.mul(2.5).add(1))),
+        )
         .mul(u.uMoonIntensity),
     )
     const cloud = clouds.sample(direction)
@@ -242,6 +263,20 @@ export class SkyMaterial extends MeshBasicNodeMaterial {
     const airGrey = luminanceOf(air)
     const mistColor = mix(vec3(airGrey), air, 0.22).mul(0.55)
     color = mix(color, mistColor, mistAmount)
+    // Fog greys the low sky into the air's own light; the volumetric air thickens it further in
+    // the main view, and this keeps the lake's reflection of the sky foggy too.
+    const fogBand = exp(max(elevation, 0).mul(-7)).mul(u.uFog.mul(0.85))
+    color = mix(color, mix(vec3(airGrey), air, 0.35).mul(0.7), fogBand)
+    // The rainbow, lit by the sun on the drops (its colour) about as bright as the sky round it,
+    // and only as far as the sun itself is clear of the cloud.
+    const sunClear = clouds.sample(u.uSunDirection).a
+    const sunTint = u.uSunDisc.rgb.div(max(luminanceOf(u.uSunDisc.rgb), 0.0001))
+    color = color.add(
+      rainbowSpectrum(direction, u.uRainbowCentre)
+        .mul(sunTint)
+        .mul(airGrey)
+        .mul(u.uRainbow.mul(mix(0.3, 1, sunClear)).mul(0.9)),
+    )
     this.fragmentNode = vec4(
       color.mul(u.uReflectionCapture.oneMinus()),
       float(1).sub(u.uReflectionCapture),
@@ -268,4 +303,11 @@ export function updateSkyLighting(material: SkyMaterial, light: LightingState, s
   u.uShowSun.value = showSun ? 1 : 0
   u.uMoonDirection.value.copy(light.moonDirection)
   u.uMoonIntensity.value = light.moonIntensity
+}
+/** Weather the sky draws itself: ground fog and the rainbow (uniforms only). */
+export function updateSkyWeather(material: SkyMaterial, fog: number, rainbow: number) {
+  const u = material.uniforms
+  u.uFog.value = Math.max(0, Math.min(1, fog))
+  u.uRainbow.value = Math.max(0, Math.min(1, rainbow))
+  stagedRainbowCentre(u.uSunDirection.value, u.uRainbowCentre.value)
 }

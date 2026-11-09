@@ -1,15 +1,16 @@
-import { exp, float, fract, max, mix, sin, smoothstep, vec2, vec3, atan } from 'three/tsl'
+import { exp, float, fract, max, mix, smoothstep, vec2, vec3, atan } from 'three/tsl'
 import type { Node } from 'three/webgpu'
 
-const hash = (v: Node<'vec2'>) => fract(sin(v.dot(vec2(127.1, 311.7))).mul(43758.5453))
+import { hash12 } from './shader-noise'
+
 export function horizonNoise(p: Node<'vec2'>) {
   const i = p.floor(),
     f0 = fract(p),
     f = f0.mul(f0).mul(float(3).sub(f0.mul(2)))
 
   return mix(
-    mix(hash(i), hash(i.add(vec2(1, 0))), f.x),
-    mix(hash(i.add(vec2(0, 1))), hash(i.add(1)), f.x),
+    mix(hash12(i), hash12(i.add(vec2(1, 0))), f.x),
+    mix(hash12(i.add(vec2(0, 1))), hash12(i.add(1)), f.x),
     f.y,
   )
 }

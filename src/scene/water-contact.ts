@@ -5,13 +5,12 @@ import type { WindState } from './wind'
 
 type Disturbance = { x: number; z: number; radius: number; velocity: number; born: number }
 
+/** `Math.min`/`Math.max` pass NaN through; a contact must never hand one to a body. */
+const bound = (value: number, limit: number) =>
+  Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) : 0
+
 const boundedSample = (height: number, dx: number, dz: number, speed: number) =>
-  [
-    WATER_LEVEL + Math.max(-0.22, Math.min(0.22, height)),
-    Math.max(-1, Math.min(1, dx)),
-    Math.max(-1, Math.min(1, dz)),
-    Math.max(-1.5, Math.min(1.5, speed)),
-  ] as const
+  [WATER_LEVEL + bound(height, 0.22), bound(dx, 1), bound(dz, 1), bound(speed, 1.5)] as const
 
 /** A bounded CPU companion to the GPU field for contacts and buoyancy. */
 export class WaterContact {
@@ -37,6 +36,7 @@ export class WaterContact {
   }
 
   sample(x: number, z: number, time: number, wind?: WindState, footprint = 0.08) {
+    if (!Number.isFinite(x + z + time)) return [WATER_LEVEL, 0, 0, 0] as const
     const index = lakeIndex(this.bed, x, z)
     if (index < 0 || !this.bed.water[index]) return [WATER_LEVEL, 0, 0, 0] as const
     let [height, dx, dz, speed] = sampleWaterContact(x, z, time, wind, footprint)

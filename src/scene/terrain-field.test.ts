@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import type { Box } from './box-index'
 import { lakeIndex, WATER_LEVEL } from './lake-bed'
 import { createLakeWorld } from './lake-world'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
@@ -8,35 +9,34 @@ import { prepareBoulders } from './terrain-boulders'
 import { createTerrainField, sampleHeight, sampleNormal } from './terrain-field'
 import type { TerrainGrid } from './terrain-field'
 import { prepareTerrainColliders, prepareTerrainSurface } from './terrain-surface'
-import type { Voxel } from './voxel-spatial'
 
 const grid: TerrainGrid = { minX: -4.125, minZ: -4.125, cell: 0.25, columns: 34, rows: 34 }
 
-/** A stepped mound: square terraces 0.25 m high, like the voxel source. */
-function terraces(): Voxel[] {
-  const voxels: Voxel[] = []
+/** A stepped mound: square terraces 0.25 m high, like the box source. */
+function terraces(): Box[] {
+  const boxes: Box[] = []
   for (let x = -2.5; x <= 2.5; x += 0.25)
     for (let z = -2.5; z <= 2.5; z += 0.25) {
       const ring = Math.max(Math.abs(x), Math.abs(z))
       const top = Math.max(0.25, 1.25 - Math.floor(ring / 0.5) * 0.25)
-      for (let y = 0.125; y < top; y += 0.25) voxels.push({ x, y, z, size: 0.25, color: 0 })
+      for (let y = 0.125; y < top; y += 0.25) boxes.push({ x, y, z, size: 0.25, color: 0 })
     }
-  return voxels
+  return boxes
 }
 
 /** Corner heights of stacked cubes: each corner takes the highest top touching it. */
-function rasterize(voxels: readonly Voxel[], rockValue = 0) {
+function rasterize(boxes: readonly Box[], rockValue = 0) {
   const heights = new Float32Array(grid.columns * grid.rows).fill(Number.NaN)
-  for (const voxel of voxels) {
-    const half = voxel.size / 2
+  for (const box of boxes) {
+    const half = box.size / 2
     for (let row = 0; row < grid.rows; row++)
       for (let column = 0; column < grid.columns; column++) {
         const x = grid.minX + column * grid.cell,
           z = grid.minZ + row * grid.cell
-        if (Math.abs(x - voxel.x) > half + 1e-4 || Math.abs(z - voxel.z) > half + 1e-4) continue
+        if (Math.abs(x - box.x) > half + 1e-4 || Math.abs(z - box.z) > half + 1e-4) continue
         const i = row * grid.columns + column
         heights[i] = Math.max(
-          voxel.y + half,
+          box.y + half,
           Number.isNaN(heights[i] ?? 0) ? -Infinity : (heights[i] ?? 0),
         )
       }
@@ -55,14 +55,14 @@ const worldFor = (mobile: boolean) => {
 }
 
 describe('terrain field', () => {
-  it('smooths voxel terraces into continuous slopes without moving the composition', () => {
+  it('smooths box terraces into continuous slopes without moving the composition', () => {
     const { field } = createTerrainField({
       ...rasterize(terraces()),
       seed: 1,
       mobile: false,
       protect: [],
     })
-    // No step remains: neighbouring corners differ far less than a voxel along a terrace edge.
+    // No step remains: neighbouring corners differ far less than a box along a terrace edge.
     let largest = 0
     for (let row = 4; row < grid.rows - 4; row++)
       for (let column = 4; column < grid.columns - 5; column++) {
@@ -107,7 +107,7 @@ describe('terrain field', () => {
   })
 
   it('turns single stones into boulders instead of bumps', () => {
-    const stone: Voxel = { x: 0, y: 0.06, z: 0, size: 0.25, color: 0 }
+    const stone: Box = { x: 0, y: 0.06, z: 0, size: 0.25, color: 0 }
     const { field, islands } = createTerrainField({
       ...rasterize([stone], 1),
       seed: 1,

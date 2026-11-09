@@ -116,9 +116,13 @@ export function initPerfOverlay(
   const header = () => {
     const canvas = renderer.domElement
     const ratio = canvas.width / Math.max(1, canvas.clientWidth)
+    // Dynamic resolution: the scene renders at this share of the canvas, which the lens upsamples.
+    const scale = canvas.dataset.renderScale ?? '1.00'
+    const budget = canvas.dataset.renderBudget === 'reduced' ? '  reduced budget' : ''
     return [
       adapterLabel(renderer),
       `${canvas.width}x${canvas.height}  dpr ${ratio.toFixed(2)} (device ${devicePixelRatio.toFixed(2)})`,
+      `scene scale ${scale}${budget}`,
     ].join('\n')
   }
   const wait = (delay: number) =>

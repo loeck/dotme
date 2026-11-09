@@ -1,3 +1,4 @@
+import { mix, saturate as clamp01, smoothstep as smooth } from './math'
 /**
  * The scene's art direction, after Voxen's Last Signal: a muted base grade, haze that
  * separates depth planes, low mist over the water, and a golden hour that alone lifts
@@ -107,12 +108,6 @@ export const LAST_SIGNAL_LOOK: LookPreset = {
   dawnMist: 2.2,
 }
 
-const clamp01 = (value: number) => Math.max(0, Math.min(1, value))
-const smooth = (a: number, b: number, value: number) => {
-  const t = clamp01((value - a) / (b - a))
-  return t * t * (3 - 2 * t)
-}
-const mix = (a: number, b: number, t: number) => a + (b - a) * t
 const lift = (factor: number, weight: number) => mix(1, factor, weight)
 
 /**

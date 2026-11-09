@@ -6,7 +6,8 @@
  */
 import { atlasRect } from './foliage-atlas'
 import type { AtlasTile } from './foliage-atlas'
-import { mixRgb } from './vegetation-models'
+import { latticeHash } from './hash'
+import { crownNormal, mixRgb } from './vegetation-models'
 import type { Point, Rgb, Spray, VegetationGeometry } from './vegetation-models'
 
 export type MeshData = Readonly<{
@@ -45,12 +46,8 @@ const place = (p: Point, at: Placement): Point => {
   const r = rotateY(p, at.yaw)
   return [at.x + r[0] * at.scale, at.y + r[1] * at.scale, at.z + r[2] * at.scale]
 }
-function hash(a: number, b: number, stream: number) {
-  let n = (Math.imul(a | 0, 0x9e3779b1) ^ Math.imul(b | 0, 0x85ebca77) ^ stream) >>> 0
-  n = Math.imul(n ^ (n >>> 16), 0x7feb352d)
-  n = Math.imul(n ^ (n >>> 15), 0x846ca68b)
-  return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
-}
+/** The shared lattice hash without a seed: placements carry their own streams. */
+const hash = (a: number, b: number, stream: number) => latticeHash(0, a, b, stream)
 
 export class MeshBuilder {
   private readonly positions: number[] = []
@@ -133,7 +130,7 @@ function card(
   b: Point,
   width: number,
   height: number,
-  normal: Point,
+  normal: (corner: Point) => Point,
   colour: Rgb,
   tile: AtlasTile,
   wind: (corner: Point) => readonly [number, number, number, number],
@@ -147,7 +144,7 @@ function card(
   ]
   const ids = corners.map(([x, y, u, v]) => {
     const p = add(add(centre, t, x * width), b, y * height)
-    return builder.vertex(p, normal, colour, wind(p), [u, v])
+    return builder.vertex(p, normal(p), colour, wind(p), [u, v])
   })
   builder.quad(ids[0] ?? 0, ids[1] ?? 0, ids[2] ?? 0, ids[3] ?? 0)
 }
@@ -184,8 +181,15 @@ export function appendSprays(
     const centre = place(spray.center, at)
     const t = rotateY(spray.t, at.yaw),
       b = rotateY(spray.b, at.yaw)
-    const normal = rotateY(spray.normal, at.yaw)
-    const value = spray.shade * (0.9 + random(1) * 0.2)
+    const facing = rotateY(spray.normal, at.yaw)
+    // Each corner leans away from the crown centre, so the light grades smoothly across a card
+    // and on into its neighbours. The normals are built once: sway never relights a card.
+    const crown = spray.crownCentre ? place(spray.crownCentre, at) : undefined
+    const normal = (corner: Point): Point =>
+      crown
+        ? crownNormal(facing, [corner[0] - crown[0], corner[1] - crown[1], corner[2] - crown[2]])
+        : facing
+    const value = spray.shade * (0.95 + random(1) * 0.1)
     const colour: Rgb = [
       spray.colour[0] * options.propTint[0] * value,
       spray.colour[1] * options.propTint[1] * value,

@@ -20,7 +20,7 @@ const POINTER_LIGHT_RADIUS = 4.5
  */
 const POINTER_LIGHT_NEAR = 25
 
-export function createPointerLightUniforms() {
+function createPointerLightUniforms() {
   return {
     uPointerLightPosition: uniform(new Vector3()),
     uPointerLightSource: uniform(new Vector3()),

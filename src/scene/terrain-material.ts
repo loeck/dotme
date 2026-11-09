@@ -16,6 +16,7 @@ import { MeshStandardNodeMaterial } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
+import { SNOW_ROUGHNESS, snowAlbedo, snowShare } from './snow-cover'
 import { surfaceGradientNormal, triplanarScan } from './surface-detail'
 import type { TerrainSkyFill } from './terrain-detail'
 import type { SurfaceScan, TerrainTextures } from './terrain-textures'
@@ -257,7 +258,9 @@ export function createTerrainMaterial(
   albedo = mix(albedo, linear(0.042, 0.038, 0.03), mud.mul(0.85))
   // Slow tint across the hills hides any repetition at 30–70 m.
   albedo = albedo.mul(macro.mul(0.24).add(0.88))
-  material.colorNode = albedo
+  // Snow settles on the flattest ground first, never on the wet shore line.
+  const snow = snowShare(up, grain).mul(smoothstep(0.04, 0.16, above))
+  material.colorNode = snowAlbedo(albedo, snow)
 
   const groundRoughness = mix(
     grassScan?.surface.r ?? float(0.96),
@@ -270,7 +273,7 @@ export function createTerrainMaterial(
     rock,
   )
   // Wet silt, not a mirror: glossier, it caught the whole sky at grazing view like concrete.
-  material.roughnessNode = mix(roughness, float(0.62), mud)
+  material.roughnessNode = mix(mix(roughness, float(0.62), mud), float(SNOW_ROUGHNESS), snow)
   material.aoNode = skyVisibility
 
   // Detail relief: grass tufts on the ground, cracks and grain on stone, pebbles at the shore.
@@ -290,7 +293,9 @@ export function createTerrainMaterial(
     .add(octave(p, 11, pixel).mul(0.005))
   if (rockScan) rockRelief = rockRelief.add(rockScan.surface.g.mul(0.055))
   const pebbleRelief = octave(p, 13, pixel).abs().mul(0.012)
-  const relief = mix(mix(groundRelief, pebbleRelief, gravel), rockRelief, rock)
+  const relief = mix(mix(groundRelief, pebbleRelief, gravel), rockRelief, rock).mul(
+    snow.mul(-0.6).add(1),
+  )
   material.normalNode = surfaceGradientNormal(relief, near)
   return material
 }
@@ -349,15 +354,23 @@ export function createBoulderMaterial(
   albedo = mix(albedo, linear(0.045, 0.042, 0.032), waterline.mul(0.8))
   albedo = mix(albedo, linear(0.06, 0.045, 0.032), foot.mul(0.6))
   albedo = albedo.mul(spray.mul(-0.45).add(1))
-  material.colorNode = albedo
+  // Snow caps the stones' tops, above the waterline and away from the waterfall's spray.
+  const snow = snowShare(up, grain)
+    .mul(smoothstep(0.18, 0.4, above))
+    .mul(spray.oneMinus())
+  material.colorNode = snowAlbedo(albedo, snow)
   material.roughnessNode = mix(
     mix(
-      mix(rockScan?.surface.r.clamp(0.5, 0.95) ?? float(0.66), float(0.93), moss),
-      float(0.3),
-      waterline,
+      mix(
+        mix(rockScan?.surface.r.clamp(0.5, 0.95) ?? float(0.66), float(0.93), moss),
+        float(0.3),
+        waterline,
+      ),
+      float(0.22),
+      spray,
     ),
-    float(0.22),
-    spray,
+    float(SNOW_ROUGHNESS),
+    snow,
   )
 
   const distance = p.distance(cameraPosition)

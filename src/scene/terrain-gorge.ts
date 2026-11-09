@@ -1,5 +1,6 @@
 import { WATER_LEVEL } from './lake-bed'
 import type { WaterfallSite } from './lake-world'
+import { clamp, smoothstep as smooth01 } from './math'
 import { vertexNormals } from './terrain-boulders'
 import type { PreparedBoulders } from './terrain-boulders'
 import { sampleHeight } from './terrain-field'
@@ -13,12 +14,6 @@ import type { TerrainField } from './terrain-field'
  * boulders' material and merges into their mesh.
  */
 export type GorgeMesh = Pick<PreparedBoulders, 'positions' | 'normals' | 'surface' | 'indices'>
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
-}
 
 function hash(seed: number, x: number, y: number) {
   let n = Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(y | 0, 0x165667b1) ^ seed
@@ -178,20 +173,22 @@ export function prepareGorge(field: TerrainField, fall: WaterfallSite | null): G
   }
 }
 
+/** `a` then `b` in one new typed array of their kind. */
+function concat<T extends Float32Array | Int8Array | Uint8Array | Uint32Array>(
+  make: new (length: number) => T,
+  a: T,
+  b: T,
+) {
+  const out = new make(a.length + b.length)
+  out.set(a)
+  out.set(b, a.length)
+  return out
+}
+
 /** Append the gorge to the merged boulder mesh (render only; colliders keep the boulders). */
 export function withGorge(boulders: PreparedBoulders, gorge: GorgeMesh): PreparedBoulders {
   if (!gorge.indices.length) return boulders
   const offset = boulders.positions.length / 3
-  const concat = <T extends Float32Array | Int8Array | Uint8Array | Uint32Array>(
-    make: new (length: number) => T,
-    a: T,
-    b: T,
-  ) => {
-    const out = new make(a.length + b.length)
-    out.set(a)
-    out.set(b, a.length)
-    return out
-  }
   return {
     ...boulders,
     positions: concat(Float32Array, boulders.positions, gorge.positions),

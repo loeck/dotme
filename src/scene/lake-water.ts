@@ -77,7 +77,9 @@ type LakeInputs = {
 }
 
 /** Floating bodies whose waterline draws a meniscus ring on the lake. */
-export const FLOATER_SLOTS = 8
+const ALL_FACES = [0, 1, 2, 3, 4, 5] as const
+
+const FLOATER_SLOTS = 8
 
 /** Uniform nodes are stable graph inputs; update their values, never replace them. */
 export class LakeWaterMaterial extends NodeMaterial {
@@ -102,7 +104,6 @@ export class LakeWaterMaterial extends NodeMaterial {
     uState: texture(this.empty),
     uMask: texture(this.empty),
     uRainSlopeMap: texture(this.empty),
-    uRainResolution: uniform(new Vector2(1, 1)),
     uRainSlopesEnabled: uniform(0),
     uRainIntensity: uniform(0),
     waterlines: this.waterlines,
@@ -603,9 +604,35 @@ export class LakeReflector extends Mesh<BufferGeometry, LakeWaterMaterial> {
   }
 
   private readonly skyCamera = new CubeCamera(0.1, 10, this.material.skyTarget)
-  /** Renders `sky` (a scene holding only the sky dome) into the reflected-sky cube. */
-  captureSky(renderer: WebGPURenderer, sky: Scene) {
-    this.skyCamera.update(renderer, sky)
+  /**
+   * Renders `sky` (a scene holding only the sky dome) into the given faces of the reflected-sky
+   * cube (all six by default), in CubeCamera order: +X, -X, +Y, -Y, +Z, -Z. Mipmaps are built
+   * once, with the last face.
+   */
+  captureSky(renderer: WebGPURenderer, sky: Scene, faces: readonly number[] = ALL_FACES) {
+    const camera = this.skyCamera
+    if (camera.coordinateSystem !== renderer.coordinateSystem) {
+      camera.coordinateSystem = renderer.coordinateSystem
+      camera.updateCoordinateSystem()
+    }
+    camera.updateMatrixWorld()
+    const target = this.material.skyTarget
+    const previous = renderer.getRenderTarget(),
+      previousFace = renderer.getActiveCubeFace(),
+      previousMip = renderer.getActiveMipmapLevel()
+    const mipmaps = target.texture.mipmapsAutoUpdate
+    try {
+      for (const [index, face] of faces.entries()) {
+        const faceCamera = camera.children[face]
+        if (!(faceCamera instanceof Camera)) throw new Error('Missing sky cube camera')
+        target.texture.mipmapsAutoUpdate = mipmaps && index === faces.length - 1
+        renderer.setRenderTarget(target, face)
+        renderer.render(sky, faceCamera)
+      }
+    } finally {
+      target.texture.mipmapsAutoUpdate = mipmaps
+      renderer.setRenderTarget(previous, previousFace, previousMip)
+    }
   }
   /** Prepares the sky cube's pipelines; the sky shares its material with the main view. */
   compileSky(renderer: WebGPURenderer, sky: Scene) {

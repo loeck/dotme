@@ -4,7 +4,7 @@ import type { Node } from 'three/webgpu'
 import { horizonNoise } from './distant-horizon'
 
 /** Share of landscapes (seeds) whose clear nights carry an aurora. */
-export const AURORA_SHARE = 0.3
+const AURORA_SHARE = 0.3
 
 /**
  * Whether a landscape's nights have an aurora: rare, but fixed by the seed so a shared link

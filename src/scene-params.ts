@@ -1,12 +1,15 @@
 import { required } from './invariant'
+import { isSeasonName } from './scene/season'
+import type { SeasonName } from './scene/season'
+import { isWeatherPreset } from './scene/weather'
 import type { WeatherPreset } from './scene/weather'
 
 export type GpsPosition = Readonly<{ latitude: number; longitude: number }>
 export type WeatherOverride = WeatherPreset | 'rain' | 'thunderstorm'
 export const PARIS: GpsPosition = { latitude: 48.8566, longitude: 2.3522 }
-export const MIN_TIME_SCALE = 1
-export const MAX_TIME_SCALE = 100
-const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale', 'weather'])
+const MIN_TIME_SCALE = 1
+const MAX_TIME_SCALE = 100
+const KEYS = new Set(['seed', 'coordinates', 'startTime', 'timeScale', 'weather', 'season'])
 // Diagnostics survive reloads on a phone but are not part of the public scene API.
 const DEBUG_KEYS = new Set(['perf', 'dpr', 'backend'])
 
@@ -33,15 +36,13 @@ export function sceneParams(search: string) {
     : 1
   const rawWeather = params.get('weather')
   const weather: WeatherOverride | undefined =
-    rawWeather === 'clear' ||
-    rawWeather === 'partly-cloudy' ||
-    rawWeather === 'cloudy' ||
-    rawWeather === 'overcast' ||
-    rawWeather === 'rain' ||
-    rawWeather === 'thunderstorm'
+    isWeatherPreset(rawWeather) || rawWeather === 'rain' || rawWeather === 'thunderstorm'
       ? rawWeather
       : undefined
-  return { seed, position, startTime, timeScale, weather }
+  // The season otherwise follows the visitor's date and the coordinates' hemisphere.
+  const rawSeason = params.get('season')
+  const season: SeasonName | undefined = isSeasonName(rawSeason) ? rawSeason : undefined
+  return { seed, position, startTime, timeScale, weather, season }
 }
 
 export function cleanSceneUrl(url: URL) {

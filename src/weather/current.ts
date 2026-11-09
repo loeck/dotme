@@ -1,7 +1,12 @@
+import { storage } from '../env'
 import { PARIS } from '../scene-params'
 import type { GpsPosition } from '../scene-params'
+import { anySignal } from './signals'
 
-export type WeatherKind =
+/** Deadline of one Open-Meteo request, including the body read. */
+const WEATHER_TIMEOUT_MS = 10_000
+
+type WeatherKind =
   | 'clear'
   | 'mainly-clear'
   | 'partly-cloudy'
@@ -222,21 +227,13 @@ export class WeatherHttpError extends Error {
 
 const CACHE_KEY = 'dotme:weather'
 
-function weatherStorage(): Storage | undefined {
-  try {
-    return typeof localStorage === 'undefined' ? undefined : localStorage
-  } catch {
-    return undefined
-  }
-}
-
 /**
  * The last response for this request while its 15-minute observation slot is current: a fresh
  * request would return the same values, so reloads skip the network round trip.
  */
 function cachedWeather(url: string, nowSeconds: number): WeatherSnapshot | undefined {
   try {
-    const raw = weatherStorage()?.getItem(CACHE_KEY)
+    const raw = storage()?.getItem(CACHE_KEY)
     if (!raw) return undefined
     const entry = object(JSON.parse(raw), 'cache')
     if (entry.url !== url) return undefined
@@ -252,7 +249,7 @@ function cachedWeather(url: string, nowSeconds: number): WeatherSnapshot | undef
 
 function rememberWeather(url: string, data: unknown) {
   try {
-    weatherStorage()?.setItem(CACHE_KEY, JSON.stringify({ url, data }))
+    storage()?.setItem(CACHE_KEY, JSON.stringify({ url, data }))
   } catch {
     /* Storage may be full or disabled; the next visit fetches again. */
   }
@@ -271,39 +268,29 @@ export async function fetchWeather({
     Math.abs(position.longitude) > 180
   )
     throw new TypeError('Invalid weather position')
-  const controller = new AbortController()
-  const abort = () => controller.abort(signal?.reason)
-  signal?.addEventListener('abort', abort, { once: true })
-  const timeout = setTimeout(() => {
-    controller.abort(
-      new DOMException('Open-Meteo request timed out after 10 seconds', 'TimeoutError'),
-    )
-  }, 10_000)
-  try {
-    const url = new URL('https://api.open-meteo.com/v1/forecast')
-    url.search = new URLSearchParams({
-      latitude: String(position.latitude),
-      longitude: String(position.longitude),
-      timezone: 'auto',
-      current: Object.keys(UNITS).join(','),
-      daily: 'sunrise,sunset',
-      forecast_days: '1',
-      wind_speed_unit: 'ms',
-      temperature_unit: 'celsius',
-      precipitation_unit: 'mm',
-      timeformat: 'unixtime',
-    }).toString()
-    const cached = cachedWeather(url.href, Date.now() / 1000)
-    if (cached) return cached
-    const response = await fetch(url, { signal: controller.signal })
-    if (!response.ok) throw new WeatherHttpError(response.status)
-    const data: unknown = await response.json()
-    controller.signal.throwIfAborted()
-    const snapshot = parseWeatherSnapshot(data)
-    rememberWeather(url.href, data)
-    return snapshot
-  } finally {
-    clearTimeout(timeout)
-    signal?.removeEventListener('abort', abort)
-  }
+  const url = new URL('https://api.open-meteo.com/v1/forecast')
+  url.search = new URLSearchParams({
+    latitude: String(position.latitude),
+    longitude: String(position.longitude),
+    timezone: 'auto',
+    current: Object.keys(UNITS).join(','),
+    daily: 'sunrise,sunset',
+    forecast_days: '1',
+    wind_speed_unit: 'ms',
+    temperature_unit: 'celsius',
+    precipitation_unit: 'mm',
+    timeformat: 'unixtime',
+  }).toString()
+  const cached = cachedWeather(url.href, Date.now() / 1000)
+  if (cached) return cached
+  // The deadline covers the request and the body read; the caller may cancel sooner.
+  const deadline = AbortSignal.timeout(WEATHER_TIMEOUT_MS)
+  const request = signal ? anySignal([signal, deadline]) : deadline
+  const response = await fetch(url, { signal: request })
+  if (!response.ok) throw new WeatherHttpError(response.status)
+  const data: unknown = await response.json()
+  request.throwIfAborted()
+  const snapshot = parseWeatherSnapshot(data)
+  rememberWeather(url.href, data)
+  return snapshot
 }

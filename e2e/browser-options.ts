@@ -1,6 +1,6 @@
 import type { LaunchOptions } from '@playwright/test'
 
-/** Use native graphics locally and an explicit software WebGPU adapter on CI. */
+/** Native graphics by default; `WEBGPU_ADAPTER=swiftshader` (set by the CI e2e job) selects a software WebGPU adapter. */
 export function chromiumLaunchOptions(): LaunchOptions {
   const adapter = process.env.WEBGPU_ADAPTER ?? 'native'
   if (adapter !== 'native' && adapter !== 'swiftshader')

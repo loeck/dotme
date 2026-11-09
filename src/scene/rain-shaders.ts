@@ -125,8 +125,62 @@ function occlude(u: RainUniforms) {
     ),
   )
 }
+/**
+ * Snowflakes are matte ice: they scatter the light round them instead of refracting it, so they
+ * read as soft white points, brighter than rain against the dark woods and greyer against the sky.
+ */
+function snowLight(world: Node<'vec3'>, u: RainUniforms, lampCount: number) {
+  let light = u.uAmbientColor.rgb
+    .mul(1.5)
+    .add(u.uFogColor.rgb.mul(0.9))
+    .add(u.uMoonColor.rgb.mul(0.16))
+  for (let i = 0; i < lampCount; i++) {
+    const delta = u.uLampPosition.element(i).sub(world)
+    light = light.add(u.uLampColor.element(i).rgb.mul(0.5).div(delta.dot(delta).add(1)))
+  }
+  return mix(light, u.uFogColor.rgb, fogAmount(world, u))
+}
+/** Round, depth-of-field-softened flakes; physical size below a pixel spreads into a faint dot. */
+function createSnowMaterial(material: MeshBasicNodeMaterial, u: RainUniforms, lampCount: number) {
+  material.name = 'SnowFlakes'
+  const flake = attribute('aDrop', 'vec4'),
+    data = attribute('aVelocity', 'vec4')
+  const head = cameraViewMatrix.mul(vec4(flake.xyz, 1)),
+    clip = cameraProjectionMatrix.mul(head),
+    depthAhead = max(0.05, head.z.negate())
+  const physical = flake.w
+    .mul(cameraProjectionMatrix.mul(vec4(0, 1, 0, 0)).y)
+    .mul(u.uResolution.y)
+    .mul(0.5)
+    .div(depthAhead)
+  // The lens is focused tens of metres out: near flakes blur into larger, fainter discs.
+  const coc = clamp(float(3.2).div(max(depthAhead, 0.4)).sub(0.35), 0, 9).mul(u.uPixelRatio)
+  const width = sqrt(physical.pow2().add(u.uPixelRatio.pow2().mul(1.6)).add(coc.pow2()))
+  material.vertexNode = vec4(
+    clip.xy.add(positionLocal.xy.mul(width.mul(2.4)).mul(2).div(u.uResolution).mul(clip.w)),
+    clip.zw,
+  )
+  const coverage = varying(min(1, physical.div(width)).pow(1.6)),
+    nearFade = varying(smoothstep(0.45, 1.4, depthAhead)),
+    seed = varying(data.w)
+  const lighting = varying(snowLight(flake.xyz, u, lampCount)),
+    clarity = varying(fogAmount(flake.xyz, u).oneMinus())
+  material.fragmentNode = Fn(() => {
+    occlude(u)
+    const offset = uv().sub(0.5).mul(2.4)
+    const disc = exp(offset.dot(offset).mul(-2.77))
+    const alpha = disc
+      .mul(min(0.9, max(coverage.mul(1.6), 0.2)))
+      .mul(mix(0.75, 1, seed))
+      .mul(nearFade)
+      .mul(clarity.mul(0.7).add(0.3))
+      .mul(u.uOpacity)
+    return rainOutput(vec4(lighting, alpha))
+  })()
+  return material
+}
 export function createRainParticleMaterial(
-  kind: 'streak' | 'crown' | 'spray',
+  kind: 'streak' | 'crown' | 'spray' | 'flake',
   u: RainUniforms,
   lampCount: number,
 ) {
@@ -142,6 +196,7 @@ export function createRainParticleMaterial(
     blendSrcAlpha: OneFactor,
     blendDstAlpha: OneMinusSrcAlphaFactor,
   })
+  if (kind === 'flake') return createSnowMaterial(material, u, lampCount)
   if (kind === 'crown') {
     material.name = 'RainCrowns'
     const impact = attribute('aImpact', 'vec4'),

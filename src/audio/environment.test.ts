@@ -1,6 +1,14 @@
 import { expect, it } from 'vitest'
 
-import { ambientMix, birdChorus, waterfallSound } from './environment'
+import {
+  ambientMix,
+  ambientTone,
+  birdChorus,
+  insectRate,
+  insectWarmth,
+  stormy,
+  waterfallSound,
+} from './environment'
 
 it('follows day, rain and wind while keeping a conservative combined gain ceiling', () => {
   for (const daylight of [-1, 0, 0.5, 1, 2, NaN])
@@ -77,4 +85,42 @@ it('sings a dawn chorus at morning twilight and keeps owls to a dry, dark night'
   expect(ambientMix(at(0, 1)).owls).toBeGreaterThan(0.1)
   expect(ambientMix(at(0, 1, 1)).owls).toBe(0)
   expect(ambientMix(at(0, 1, 0, 12)).owls).toBeLessThan(ambientMix(at(0, 1)).owls)
+})
+
+it('follows rain perceptually, silences crickets in the cold and damps fog and snow', () => {
+  const night = { solarHour: 1, daylight: 0, windSpeed: 0, rainIntensity: 0.25 }
+  // Square-root loudness: a quarter of the rain is heard at half the full level.
+  expect(ambientMix(night).rain).toBeCloseTo(0.21)
+  expect(ambientMix({ ...night, snow: 1 }).rain).toBe(0)
+  expect(insectWarmth(undefined)).toBe(1)
+  expect(insectWarmth(7)).toBe(0)
+  expect(insectWarmth(10)).toBeCloseTo(0.5)
+  expect(insectWarmth(13)).toBe(1)
+  expect(ambientMix({ ...night, temperature: 5 }).insects).toBe(0)
+  expect(ambientMix({ ...night, temperature: 20 }).insects).toBe(ambientMix(night).insects)
+  expect(insectRate(20)).toBe(1)
+  expect(insectRate(40)).toBe(1.15)
+  expect(insectRate(-10)).toBe(0.9)
+  expect(insectRate(Number.NaN)).toBe(1)
+  const day = { solarHour: 12, daylight: 1, windSpeed: 0, rainIntensity: 0 }
+  expect(ambientMix({ ...day, fog: 1 }).birds).toBeCloseTo(ambientMix(day).birds * 0.4)
+  expect(ambientTone(day).masterShelf).toBe(-0)
+  expect(ambientTone({ ...day, snow: 0.5 }).masterShelf).toBe(-7)
+  expect(ambientTone({ ...day, rainIntensity: 0 }).rainCutoff).toBe(1200)
+  expect(ambientTone({ ...day, rainIntensity: 1 }).rainCutoff).toBeCloseTo(11_000)
+  expect(ambientTone({ ...day, daylight: 0 }).reverb).toBeGreaterThan(ambientTone(day).reverb)
+  expect(ambientTone(day).windPan).toBe(0)
+  expect(ambientTone({ ...day, windPan: -2 }).windPan).toBe(-0.6)
+  expect(stormy({ ...day, rainIntensity: 0.8 })).toBe(true)
+  expect(stormy({ ...day, storm: true })).toBe(true)
+  expect(stormy({ ...day, rainIntensity: 0.5 })).toBe(false)
+})
+
+it('thins the birds and silences the crickets in winter', () => {
+  const day = { solarHour: 12, daylight: 1, windSpeed: 0, rainIntensity: 0 }
+  const night = { ...day, solarHour: 23, daylight: 0 }
+  expect(ambientMix({ ...day, winter: 1 }).birds).toBeCloseTo(ambientMix(day).birds * 0.4)
+  expect(ambientMix({ ...night, winter: 1 }).insects).toBe(0)
+  expect(ambientMix({ ...night, winter: 0 }).insects).toBe(ambientMix(night).insects)
+  expect(ambientMix({ ...night, winter: Number.NaN }).insects).toBe(ambientMix(night).insects)
 })

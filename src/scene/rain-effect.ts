@@ -1,0 +1,510 @@
+import {
+  Color,
+  DepthTexture,
+  NoToneMapping,
+  LinearSRGBColorSpace,
+  DynamicDrawUsage,
+  Group,
+  HalfFloatType,
+  InstancedBufferAttribute,
+  InstancedBufferGeometry,
+  Mesh,
+  PlaneGeometry,
+  Scene,
+  MeshBasicNodeMaterial,
+  UnsignedByteType,
+  Vector2,
+  Vector3,
+  RenderTarget,
+} from 'three/webgpu'
+import type {
+  AmbientLight,
+  FogExp2,
+  Object3D,
+  DirectionalLight,
+  PerspectiveCamera,
+  PointLight,
+  Texture,
+  WebGPURenderer,
+} from 'three/webgpu'
+
+import { required } from '../invariant'
+import {
+  createRainParticleMaterial,
+  createRainSlopeMaterial,
+  createRainUniforms,
+  RAIN_EXPOSURE,
+  RAIN_CROWN_LIFETIME,
+  RAIN_SPRAY_LIFETIME,
+} from './rain-shaders'
+import type { RainSurface } from './rain-shaders'
+import { IMPACT_LIFETIME, RainSimulation, WATER_Y } from './rain-simulation'
+import type { RainImpact, RainRepulsor, RainState, SegmentTrace } from './rain-simulation'
+import { SnowSimulation } from './snow-simulation'
+import type { SnowGround, SnowPush } from './snow-simulation'
+import type { WaterContact } from './water-contact'
+import { sampleWaterContact } from './water-surface'
+import type { WindState } from './wind'
+
+/** Relative kinetic energy: volume scales with diameter cubed. */
+const impactEnergy = (impact: RainImpact) =>
+  Math.min(1, (impact.size / 0.004) ** 3 * (impact.vy / 9) ** 2)
+
+/** Layer 2 is drawn after the lens; layer 1 belongs to the bed. */
+const RAIN_LAYER = 2
+
+function instancedPlane(capacity: number, firstName: string, secondName: string, segments = 1) {
+  const plane = new PlaneGeometry(1, 1, segments, 1)
+  const geometry = new InstancedBufferGeometry()
+  geometry.setIndex(required(plane.index).clone())
+  geometry.setAttribute('position', plane.getAttribute('position').clone())
+  geometry.setAttribute('uv', plane.getAttribute('uv').clone())
+  plane.dispose()
+  const first = new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(
+    DynamicDrawUsage,
+  )
+  const second = new InstancedBufferAttribute(new Float32Array(capacity * 4), 4).setUsage(
+    DynamicDrawUsage,
+  )
+  geometry.setAttribute(firstName, first)
+  geometry.setAttribute(secondName, second)
+  geometry.instanceCount = 0
+  return { geometry, first, second, attributes: [first, second] }
+}
+
+export type RainEnvironment = Readonly<{ ambient: AmbientLight; fog: FogExp2 }>
+
+/** The lake surface and the wind the drops and flakes meet this frame (`RainEffect.update`). */
+export type RainSurfaceFrame = { time: number; wind: WindState; gust?: number; push?: SnowPush }
+
+/**
+ * Rain is independent of weather: setRainState() sets it, update() only scales its wind by a gust
+ * factor. Snowfall (setSnow) shares its lighting, occlusion, overlay and compilation; flakes ride
+ * the rain's wind and leave no impacts.
+ */
+export class RainEffect {
+  readonly group = new Group()
+  readonly simulation: RainSimulation
+  readonly snow: SnowSimulation
+  private readonly slopes = new Scene()
+  private readonly emptyDepth = new DepthTexture(1, 1)
+  private readonly slopeTarget = new RenderTarget(1, 1, {
+    type: HalfFloatType,
+    depthBuffer: false,
+    stencilBuffer: false,
+  })
+  private readonly drops
+  private readonly contactAges: InstancedBufferAttribute
+  private readonly waves
+  private readonly crowns
+  private readonly spray
+  private readonly flakes
+  private readonly particleMaterials: MeshBasicNodeMaterial[]
+  private readonly uniforms
+  private readonly slopeMaterial: MeshBasicNodeMaterial
+  private readonly clearColor = new Color()
+  private activeRenderer: WebGPURenderer | undefined
+  private bufferHeight = 1
+  private readonly renderResolution = new Vector2(1, 1)
+  private readonly lampPositions: Vector3[]
+  private readonly lampColors: Color[]
+  private readonly moonColor = new Color()
+  private readonly moonDirection = new Vector3()
+  private readonly ambientColor = new Color()
+  private readonly fogColor = new Color()
+  private readonly splashLimit: number
+  private wind: RainState['wind'] = { x: 0, z: 0 }
+  private slopeDirty = true
+  private impactSlopes?: Object3D
+  private impactsWereVisible = false
+  private surfaceTimeOffset = 0
+  private surfaceWind?: WindState
+  private waterContact?: WaterContact
+  private readonly sampleSurface = (x: number, z: number, time: number) =>
+    this.waterContact
+      ? this.waterContact.sample(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
+      : WATER_Y + sampleWaterContact(x, z, time + this.surfaceTimeOffset, this.surfaceWind)[0]
+
+  private readonly lamps: readonly PointLight[]
+  private readonly moon: DirectionalLight
+  private readonly environment: RainEnvironment
+  private readonly reducedMotion: boolean
+
+  constructor(
+    trace: SegmentTrace,
+    mobile: boolean,
+    seed: number,
+    lamps: readonly PointLight[],
+    moon: DirectionalLight,
+    reducedMotion: boolean,
+    surfaceUniforms: RainSurface,
+    slopesSupported: boolean,
+    environment: RainEnvironment,
+    /** Ground or water height under a flake; flat water without it. */
+    snowGround: SnowGround = () => WATER_Y,
+  ) {
+    this.lamps = lamps
+    this.moon = moon
+    this.environment = environment
+    this.reducedMotion = reducedMotion
+    this.simulation = new RainSimulation(trace, mobile, seed)
+    this.snow = new SnowSimulation(snowGround, mobile, seed)
+    this.splashLimit = mobile ? 48 : 128
+    this.drops = instancedPlane(this.simulation.drops.length, 'aDrop', 'aVelocity')
+    this.contactAges = new InstancedBufferAttribute(
+      new Float32Array(this.simulation.drops.length),
+      1,
+    ).setUsage(DynamicDrawUsage)
+    this.drops.geometry.setAttribute('aContactAge', this.contactAges)
+    this.drops.attributes.push(this.contactAges)
+    this.waves = instancedPlane(this.simulation.impacts.length, 'aImpact', 'aArrival')
+    this.crowns = instancedPlane(this.splashLimit, 'aImpact', 'aArrival', 28)
+    this.spray = instancedPlane(this.splashLimit * 3, 'aDrop', 'aVelocity')
+    this.flakes = instancedPlane(this.snow.flakes.length, 'aDrop', 'aVelocity')
+    this.lampPositions = Array.from({ length: Math.max(1, lamps.length) }, () => new Vector3())
+    this.lampColors = Array.from({ length: Math.max(1, lamps.length) }, () => new Color(0))
+    this.uniforms = createRainUniforms(
+      surfaceUniforms,
+      this.renderResolution,
+      this.moonColor,
+      this.moonDirection,
+      this.ambientColor,
+      this.fogColor,
+      this.lampPositions,
+      this.lampColors,
+      this.emptyDepth,
+    )
+    this.slopeMaterial = createRainSlopeMaterial(surfaceUniforms)
+    this.particleMaterials = [
+      { kind: 'streak', geometry: this.drops.geometry },
+      { kind: 'crown', geometry: this.crowns.geometry },
+      { kind: 'spray', geometry: this.spray.geometry },
+      { kind: 'flake', geometry: this.flakes.geometry },
+    ].map(({ geometry, kind }) => {
+      if (kind !== 'streak' && kind !== 'crown' && kind !== 'spray' && kind !== 'flake')
+        throw new Error('Invalid rain material')
+      const material = createRainParticleMaterial(kind, this.uniforms, this.lampPositions.length)
+      const mesh = new Mesh(geometry, material)
+      mesh.frustumCulled = false
+      mesh.layers.set(RAIN_LAYER)
+      mesh.onBeforeRender = () => {
+        const renderer = this.activeRenderer
+        if (!renderer) return
+        const target = renderer.getRenderTarget()
+        if (target) this.renderResolution.set(target.viewport.z, target.viewport.w)
+        else renderer.getDrawingBufferSize(this.renderResolution)
+        this.uniforms.uPixelRatio.value =
+          (renderer.getPixelRatio() * this.renderResolution.y) / this.bufferHeight
+      }
+      this.group.add(mesh)
+      return material
+    })
+    const waveMesh = new Mesh(this.waves.geometry, this.slopeMaterial)
+    waveMesh.frustumCulled = false
+    waveMesh.visible = slopesSupported
+    if (!slopesSupported) this.slopeTarget.texture.type = UnsignedByteType
+    this.slopes.add(waveMesh)
+    this.slopeTarget.texture.name = 'Rain screen-space world slopes'
+  }
+
+  setImpactSlopes(mesh: Object3D) {
+    this.impactSlopes = mesh
+    this.slopes.add(mesh)
+  }
+
+  get texture() {
+    return this.slopeTarget.texture
+  }
+
+  setRainState(state: RainState) {
+    this.simulation.setRainState(state)
+    this.wind = this.simulation.state.wind
+    this.snow.setState(this.snow.intensity, this.wind.x, this.wind.z)
+    this.refreshVisibility()
+  }
+
+  /** Snowfall, 0–1; it rides the rain state's wind. */
+  setSnow(intensity: number) {
+    const starting = this.snow.intensity === 0
+    this.snow.setState(intensity, this.wind.x, this.wind.z)
+    if (starting && this.snow.intensity > 0 && !this.reducedMotion) this.snow.prime()
+    this.refreshVisibility()
+  }
+
+  /** Rain is falling (not only snow): the lake takes impacts and the mirror its detail. */
+  get raining() {
+    return this.group.visible && this.simulation.state.intensity > 0
+  }
+
+  private refreshVisibility() {
+    this.group.visible =
+      !this.reducedMotion && (this.simulation.state.intensity > 0 || this.snow.intensity > 0)
+    this.slopeDirty = true
+    if (this.simulation.state.intensity === 0 || !this.group.visible) {
+      this.drops.geometry.instanceCount = 0
+      this.waves.geometry.instanceCount = 0
+      this.crowns.geometry.instanceCount = 0
+      this.spray.geometry.instanceCount = 0
+    }
+    if (this.snow.intensity === 0 || !this.group.visible) this.flakes.geometry.instanceCount = 0
+  }
+
+  prime() {
+    if (!this.reducedMotion) this.simulation.prime()
+  }
+
+  setRepulsor(repulsor: RainRepulsor | null) {
+    this.simulation.setRepulsor(repulsor)
+    this.snow.setRepulsor(repulsor)
+  }
+
+  setWaterContact(contact: WaterContact) {
+    this.waterContact = contact
+  }
+
+  resize(width: number, height: number) {
+    this.bufferHeight = height
+    this.renderResolution.set(width, height)
+    this.slopeTarget.setSize(width, height)
+    this.slopeDirty = true
+  }
+
+  update(delta: number, camera: PerspectiveCamera, opacity: number, surface?: RainSurfaceFrame) {
+    if (!this.group.visible) return
+    if (surface) {
+      this.surfaceTimeOffset =
+        surface.time - (this.simulation.elapsedTime + Math.max(0, Math.min(delta, 0.1)))
+      this.surfaceWind = surface.wind
+      const gust = surface.gust ?? 1
+      this.simulation.setWind(this.wind.x * gust, this.wind.z * gust)
+      this.simulation.setWaterSurface(this.sampleSurface)
+      if (this.snow.intensity > 0) {
+        this.snow.setState(this.snow.intensity, this.wind.x * gust, this.wind.z * gust)
+        this.snow.setPush(surface.push)
+      }
+    }
+    this.simulation.update(delta)
+    this.snow.update(delta)
+    this.uniforms.uOpacity.value = opacity
+    this.moonColor.copy(this.moon.color).multiplyScalar(this.moon.intensity * 1.8)
+    this.moonDirection.copy(this.moon.position).sub(this.moon.target.position).normalize()
+    const { ambient, fog } = this.environment
+    this.ambientColor.copy(ambient.color).multiplyScalar(ambient.intensity)
+    this.fogColor.copy(fog.color)
+    this.uniforms.uFogDensity.value = fog.density
+    this.lamps.forEach((lamp, i) => {
+      required(this.lampPositions[i]).copy(lamp.position)
+      required(this.lampColors[i])
+        .copy(lamp.color)
+        .multiplyScalar(lamp.intensity * 1.6)
+    })
+    let count = 0
+    const ahead = this.simulation.elapsedTime - this.simulation.time
+    for (const drop of this.simulation.drops) {
+      if (!drop.alive) continue
+      this.drops.first.setXYZW(
+        count,
+        drop.x + drop.vx * ahead,
+        drop.y + drop.vy * ahead,
+        drop.z + drop.vz * ahead,
+        drop.size,
+      )
+      this.contactAges.setX(count, -1)
+      this.drops.second.setXYZW(count++, drop.vx, drop.vy, drop.vz, drop.seed)
+    }
+    let waveCount = 0
+    let crownCount = 0
+    let sprayCount = 0
+    let splashCount = 0
+    for (const impact of this.simulation.impacts) {
+      const age = this.simulation.time - impact.born
+      if (age < 0 || age >= IMPACT_LIFETIME) continue
+      // Retain the final, shortening exposure segment for the frame of contact.
+      // Its head is exactly at the collision, so the incoming streak joins its ripple.
+      if (age < RAIN_EXPOSURE && count < this.simulation.drops.length) {
+        this.drops.first.setXYZW(count, impact.x, impact.y, impact.z, impact.size)
+        this.contactAges.setX(count, age)
+        this.drops.second.setXYZW(count++, impact.vx, impact.vy, impact.vz, impact.seed)
+      }
+      const energy = impactEnergy(impact)
+      this.writeImpact(this.waves, waveCount++, impact, age, energy)
+      const distance = Math.hypot(impact.x - camera.position.x, impact.z - camera.position.z)
+      if (
+        age > RAIN_SPRAY_LIFETIME ||
+        energy < 0.28 ||
+        impact.seed > energy ||
+        distance > 42 ||
+        splashCount >= this.splashLimit
+      )
+        continue
+      splashCount++
+      if (age < RAIN_CROWN_LIFETIME)
+        this.writeImpact(this.crowns, crownCount++, impact, age, energy)
+      for (let i = 0; i < 1 + Math.floor(energy * 2); i++) {
+        const angle = impact.seed * 31 + i * 2.399963
+        const speed = 0.07 + energy * 0.18
+        const vx = Math.cos(angle) * speed + impact.vx * 0.12
+        const vz = Math.sin(angle) * speed + impact.vz * 0.12
+        const vy = 0.3 + energy * 0.45 + Math.sin(i * 3 + impact.seed) * 0.07
+        const y = WATER_Y + vy * age - 4.905 * age * age
+        if (y <= WATER_Y) continue
+        this.spray.first.setXYZW(
+          sprayCount,
+          impact.x + vx * age,
+          y,
+          impact.z + vz * age,
+          impact.size * 0.28,
+        )
+        this.spray.second.setXYZW(sprayCount++, vx, vy - 9.81 * age, vz, impact.seed + i * 0.1)
+      }
+    }
+    this.upload(this.drops, count)
+    this.upload(this.waves, waveCount)
+    this.upload(this.crowns, crownCount)
+    this.upload(this.spray, sprayCount)
+    let flakeCount = 0
+    if (this.snow.intensity > 0)
+      for (const flake of this.snow.flakes) {
+        if (!flake.alive) continue
+        this.flakes.first.setXYZW(flakeCount, flake.x, flake.y, flake.z, flake.size)
+        this.flakes.second.setXYZW(flakeCount++, flake.vx, flake.vy, flake.vz, flake.seed)
+      }
+    this.upload(this.flakes, flakeCount)
+    this.slopeDirty = true
+  }
+
+  private writeImpact(
+    batch: ReturnType<typeof instancedPlane>,
+    i: number,
+    impact: RainImpact,
+    age: number,
+    energy: number,
+  ) {
+    batch.first.setXYZW(i, impact.x, impact.z, age, impact.size)
+    batch.second.setXYZW(i, impact.vx, impact.vz, impact.seed, energy)
+  }
+
+  private upload(batch: ReturnType<typeof instancedPlane>, count: number) {
+    batch.geometry.instanceCount = count
+    for (const attribute of batch.attributes) {
+      attribute.clearUpdateRanges()
+      if (count) attribute.addUpdateRange(0, count * attribute.itemSize)
+      attribute.needsUpdate = true
+    }
+  }
+
+  renderSlopes(renderer: WebGPURenderer, camera: PerspectiveCamera, lakeTime: number) {
+    this.activeRenderer = renderer
+    if (!this.slopeDirty && !this.impactSlopes?.visible && !this.impactsWereVisible) return
+    const previousTarget = renderer.getRenderTarget()
+    renderer.getClearColor(this.clearColor)
+    const alpha = renderer.getClearAlpha()
+    const autoClear = renderer.autoClear
+    this.uniforms.uTime.value = lakeTime
+    try {
+      renderer.setRenderTarget(this.slopeTarget)
+      renderer.setClearColor(0, 0)
+      renderer.autoClear = true
+      renderer.render(this.slopes, camera)
+    } finally {
+      renderer.setRenderTarget(previousTarget)
+      renderer.setClearColor(this.clearColor, alpha)
+      renderer.autoClear = autoClear
+    }
+    this.slopeDirty = false
+    this.impactsWereVisible = this.impactSlopes?.visible ?? false
+  }
+
+  /** Composite after surface DOF, depth-testing against the opaque scene explicitly. */
+  renderOverlay(renderer: WebGPURenderer, scene: Scene, camera: PerspectiveCamera, depth: Texture) {
+    if (!this.group.visible) return
+    const layers = camera.layers.mask
+    const background = scene.background
+    const autoClear = renderer.autoClear,
+      toneMapping = renderer.toneMapping,
+      outputColorSpace = renderer.outputColorSpace
+    renderer.toneMapping = NoToneMapping
+    renderer.outputColorSpace = LinearSRGBColorSpace
+    renderer.getDrawingBufferSize(this.renderResolution)
+    this.uniforms.uPixelRatio.value = renderer.getPixelRatio()
+    this.uniforms.uDepth.value = depth
+    this.uniforms.uOverlay.value = true
+    for (const material of this.particleMaterials) material.depthTest = false
+    try {
+      camera.layers.set(RAIN_LAYER)
+      scene.background = null
+      renderer.autoClear = false
+      renderer.render(scene, camera)
+    } finally {
+      camera.layers.mask = layers
+      scene.background = background
+      renderer.autoClear = autoClear
+      renderer.toneMapping = toneMapping
+      renderer.outputColorSpace = outputColorSpace
+      this.uniforms.uOverlay.value = false
+      for (const material of this.particleMaterials) material.depthTest = true
+    }
+  }
+
+  /** `everything`: also the hidden rain and snow, for weather that may change after the first frame. */
+  async compileAsync(
+    renderer: WebGPURenderer,
+    camera: PerspectiveCamera,
+    everything = false,
+    scene?: Scene,
+  ) {
+    this.activeRenderer = renderer
+    const previous = renderer.getRenderTarget()
+    let compiled: Promise<void>
+    try {
+      renderer.setRenderTarget(this.slopeTarget)
+      compiled = renderer.compileAsync(this.slopes, camera)
+    } finally {
+      renderer.setRenderTarget(previous)
+    }
+    await compiled
+    const layers = camera.layers.mask,
+      visible = this.group.visible
+    camera.layers.enable(RAIN_LAYER)
+    // Live weather may bring rain or snow later, and no program may compile after the first
+    // frame: compile them hidden. Nothing renders while this runs.
+    if (everything) this.group.visible = true
+    // In the overlay's own state (`renderOverlay`): onto the canvas, untoned and linear, against
+    // the scene it renders with, so the first rainy frame finds its programs ready.
+    const toneMapping = renderer.toneMapping,
+      outputColorSpace = renderer.outputColorSpace,
+      target = renderer.getRenderTarget()
+    let overlay: Promise<void>
+    try {
+      renderer.setRenderTarget(null)
+      renderer.toneMapping = NoToneMapping
+      renderer.outputColorSpace = LinearSRGBColorSpace
+      for (const material of this.particleMaterials) material.depthTest = false
+      overlay = renderer.compileAsync(this.group, camera, scene ?? null)
+    } finally {
+      for (const material of this.particleMaterials) material.depthTest = true
+      renderer.setRenderTarget(target)
+      renderer.toneMapping = toneMapping
+      renderer.outputColorSpace = outputColorSpace
+    }
+    try {
+      await overlay
+    } finally {
+      camera.layers.mask = layers
+      this.group.visible = visible
+      // The renderer's asynchronous compilation ends by re-binding the canvas it compiled for
+      // (its frame-buffer target): hand the caller back its own target.
+      renderer.setRenderTarget(target)
+    }
+  }
+
+  dispose() {
+    this.group.removeFromParent()
+    for (const batch of [this.drops, this.waves, this.crowns, this.spray, this.flakes])
+      batch.geometry.dispose()
+    for (const material of this.particleMaterials) material.dispose()
+    this.slopeMaterial.dispose()
+    this.slopeTarget.dispose()
+    this.emptyDepth.dispose()
+  }
+}

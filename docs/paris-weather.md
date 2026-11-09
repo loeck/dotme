@@ -45,23 +45,50 @@ their WMO codes. Unknown codes can still have precipitation indicators from meas
 
 Missing, non-finite, out-of-range or incorrectly typed required values and unexpected units throw
 `TypeError`. HTTP failures throw `WeatherHttpError` with a numeric `status`; network and JSON errors
-propagate. The entire fetch and body read have a 10-second deadline (`TimeoutError`). Caller
-cancellation preserves the signal's reason (normally `AbortError`). Timers/listeners are removed on
-every outcome. The page wraps this helper in a shorter **3-second deadline**, configured by
+propagate. The entire fetch and body read have a 10-second deadline (`AbortSignal.timeout`,
+`TimeoutError`), combined with the caller's signal through `AbortSignal.any` (a small listener
+fallback covers browsers without it). Caller cancellation preserves the signal's reason (normally
+`AbortError`). The page wraps this helper in a shorter **3-second scene deadline**, configured by
 `WEATHER_PRELOAD_TIMEOUT_MS` in `src/weather/scene.ts`. That deadline also covers downloading the
-weather module. Timeout, HTTP, network and parsing failures select a seeded random preset and abort
-the request. Late responses cannot replace the chosen preset. Page disposal aborts the preload;
-it does not trigger the random fallback. Completed snapshots survive motion preference changes and
-bfcache restores for the same page. There is no polling or persistent cache.
+weather module. Timeout, HTTP, network and parsing failures select a seeded random preset. A
+request that misses the scene deadline is not aborted: it may still finish in the background, up
+to its own 10 seconds, and fill the cache for the next visit, but it never replaces the preset this
+scene chose. Page disposal aborts the preload and its request; it does not trigger the random
+fallback. Completed snapshots survive motion preference changes and bfcache restores for the same
+page.
+
+The last response is kept in `localStorage` (`dotme:weather`), together with its request URL, and
+so with the requested coordinates. A reload with the same coordinates within the same 15-minute
+observation slot reuses it instead of asking again; storage that is full or disabled only means a
+fresh request. Nothing else about the visitor is stored.
+
+`watchSceneWeather(options, onChange, signal)` in `src/weather/watch.ts` keeps a long visit
+current: one request per 15-minute slot, a minute after the slot begins, only while the page is
+visible (a hidden page catches up once on its return) and never for forced weather. `onChange`
+receives each new slot's scene weather; failures are silent and retried at the next slot, or after
+a minute when the scene opened on random weather. Aborting `signal` stops it. The landscape starts
+it after the engine unless the weather is forced, and hands each refresh to the engine
+(`setWeather`, eased over a minute, see [weather refresh](atmosphere.md#weather-refresh)) and to the
+sound (`setWeather`).
 
 Cloud cover selects clear (<20%), partly cloudy (<55%), cloudy (<85%) or overcast. Rain implies at
 least a cloudy sky; fog, snow and thunderstorm codes use overcast. A dry overcast sky (no
 precipitation, fog, snow or storm) is shown as cloudy instead: a flat grey deck is the dullest
 frame the scene can open on, so it keeps its cloud but breaks up and lets the light reach the lake. Liquid precipitation is converted
 from its reported interval to mm/hour, then mapped to the artistic rain intensity (0.12–1, saturated
-at 8 mm/hour). WMO rain/drizzle codes supply an intensity when reported amounts are zero. Snow-only
-conditions do not create rain. Snowflakes and weather-driven fog are not implemented; thunderstorms bring lightning (see
-[atmosphere](atmosphere.md)).
+at 8 mm/hour). WMO rain/drizzle codes supply an intensity when reported amounts are zero, and a
+floor of 60% of their own intensity otherwise: fifteen-minute model amounts lag a heavy shower the
+code already names, so a downpour code never plays as drizzle. Snow-only conditions do not create
+rain; thunderstorms bring lightning (see [atmosphere](atmosphere.md)).
+
+`SceneWeather` also carries the conditions beyond the sky preset, which the scene draws (fog banks,
+snowfall and snow cover, see [atmosphere](atmosphere.md#fog) and [rain](rain-rendering.md#snow))
+and the sound follows: `condition` (`dry`, `drizzle`, `rain`, `fog`, `snow` or `thunderstorm`), `fog` (0–1:
+0.7 for WMO 45 and 0.8 for rime fog 48, or more from visibility, none at 5 km, half at 1 km, full
+at 200 m), `snow` (0–1, from snowfall saturated at 2.5 cm/hour and the WMO 71–77 and 85–86 codes,
+with the same code floor as rain), `temperature` (°C) and `humidity` (0–1). Snow codes select the
+`snow` sky preset and fog codes the `fog` preset, as does a dry sky with under about 450 m of
+visibility; snow keeps the overcast deck, fog a thin broken one above its banks.
 
 Wind bearing and speed drive the rain and shared atmospheric/water wind model. Rain wind is capped
 at 20 m/s, atmospheric mean speed at 8 m/s to fit the scene's wave model. Reported gusts set the
@@ -75,9 +102,10 @@ The public query parameters are `seed`, `coordinates=latitude,longitude`, `start
 `startTime` overrides the snapshot-seeded clock; without it the scene starts at the weather
 location's local time rather than the visitor's.
 
-`weather=clear|partly-cloudy|cloudy|overcast|rain|thunderstorm` bypasses the API and selects an
-artistic preset. The four sky presets are dry; `rain` uses an overcast sky with rain intensity
-0.55, and `thunderstorm` uses an overcast sky with intensity 1 and lightning. Wind stays seeded
+`weather=clear|partly-cloudy|cloudy|overcast|fog|snow|rain|thunderstorm` bypasses the API and
+selects an artistic preset. The four sky presets are dry at 18 °C; `fog` is fog 0.85 at 9 °C,
+`snow` is snowfall 0.7 at -1 °C; `rain` uses an overcast sky with rain intensity 0.55, and
+`thunderstorm` uses an overcast sky with intensity 1 and lightning. Wind stays seeded
 for the visit. Forced weather uses the default solar orbit and the visitor's local time unless
 `startTime` is set. Missing or unknown `weather` values keep the normal live-weather and fallback
 path. Overrides survive URL cleanup and reloads, use `data-weather-source="override"`, and do not

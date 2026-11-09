@@ -1,6 +1,6 @@
 import { WATERFALL_EXIT_DRIFT, WATERFALL_LIP_Z, waterfallDrift } from './waterfall-flow'
 
-/** Voxels less than this in front of the curtain plane don't veto the block. */
+/** Solids less than this in front of the curtain plane don't veto the block. */
 export const WATERFALL_OCCLUSION_TOLERANCE = 0.5
 
 type Point = Readonly<{ x: number; y: number; z: number }>

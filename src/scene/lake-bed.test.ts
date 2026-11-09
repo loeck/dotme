@@ -1,17 +1,17 @@
 import { describe, expect, it } from 'vitest'
 
+import type { Box } from './box-index'
 import { createLakeBed, LAKE_BOUNDS } from './lake-bed'
-import type { Voxel } from './voxel-spatial'
 
 describe('lake shore distance', () => {
   it('preserves interior, edge and corner distances across overlapping terrain footprints', () => {
-    const voxels: Voxel[] = [
+    const boxes: Box[] = [
       { x: 0, y: 0, z: 0, size: 1.5, color: 0 },
       { x: 0.65, y: 0.2, z: 0.25, size: 0.5, color: 0 },
       { x: -0.35, y: 1, z: -0.2, size: 0.5, color: 0 },
       { x: 0, y: 1.5, z: 0, size: 1.5, color: 0 },
     ]
-    const bed = createLakeBed(voxels, 42, true)
+    const bed = createLakeBed(boxes, 42, true)
     const resolution = bed.resolution * 2
     const cell = LAKE_BOUNDS.size / resolution
     let inside = 0,
@@ -23,10 +23,10 @@ describe('lake shore distance', () => {
         const worldX = LAKE_BOUNDS.minX + (x + 0.5) * cell
         if (worldX < -0.8 || worldX > 0.9) continue
         let expected = 2
-        for (const voxel of voxels) {
-          const half = voxel.size / 2
-          const dx = Math.abs(worldX - voxel.x) - half
-          const dz = Math.abs(worldZ - voxel.z) - half
+        for (const box of boxes) {
+          const half = box.size / 2
+          const dx = Math.abs(worldX - box.x) - half
+          const dz = Math.abs(worldZ - box.z) - half
           const distance =
             dx <= 0 && dz <= 0 ? Math.max(dx, dz) : Math.hypot(Math.max(0, dx), Math.max(0, dz))
           expected = Math.fround(Math.min(expected, distance))

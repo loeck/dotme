@@ -1,5 +1,6 @@
 import { required } from '../invariant'
-import type { Voxel } from './voxel-spatial'
+import type { Box } from './box-index'
+import { smoothstep as smooth01 } from './math'
 
 export const LAKE_BOUNDS = { minX: -80, minZ: -112, size: 160 } as const
 export const WATER_LEVEL = -0.035
@@ -15,13 +16,8 @@ export type LakeBed = Readonly<{
   obstacle: Float32Array
   /** Signed distance to actual terrain footprints, at twice the bed resolution. */
   shore: Float32Array
-  stones: readonly Voxel[]
+  stones: readonly Box[]
 }>
-
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
 
 export function lakeIndex(bed: Pick<LakeBed, 'resolution'>, x: number, z: number) {
   const u = (x - LAKE_BOUNDS.minX) / LAKE_BOUNDS.size
@@ -49,28 +45,28 @@ export function sampleShore(bed: LakeBed, x: number, z: number) {
 }
 
 /** Footprint raster of box solids only: the water mask and obstacle tops. */
-export type LakeFootprint = Pick<LakeBed, 'resolution' | 'water' | 'obstacle'>
+type LakeFootprint = Pick<LakeBed, 'resolution' | 'water' | 'obstacle'>
 
 /** Terrain columns continue down to the bed; trees raise obstacles but do not become barriers. */
-export function createLakeFootprint(
-  voxels: readonly Voxel[],
+function createLakeFootprint(
+  boxes: readonly Box[],
   mobile: boolean,
-  terrainCount = voxels.length,
+  terrainCount = boxes.length,
 ): LakeFootprint {
   const resolution = lakeResolution(mobile)
   const count = resolution * resolution
   const cell = LAKE_BOUNDS.size / resolution
   const water = new Uint8Array(count).fill(255)
   const obstacle = new Float32Array(count).fill(-100)
-  for (let voxelIndex = 0; voxelIndex < voxels.length; voxelIndex++) {
-    const voxel = required(voxels[voxelIndex])
-    const half = voxel.size / 2
-    const top = voxel.y + half
-    const terrain = voxelIndex < terrainCount
-    const x0 = Math.max(0, Math.floor((voxel.x - half - LAKE_BOUNDS.minX) / cell))
-    const x1 = Math.min(resolution - 1, Math.floor((voxel.x + half - LAKE_BOUNDS.minX) / cell))
-    const z0 = Math.max(0, Math.floor((voxel.z - half - LAKE_BOUNDS.minZ) / cell))
-    const z1 = Math.min(resolution - 1, Math.floor((voxel.z + half - LAKE_BOUNDS.minZ) / cell))
+  for (let boxIndex = 0; boxIndex < boxes.length; boxIndex++) {
+    const box = required(boxes[boxIndex])
+    const half = box.size / 2
+    const top = box.y + half
+    const terrain = boxIndex < terrainCount
+    const x0 = Math.max(0, Math.floor((box.x - half - LAKE_BOUNDS.minX) / cell))
+    const x1 = Math.min(resolution - 1, Math.floor((box.x + half - LAKE_BOUNDS.minX) / cell))
+    const z0 = Math.max(0, Math.floor((box.z - half - LAKE_BOUNDS.minZ) / cell))
+    const z1 = Math.min(resolution - 1, Math.floor((box.z + half - LAKE_BOUNDS.minZ) / cell))
     for (let z = z0; z <= z1; z++)
       for (let x = x0; x <= x1; x++) {
         const i = z * resolution + x
@@ -83,12 +79,12 @@ export function createLakeFootprint(
 
 /**
  * Signed distance to terrain footprints above the water line. Exact rectangle
- * distances keep the contact attached to voxel faces; the coarser conservative
+ * distances keep the contact attached to box faces; the coarser conservative
  * picking raster would leave a visible gap. Each cell keeps the minimum over all
- * footprints, so the result is independent of voxel order.
+ * footprints, so the result is independent of box order.
  */
 function rasterizeShore(
-  voxels: readonly Voxel[],
+  boxes: readonly Box[],
   terrainCount: number,
   shoreResolution: number,
   shoreCell: number,
@@ -100,26 +96,26 @@ function rasterizeShore(
     centerX[n] = LAKE_BOUNDS.minX + (n + 0.5) * shoreCell
     centerZ[n] = LAKE_BOUNDS.minZ + (n + 0.5) * shoreCell
   }
-  for (let voxelIndex = 0; voxelIndex < terrainCount && voxelIndex < voxels.length; voxelIndex++) {
-    const voxel = required(voxels[voxelIndex])
-    if (voxel.y + voxel.size / 2 < WATER_LEVEL) continue
-    const half = voxel.size / 2
+  for (let boxIndex = 0; boxIndex < terrainCount && boxIndex < boxes.length; boxIndex++) {
+    const box = required(boxes[boxIndex])
+    if (box.y + box.size / 2 < WATER_LEVEL) continue
+    const half = box.size / 2
     const reach = half + 1.2
-    const sx0 = Math.max(0, Math.floor((voxel.x - reach - LAKE_BOUNDS.minX) / shoreCell))
+    const sx0 = Math.max(0, Math.floor((box.x - reach - LAKE_BOUNDS.minX) / shoreCell))
     const sx1 = Math.min(
       shoreResolution - 1,
-      Math.ceil((voxel.x + reach - LAKE_BOUNDS.minX) / shoreCell),
+      Math.ceil((box.x + reach - LAKE_BOUNDS.minX) / shoreCell),
     )
-    const sz0 = Math.max(0, Math.floor((voxel.z - reach - LAKE_BOUNDS.minZ) / shoreCell))
+    const sz0 = Math.max(0, Math.floor((box.z - reach - LAKE_BOUNDS.minZ) / shoreCell))
     const sz1 = Math.min(
       shoreResolution - 1,
-      Math.ceil((voxel.z + reach - LAKE_BOUNDS.minZ) / shoreCell),
+      Math.ceil((box.z + reach - LAKE_BOUNDS.minZ) / shoreCell),
     )
     for (let z = sz0; z <= sz1; z++) {
-      const dz = Math.abs((centerZ[z] ?? 0) - voxel.z) - half
+      const dz = Math.abs((centerZ[z] ?? 0) - box.z) - half
       const row = z * shoreResolution
       for (let x = sx0; x <= sx1; x++) {
-        const dx = Math.abs((centerX[x] ?? 0) - voxel.x) - half
+        const dx = Math.abs((centerX[x] ?? 0) - box.x) - half
         const i = row + x
         const bound = Math.max(dx, dz)
         const stored = shore[i] ?? 2
@@ -179,18 +175,18 @@ function chamferDistance(water: Uint8Array, resolution: number, cell: number) {
  * connect submerged relief to those shores. The generated world uses `createLakeBedFromTerrain`.
  */
 export function createLakeBed(
-  voxels: readonly Voxel[],
+  boxes: readonly Box[],
   seed: number,
   mobile: boolean,
-  terrainCount = voxels.length,
+  terrainCount = boxes.length,
 ): LakeBed {
-  const { resolution, water, obstacle } = createLakeFootprint(voxels, mobile, terrainCount)
+  const { resolution, water, obstacle } = createLakeFootprint(boxes, mobile, terrainCount)
   const count = resolution * resolution
   const cell = LAKE_BOUNDS.size / resolution
-  const shore = rasterizeShore(voxels, terrainCount, resolution * 2, cell / 2)
+  const shore = rasterizeShore(boxes, terrainCount, resolution * 2, cell / 2)
   const distance = chamferDistance(water, resolution, cell)
   const depth = new Float32Array(count)
-  const stones: Voxel[] = []
+  const stones: Box[] = []
   const noise = (i: number) => {
     let n = Math.imul(i ^ seed, 0x45d9f3b)
     n = Math.imul(n ^ (n >>> 16), 0x45d9f3b)
@@ -375,7 +371,7 @@ export function createLakeBedFromTerrain(
     }
   const distance = chamferDistance(water, resolution, cell)
   const depth = new Float32Array(count)
-  const stones: Voxel[] = []
+  const stones: Box[] = []
   const noise = (i: number) => {
     let h = Math.imul(i ^ seed, 0x45d9f3b)
     h = Math.imul(h ^ (h >>> 16), 0x45d9f3b)

@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { required } from '../invariant'
 import { AUDIO_LAYERS, AmbientMixer } from './ambient-mixer'
 import type { AmbientMixerOptions, AudioFormat, AudioSample } from './ambient-mixer'
+import { THUNDER_RATE } from './thunder'
 
 class Param {
   value = 0
@@ -78,7 +79,7 @@ function fixture(format?: AudioFormat, options: AmbientMixerOptions = { wide: fa
       panners.push(panner)
       return panner
     },
-    decodeAudioData: async () => {
+    decodeAudioData: async (_data: ArrayBuffer): Promise<AudioSample> => {
       const duration = decoded++ === 0 ? 60 : 16
       const sample = { duration, length: duration * 32000, numberOfChannels: 1 }
       samples.push(sample)
@@ -391,7 +392,8 @@ it('spreads each bed over two decorrelated passages, places calls and keeps owls
   mixer.resume()
   // Two passages per bed, each through its own panner on opposite sides.
   expect(voices).toHaveLength(8)
-  expect(panners.map((panner) => panner.pan.value)).toEqual([
+  // The first panner places the whole wind bed; each passage then has its own.
+  expect(panners.slice(1).map((panner) => panner.pan.value)).toEqual([
     -0.65, 0.65, -0.65, 0.65, -0.65, 0.65, -0.65, 0.65,
   ])
   const water = voices.slice(0, 2)
@@ -502,9 +504,284 @@ it('rolls thunder in after a strike, at the speed of sound, only while playing',
   expect(voices.length).toBe(before + 1)
   expect(peal.at).toBeCloseTo(context.currentTime + strike.delay, 9)
   expect(required(panners.at(-1)).pan.value).toBe(-0.3)
-  expect(required(buffers[0]).rate).toBe(32_000)
+  expect(required(buffers[0]).rate).toBe(THUNDER_RATE)
   // A strike too faint to hear renders nothing; a mixer without buffers ignores storms.
   playing.thunder({ ...strike, intensity: 0 })
   expect(buffers).toHaveLength(1)
   expect(() => mixer.thunder(strike)).not.toThrow()
+})
+
+class Filter extends Node {
+  type = 'lowpass'
+  frequency = new Param()
+  Q = new Param()
+}
+class Convolver extends Node {
+  buffer: AudioSample | null = null
+  normalize = false
+}
+/** The optional nodes a real context has: filters, a convolver and buffers. */
+function complete(context: ReturnType<typeof fixture>['context']) {
+  const filters: Filter[] = [],
+    convolvers: Convolver[] = [],
+    buffers: Array<{ channels: number; length: number; rate: number }> = []
+  const full = Object.assign(context, {
+    sampleRate: 32_000,
+    createBiquadFilter: () => {
+      const filter = new Filter()
+      filters.push(filter)
+      return filter
+    },
+    createConvolver: () => {
+      const convolver = new Convolver()
+      convolvers.push(convolver)
+      return convolver
+    },
+    createBuffer: (channels: number, length: number, rate: number) => {
+      buffers.push({ channels, length, rate })
+      return { duration: length / rate, length, numberOfChannels: channels, copyToChannel() {} }
+    },
+  })
+  return { full, filters, convolvers, buffers }
+}
+const lastTarget = (param: Param) => required(required(param.events.at(-1))[0])
+
+it('fades the master without cancelAndHoldAtTime, as in Firefox', async () => {
+  vi.useFakeTimers()
+  const { context, gains, mixer } = fixture()
+  // Firefox's AudioParam: no cancelAndHoldAtTime, but cancelScheduledValues and the rest.
+  const params = gains.map((gain) => gain.gain)
+  for (const param of params) Object.assign(param, { cancelAndHoldAtTime: undefined })
+  const cancelled = vi.spyOn(required(params[0]), 'cancelScheduledValues')
+  await mixer.load()
+  expect(() => mixer.resume()).not.toThrow()
+  const master = required(gains[0]).gain
+  expect(cancelled).toHaveBeenCalledWith(0)
+  // Held at its current value, then ramped up to the master level.
+  expect(master.events.slice(-2)).toEqual([
+    [0, 0],
+    [0.76, 1.5],
+  ])
+  context.currentTime = 3
+  mixer.pause()
+  expect(master.events.slice(-2)).toEqual([
+    [0.76, 3],
+    [0, 3.04],
+  ])
+  // Interrupted half-way, a fade starts from where the previous one had got to, even though
+  // the parameter's reported value is stale.
+  context.currentTime = 10
+  mixer.resume()
+  context.currentTime = 10.75
+  mixer.pause()
+  expect(required(master.events.at(-2))[0]).toBeCloseTo(0.38)
+  expect(required(master.events.at(-2))[1]).toBe(10.75)
+  mixer.dispose()
+})
+
+class Compressor extends Node {
+  threshold = new Param()
+  knee = new Param()
+  ratio = new Param()
+  attack = new Param()
+  release = new Param()
+}
+
+it('limits the louder master before the output, without changing the balance', async () => {
+  const { context, gains, mixer } = fixture()
+  const limiters: Compressor[] = []
+  const limited = Object.assign(context, {
+    createDynamicsCompressor: () => {
+      const limiter = new Compressor()
+      limiters.push(limiter)
+      return limiter
+    },
+  })
+  const graph = new AmbientMixer(limited, 'mp3', { wide: false })
+  expect(limiters).toHaveLength(1)
+  const limiter = required(limiters[0])
+  // Master, limiter, destination: a peak limiter well above the beds, not a compressor.
+  expect(limiter.connections).toEqual([context.destination])
+  const master = required(gains.find((gain) => gain.connections.includes(limiter)))
+  expect(limiter.threshold.value).toBe(-6)
+  expect(limiter.ratio.value).toBeGreaterThanOrEqual(8)
+  expect(limiter.attack.value).toBeLessThan(0.01)
+  await graph.load()
+  graph.resume()
+  expect(lastTarget(master.gain)).toBe(0.76)
+  graph.dispose()
+  expect(limiter.disconnect).toHaveBeenCalled()
+  mixer.dispose()
+})
+
+it('holds with cancelAndHoldAtTime where the browser has it', async () => {
+  const { context, gains, mixer } = fixture()
+  const hold = vi.spyOn(required(gains[0]).gain, 'cancelAndHoldAtTime')
+  const cancel = vi.spyOn(required(gains[0]).gain, 'cancelScheduledValues')
+  await mixer.load()
+  context.currentTime = 2
+  mixer.resume()
+  expect(hold).toHaveBeenCalledWith(2)
+  expect(cancel).not.toHaveBeenCalled()
+  mixer.dispose()
+})
+
+it('admits clips in layer order, whatever order they decode in, and always keeps the water', async () => {
+  const sizes: Record<string, number> = {
+    water: 60,
+    wind: 23,
+    rain: 21,
+    insects: 17,
+    birds: 20,
+    owls: 14,
+    splashes: 8,
+  }
+  const keptWith = async (order: readonly string[]) => {
+    const { context, mixer, voices } = fixture()
+    // Seconds of 32 kHz stereo; 24 MiB holds about 98 s of it, so the last layers cannot fit.
+    let pending: Array<() => void> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => ({
+        ok: true,
+        arrayBuffer: async () => new TextEncoder().encode(url).buffer,
+      })),
+    )
+    context.decodeAudioData = (data: ArrayBuffer) =>
+      new Promise<AudioSample>((resolve) => {
+        const layer = required(/\/audio\/(\w+)\./.exec(new TextDecoder().decode(data))?.[1])
+        const duration = required(sizes[layer])
+        pending.push(() => resolve({ duration, length: duration * 32000, numberOfChannels: 2 }))
+        Object.assign(pending, { [layer]: pending.at(-1) })
+      })
+    const loading = mixer.load()
+    await vi.waitFor(() => expect(pending).toHaveLength(order.length))
+    const byLayer = new Map(Object.entries(pending).filter(([key]) => key in sizes))
+    for (const layer of order) required(byLayer.get(layer))()
+    pending = []
+    await loading
+    mixer.setEnvironment({ solarHour: 12, daylight: 1, windSpeed: 3, rainIntensity: 0.5 })
+    mixer.resume()
+    const durations = new Set(voices.map((voice) => voice.buffer?.duration ?? 0))
+    mixer.dispose()
+    return [...durations].toSorted((a, b) => a - b)
+  }
+  const forwards = await keptWith(AUDIO_LAYERS)
+  const backwards = await keptWith(AUDIO_LAYERS.toReversed())
+  expect(backwards).toEqual(forwards)
+  expect(forwards).toContain(60)
+})
+
+it('opens the rain filter with intensity, damps fog and snow, and silences rain under snow', async () => {
+  const { context, gains, mixer } = fixture()
+  const { full, filters } = complete(context)
+  const graph = new AmbientMixer(full, 'mp3', { wide: false })
+  await graph.load()
+  const [shelf, rain] = filters
+  expect(required(shelf).type).toBe('highshelf')
+  expect(required(rain).type).toBe('lowpass')
+  const at = { solarHour: 12, daylight: 1, windSpeed: 2, rainIntensity: 0.1 }
+  graph.setEnvironment(at)
+  const drizzle = lastTarget(required(rain).frequency)
+  graph.setEnvironment({ ...at, rainIntensity: 1 })
+  expect(lastTarget(required(rain).frequency)).toBeGreaterThan(drizzle * 4)
+  expect(lastTarget(required(shelf).gain)).toBe(-0)
+  // Layer gains of this mixer come after the first fixture mixer's master and layers.
+  const layers = gains.slice(gains.length - AUDIO_LAYERS.length - 3, gains.length - 3)
+  const layer = (name: (typeof AUDIO_LAYERS)[number]) =>
+    required(layers[AUDIO_LAYERS.indexOf(name)]).gain
+  graph.setEnvironment({ ...at, rainIntensity: 1, fog: 1 })
+  expect(lastTarget(required(shelf).gain)).toBe(-14)
+  const clearBirds = (() => {
+    graph.setEnvironment(at)
+    return lastTarget(layer('birds'))
+  })()
+  graph.setEnvironment({ ...at, fog: 1 })
+  expect(lastTarget(layer('birds'))).toBeCloseTo(clearBirds * 0.4)
+  graph.setEnvironment({ ...at, rainIntensity: 1, snow: 1 })
+  expect(lastTarget(layer('rain'))).toBe(0)
+  graph.dispose()
+  mixer.dispose()
+})
+
+it('builds one stereo reverb within the budget, wetter at night, and pre-renders thunder at idle', async () => {
+  vi.useFakeTimers()
+  const { context, gains, mixer } = fixture()
+  const { full, convolvers, buffers } = complete(context)
+  const graph = new AmbientMixer(full, 'mp3', { wide: false })
+  const day = { solarHour: 12, daylight: 1, windSpeed: 2, rainIntensity: 0 }
+  graph.setEnvironment(day)
+  await graph.load()
+  expect(convolvers).toHaveLength(1)
+  expect(required(convolvers[0]).buffer).toMatchObject({ numberOfChannels: 2, length: 80_000 })
+  expect(buffers).toEqual([{ channels: 2, length: 80_000, rate: 32_000 }])
+  // The reverb return is the last gain the mixer made before its owls send.
+  const wet = required(gains.at(-2)).gain
+  const dayWet = lastTarget(wet)
+  graph.setEnvironment({ ...day, daylight: 0, solarHour: 0 })
+  expect(lastTarget(wet)).toBeGreaterThan(dayWet)
+  // Thunder peals render one per idle period, at 8 kHz.
+  await vi.advanceTimersByTimeAsync(1000)
+  expect(buffers.slice(1)).toEqual([
+    { channels: 1, length: 40_000, rate: THUNDER_RATE },
+    { channels: 1, length: 40_000, rate: THUNDER_RATE },
+    { channels: 1, length: 40_000, rate: THUNDER_RATE },
+  ])
+  graph.dispose()
+  mixer.dispose()
+})
+
+it('speeds crickets up in the warm, silences them in the cold and pans the wind upwind', async () => {
+  vi.useFakeTimers()
+  const { voices, panners, mixer } = fixture('mp3', {})
+  const night = { solarHour: 1, daylight: 0, windSpeed: 6, rainIntensity: 0 }
+  mixer.setEnvironment({ ...night, temperature: 28, windPan: 1 })
+  await mixer.load()
+  mixer.resume()
+  const insects = voices.filter((voice) => voice.playbackRate.value > 1)
+  expect(insects).toHaveLength(2)
+  for (const voice of insects) {
+    expect(voice.playbackRate.value).toBeCloseTo(1.096)
+    // A faster passage still ends inside the recording.
+    expect(voice.offset + (voice.end - voice.at) * voice.playbackRate.value).toBeLessThanOrEqual(
+      16.001,
+    )
+  }
+  expect(lastTarget(required(panners[0]).pan)).toBeCloseTo(0.6)
+  mixer.setEnvironment({ ...night, temperature: 4 })
+  expect(lastTarget(required(panners[0]).pan)).toBe(0)
+  mixer.dispose()
+})
+
+it('rumbles a distant storm on its own under reduced motion only', async () => {
+  vi.useFakeTimers()
+  const { context, voices, mixer } = fixture()
+  const { full } = complete(context)
+  const graph = new AmbientMixer(full, 'mp3', { wide: false })
+  const storm = { solarHour: 12, daylight: 1, windSpeed: 2, rainIntensity: 0.4, storm: true }
+  graph.setEnvironment(storm)
+  await graph.load()
+  graph.resume()
+  const peals = () => voices.filter((voice) => (voice.buffer?.duration ?? 0) === 5).length
+  for (let i = 0; i < 400; i++) {
+    context.currentTime += 0.25
+    vi.advanceTimersByTime(250)
+  }
+  expect(peals()).toBe(0)
+  graph.setEnvironment({ ...storm, reducedMotion: true })
+  for (let i = 0; i < 400; i++) {
+    context.currentTime += 0.25
+    vi.advanceTimersByTime(250)
+  }
+  expect(peals()).toBeGreaterThanOrEqual(2)
+  expect(peals()).toBeLessThanOrEqual(6)
+  graph.setEnvironment({ ...storm, storm: false, reducedMotion: true })
+  const count = peals()
+  for (let i = 0; i < 400; i++) {
+    context.currentTime += 0.25
+    vi.advanceTimersByTime(250)
+  }
+  expect(peals()).toBe(count)
+  graph.dispose()
+  mixer.dispose()
 })
