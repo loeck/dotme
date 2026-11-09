@@ -85,8 +85,14 @@ floaters through buoyancy as they arrive. Floaters
 join the fish capture, so their submerged half refracts through the surface, and each reports its
 waterline circle so the lake draws a thin meniscus ring where it crosses the moving surface.
 The buoy can be picked with mouse, touch or pen, using a small screen-space hit tolerance.
-A damped spring follows a camera-facing drag plane while terrain collision remains active.
-Releasing restores gravity and bounded throw momentum; cancellation, capture loss and blur
+A damped spring (`GRAB` in `floating-bodies.ts`) pulls it toward a camera-facing drag plane, or
+along the water just under its resting level once the pointer goes below the waterline, so the
+body lags, overshoots a little and still collides with terrain, boulders and the floating leaves.
+Held, it keeps the water's forces: drag toward the surface's own motion and the buoyancy of its
+wetted share, so it bobs on passing waves and slows in the water. Dragged through the lake it
+leaves a trough every 12 cm travelled (broad, bounded impulses into the shared field), plunging
+in or tearing out throws a splash, and a drag faster than 1.1 m/s throws spray, all through the
+lake splashes and their sounds. Releasing restores gravity and bounded throw momentum; cancellation, capture loss and blur
 release it safely. A dry buoy re-entering the lake sends a wave and droplets back to the shared
 surface. Grabbing takes priority over the lake's hold, flick and double-tap gestures.
 
@@ -107,9 +113,11 @@ Shore splashes and pointer bursts fly droplets as dynamic
 bodies whose water landings return impulses to the field. Terrain collision events supply
 near-shore impacts. The buoy and drifting leaves receive buoyancy and drag at several body
 points, allowing torque from uneven waves. Continuous collision detection is enabled only
-for curtain parcels near the moving blocker. Foam flecks advect on the CPU with wind and
-slope currents and collapse against the shore distance field.
+for curtain parcels near the moving blocker.
 
+Impulses with a non-finite position, radius or velocity, or off the field, are refused before
+they reach the field or the CPU contacts (`waterImpulse`), contact samples never return NaN, and
+a field cell that turns non-finite restarts at rest on the next step instead of spreading.
 Unit tests cover equations, fixed-step behavior, impulse bounds, shore handling and wind.
 Verifying the GPU water solver requires a genuine WebGPU adapter. Use the production benchmark to
 inspect seeded water at rest, during interaction and in rain; compare like-for-like captures.

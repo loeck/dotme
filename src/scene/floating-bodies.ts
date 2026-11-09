@@ -24,9 +24,63 @@ import { contactNoise } from './water-noise'
 import { sampleWaterContact } from './water-surface'
 import type { WindState } from './wind'
 
-/** Floaters strike terrain only: neither droplets, fish, nor each other. */
-const FLOATER_GROUPS = (0x0002 << 16) | 0x0001
+/**
+ * Floaters strike terrain only: neither droplets, fish, nor each other. The buoy has its own
+ * membership so that, while held, it shoulders the leaves aside (and they it).
+ */
+const FLOATER_GROUPS = (0x0002 << 16) | 0x0011
+const BUOY_GROUPS = (0x0010 << 16) | 0x0001
+const HELD_BUOY_GROUPS = (0x0010 << 16) | 0x0003
 const GRAVITY = 9.81
+
+/**
+ * The held buoy follows the pointer on a damped spring rather than being placed, so it lags,
+ * collides and still feels the water: drag toward the water's own motion and the buoyancy of
+ * its wetted share (its weight is carried by the hand).
+ */
+export const GRAB = {
+  /** Spring and damping per unit mass: slightly under critical, so it overshoots a touch. */
+  stiffness: 120,
+  damping: 18,
+  /** Largest spring acceleration, m/s². */
+  limit: 100,
+  /** Water drag per second at full immersion. */
+  waterDrag: 7,
+  /** How far under the resting level the hand may push it, in radii. */
+  depth: 1.3,
+  /**
+   * Wake troughs while it moves through the water: one per `wakeTravel` metres, at most every
+   * `wakeSpacing` seconds, each at most `wakeDepth` (the GPU field's impulse velocity) and
+   * as broad as a pointer stroke's splat: narrower, repeated splats steepen the field until
+   * its shading breaks.
+   */
+  wakeSpacing: 0.06,
+  wakeTravel: 0.12,
+  wakeRadius: 0.45,
+  wakeDepth: 0.07,
+  /** Horizontal speed (m/s) past which a dragged buoy throws spray, and their spacing. */
+  sprayFrom: 1.1,
+  spraySpacing: 0.18,
+} as const
+
+/**
+ * Acceleration along one axis of a held body `offset` metres short of its target, moving at
+ * `velocity` through water moving at `water`, `immersion` 0–1 wet; `vertical` adds buoyancy.
+ */
+export function grabAcceleration(
+  offset: number,
+  velocity: number,
+  water: number,
+  immersion: number,
+  vertical: boolean,
+) {
+  const spring = Math.max(
+    -GRAB.limit,
+    Math.min(GRAB.limit, offset * GRAB.stiffness - velocity * GRAB.damping),
+  )
+  const wet = Math.max(0, Math.min(1, immersion))
+  return spring + (water - velocity) * GRAB.waterDrag * wet + (vertical ? GRAVITY * wet : 0)
+}
 const SPLASH_SPEED = 1
 const LEAF_COLORS = [0x4a7c3a, 0x5d8f43, 0x3d6e33]
 const BUOY_POINTS = [
@@ -50,6 +104,7 @@ type Floater = {
   flatten: number
   home: { x: number; z: number }
   wakeAt: number
+  sprayAt: number
   dry: boolean
   born: number
   fadeAt: number
@@ -137,7 +192,7 @@ export class FloatingBodies {
           .setDensity(spec.density)
           .setRestitution(0.25)
           .setFriction(0.6)
-          .setCollisionGroups(FLOATER_GROUPS),
+          .setCollisionGroups(spec.flatten < 1 ? FLOATER_GROUPS : BUOY_GROUPS),
         body,
       )
       this.floaters.push({
@@ -148,6 +203,7 @@ export class FloatingBodies {
         flatten: spec.flatten,
         home,
         wakeAt: -Infinity,
+        sprayAt: -Infinity,
         dry: false,
         born: -Infinity,
         fadeAt: Infinity,
@@ -302,6 +358,7 @@ export class FloatingBodies {
       this.held = floater
       this.grabTarget.copy(position)
       floater.body.setGravityScale(0, true)
+      this.setGroups(floater, HELD_BUOY_GROUPS)
       return position.clone()
     }
     return null
@@ -311,7 +368,7 @@ export class FloatingBodies {
     if (!this.held || !Number.isFinite(target.x + target.y + target.z)) return
     this.grabTarget.set(
       Math.max(-LAKE_BOUNDS.size / 2 + 6, Math.min(LAKE_BOUNDS.size / 2 - 6, target.x)),
-      Math.max(WATER_LEVEL, Math.min(WATER_LEVEL + 6, target.y)),
+      Math.max(WATER_LEVEL - this.held.radius * GRAB.depth, Math.min(WATER_LEVEL + 6, target.y)),
       Math.max(LAKE_BOUNDS.minZ + 6, Math.min(12, target.z)),
     )
   }
@@ -321,9 +378,15 @@ export class FloatingBodies {
     if (!floater) return
     this.held = null
     floater.body.setGravityScale(1, true)
+    this.setGroups(floater, BUOY_GROUPS)
     const velocity = this.point.copy(floater.body.linvel()).clampLength(0, 6)
     if (cancelled) velocity.set(0, 0, 0)
     floater.body.setLinvel(velocity, true)
+  }
+
+  private setGroups(floater: Floater, groups: number) {
+    for (let i = 0; i < floater.body.numColliders(); i++)
+      floater.body.collider(i).setCollisionGroups(groups)
   }
 
   /** Crown volumes come from the rendered trees; only overhanging water can shed here. */
@@ -384,19 +447,7 @@ export class FloatingBodies {
       body.resetForces(false)
       body.resetTorques(false)
       if (floater === this.held) {
-        const force = (delta: number, speed: number) =>
-          Math.max(-100, Math.min(100, delta * 180 - speed * 26)) * floater.mass
-        body.addForce(
-          {
-            x: force(this.grabTarget.x - position.x, velocity.x),
-            y: force(this.grabTarget.y - position.y, velocity.y),
-            z: force(this.grabTarget.z - position.z, velocity.z),
-          },
-          true,
-        )
-        floater.dry =
-          position.y >
-          this.surfaceAt(position.x, position.z, stepTime, wind, floater.radius)[0] + floater.radius
+        this.applyHeldForces(floater, stepTime, wind)
         continue
       }
       const leaf = floater.flatten < 1
@@ -482,6 +533,62 @@ export class FloatingBodies {
         this.onWake?.(position.x, position.z, 0.3, -(0.008 + speed * 0.008))
       }
     }
+  }
+
+  /**
+   * The held buoy: a spring toward the hand plus the water it is pushed through. Moving wet it
+   * sends a wake, plunging in or tearing out throws spray, and a fast drag throws spray too.
+   */
+  private applyHeldForces(floater: Floater, stepTime: number, wind: WindState) {
+    const { body, radius, mass } = floater
+    const position = body.translation()
+    const velocity = body.linvel()
+    const [surface, , , dhdt] = this.surfaceAt(position.x, position.z, stepTime, wind, radius)
+    const index = lakeIndex(this.bed, position.x, position.z)
+    const afloat = index >= 0 && sampleShore(this.bed, position.x, position.z) > 0
+    const wet = afloat
+      ? Math.max(0, Math.min(1, (surface - position.y + radius) / (2 * radius)))
+      : 0
+    const target = this.grabTarget
+    body.addForce(
+      {
+        x: grabAcceleration(target.x - position.x, velocity.x, 0, wet, false) * mass,
+        y: grabAcceleration(target.y - position.y, velocity.y, dhdt, wet, true) * mass,
+        z: grabAcceleration(target.z - position.z, velocity.z, 0, wet, false) * mass,
+      },
+      true,
+    )
+    const speed = Math.hypot(velocity.x, velocity.z)
+    if (wet > 0 && floater.dry && velocity.y < -0.3) {
+      // Plunged in: a ring and a splash, as for a drop.
+      const energy = Math.min(0.8, -velocity.y * 0.18 + speed * 0.08)
+      this.onWake?.(position.x, position.z, 0.15 + radius * 2, -energy * 0.1)
+      this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
+      floater.sprayAt = stepTime
+    } else if (wet === 0 && !floater.dry && velocity.y > 0.5) {
+      // Torn out: the water it drags up falls back.
+      const energy = Math.min(0.45, velocity.y * 0.14)
+      this.onWake?.(position.x, position.z, 0.2 + radius, energy * 0.08)
+      this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
+      floater.sprayAt = stepTime
+    }
+    if (wet > 0.05 && speed > 0.12 && stepTime - floater.wakeAt > GRAB.wakeSpacing) {
+      // One trough per hull length travelled: the lake carries the wake on from there.
+      floater.wakeAt = stepTime + Math.min(0.25, GRAB.wakeTravel / speed) - GRAB.wakeSpacing
+      const depth = Math.min(1, wet * 1.6)
+      this.onWake?.(
+        position.x,
+        position.z,
+        GRAB.wakeRadius,
+        -Math.min(GRAB.wakeDepth, 0.01 + speed * 0.025) * depth,
+      )
+    }
+    if (wet > 0.15 && speed > GRAB.sprayFrom && stepTime - floater.sprayAt > GRAB.spraySpacing) {
+      floater.sprayAt = stepTime
+      const energy = Math.min(0.5, 0.12 + (speed - GRAB.sprayFrom) * 0.18)
+      this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
+    }
+    floater.dry = wet === 0
   }
 
   private escaped(floater: Floater) {

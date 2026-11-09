@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { required } from '../invariant'
 import { createBoxIndex } from './box-index'
 import type { Box } from './box-index'
-import { FloatingBodies } from './floating-bodies'
+import { FloatingBodies, GRAB, grabAcceleration } from './floating-bodies'
 import { createLakeBed, sampleShore, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
@@ -258,5 +258,80 @@ describe('floating bodies', () => {
     const first = await run(42)
     expect(await run(42)).toEqual(first)
     expect((await run(43)).end).not.toEqual(first.end)
+  })
+})
+
+const follow = (immersion: number, water = 0) => {
+  // A hand moving at 1 m/s; the body starts with it.
+  let x = 0,
+    v = 1,
+    lag = 0
+  for (let t = 0; t < 2; t += 1 / 120) {
+    v += grabAcceleration(t - x, v, water, immersion, false) / 120
+    x += v / 120
+    lag = t - x
+  }
+  return lag
+}
+
+describe('grab spring', () => {
+  it('lags the hand more through water than through air', () => {
+    expect(follow(0)).toBeLessThan(0.16)
+    expect(follow(1)).toBeGreaterThan(follow(0) * 1.2)
+  })
+
+  it('floats a wet body a little above the hand and carries it with the water', () => {
+    // At rest, wet: buoyancy balances the spring a few centimetres high.
+    const rise = (9.81 * 0.5) / GRAB.stiffness
+    expect(grabAcceleration(-rise, 0, 0, 0.5, true)).toBeCloseTo(0, 6)
+    expect(grabAcceleration(0, 0, 0.3, 1, false)).toBeGreaterThan(0)
+  })
+
+  it('bounds the pull', () => {
+    expect(grabAcceleration(100, 0, 0, 0, false)).toBe(GRAB.limit)
+  })
+})
+
+describe('held buoy in the water', () => {
+  it('sends a wake and spray while dragged through the lake, and collides on', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 42, true, physics)
+    const floating = new FloatingBodies(scene, bed, 42, true, physics, splashes)
+    const contact = new WaterContact(bed)
+    splashes.setWaterContact(contact)
+    floating.setWaterContact(contact)
+    const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      const [bx, by, bz] = required(positionsOf(floating)[0])
+      const ray = new Ray(new Vector3(bx, by + 3, bz), new Vector3(0, -1, 0))
+      expect(floating.grab(ray, 0.005, 10)).not.toBeNull()
+      const wakes: number[][] = []
+      floating.onWake = (...wake) => wakes.push(wake)
+      let lowest = Infinity
+      for (let frame = 0; frame < 150; frame++) {
+        const time = frame / 60
+        // Swept back and forth along the waterline at up to ~2 m/s.
+        const x = bx + Math.sin(time * 3) * 0.7
+        floating.moveGrab(new Vector3(x, WATER_LEVEL - 0.03, bz))
+        floating.update(time, calm.sample(time))
+        splashes.update(time, calm.sample(time))
+        if (frame > 30) lowest = Math.min(lowest, required(required(positionsOf(floating)[0])[1]))
+      }
+      // Buoyancy holds it near the surface rather than at the hand's depth.
+      expect(lowest).toBeGreaterThan(WATER_LEVEL - 0.075)
+      const troughs = wakes.filter((wake) => required(wake[3]) < 0)
+      expect(troughs.length).toBeGreaterThan(10)
+      // Broad, bounded troughs: the GPU field takes them without steepening.
+      const deepest = Math.min(...troughs.map((wake) => required(wake[3])))
+      expect(deepest).toBeLessThan(-0.03)
+      expect(deepest).toBeGreaterThanOrEqual(-GRAB.wakeDepth)
+      expect(splashes.emitted).toBeGreaterThan(0)
+      floating.releaseGrab()
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
   })
 })

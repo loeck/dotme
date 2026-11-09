@@ -4,7 +4,6 @@ import type { Camera, Object3D, Ray, Scene, Vector3, Vector4, WebGPURenderer } f
 import type { FishBait } from './fish-pointer'
 import { PointerDisturbance } from './fish-pointer'
 import { FloatingBodies } from './floating-bodies'
-import { FoamDrift } from './foam-drift'
 import { LakeCaustics } from './lake-caustics'
 import { LakeFireflies } from './lake-fireflies'
 import type { FireflyPointer } from './lake-fireflies'
@@ -55,7 +54,6 @@ export class SceneDetails {
   private readonly splashes: LakeSplashes
   private readonly floating: FloatingBodies
   private waterlines?: readonly Vector4[]
-  private readonly foam: FoamDrift
   private readonly fireflies: LakeFireflies
   private readonly waterfall: LakeWaterfall | undefined
   private readonly wetness = this.resources.own(new ShoreWetness())
@@ -92,7 +90,6 @@ export class SceneDetails {
     this.floating = this.resources.own(
       new FloatingBodies(scene, world.lakeBed, world.seed, mobile, physics, this.splashes),
     )
-    this.foam = this.resources.own(new FoamDrift(scene, world.lakeBed, world.seed, mobile))
     if (world.waterfall) {
       this.waterfall = this.resources.own(
         new LakeWaterfall(
@@ -114,7 +111,6 @@ export class SceneDetails {
       this.splashes.impacts.mesh,
       this.splashes.impacts.slopes,
       this.floating.mesh,
-      this.foam.mesh,
     ]
     if (this.waterfall) roots.push(this.waterfall.group)
     this.probeStates = roots.map((root) => ({ root, visible: root.visible }))
@@ -246,7 +242,6 @@ export class SceneDetails {
     this.waterfall?.update(time, daylight, intro, wind)
     this.floating.update(time, wind, this.reducedMotion)
     if (this.waterlines) this.floating.waterlines(this.waterlines)
-    this.foam.update(time, wind, this.reducedMotion)
     this.splashes.update(time, wind, this.reducedMotion, intro)
     // The shared world step is owned by splashes; curtain landings reach the lake next frame.
     if (!this.reducedMotion) this.waterfall?.syncCurtain()

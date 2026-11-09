@@ -44,7 +44,7 @@ const firstInstance = (scene: Scene, name: string) => {
 }
 
 describe('details water layer', () => {
-  it('routes pointer bursts to splash impulses and advances floaters and foam', async () => {
+  it('routes pointer bursts to splash impulses and advances floaters', async () => {
     const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
     const scene = new Scene()
     const material = new LakeWaterMaterial()
@@ -62,7 +62,6 @@ describe('details water layer', () => {
         material.uniforms,
       )
       const floaterStart = firstInstance(scene, 'floating-bodies')
-      const foamStart = firstInstance(scene, 'drifting-foam')
       details.pointerBurst(5, -5, 0.55, 0, windy.sample(0))
       expect(returns[0]?.slice(0, 2)).toEqual([5, -5])
       for (let frame = 0; frame < 120; frame++) {
@@ -71,7 +70,6 @@ describe('details water layer', () => {
       }
       expect(returns.length).toBeGreaterThan(0)
       expect(firstInstance(scene, 'floating-bodies')).not.toEqual(floaterStart)
-      expect(firstInstance(scene, 'drifting-foam')).not.toEqual(foamStart)
     } finally {
       details.dispose()
       material.dispose()
@@ -95,14 +93,12 @@ describe('details water layer', () => {
         (x, z, radius, velocity) => returns.push([x, z, radius, velocity]),
         new LakeWaterMaterial().uniforms,
       )
-      const foamStart = firstInstance(scene, 'drifting-foam')
       details.pointerBurst(5, -5, 0.55, 0, windy.sample(0))
       for (let frame = 0; frame < 60; frame++) {
         const time = frame / 60
         details.update(time, 1 / 60, windy.sample(time), null, null, 0, 1)
       }
       expect(returns).toHaveLength(0)
-      expect(firstInstance(scene, 'drifting-foam')).toEqual(foamStart)
     } finally {
       details.dispose()
       physics.dispose()

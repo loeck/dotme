@@ -33,7 +33,18 @@ export const AUDIO_LAYERS = [
 ] as const
 type Layer = (typeof AUDIO_LAYERS)[number] | 'waterfall'
 export type AudioFormat = 'ogg' | 'mp3'
-const MASTER = 0.38
+/**
+ * The landscape's overall level, 6 dB above the 0.38 it long played at, which sounded faint
+ * next to other pages. The clips keep -9 dBTP of headroom (docs/living-landscape.md); the
+ * limiter below catches the rare peaks the louder master leaves too little room for.
+ */
+const MASTER = 0.76
+/**
+ * A gentle peak limiter before the output: beds and calls pass untouched below -6 dBFS, while
+ * thunder over a full rain bed, a near splash or music over the beds is held under full scale
+ * instead of clipping. Fast attack, a quarter-second release so the rain does not pump.
+ */
+const LIMITER = { threshold: -6, knee: 4, ratio: 12, attack: 0.003, release: 0.25 } as const
 /** Fixed level of the splash takes; each event already carries its distance attenuation. */
 const SPLASH_LEVEL = 0.3
 /** Peak gain of a skip note before the master: under the splash it rides on. */
@@ -131,6 +142,13 @@ interface MixerSource extends MixerNode {
   stop(time: number): void
   addEventListener(type: 'ended', listener: () => void, options: { once: boolean }): void
 }
+interface CompressorParams {
+  readonly threshold: { value: number }
+  readonly knee: { value: number }
+  readonly ratio: { value: number }
+  readonly attack: { value: number }
+  readonly release: { value: number }
+}
 /** The mixer requires only these public audio operations; tests provide the same contract. */
 export interface AmbientAudioContext {
   readonly currentTime: number
@@ -148,6 +166,8 @@ export interface AmbientAudioContext {
   createBiquadFilter?(): MixerFilter
   /** Optional: without it the landscape plays dry. */
   createConvolver?(): MixerConvolver
+  /** Optional: without it the master reaches the output unlimited. */
+  createDynamicsCompressor?(): MixerNode & CompressorParams
   readonly sampleRate?: number
 }
 
@@ -164,6 +184,26 @@ function holdAt(param: MixerParam, time: number, value = param.value) {
   }
   param.cancelScheduledValues(time)
   param.setValueAtTime(value, time)
+}
+
+/**
+ * The context's output behind the peak limiter (`LIMITER`), or the bare destination where the
+ * context has no compressor; `limiters` collects what was created, for disposal.
+ */
+function limitedOutput<N extends MixerNode>(
+  context: Readonly<{ destination: N; createDynamicsCompressor?: () => N & CompressorParams }>,
+  limiters: MixerNode[],
+): N {
+  const limiter = context.createDynamicsCompressor?.()
+  if (!limiter) return context.destination
+  limiter.threshold.value = LIMITER.threshold
+  limiter.knee.value = LIMITER.knee
+  limiter.ratio.value = LIMITER.ratio
+  limiter.attack.value = LIMITER.attack
+  limiter.release.value = LIMITER.release
+  limiter.connect(context.destination)
+  limiters.push(limiter)
+  return limiter
 }
 
 /** Runs `task` when the main thread is idle, or soon where idle callbacks are missing. */
@@ -188,6 +228,8 @@ export class AmbientMixer {
   private readonly reverbIn: MixerGain
   private readonly reverbOut: MixerGain
   private readonly sends: MixerGain[] = []
+  /** The peak limiters before the outputs: one, shared with the music in the page's context. */
+  private readonly limiters: MixerNode[] = []
   private convolver: MixerConvolver | undefined
   private readonly thunderBuffers: Array<MixerBuffer | undefined> = []
   private cancelIdle: (() => void) | undefined
@@ -235,6 +277,12 @@ export class AmbientMixer {
     this.context = context
     this.format = format
     this.wide = options.wide ?? true
+    const media = options.media
+    // In the page's single context the landscape and the music share one limiter, so their sum
+    // is held under full scale too.
+    const mediaOutput = media ? limitedOutput<AudioNode>(media, this.limiters) : undefined
+    const landscapeOutput: MixerNode =
+      mediaOutput && media === context ? mediaOutput : limitedOutput(context, this.limiters)
     this.master = context.createGain()
     this.master.gain.value = 0
     this.shelf = context.createBiquadFilter?.()
@@ -243,8 +291,8 @@ export class AmbientMixer {
       this.shelf.frequency.value = 2000
       this.shelf.gain.value = 0
       this.master.connect(this.shelf)
-      this.shelf.connect(context.destination)
-    } else this.master.connect(context.destination)
+      this.shelf.connect(landscapeOutput)
+    } else this.master.connect(landscapeOutput)
     this.rainFilter = context.createBiquadFilter?.()
     if (this.rainFilter) {
       this.rainFilter.type = 'lowpass'
@@ -272,12 +320,11 @@ export class AmbientMixer {
     const synthesis = context.createBuffer ? THUNDER_BYTES : 0
     const room = context.createConvolver && context.createBuffer ? reverbBytes(this.rate) : 0
     this.reservedBytes = synthesis + room
-    const media = options.media
-    if (media) {
+    if (media && mediaOutput) {
       // Streamed music follows the same master fades on its own output.
       this.mediaMaster = media.createGain()
       this.mediaMaster.gain.value = 0
-      this.mediaMaster.connect(media.destination)
+      this.mediaMaster.connect(mediaOutput)
       // Music follows the clips' format, including a fallback to MP3 after an Ogg failure.
       this.music = new AmbientMusic(media, this.mediaMaster, () => this.format, {
         element: options.musicElement,
@@ -773,6 +820,7 @@ export class AmbientMixer {
       this.shelf?.disconnect()
       this.music?.dispose()
       this.mediaMaster?.disconnect()
+      for (const limiter of this.limiters) limiter.disconnect()
     }
     if (fade) setTimeout(disconnect, fade * 1000 + 30)
     else disconnect()

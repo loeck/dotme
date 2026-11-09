@@ -56,6 +56,7 @@ export class EnvironmentProbe {
   private filteredTarget: CubeRenderTarget | undefined
   private readonly world: ProbeScene
   private at = -Infinity
+  /** The atmosphere clock at the previous update, to tell a clock jump from a slow sweep. */
   private time = -Infinity
   private face = 6
   private skyRound = 0
@@ -126,13 +127,17 @@ export class EnvironmentProbe {
    * refresh takes about half a second.
    */
   update(now: number, atmosphereTime: number, interval: number) {
-    // A clock jump (time scrub, weather change) restarts the sweep immediately.
+    // A clock jump (time scrub, weather change) restarts the sweep immediately. It is measured
+    // from the previous frame, not from the sweep's first face: six faces at the 200 ms
+    // low-power interval span just over a second, and measuring from the first face restarted
+    // every such sweep before it was filtered, so the lighting stayed stale and then jumped
+    // (crowns brightened by about a quarter in one frame) whenever frame timing let one finish.
     const jump = atmosphereTime < this.time || atmosphereTime - this.time > 1
+    this.time = atmosphereTime
     if (jump) this.face = 0
     if (!jump && this.world.state.intro === 1 && now - this.at < interval) return
     const face = this.face
     this.at = now
-    if (face === 0) this.time = atmosphereTime
 
     this.renderFaces([face])
     this.face = (face + 1) % 6

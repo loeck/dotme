@@ -265,6 +265,11 @@ declare global {
   interface Window {
     sceneElimination?: SceneElimination
     sceneGpuInfo?: () => SceneGpuInfo
+    /**
+     * Sends a flock now (`crow`, `gull`, `mallard`, `swift`, or one the hour picks), `nearer`
+     * metres closer than usual over the lake; for captures.
+     */
+    sceneFlock?: (species?: string, nearer?: number) => boolean
     sceneRenderCapture?: {
       start: () => void
       stop: () => SceneRenderCapture | null

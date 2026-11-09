@@ -1,4 +1,4 @@
-import { Vector3 } from 'three/webgpu'
+import { Matrix4, Quaternion, Vector3 } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
 import { FallingLeaves, LEAVES, paletteColour, seasonPalette } from './falling-leaves'
@@ -113,5 +113,71 @@ describe('seasonal leaf fall', () => {
       const palette = seasonPalette(autumn, 0.5)
       expect(palette.map(([hex]) => hex)).toContain(paletteColour(palette, pick))
     }
+  })
+})
+
+const surface = (x: number, _z: number, time: number) => 0.03 * Math.sin(x * 2 - time * 3)
+
+describe('leaves as bodies', () => {
+  it('rest on the ground below them and lie flat there', () => {
+    const leaves = forest()
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    for (let t = 1; t < 9; t += 1 / 30) leaves.update(t, 1 / 30, calm, 0, undefined)
+    expect(leaves.grounded).toBeGreaterThan(0)
+    const matrix = new Matrix4(),
+      position = new Vector3(),
+      rotation = new Quaternion(),
+      scale = new Vector3(),
+      normal = new Vector3()
+    for (let i = 0; i < leaves.mesh.count; i++) {
+      leaves.mesh.getMatrixAt(i, matrix)
+      matrix.decompose(position, rotation, scale)
+      if (scale.x === 0) continue
+      expect(position.y).toBeGreaterThanOrEqual(0)
+      expect(position.y).toBeLessThan(0.05)
+      expect(Math.abs(normal.set(0, 1, 0).applyQuaternion(rotation).y)).toBeGreaterThan(0.95)
+    }
+    leaves.dispose()
+  })
+
+  it('float on the live surface, riding its waves and drifting', () => {
+    const ripples: number[] = []
+    const leaves = new FallingLeaves(
+      32,
+      new Vector3(0, 2, 16),
+      () => ({ y: 0, water: true }),
+      (x) => ripples.push(x),
+      seeded(3),
+      {
+        water: (x, z, time, _wind, out) => {
+          out[0] = surface(x, z, time)
+          out[1] = 0.06 * Math.cos(x * 2 - time * 3)
+          out[2] = 0
+        },
+      },
+    )
+    leaves.setSources(Float32Array.from([0, 6, 0, 2]))
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    let t = 1
+    for (; t < 9; t += 1 / 60) leaves.update(t, 1 / 60, calm, 0, undefined)
+    expect(leaves.floating).toBeGreaterThan(0)
+    expect(ripples.length).toBeGreaterThan(0)
+    const matrix = new Matrix4(),
+      position = new Vector3()
+    for (let i = 0; i < leaves.mesh.count; i++) {
+      leaves.mesh.getMatrixAt(i, matrix)
+      position.setFromMatrixPosition(matrix)
+      if (matrix.elements[0] === 0 && matrix.elements[5] === 0) continue
+      expect(Math.abs(position.y - surface(position.x, position.z, t - 1 / 60))).toBeLessThan(0.05)
+    }
+    leaves.dispose()
   })
 })

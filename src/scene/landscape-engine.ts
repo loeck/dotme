@@ -577,6 +577,12 @@ export class LandscapeEngine {
       life: this.life,
       leafGround: (x, z, fromY) => this.picker.restingPoint(x, z, fromY),
       ripple: (x, z) => this.simulation.addImpulse(x, z, 0.14, -0.05),
+      leafWater: (x, z, time, wind, out) => {
+        const [height, dx, dz] = this.simulation.contact.sample(x, z, time, wind, 0.1)
+        out[0] = height
+        out[1] = dx
+        out[2] = dz
+      },
     })
     this.receiveSceneLight(this.wildlife.leaves.mesh.material, { translucency: 0.6, gain: 2 })
 

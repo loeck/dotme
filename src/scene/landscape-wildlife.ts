@@ -1,18 +1,23 @@
 import type { Camera, Scene } from 'three/webgpu'
 
 import { BirdFlock, FLOCK } from './bird-flock'
+import { BIRD_SPECIES, SPECIES } from './bird-species'
+import type { BirdSpeciesName, FlockContext } from './bird-species'
 import { FallingLeaves, LEAVES } from './falling-leaves'
+import type { LeafWater } from './falling-leaves'
 import { FlockSchedule } from './flock-schedule'
 import type { LakeBed } from './lake-bed'
 import type { LandscapeState } from './landscape-state'
 import type { LightingState } from './lighting'
+import { smoothstep } from './math'
 import type { PhysicsWorld } from './physics-world'
 import type { ScenePicker } from './scene-picking'
 import type { Season, SeasonalLife } from './season'
 import { SeasonalFauna } from './seasonal-fauna'
 import type { SolarEndpoints } from './solar-clock'
-import { wrapDay } from './solar-clock'
+import { DEFAULT_SOLAR, wrapDay } from './solar-clock'
 import type { SceneWeatherState } from './weather-state'
+import type { WindState } from './wind'
 
 export type WildlifeWorld = Readonly<{
   scene: Scene
@@ -30,6 +35,8 @@ export type WildlifeWorld = Readonly<{
   leafGround: (x: number, z: number, fromY: number) => { y: number; water: boolean }
   /** A leaf settling on the water rings it. */
   ripple: (x: number, z: number) => void
+  /** The live lake surface floating leaves ride; the resting level without it. */
+  leafWater?: LeafWater<WindState>
 }>
 
 export type WildlifeFrame = Readonly<{
@@ -48,22 +55,32 @@ export type WildlifeFrame = Readonly<{
  */
 export class LandscapeWildlife {
   readonly birds: BirdFlock
-  readonly leaves: FallingLeaves
+  readonly leaves: FallingLeaves<WindState>
   readonly fauna: SeasonalFauna
   readonly flocks: FlockSchedule
   private readonly world: WildlifeWorld
+  /** Who flies depends on the hour and the sky; the latest frame's, for the flock schedule. */
+  private readonly sky: { -readonly [K in keyof Omit<FlockContext, 'fromCrown'>]: FlockContext[K] }
+  private readonly unpublish: () => void
 
   constructor(world: WildlifeWorld) {
     this.world = world
     const { scene, life, season } = world
-    const flockSize = world.lowPower ? FLOCK.lowPowerSize : FLOCK.size
-    this.birds = new BirdFlock(Math.max(3, Math.round(flockSize * life.birds)))
+    // Winter thins the flocks; low-power devices fly fewer birds.
+    const share = life.birds * (world.lowPower ? FLOCK.lowPowerShare : 1)
+    const flockSize = (species: BirdSpeciesName) =>
+      Math.max(FLOCK.minimum, Math.round(SPECIES[species].count * share))
+    this.birds = new BirdFlock(Math.max(...BIRD_SPECIES.map(flockSize)))
     scene.add(this.birds.group)
+    const noon = (DEFAULT_SOLAR.sunset - DEFAULT_SOLAR.sunrise) / 2
+    this.sky = { season, sinceSunrise: noon, untilSunset: noon, overcast: 0 }
     this.leaves = new FallingLeaves(
-      world.mobile ? LEAVES.mobileCapacity : LEAVES.capacity,
+      world.mobile || world.lowPower ? LEAVES.mobileCapacity : LEAVES.capacity,
       world.camera.position,
       world.leafGround,
       world.ripple,
+      Math.random,
+      { lowPower: world.lowPower, ...(world.leafWater ? { water: world.leafWater } : {}) },
     )
     scene.add(this.leaves.mesh)
     this.leaves.setSeason({
@@ -88,7 +105,15 @@ export class LandscapeWildlife {
       state: world.state,
       seed: world.seed,
       rate: life.birds,
+      flockSize,
+      context: () => this.sky,
     })
+    // A capture hook, like the benchmark's: never called by the scene itself.
+    const force = (species?: string, nearer?: number) => this.flocks.force(species, nearer)
+    if (typeof window !== 'undefined') window.sceneFlock = force
+    this.unpublish = () => {
+      if (typeof window !== 'undefined' && window.sceneFlock === force) delete window.sceneFlock
+    }
   }
 
   /** Hidden until a gust or a flight; every view compiles them up front. */
@@ -116,7 +141,13 @@ export class LandscapeWildlife {
     const { weather, light } = frame
     // The blended weather follows live refreshes; until a report carries a temperature the
     // season's typical one stands in.
-    const { fog, snow } = weather.levels
+    const { fog, snow, diffuse } = weather.levels
+    const now = wrapDay(frame.solarSeconds)
+    this.sky.sinceSunrise = now - frame.solar.sunrise
+    this.sky.untilSunset = frame.solar.sunset - now
+    this.sky.overcast = smoothstep(0.95, 0.65, diffuse)
+    this.birds.setLight(light)
+    this.birds.setHaze(this.world.scene.fog)
     this.fauna.update({
       time: this.world.state.elapsed,
       dt: frame.dt,
@@ -139,6 +170,7 @@ export class LandscapeWildlife {
   }
 
   dispose() {
+    this.unpublish()
     this.birds.group.removeFromParent()
     this.birds.dispose()
     this.fauna.dispose()

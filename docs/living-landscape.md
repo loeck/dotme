@@ -43,6 +43,15 @@ not measured: its gain follows the square root of the intensity (a quarter of th
 half the level), the water and waterfall duck by the same curve, and a low-pass on the rain bed
 opens from 1.2 kHz in a drizzle to 11 kHz in a downpour. Snow silences the rain bed.
 
+Every layer, call, note and peal meets at one master gain of 0.76. That is 6 dB above the 0.38 the
+landscape used to play at, which sounded faint next to other pages. The relative levels above are
+unchanged. A peak limiter (`DynamicsCompressorNode`: threshold −6 dBFS, 4 dB knee, ratio 12,
+3 ms attack, 250 ms release) sits between the master and the output. The beds and calls stay
+below its threshold, so it only engages on rare peaks: thunder over a full rain bed, a near
+splash, or music over the beds. Those are held under full scale instead of clipping. In the
+page's single context, the streamed music shares that limiter. The limiter decodes nothing, so
+the decoded-audio budget is unchanged.
+
 The weather the scene does not simulate reaches the sound through `setWeather` on the sound
 control (a `SceneWeather` fits): crickets fall silent below about 10 °C (a smooth fade from 8 to
 12 °C) and, following Dolbear's law, play 1.2% faster per degree above 20 °C and slower below, from

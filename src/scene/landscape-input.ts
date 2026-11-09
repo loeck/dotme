@@ -2,6 +2,7 @@ import { Plane, Vector2, Vector3 } from 'three/webgpu'
 import type { PerspectiveCamera } from 'three/webgpu'
 
 import type { FishBait } from './fish-pointer'
+import { WATER_LEVEL } from './lake-bed'
 import { isDoubleTap } from './lake-lanterns'
 import type { LakeLanterns } from './lake-lanterns'
 import type { LandscapeState } from './landscape-state'
@@ -128,6 +129,8 @@ export class LandscapeInput {
   private readonly grabPlane = new Plane()
   private readonly grabNormal = new Vector3()
   private readonly grabPoint = new Vector3()
+  /** Just under the resting lake: dragged below the waterline, the buoy ploughs along it. */
+  private readonly grabWater = new Plane(new Vector3(0, 1, 0), -(WATER_LEVEL - 0.04))
   // Separate targets: processPointer() runs inside render() and must not overwrite the
   // frame's water point, nor a stroke's endpoints while it samples between them.
   private readonly pressPoint = new Vector3()
@@ -646,7 +649,11 @@ export class LandscapeInput {
 
   moveGrabbedFloater() {
     if (this.grabPointerId < 0 || !this.world.picker.project(this.client.x, this.client.y)) return
-    const target = this.world.picker.ray.intersectPlane(this.grabPlane, this.grabPoint)
+    const ray = this.world.picker.ray
+    let target = ray.intersectPlane(this.grabPlane, this.grabPoint)
+    // The two planes cross on the waterline, so the hand slides on without a jump.
+    if (target && target.y < WATER_LEVEL - 0.04)
+      target = ray.intersectPlane(this.grabWater, this.grabPoint) ?? target
     if (target) this.world.details?.moveFloater(target)
   }
 

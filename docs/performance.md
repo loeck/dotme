@@ -290,8 +290,12 @@ cube shadows (one on low power): each cube costs six caster renders and a cube s
 lit pixel, and unshadowed lanterns still light the bank. Those two refresh once their lantern has
 drifted 8 cm (12 cm on low power), at most one per frame. The environment probe renders one cube
 face per interval (about 90 ms on a focused desktop, 200 ms on low power) and filters once all
-six are current; clock discontinuities restart the sweep, and the intro refreshes one face per
-frame. The lake's sky reflection does not wait for that sweep: a sky-only cube (the dome and
+six are current; clock discontinuities (more than a second of atmosphere time between two
+frames) restart the sweep, and the intro refreshes one face per frame. The jump is measured from
+the previous frame rather than from the sweep's first face: a low-power sweep (six faces 200 ms
+apart) spans just over a second, so it was restarted before being filtered and the lighting stayed
+stale. In the WebGL captures, crowns were then about a quarter darker, and they brightened in a
+single frame whenever frame timing let a sweep finish. The lake's sky reflection does not wait for that sweep: a sky-only cube (the dome and
 its cloud lookup, no geometry, 128 px faces or 64 on low power, mipmapped instead of filtered)
 refreshes two faces per frame, each upper face twice every five frames, inside the same
 `environment` diagnostics pass. The lake only reflects the upper hemisphere, so -Y waits for a

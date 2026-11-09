@@ -560,12 +560,12 @@ it('fades the master without cancelAndHoldAtTime, as in Firefox', async () => {
   // Held at its current value, then ramped up to the master level.
   expect(master.events.slice(-2)).toEqual([
     [0, 0],
-    [0.38, 1.5],
+    [0.76, 1.5],
   ])
   context.currentTime = 3
   mixer.pause()
   expect(master.events.slice(-2)).toEqual([
-    [0.38, 3],
+    [0.76, 3],
     [0, 3.04],
   ])
   // Interrupted half-way, a fade starts from where the previous one had got to, even though
@@ -574,8 +574,43 @@ it('fades the master without cancelAndHoldAtTime, as in Firefox', async () => {
   mixer.resume()
   context.currentTime = 10.75
   mixer.pause()
-  expect(required(master.events.at(-2))[0]).toBeCloseTo(0.19)
+  expect(required(master.events.at(-2))[0]).toBeCloseTo(0.38)
   expect(required(master.events.at(-2))[1]).toBe(10.75)
+  mixer.dispose()
+})
+
+class Compressor extends Node {
+  threshold = new Param()
+  knee = new Param()
+  ratio = new Param()
+  attack = new Param()
+  release = new Param()
+}
+
+it('limits the louder master before the output, without changing the balance', async () => {
+  const { context, gains, mixer } = fixture()
+  const limiters: Compressor[] = []
+  const limited = Object.assign(context, {
+    createDynamicsCompressor: () => {
+      const limiter = new Compressor()
+      limiters.push(limiter)
+      return limiter
+    },
+  })
+  const graph = new AmbientMixer(limited, 'mp3', { wide: false })
+  expect(limiters).toHaveLength(1)
+  const limiter = required(limiters[0])
+  // Master, limiter, destination: a peak limiter well above the beds, not a compressor.
+  expect(limiter.connections).toEqual([context.destination])
+  const master = required(gains.find((gain) => gain.connections.includes(limiter)))
+  expect(limiter.threshold.value).toBe(-6)
+  expect(limiter.ratio.value).toBeGreaterThanOrEqual(8)
+  expect(limiter.attack.value).toBeLessThan(0.01)
+  await graph.load()
+  graph.resume()
+  expect(lastTarget(master.gain)).toBe(0.76)
+  graph.dispose()
+  expect(limiter.disconnect).toHaveBeenCalled()
   mixer.dispose()
 })
 

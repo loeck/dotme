@@ -4,7 +4,13 @@ import { required } from '../invariant'
 import { LAKE_BOUNDS, WATER_LEVEL, createLakeBed, lakeIndex } from './lake-bed'
 import { prepareWaterMask } from './lake-geometry-data'
 import { WaterContact } from './water-contact'
-import { WaterClock, WATER_STEP, WAVE_SPEED, MAX_WATER_STEPS } from './water-simulation'
+import {
+  WaterClock,
+  WATER_STEP,
+  WAVE_SPEED,
+  MAX_WATER_STEPS,
+  waterImpulse,
+} from './water-simulation'
 import { sampleWindField } from './water-surface'
 
 describe('lake field', () => {
@@ -115,5 +121,30 @@ describe('lake field', () => {
       ),
     ).toBeLessThan(0.004)
     expect(contact.sample(0, 0, 0.15)[0]).toBe(WATER_LEVEL)
+  })
+
+  it('refuses non-finite or off-field impulses before they reach the field or the contacts', () => {
+    const bed = createLakeBed([{ x: 0, y: 0.2, z: 0, size: 2, color: 0 }], 19, true)
+    const splat = required(waterImpulse(bed, 512, 3, 0, 0.4, -2))
+    expect(splat.u).toBeGreaterThan(0)
+    expect(splat.u).toBeLessThan(1)
+    expect(splat.velocity).toBe(-0.65)
+    expect(splat.radius).toBeGreaterThanOrEqual((LAKE_BOUNDS.size / 512) * 2.5)
+    for (const bad of [Number.NaN, Infinity, -Infinity]) {
+      expect(waterImpulse(bed, 512, bad, 0, 0.4, -0.1)).toBeNull()
+      expect(waterImpulse(bed, 512, 3, bad, 0.4, -0.1)).toBeNull()
+      expect(waterImpulse(bed, 512, 3, 0, bad, -0.1)).toBeNull()
+      expect(waterImpulse(bed, 512, 3, 0, 0.4, bad)).toBeNull()
+    }
+    expect(waterImpulse(bed, 512, LAKE_BOUNDS.minX - 1, 0, 0.4, -0.1)).toBeNull()
+    expect(waterImpulse(bed, 0, 3, 0, 0.4, -0.1)).toBeNull()
+
+    const contact = new WaterContact(bed)
+    contact.addImpulse(3, 0, Number.NaN, 0.5, 0)
+    contact.addImpulse(3, 0, 0.4, Infinity, 0)
+    for (const value of contact.sample(3, 0, 0.15)) expect(Number.isFinite(value)).toBe(true)
+    for (const value of contact.sample(Number.NaN, 0, 0.15))
+      expect(Number.isFinite(value)).toBe(true)
+    for (const value of contact.sample(3, 0, Number.NaN)) expect(Number.isFinite(value)).toBe(true)
   })
 })
