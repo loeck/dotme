@@ -100,10 +100,12 @@ const LEAF_POINTS = [
   [-0.35, -0.606],
 ] as const
 
-/** A floating leaf is drawn as if seen from at least this elevation (about 24°), tilted by
- * at most `LEAF_TILT_MAX` (about 26°). */
-const LEAF_TILT_VIEW = 0.42
-const LEAF_TILT_MAX = 0.45
+/**
+ * A floating leaf is drawn as if seen from at least this elevation (about 17°), tilted by at
+ * most `LEAF_TILT_MAX` (about 12°): a steeper tilt made them look perched above the water.
+ */
+const LEAF_TILT_VIEW = 0.3
+const LEAF_TILT_MAX = 0.21
 
 /** A caught leaf's velocity component, bounded and finite. */
 const catchSpeed = (value: number) => Math.max(-3, Math.min(3, Number.isFinite(value) ? value : 0))
@@ -672,8 +674,10 @@ export class FloatingBodies {
     const fade = Math.max(0, Math.min(1, (floater.fadeAt - this.time) / 4))
     const size = floater.radius * floater.look * fade
     if (floater.flatten < 1 && floater !== this.held) {
-      // Raised by the half-width the tilt dips its near edge, so that edge stays above water.
-      this.transform.position.y += size * Math.sin(this.tiltTowardCamera(position.x, position.z))
+      // Raised by part of the depth the tilt dips its near edge (its width along the view is
+      // about half its length): enough to keep that edge from sinking, not to lift the leaf.
+      this.transform.position.y +=
+        0.5 * size * Math.sin(this.tiltTowardCamera(position.x, position.z))
     }
     this.transform.scale.set(size, size * floater.flatten, size * (floater.flatten < 1 ? 0.55 : 1))
     this.transform.updateMatrix()
@@ -681,7 +685,7 @@ export class FloatingBodies {
   }
 
   /**
-   * Turns a floating leaf's face toward the camera when drawn, by at most about 26°. Flat on
+   * Turns a floating leaf's face toward the camera when drawn, by at most about 12°. Flat on
    * the water it is seen edge-on from the bank and seemed to vanish into the lake.
    */
   private tiltTowardCamera(x: number, z: number): number {
@@ -739,7 +743,7 @@ export class FloatingBodies {
     pick.born = this.time
     pick.fadeAt = this.time + 40 + this.random() * 20
     pick.dry = true
-    pick.look = Math.max(1, Math.min(6, width / (2 * pick.radius)))
+    pick.look = Math.max(1, Math.min(3, width / (2 * pick.radius)))
     const index = this.floaters.indexOf(pick)
     this.mesh.setColorAt(index, this.leafColour.copy(colour))
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true

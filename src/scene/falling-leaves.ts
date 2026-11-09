@@ -67,11 +67,11 @@ export const LEAVES = {
   floatClearance: 0.008,
   floatPerMetre: 0.0012,
   /**
-   * A floating leaf is drawn as if seen from at least this elevation, radians (about 24°),
-   * tilting it toward the camera by at most `floatTiltMax` (about 26°).
+   * A floating leaf is drawn as if seen from at least this elevation, radians (about 17°),
+   * tilting it toward the camera by at most `floatTiltMax` (about 12°).
    */
-  floatTiltView: 0.42,
-  floatTiltMax: 0.45,
+  floatTiltView: 0.3,
+  floatTiltMax: 0.21,
   /** A floating leaf sinks this far, metres, while it fades. */
   sink: 0.035,
   fade: 1.6,
@@ -659,9 +659,9 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
       alive++
       this.position.set(body.x, body.y, body.z)
       this.quaternion.set(body.qx, body.qy, body.qz, body.qw)
-      // Raised by the half-width the tilt dips its near edge, so that edge stays above the water.
+      // Raised by part of the depth the tilt dips its near edge, so that edge stays dry.
       if (leaf.state === FLOATING)
-        this.position.y += (scale / 2) * Math.sin(this.tiltTowardCamera(body.x, body.y, body.z))
+        this.position.y += (scale / 4) * Math.sin(this.tiltTowardCamera(body.x, body.y, body.z))
       this.matrix.compose(this.position, this.quaternion, this.scale.setScalar(scale))
       this.mesh.setMatrixAt(i, this.matrix)
     }
