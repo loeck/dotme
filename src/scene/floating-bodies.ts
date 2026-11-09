@@ -100,6 +100,14 @@ const LEAF_POINTS = [
   [-0.35, -0.606],
 ] as const
 
+/** A floating leaf is drawn as if seen from at least this elevation (about 24°), tilted by
+ * at most `LEAF_TILT_MAX` (about 26°). */
+const LEAF_TILT_VIEW = 0.42
+const LEAF_TILT_MAX = 0.45
+
+/** A caught leaf's velocity component, bounded and finite. */
+const catchSpeed = (value: number) => Math.max(-3, Math.min(3, Number.isFinite(value) ? value : 0))
+
 type Floater = {
   body: RigidBody
   radius: number
@@ -114,6 +122,10 @@ type Floater = {
   dry: boolean
   born: number
   fadeAt: number
+  /** Drawn size relative to the collider: a caught falling leaf keeps the size it fell at. */
+  look: number
+  /** Reserved for falling leaves `catchLeaf` takes over. */
+  pooled: boolean
 }
 
 type FloaterSpec = {
@@ -131,6 +143,10 @@ export class FloatingBodies {
   private readonly transform = new Object3D()
   private readonly point = new Vector3()
   private readonly bodyRotation = new Quaternion()
+  private readonly tilt = new Quaternion()
+  private readonly tiltAxis = new Vector3()
+  private readonly leafColour = new Color()
+  private camera: Vector3 | null = null
   private wind: WindState | null = null
   private readonly releaseHook: () => void
   onWake?: (x: number, z: number, radius: number, velocity: number) => void
@@ -162,9 +178,11 @@ export class FloatingBodies {
     const specs: FloaterSpec[] = [
       { radius: 0.075, density: 500, windage: 0.25, flatten: 1, color: 0x91625a },
     ]
-    // Seven leaves plus the buoy fit the lake material's eight contact slots.
+    // Seven leaves plus the buoy fit the lake material's eight contact slots; the pool behind
+    // them takes leaves falling from the crowns as they reach the water (`catchLeaf`).
     const leaves = mobile ? 4 : 7
-    for (let i = 0; i < leaves; i++)
+    const pooled = mobile ? 6 : 16
+    for (let i = 0; i < leaves + pooled; i++)
       specs.push({
         radius: 0.035 + this.random() * 0.015,
         density: 350,
@@ -176,16 +194,17 @@ export class FloatingBodies {
     const placed = specs
       .map((spec, i) => ({
         spec,
+        pooled: i > leaves,
         home:
           i === 0
             ? this.findWater(bed, 3, 5, 0.5)
             : this.findWater(bed, -9 + this.random() * 18, -14 + this.random() * 23, 0.3),
       }))
       .filter(
-        (entry): entry is { spec: FloaterSpec; home: { x: number; z: number } } =>
+        (entry): entry is { spec: FloaterSpec; pooled: boolean; home: { x: number; z: number } } =>
           entry.home !== null,
       )
-    for (const { spec, home } of placed) {
+    for (const { spec, home, pooled: idle } of placed) {
       const body = physics.world.createRigidBody(
         RigidBodyDesc.dynamic()
           .setTranslation(home.x, WATER_LEVEL, home.z)
@@ -213,8 +232,12 @@ export class FloatingBodies {
         trailZ: Number.NaN,
         dry: false,
         born: -Infinity,
-        fadeAt: Infinity,
+        // A pooled leaf waits, disabled and undrawn, until a falling leaf reaches the water.
+        fadeAt: idle ? -Infinity : Infinity,
+        look: 1,
+        pooled: idle,
       })
+      if (idle) body.setEnabled(false)
     }
     const geometry = new SphereGeometry(1, 12, 8)
     const material = new MeshStandardNodeMaterial({ roughness: 0.55, metalness: 0 })
@@ -423,8 +446,8 @@ export class FloatingBodies {
     if (time < this.nextLeaf || this.leafSources.length === 0) return
     this.nextLeaf = time + 8 + this.random() * 10
     const leaf =
-      this.floaters.find((floater) => floater.flatten < 1 && time > floater.fadeAt) ??
-      this.floaters.find((floater) => floater.flatten < 1 && floater.born === -Infinity)
+      this.floaters.find((f) => f.flatten < 1 && !f.pooled && time > f.fadeAt) ??
+      this.floaters.find((f) => f.flatten < 1 && !f.pooled && f.born === -Infinity)
     const source = this.leafSources[Math.floor(this.random() * this.leafSources.length)]
     if (!leaf || !source) return
     leaf.body.setEnabled(true)
@@ -435,6 +458,7 @@ export class FloatingBodies {
     leaf.born = time
     leaf.fadeAt = time + 100 + this.random() * 30
     leaf.dry = true
+    leaf.look = 1
   }
 
   private applyStepForces(stepTime: number) {
@@ -646,13 +670,80 @@ export class FloatingBodies {
     this.transform.position.set(position.x, position.y, position.z)
     this.transform.quaternion.set(rotation.x, rotation.y, rotation.z, rotation.w)
     const fade = Math.max(0, Math.min(1, (floater.fadeAt - this.time) / 4))
-    this.transform.scale.set(
-      floater.radius * fade,
-      floater.radius * floater.flatten * fade,
-      floater.radius * (floater.flatten < 1 ? 0.55 : 1) * fade,
-    )
+    const size = floater.radius * floater.look * fade
+    if (floater.flatten < 1 && floater !== this.held) {
+      // Raised by the half-width the tilt dips its near edge, so that edge stays above water.
+      this.transform.position.y += size * Math.sin(this.tiltTowardCamera(position.x, position.z))
+    }
+    this.transform.scale.set(size, size * floater.flatten, size * (floater.flatten < 1 ? 0.55 : 1))
     this.transform.updateMatrix()
     this.mesh.setMatrixAt(index, this.transform.matrix)
+  }
+
+  /**
+   * Turns a floating leaf's face toward the camera when drawn, by at most about 26°. Flat on
+   * the water it is seen edge-on from the bank and seemed to vanish into the lake.
+   */
+  private tiltTowardCamera(x: number, z: number): number {
+    const camera = this.camera
+    if (!camera) return 0
+    const toX = camera.x - x,
+      toZ = camera.z - z
+    const across = Math.hypot(toX, toZ)
+    if (across < 1e-3) return 0
+    const elevation = Math.atan2(camera.y - WATER_LEVEL, across)
+    const angle = Math.min(LEAF_TILT_MAX, Math.max(0, LEAF_TILT_VIEW - elevation))
+    if (angle <= 0) return 0
+    this.tiltAxis.set(toZ / across, 0, -toX / across)
+    this.transform.quaternion.premultiply(this.tilt.setFromAxisAngle(this.tiltAxis, angle))
+    return angle
+  }
+
+  /** The camera floating leaves are drawn turned toward. */
+  setCamera(camera: Vector3) {
+    this.camera = camera
+  }
+
+  /**
+   * Takes over a leaf falling from a crown as it reaches open water: a pooled (or the oldest
+   * shed) physical leaf appears where it fell, with its velocity, colour and drawn width, and
+   * from then on floats, rides the waves and drifts like the buoy. False when none is free.
+   */
+  catchLeaf(
+    x: number,
+    y: number,
+    z: number,
+    velocity: Readonly<{ x: number; y: number; z: number }>,
+    width: number,
+    colour: Color,
+  ): boolean {
+    if (!Number.isFinite(x + y + z + width)) return false
+    let pick: Floater | undefined
+    for (const floater of this.floaters) {
+      if (!floater.pooled || floater === this.held) continue
+      if (floater.fadeAt <= this.time) {
+        pick = floater
+        break
+      }
+      if (floater.born > -Infinity && (!pick || floater.born < pick.born)) pick = floater
+    }
+    if (!pick) return false
+    pick.body.setEnabled(true)
+    pick.body.setTranslation({ x, y: Math.max(y, WATER_LEVEL), z }, true)
+    pick.body.setLinvel(
+      { x: catchSpeed(velocity.x), y: catchSpeed(velocity.y), z: catchSpeed(velocity.z) },
+      true,
+    )
+    pick.body.setAngvel({ x: 0.6, y: this.random() * 2 - 1, z: 0.4 }, true)
+    pick.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true)
+    pick.born = this.time
+    pick.fadeAt = this.time + 40 + this.random() * 20
+    pick.dry = true
+    pick.look = Math.max(1, Math.min(6, width / (2 * pick.radius)))
+    const index = this.floaters.indexOf(pick)
+    this.mesh.setColorAt(index, this.leafColour.copy(colour))
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
+    return true
   }
 
   /** Only the impact itself shoves a floater; travelling waves act through surface buoyancy. */

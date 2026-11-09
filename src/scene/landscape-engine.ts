@@ -583,6 +583,7 @@ export class LandscapeEngine {
         out[1] = dx
         out[2] = dz
       },
+      leafToWater: (...leaf) => this.details?.catchLeaf(...leaf) ?? false,
     })
     this.receiveSceneLight(this.wildlife.leaves.mesh.material, { translucency: 0.6, gain: 2 })
 
@@ -744,6 +745,7 @@ export class LandscapeEngine {
           this.options.detailEnvironment,
         ),
       )
+    this.details?.setFloaterCamera(this.camera.position)
     const listener = this.options.onWaterSound
     if (listener)
       this.details?.setSoundHandler((kind, x, z, energy) => {

@@ -4,7 +4,7 @@ import { BirdFlock, FLOCK } from './bird-flock'
 import { BIRD_SPECIES, SPECIES } from './bird-species'
 import type { BirdSpeciesName, FlockContext } from './bird-species'
 import { FallingLeaves, LEAVES } from './falling-leaves'
-import type { LeafWater } from './falling-leaves'
+import type { LeafHandOff, LeafWater } from './falling-leaves'
 import { FlockSchedule } from './flock-schedule'
 import type { LakeBed } from './lake-bed'
 import type { LandscapeState } from './landscape-state'
@@ -37,6 +37,8 @@ export type WildlifeWorld = Readonly<{
   ripple: (x: number, z: number) => void
   /** The live lake surface floating leaves ride; the resting level without it. */
   leafWater?: LeafWater<WindState>
+  /** Takes a leaf reaching open water into the physical floaters. */
+  leafToWater?: LeafHandOff
 }>
 
 export type WildlifeFrame = Readonly<{
@@ -80,7 +82,11 @@ export class LandscapeWildlife {
       world.leafGround,
       world.ripple,
       Math.random,
-      { lowPower: world.lowPower, ...(world.leafWater ? { water: world.leafWater } : {}) },
+      {
+        lowPower: world.lowPower,
+        ...(world.leafWater ? { water: world.leafWater } : {}),
+        ...(world.leafToWater ? { handOff: world.leafToWater } : {}),
+      },
     )
     scene.add(this.leaves.mesh)
     this.leaves.setSeason({

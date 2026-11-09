@@ -1,6 +1,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
+import { required } from '../invariant'
 import { FallingLeaves, LEAVES, paletteColour, seasonPalette } from './falling-leaves'
 import { GUST, WindGusts } from './wind-gusts'
 
@@ -184,6 +185,38 @@ describe('leaves as bodies', () => {
         0.05 + (LEAVES.size * 1.2 * Math.sin(LEAVES.floatTiltMax)) / 2 + 0.03,
       )
     }
+    leaves.dispose()
+  })
+
+  it('hand leaves reaching open water to the physical floaters', () => {
+    const caught: number[][] = []
+    const leaves = new FallingLeaves(
+      32,
+      new Vector3(0, 2, 16),
+      () => ({ y: 0, water: true }),
+      () => {},
+      seeded(3),
+      {
+        handOff: (x, y, z, velocity, width) => {
+          caught.push([x, y, z, velocity.y, width])
+          return true
+        },
+      },
+    )
+    leaves.setSources(Float32Array.from([0, 6, 0, 2]))
+    const gusts = new WindGusts()
+    for (let t = 0; t < 1; t += 1 / 60) {
+      gusts.update(stroke, 1 / 60)
+      leaves.update(t, 1 / 60, calm, 0, gusts)
+    }
+    for (let t = 1; t < 9; t += 1 / 60) leaves.update(t, 1 / 60, calm, 0, undefined)
+    expect(caught.length).toBeGreaterThan(0)
+    // Taken at the water, and no longer drawn or floating here.
+    for (const [, y, , , width] of caught) {
+      expect(Math.abs(required(y))).toBeLessThan(0.1)
+      expect(required(width)).toBeGreaterThan(0)
+    }
+    expect(leaves.floating).toBe(0)
     leaves.dispose()
   })
 })

@@ -199,6 +199,16 @@ export class SceneDetails {
     this.floating.setLeafSources(crowns)
   }
 
+  /** See `FloatingBodies.catchLeaf`. */
+  catchLeaf(...leaf: Parameters<FloatingBodies['catchLeaf']>) {
+    if (this.disposed || this.reducedMotion) return false
+    return this.floating.catchLeaf(...leaf)
+  }
+
+  setFloaterCamera(camera: Vector3) {
+    this.floating.setCamera(camera)
+  }
+
   setWaterfallBlock(across: number, height: number, radius: number, strength: number) {
     this.waterfall?.setBlock(across, height, radius, strength)
   }

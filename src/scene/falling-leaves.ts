@@ -155,8 +155,22 @@ export type LeafWater<W extends LeafWind> = (
   out: Float64Array,
 ) => void
 
+/**
+ * Takes a leaf reaching open water into the physical floaters (`FloatingBodies.catchLeaf`):
+ * position, velocity, drawn width and colour. True when it was taken.
+ */
+export type LeafHandOff = (
+  x: number,
+  y: number,
+  z: number,
+  velocity: Readonly<{ x: number; y: number; z: number }>,
+  width: number,
+  colour: Color,
+) => boolean
+
 export type LeafOptions<W extends LeafWind> = Readonly<{
   water?: LeafWater<W>
+  handOff?: LeafHandOff
   lowPower?: boolean
 }>
 
@@ -244,6 +258,8 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
   private readonly onWater: (x: number, z: number) => void
   private readonly random: () => number
   private readonly water: LeafWater<W> | undefined
+  private readonly handOff: LeafHandOff | undefined
+  private readonly velocity = { x: 0, y: 0, z: 0 }
   private readonly maxStep: number
 
   constructor(
@@ -259,6 +275,7 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
     this.onWater = onWater
     this.random = random
     this.water = options.water
+    this.handOff = options.handOff
     this.maxStep = options.lowPower ? LEAVES.lowPowerStep : LEAVES.step
     const material = new MeshStandardNodeMaterial({
       roughness: 0.82,
@@ -507,6 +524,24 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
     return angle
   }
 
+  /** Gives a leaf touching open water to the physical floaters; frees it here when taken. */
+  private handToWater(leaf: Leaf, index: number, time: number) {
+    const handOff = this.handOff
+    if (!handOff) return false
+    const body = leaf.body
+    this.mesh.getColorAt(index, this.colour)
+    this.velocity.x = body.vx
+    this.velocity.y = body.vy
+    this.velocity.z = body.vz
+    if (!handOff(body.x, body.y, body.z, this.velocity, leaf.size, this.colour)) return false
+    leaf.state = FREE
+    if (time - this.lastRipple > LEAVES.rippleSpacing) {
+      this.lastRipple = time
+      this.onWater(body.x, body.z)
+    }
+    return true
+  }
+
   /** How far above the sampled lake surface a leaf floats so it is drawn on it. */
   private clearance(leaf: Leaf) {
     const { x, y, z } = leaf.body
@@ -555,6 +590,7 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
         const airX = dx * drift + pushX,
           airZ = dz * drift + pushZ,
           airY = Math.hypot(pushX, pushZ) * 0.25
+        let handed = false
         for (let s = 0; s < steps && leaf.state === FALLING; s++) {
           stepLeafInAir(body, airX, airY, airZ, time + s * h, h)
           const moved = Math.abs(body.x - leaf.castX) + Math.abs(body.z - leaf.castZ)
@@ -567,8 +603,16 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
           if (leaf.water) floor += this.clearance(leaf)
           if (body.y <= floor + 0.01) {
             body.y = leaf.water ? floor : floor + 0.004
+            if (leaf.water && this.handToWater(leaf, i, time)) {
+              handed = true
+              break
+            }
             this.land(leaf, time)
           }
+        }
+        if (handed) {
+          this.mesh.setMatrixAt(i, this.matrix.makeScale(0, 0, 0))
+          continue
         }
       } else if (leaf.state === GROUNDED) {
         settleLeaf(body, leaf.nx, leaf.ny, leaf.nz, 1 - Math.exp(-dt * 14))

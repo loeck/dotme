@@ -1,4 +1,4 @@
-import { Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
+import { Color, Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
@@ -21,8 +21,11 @@ const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createBox
 const positionsOf = (floating: FloatingBodies) => {
   const matrix = new Matrix4(),
     position = new Vector3()
-  return Array.from({ length: floating.mesh.count }, (_, i) => {
+  // Hidden instances (pooled leaves waiting for a falling leaf) read as NaN.
+  return Array.from({ length: floating.mesh.count }, (_, i): [number, number, number] => {
     floating.mesh.getMatrixAt(i, matrix)
+    if (matrix.elements[0] === 0 && matrix.elements[5] === 0)
+      return [Number.NaN, Number.NaN, Number.NaN]
     return position.setFromMatrixPosition(matrix).toArray()
   })
 }
@@ -232,6 +235,7 @@ describe('floating bodies', () => {
     const time = 599 / 60,
       wind = windy.sample(time)
     for (const [i, position] of end.entries()) {
+      if (Number.isNaN(position[0])) continue
       const [x, y, z] = [required(position[0]), required(position[1]), required(position[2])]
       expect(Number.isFinite(x + y + z)).toBe(true)
       const surface = WATER_LEVEL + sampleWindField(x, z, time, wind, 0.08)[0]
@@ -343,6 +347,51 @@ describe('held buoy in the water', () => {
       expect(splashes.emitted).toBe(0)
       expect(wakes.filter((wake) => required(wake[3]) > 0)).toEqual([])
       floating.releaseGrab()
+    } finally {
+      floating.dispose()
+      splashes.dispose()
+      physics.dispose()
+    }
+  })
+})
+
+describe('caught falling leaves', () => {
+  it('float on the water like the buoy instead of sinking', async () => {
+    const physics = await physicsFor()
+    const scene = new Scene()
+    const splashes = new LakeSplashes(scene, bed, 7, true, physics)
+    const floating = new FloatingBodies(scene, bed, 7, true, physics, splashes)
+    const contact = new WaterContact(bed)
+    splashes.setWaterContact(contact)
+    floating.setWaterContact(contact)
+    floating.setCamera(new Vector3(0, 2.5, 16))
+    const calm = new WindModel(7, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
+    try {
+      // Beside a resting leaf: open water, clear of the island.
+      const [bx, , bz] = required(positionsOf(floating)[1])
+      const before = positionsOf(floating)
+      const caught = floating.catchLeaf(
+        bx + 0.3,
+        WATER_LEVEL + 0.2,
+        bz,
+        { x: 0.2, y: -0.8, z: 0 },
+        0.2,
+        new Color(0xc0612b),
+      )
+      expect(caught).toBe(true)
+      for (let frame = 0; frame < 300; frame++) {
+        const time = frame / 60
+        floating.update(time, calm.sample(time))
+        splashes.update(time, calm.sample(time))
+      }
+      // The pooled leaf that was hidden before the catch.
+      const leaf = positionsOf(floating).find(
+        (p, i) => Number.isNaN(required(before[i])[0]) && !Number.isNaN(p[0]),
+      )
+      const [, y] = required(leaf)
+      // Afloat at the surface: neither sunk nor hovering.
+      expect(required(y)).toBeGreaterThan(WATER_LEVEL - 0.03)
+      expect(required(y)).toBeLessThan(WATER_LEVEL + 0.15)
     } finally {
       floating.dispose()
       splashes.dispose()
