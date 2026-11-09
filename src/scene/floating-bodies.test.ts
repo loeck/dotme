@@ -293,7 +293,7 @@ describe('grab spring', () => {
 })
 
 describe('held buoy in the water', () => {
-  it('sends a wake and spray while dragged through the lake, and collides on', async () => {
+  it('lays one continuous wake, without spray or rings, while dragged along the lake', async () => {
     const physics = await physicsFor()
     const scene = new Scene()
     const splashes = new LakeSplashes(scene, bed, 42, true, physics)
@@ -339,7 +339,9 @@ describe('held buoy in the water', () => {
         )
       }
       expect(gap).toBeLessThan(GRAB.wakeRadius)
-      expect(splashes.emitted).toBeGreaterThan(0)
+      // Bobbing along the surface is neither a plunge nor a tear-out: no spray, no rising rings.
+      expect(splashes.emitted).toBe(0)
+      expect(wakes.filter((wake) => required(wake[3]) > 0)).toEqual([])
       floating.releaseGrab()
     } finally {
       floating.dispose()

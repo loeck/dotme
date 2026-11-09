@@ -179,7 +179,10 @@ describe('leaves as bodies', () => {
       // On the water, never under it: just above the displaced surface it rides.
       const above = position.y - surface(position.x, position.z, t - 1 / 60)
       expect(above).toBeGreaterThan(LEAVES.floatClearance)
-      expect(above).toBeLessThan(0.05)
+      // Plus the lift that keeps the near edge of a camera-tilted leaf out of the water.
+      expect(above).toBeLessThan(
+        0.05 + (LEAVES.size * 1.2 * Math.sin(LEAVES.floatTiltMax)) / 2 + 0.03,
+      )
     }
     leaves.dispose()
   })

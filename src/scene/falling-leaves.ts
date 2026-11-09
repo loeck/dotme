@@ -66,6 +66,12 @@ export const LEAVES = {
    */
   floatClearance: 0.008,
   floatPerMetre: 0.0012,
+  /**
+   * A floating leaf is drawn as if seen from at least this elevation, radians (about 24°),
+   * tilting it toward the camera by at most `floatTiltMax` (about 26°).
+   */
+  floatTiltView: 0.42,
+  floatTiltMax: 0.45,
   /** A floating leaf sinks this far, metres, while it fades. */
   sink: 0.035,
   fade: 1.6,
@@ -222,6 +228,8 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
   private sources = new Float32Array(0)
   private readonly matrix = new Matrix4()
   private readonly quaternion = new Quaternion()
+  private readonly tilt = new Quaternion()
+  private readonly tiltAxis = new Vector3()
   private readonly position = new Vector3()
   private readonly scale = new Vector3()
   private readonly colour = new Color()
@@ -479,6 +487,26 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
     body.wx = body.wy = body.wz = 0
   }
 
+  /**
+   * Lifts a floating leaf's face toward the camera when drawn. Flat on the water it is seen
+   * almost edge-on from the bank: a 10 cm leaf 30 m away was under a pixel tall and seemed to
+   * vanish into the lake as it landed. Ripples tilt real floating leaves too.
+   */
+  private tiltTowardCamera(x: number, y: number, z: number): number {
+    const camera = this.camera
+    const toX = camera.x - x,
+      toZ = camera.z - z
+    const across = Math.hypot(toX, toZ)
+    if (across < 1e-3) return 0
+    const elevation = Math.atan2(camera.y - y, across)
+    const angle = Math.min(LEAVES.floatTiltMax, Math.max(0, LEAVES.floatTiltView - elevation))
+    if (angle <= 0) return 0
+    // Rotating about up × (toward the camera) turns the leaf's face toward the camera.
+    this.tiltAxis.set(toZ / across, 0, -toX / across)
+    this.quaternion.premultiply(this.tilt.setFromAxisAngle(this.tiltAxis, angle))
+    return angle
+  }
+
   /** How far above the sampled lake surface a leaf floats so it is drawn on it. */
   private clearance(leaf: Leaf) {
     const { x, y, z } = leaf.body
@@ -587,6 +615,9 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
       alive++
       this.position.set(body.x, body.y, body.z)
       this.quaternion.set(body.qx, body.qy, body.qz, body.qw)
+      // Raised by the half-width the tilt dips its near edge, so that edge stays above the water.
+      if (leaf.state === FLOATING)
+        this.position.y += (scale / 2) * Math.sin(this.tiltTowardCamera(body.x, body.y, body.z))
       this.matrix.compose(this.position, this.quaternion, this.scale.setScalar(scale))
       this.mesh.setMatrixAt(i, this.matrix)
     }

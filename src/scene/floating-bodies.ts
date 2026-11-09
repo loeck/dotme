@@ -38,6 +38,9 @@ const GRAVITY = 9.81
  * collides and still feels the water: drag toward the water's own motion and the buoyancy of
  * its wetted share (its weight is carried by the hand).
  */
+/** Height above the surface, metres, the held buoy must clear before it counts as out. */
+const HELD_CLEARANCE = 0.08
+
 export const GRAB = {
   /** Spring and damping per unit mass: slightly under critical, so it overshoots a touch. */
   stiffness: 120,
@@ -62,9 +65,6 @@ export const GRAB = {
   wakeStrength: 0.018,
   wakeFloor: 0.005,
   wakeDepth: 0.05,
-  /** Horizontal speed (m/s) past which a dragged buoy throws spray, and their spacing. */
-  sprayFrom: 1.1,
-  spraySpacing: 0.18,
 } as const
 
 /**
@@ -111,7 +111,6 @@ type Floater = {
   /** Where the held buoy's wake segment starts: its position at the last step, NaN if dry. */
   trailX: number
   trailZ: number
-  sprayAt: number
   dry: boolean
   born: number
   fadeAt: number
@@ -212,7 +211,6 @@ export class FloatingBodies {
         wakeAt: -Infinity,
         trailX: Number.NaN,
         trailZ: Number.NaN,
-        sprayAt: -Infinity,
         dry: false,
         born: -Infinity,
         fadeAt: Infinity,
@@ -569,26 +567,24 @@ export class FloatingBodies {
       true,
     )
     const speed = Math.hypot(velocity.x, velocity.z)
+    // Clear of the water by a margin: bobbing on a wave while dragged along the surface must not
+    // count as tearing out and plunging back, which threw a ring and a splash at every bob.
+    const clear = position.y - radius > surface + HELD_CLEARANCE
     if (wet > 0 && floater.dry && velocity.y < -0.3) {
       // Plunged in: a ring and a splash, as for a drop.
       const energy = Math.min(0.8, -velocity.y * 0.18 + speed * 0.08)
       this.onWake?.(position.x, position.z, 0.15 + radius * 2, -energy * 0.1)
       this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
-      floater.sprayAt = stepTime
-    } else if (wet === 0 && !floater.dry && velocity.y > 0.5) {
+    } else if (clear && !floater.dry && velocity.y > 0.5) {
       // Torn out: the water it drags up falls back.
       const energy = Math.min(0.45, velocity.y * 0.14)
       this.onWake?.(position.x, position.z, 0.2 + radius, energy * 0.08)
       this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
-      floater.sprayAt = stepTime
     }
+    // Dragged through the water it only lays a wake; spray is for plunging in and tearing out.
     this.layWake(floater, position.x, position.z, speed, wet)
-    if (wet > 0.15 && speed > GRAB.sprayFrom && stepTime - floater.sprayAt > GRAB.spraySpacing) {
-      floater.sprayAt = stepTime
-      const energy = Math.min(0.5, 0.12 + (speed - GRAB.sprayFrom) * 0.18)
-      this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
-    }
-    floater.dry = wet === 0
+    if (wet > 0) floater.dry = false
+    else if (clear) floater.dry = true
   }
 
   /**
