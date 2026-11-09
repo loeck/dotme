@@ -1,6 +1,6 @@
 import { WebGPURenderer } from 'three/webgpu'
 
-import { isLowPowerDevice, maxPixelRatio } from '../scene/device-profile'
+import { canvasPixelRatio, isLowPowerDevice } from '../scene/device-profile'
 
 export type GraphicsBackend = 'webgpu' | 'webgl'
 /** `auto` prefers WebGPU and falls back to WebGL 2; `webgl` never requests an adapter. */
@@ -95,7 +95,7 @@ export class GpuRuntime {
 
   resize() {
     if (this.disposed) return
-    this.renderer.setPixelRatio(maxPixelRatio(isLowPowerDevice()))
+    this.renderer.setPixelRatio(canvasPixelRatio(isLowPowerDevice()))
     this.renderer.setSize(Math.max(1, innerWidth), Math.max(1, innerHeight), false)
   }
 

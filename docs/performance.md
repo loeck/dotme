@@ -338,9 +338,11 @@ for every parcel each step and still upload whole).
 
 ### Dynamic resolution
 
-The drawing buffer is capped by pixel count as well as ratio: 2.2 MP on desktop (pixel ratio
+The scene resolution is capped by pixel count as well as ratio: 2.2 MP on desktop (pixel ratio
 at most 1.75) and 1.2 MP on low-power devices (at most 1.25), so a 1440p window or a dense tablet
-gets a lower ratio rather than a larger image (`pixelRatioFor` in `device-profile.ts`).
+gets a lower ratio rather than a larger image (`pixelRatioFor` in `device-profile.ts`). Only the scene pays for that: its targets render at
+the budget share, while the canvas keeps the display ratio (capped at 1.75, or 1.25 on low-power
+devices) so the profile text and icons drawn there stay sharp.
 
 The scene then renders its view, air and mirror at a dynamic share of that buffer, which the
 lens upsamples onto the canvas (`RenderScaleController`, `render-scale.ts`). Shares are quantized

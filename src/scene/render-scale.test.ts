@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { PIXEL_BUDGET, pixelRatioFor } from './device-profile'
+import { PIXEL_BUDGET, budgetScale, canvasPixelRatio, pixelRatioFor } from './device-profile'
 import { RENDER_SCALE, RenderScaleController } from './render-scale'
 
 const BUDGET = 1000 / 60
@@ -153,5 +153,20 @@ describe('pixel ratio', () => {
     expect(
       pixelRatioFor({ lowPower: true, devicePixelRatio: 1, width: 400, height: 800, override: 2 }),
     ).toBe(1)
+  })
+})
+
+describe('canvas and scene resolution', () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('keeps the canvas at the display ratio and applies the budget to the scene only', () => {
+    vi.stubGlobal('window', { devicePixelRatio: 2 })
+    vi.stubGlobal('location', { search: '' })
+    expect(canvasPixelRatio(false)).toBe(1.75)
+    expect(budgetScale(false, 800, 600)).toBe(1)
+    const share = budgetScale(false, 2560, 1440)
+    expect(share).toBeLessThan(1)
+    const sceneRatio = 1.75 * share
+    expect(2560 * 1440 * sceneRatio ** 2).toBeCloseTo(PIXEL_BUDGET.desktop, -2)
   })
 })

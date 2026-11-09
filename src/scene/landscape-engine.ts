@@ -27,7 +27,7 @@ import { CAMERA_IDLE_DRIFT, CAMERA_REST, easeCamera } from './camera-rig'
 import { installCompilationScheduler } from './compilation-scheduler'
 import { CursorEffects } from './cursor-effects'
 import { DepthFocus } from './depth-focus'
-import { LOW_POWER_FPS, isLowPowerDevice, maxPixelRatio } from './device-profile'
+import { LOW_POWER_FPS, budgetScale, canvasPixelRatio, isLowPowerDevice } from './device-profile'
 import { DeviceTilt } from './device-tilt'
 import { SceneRenderDiagnostics } from './diagnostics'
 import { EnvironmentProbe } from './environment-probe'
@@ -226,6 +226,8 @@ export class LandscapeEngine {
   }
   /** Dynamic resolution; null under `?dpr=`, which fixes the resolution for comparisons. */
   private readonly renderScale: RenderScaleController | null
+  /** Pixel-budget share of the canvas resolution the scene renders at (`device-profile.ts`). */
+  private budgetScale = 1
   /**
    * Frames stayed late at the smallest render scale: switch to the low-power pixel, probe and
    * reflection budgets. Only knobs that need no new shader programs follow it.
@@ -1303,9 +1305,9 @@ export class LandscapeEngine {
     this.input.size.height = this.height
     this.camera.aspect = this.width / this.height
     this.camera.updateProjectionMatrix()
-    this.renderer.setPixelRatio(
-      maxPixelRatio(this.lowPower || this.reducedBudget, this.width, this.height),
-    )
+    const reduced = this.lowPower || this.reducedBudget
+    this.renderer.setPixelRatio(canvasPixelRatio(reduced))
+    this.budgetScale = budgetScale(reduced, this.width, this.height)
     this.renderer.setSize(this.width, this.height, false)
     this.renderer.getDrawingBufferSize(this.drawingBufferSize)
     this.rain.resize(this.drawingBufferSize.x, this.drawingBufferSize.y)
@@ -1324,7 +1326,7 @@ export class LandscapeEngine {
    * reallocation they cost does not recur.
    */
   private resizeScene(reflection = true) {
-    const scale = this.renderScale?.scale ?? 1
+    const scale = this.sceneScale()
     const size = this.sceneBufferSize.set(
       Math.max(1, Math.round(this.drawingBufferSize.x * scale)),
       Math.max(1, Math.round(this.drawingBufferSize.y * scale)),
@@ -1347,8 +1349,12 @@ export class LandscapeEngine {
       (detailed ? 1536 : reduced ? 768 : 1024) / this.drawingBufferSize.x,
       (detailed ? 1080 : reduced ? 832 : 960) / this.drawingBufferSize.y,
     )
-    this.water.reflectorNode.reflector.resolutionScale =
-      reflectionScale * (this.renderScale?.scale ?? 1)
+    this.water.reflectorNode.reflector.resolutionScale = reflectionScale * this.sceneScale()
+  }
+
+  /** The scene's share of the canvas resolution: pixel budget times dynamic render scale. */
+  private sceneScale() {
+    return this.budgetScale * (this.renderScale?.scale ?? 1)
   }
 
   private removeListeners() {

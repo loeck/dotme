@@ -6,12 +6,13 @@ export function isLowPowerDevice(width = window.innerWidth) {
 }
 
 /**
- * Drawing-buffer pixels the scene may fill: past this, a larger or denser screen only gets a
- * lower pixel ratio. Desktop at 1.75 × 1280×720 is 2.8 MP; a 1440p window at ratio 1 is 3.7 MP.
+ * Pixels the scene's own targets may fill: past this, a larger or denser screen renders the
+ * scene at a lower resolution, which the lens upsamples. The canvas itself, where the profile
+ * text and icons are drawn, keeps the display's ratio (`canvasPixelRatio`), so they stay sharp.
  */
 export const PIXEL_BUDGET = { desktop: 2_200_000, lowPower: 1_200_000 } as const
 
-/** Pixel ratio for a viewport: the device ratio, capped per profile and by the pixel budget. */
+/** Scene pixel ratio for a viewport: the device ratio, capped per profile and by the budget. */
 export function pixelRatioFor(
   options: Readonly<{
     lowPower: boolean
@@ -29,18 +30,34 @@ export function pixelRatioFor(
   return Math.min(device, options.lowPower ? 1.25 : 1.75, Math.sqrt(budget / area))
 }
 
-export function maxPixelRatio(
+/** Canvas pixel ratio: the device ratio capped per profile, without the pixel budget. */
+export function canvasPixelRatio(lowPower: boolean) {
+  return pixelRatioFor({
+    lowPower,
+    devicePixelRatio: window.devicePixelRatio,
+    width: 1,
+    height: 1,
+    override: debugParams(location.search).pixelRatio,
+  })
+}
+
+/**
+ * Share of the canvas resolution the scene renders at under the pixel budget (at most 1). The
+ * dynamic render scale multiplies it.
+ */
+export function budgetScale(
   lowPower: boolean,
   width = window.innerWidth,
   height = window.innerHeight,
 ) {
-  return pixelRatioFor({
+  const scene = pixelRatioFor({
     lowPower,
     devicePixelRatio: window.devicePixelRatio,
     width,
     height,
     override: debugParams(location.search).pixelRatio,
   })
+  return Math.min(1, scene / canvasPixelRatio(lowPower))
 }
 
 export const LOW_POWER_FPS = 30
