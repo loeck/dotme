@@ -4,8 +4,10 @@ import type { FoliageAtlas } from './foliage-atlas'
 import { appendForestFloor } from './forest-floor'
 import { appendClump } from './grass'
 import type { GrassForm } from './grass'
+import { latticeHash as hash } from './hash'
 import { WATER_LEVEL } from './lake-bed'
 import type { TreeKind, LakeWorld } from './lake-world'
+import { smoothstep as smooth01 } from './math'
 import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import { appendFern, appendSprays, appendFlower, MeshBuilder } from './vegetation-meshes'
 import type { MeshData } from './vegetation-meshes'
@@ -61,19 +63,6 @@ const TREE_SWAY: Record<TreeKind, number> = {
 type Column = { top: number; ground: boolean }
 const COLUMN = 0.125
 
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - a) / (b - a)))
-  return t * t * (3 - 2 * t)
-}
-
-function hash(seed: number, a: number, b: number, stream: number) {
-  let n = (seed ^ Math.imul(a, 0x9e3779b1) ^ Math.imul(b, 0x85ebca77) ^ stream) >>> 0
-  n ^= n >>> 16
-  n = Math.imul(n, 0x7feb352d)
-  n ^= n >>> 15
-  n = Math.imul(n, 0x846ca68b)
-  return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
-}
 /** Smooth value noise, used for Last Signal's clumps (1.6 m) and patches (8 m). */
 function valueNoise(seed: number, x: number, z: number, scale: number, stream: number) {
   const px = x / scale,
@@ -343,11 +332,9 @@ export function prepareVegetation(
         // One candidate per 3 × 3 columns, jittered below, keeps the scan short.
         (((cx % 3) + 3) % 3) + (((cz % 3) + 3) % 3) === 0,
     )
-    .map((spot) => ({
-      ...spot,
-      order: hash(seed, spot.cx, spot.cz, 1201),
-    }))
-    .sort((a, b) => a.order - b.order)
+    // The spots are fresh records from the first map: extend them in place.
+    .map((spot) => Object.assign(spot, { order: hash(seed, spot.cx, spot.cz, 1201) }))
+    .toSorted((a, b) => a.order - b.order)
   const shrubs: { x: number; z: number; r: number }[] = []
   for (const { cx, cz, column } of shrubSpots) {
     if (shrubs.length >= grid.shrubs) break
@@ -385,11 +372,12 @@ export function prepareVegetation(
     .filter(
       ({ z, column }) => column.ground && z > GROUND_COVER_Z && column.top > WATER_LEVEL + 0.05,
     )
-    .map((cell) => ({
-      ...cell,
-      order: hash(seed, Math.round(cell.x / COLUMN), Math.round(cell.z / COLUMN), 1031),
-    }))
-    .sort((a, b) => a.order - b.order)
+    .map((cell) =>
+      Object.assign(cell, {
+        order: hash(seed, Math.round(cell.x / COLUMN), Math.round(cell.z / COLUMN), 1031),
+      }),
+    )
+    .toSorted((a, b) => a.order - b.order)
   // The sward as clumps (see `grass.ts`) on a jittered 20 cm lattice: each clump one growth form
   // of the shore, its height, colour and dryness its own, its blades rooted on the ground beneath.
   // Detail falls off with distance (fewer, wider blades), and a triangle budget visited in a

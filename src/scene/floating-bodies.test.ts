@@ -2,21 +2,21 @@ import { Matrix4, Ray, Scene, Vector3, Vector4 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { FloatingBodies } from './floating-bodies'
 import { createLakeBed, sampleShore, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { WaterContact } from './water-contact'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
-const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
 
 const positionsOf = (floating: FloatingBodies) => {
   const matrix = new Matrix4(),
@@ -133,14 +133,14 @@ describe('floating bodies', () => {
   })
 
   it('keeps fallen leaves afloat in a sheltered inlet without carrying them through its banks', async () => {
-    const banks: Voxel[] = [
+    const banks: Box[] = [
       { x: 0, y: 0.5, z: 5, size: 2, color: 0 },
       { x: 6, y: 0.5, z: 5, size: 2, color: 0 },
       { x: 2, y: 0.5, z: 7, size: 2, color: 0 },
       { x: 4, y: 0.5, z: 7, size: 2, color: 0 },
     ]
     const inlet = createLakeBed(banks, 42, false)
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex(banks))
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex(banks))
     const scene = new Scene()
     const splashes = new LakeSplashes(scene, inlet, 42, true, physics)
     const floating = new FloatingBodies(scene, inlet, 42, true, physics, splashes)

@@ -140,7 +140,7 @@ Never edit source or tests while `pnpm test:watch` is running in the checkout.
 1. Run the smallest owner and sibling unit tests with
    `pnpm vitest run <path-or-filter>`.
 2. Run the affected e2e specs with the playwright config that routes them:
-   `pnpm e2e <spec>`, `pnpm e2e:extended <spec>`, or `pnpm e2e:gpu <spec>`.
+   `pnpm e2e <spec>`.
    Confirm each spec is actually routed by checking the `testMatch` lists in
    the three configs. Install browsers on first run with
    `pnpm exec playwright install chromium`.

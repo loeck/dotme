@@ -13,6 +13,8 @@ const fake = vi.hoisted(() => {
         ready: () => void,
         failed: () => void,
         autoplay: boolean,
+        world: object,
+        weather: Promise<object>,
       ) => Promise<() => void>
     >()
   const created: Runtime[] = []
@@ -32,11 +34,16 @@ const fake = vi.hoisted(() => {
       async (canvas: HTMLCanvasElement, signal: AbortSignal) => new Runtime(canvas, signal),
     )
   }
-  return { loader, landscape, created, Runtime }
+  const weather = { source: 'random' }
+  const preloadWeather = vi.fn<(options: { seed: number; signal: AbortSignal }) => Promise<object>>(
+    async () => weather,
+  )
+  return { loader, landscape, created, Runtime, weather, preloadWeather }
 })
 vi.mock('./components/gpu-runtime', () => ({ GpuRuntime: fake.Runtime }))
 vi.mock('./components/scene-loader', () => ({ initSceneLoader: fake.loader }))
 vi.mock('./components/landscape', () => ({ initLandscape: fake.landscape }))
+vi.mock('./weather/scene', () => ({ preloadSceneWeather: fake.preloadWeather }))
 // World preparation has its own tests; the page lifecycle only hands it to the landscape.
 vi.mock('./components/scene-world', () => ({
   startSceneWorld: () => {
@@ -64,6 +71,7 @@ beforeEach(() => {
   fake.created.length = 0
   fake.Runtime.create.mockClear()
   fake.loader.mockReset().mockResolvedValue({ dispose() {} })
+  fake.preloadWeather.mockClear()
   fake.landscape.mockReset().mockImplementation(async (_host, _renderer, _signal, ready) => {
     ready()
     return () => {}
@@ -124,6 +132,26 @@ it('serializes restoration after release and ignores repeated pageshow', async (
   expect(fake.landscape.mock.calls[1]?.[5]).toBe(false)
 })
 
+it('requests weather with world preparation and reuses it on restoration', async () => {
+  const loaded = deferred()
+  fake.loader.mockImplementationOnce(async () => {
+    await loaded.promise
+    return { dispose() {} }
+  })
+  await import('./main')
+  // Requested before the loader presents and the landscape module is imported.
+  await vi.waitFor(() => expect(fake.preloadWeather).toHaveBeenCalledOnce())
+  expect(fake.preloadWeather.mock.calls[0]?.[0].seed).toBe(1)
+  expect(fake.landscape).not.toHaveBeenCalled()
+  loaded.resolve()
+  await vi.waitFor(() => expect(fake.landscape).toHaveBeenCalledOnce())
+  await expect(fake.landscape.mock.calls[0]?.[7]).resolves.toBe(fake.weather)
+  window.dispatchEvent(new Event('pagehide'))
+  window.dispatchEvent(Object.assign(new Event('pageshow'), { persisted: true }))
+  await vi.waitFor(() => expect(fake.landscape).toHaveBeenCalledTimes(2))
+  expect(fake.preloadWeather).toHaveBeenCalledOnce()
+})
+
 it('releases the profile when the WebGPU device fails without creating another renderer', async () => {
   await import('./main')
   await vi.waitFor(() => expect(fake.landscape).toHaveBeenCalledOnce())
@@ -165,7 +193,7 @@ it('waits for cancelled renderer initialization and release before restoring', a
   expect(document.documentElement.dataset.sceneLoading).toBe('ready')
 })
 
-it('aborts on the independent 20-second timeout and ignores a late loader', async () => {
+it('aborts on the independent 45-second timeout and ignores a late loader', async () => {
   const loaded = deferred()
   const disposed = vi.fn<() => void>()
   const settled = vi.fn<() => void>()

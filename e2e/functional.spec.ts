@@ -4,23 +4,11 @@ import type { Page } from '@playwright/test'
 import { availableBackend } from './graphics-support'
 import { mockSceneWeather } from './weather-fixture'
 
-async function requireSceneOrStaticMobileProfile(page: Page) {
-  const backend = await page.evaluate(availableBackend)
-  if (test.info().project.name === 'mobile' && !backend) {
-    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'failed')
-    await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
-    await expect(page.locator('#scene-canvas')).toBeHidden()
-    const github = page.getByRole('link', { name: /GitHub/ })
-    await github.focus()
-    await expect(github).toBeFocused()
-    return false
-  }
-  if (test.info().project.name === 'mobile')
-    expect(backend, 'Rendering journeys require WebGPU or WebGL 2').not.toBeNull()
-  else expect(backend, 'Rendering journeys require a WebGPU adapter').toBe('webgpu')
+/** Desktop Chromium must render through WebGPU (a software adapter on CI). */
+async function requireScene(page: Page) {
+  expect(await page.evaluate(availableBackend), 'Rendering journeys require WebGPU').toBe('webgpu')
   await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-backend', backend ?? '')
-  return true
+  await expect(page.locator('#scene-canvas')).toHaveAttribute('data-backend', 'webgpu')
 }
 
 test('daylight scene supports interaction, resizing, credits and navigation restoration', async ({
@@ -30,10 +18,7 @@ test('daylight scene supports interaction, resizing, credits and navigation rest
   page.on('pageerror', (error) => errors.push(error.message))
   await mockSceneWeather(page, 'clear')
   await page.goto('/?seed=42&startTime=12:00')
-  if (!(await requireSceneOrStaticMobileProfile(page))) {
-    expect(errors).toEqual([])
-    return
-  }
+  await requireScene(page)
   const canvas = page.locator('#landscape canvas')
   await expect(canvas).toHaveCount(1)
   await expect(canvas).toHaveAttribute('data-scene-rendered', 'true')
@@ -71,10 +56,7 @@ test('night and rain render with reduced motion and retain an accessible profile
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await mockSceneWeather(page, 'overcast', 1)
   await page.goto('/?seed=42&startTime=00:00')
-  if (!(await requireSceneOrStaticMobileProfile(page))) {
-    expect(errors).toEqual([])
-    return
-  }
+  await requireScene(page)
   await expect(page.locator('canvas[data-scene-rendered="true"]')).toHaveCount(1)
   await expect(page.locator('#landscape')).toHaveAttribute('data-rain-intensity', '1')
   const profile = page.getByRole('link', { name: /GitHub/ })

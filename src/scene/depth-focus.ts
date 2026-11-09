@@ -48,6 +48,13 @@ export type PlanarMirror = Readonly<{
 export const LENS_TARGET = 'Landscape lens color'
 
 const REC709 = vec3(0.2126, 0.7152, 0.0722)
+/** Luma compressed as display would (Reinhard), for the antialiasing's edge detection. */
+const luma = (c: Node<'vec3'>) => {
+  const l = dot(c, REC709)
+  return sqrt(l.div(l.add(1)))
+}
+/** Display-compressed luma range below which the depth-of-field disc changes nothing visible. */
+const FLAT_LUMA = 0.012
 
 /**
  * Bloom reads the graded radiance, so its threshold is in exposed units: ACES maps 1 to
@@ -107,10 +114,6 @@ export class DepthFocus {
     const antialiased = (coord: Node<'vec2'>) => {
       const px = this.bufferPixel
       const at = (dx: number, dy: number) => this.color.sample(coord.add(px.mul(vec2(dx, dy)))).rgb
-      const luma = (c: Node<'vec3'>) => {
-        const l = dot(c, REC709)
-        return sqrt(l.div(l.add(1)))
-      }
       const centre = this.color.sample(coord).rgb
       const lM = luma(centre)
       const lNW = luma(at(-1, -1)),
@@ -137,8 +140,12 @@ export class DepthFocus {
       const b = a.mul(0.5).add(sampleAt(-0.5).add(sampleAt(0.5)).mul(0.25))
       const lB = luma(b)
       const blended = select(lB.lessThan(lMin).or(lB.greaterThan(lMax)), a, b)
+      const contrast = lMax.sub(lMin)
       // Flat regions keep the untouched pixel: no blur where there is no edge.
-      return select(lMax.sub(lMin).lessThan(max(0.04, lMax.mul(0.125))), centre, blended)
+      return {
+        colour: select(contrast.lessThan(max(0.04, lMax.mul(0.125))), centre, blended),
+        contrast,
+      }
     }
     // Graded before the bright pass so the threshold follows exposure through the day and night.
     this.glow = bloom(
@@ -161,9 +168,12 @@ export class DepthFocus {
           smoothstep(4, 14, centerDistance).oneMinus().mul(0.6),
           smoothstep(90, 180, centerDistance).mul(1.35),
         )
-        const color = antialiased(uv()).toVar(),
+        const edge = antialiased(uv())
+        const color = edge.colour.toVar(),
           weight = float(1).toVar()
-        If(radius.greaterThan(0.3), () => {
+        // The disc spans at most 1.35 CSS pixels: where the neighbourhood is already flat (open
+        // sky, cloud, calm water) it would return the pixel itself, so skip its taps there.
+        If(radius.greaterThan(0.3).and(edge.contrast.greaterThan(FLAT_LUMA)), () => {
           Loop(samples, ({ i }) => {
             const index = float(i).add(0.5),
               angle = index.mul(2.39996323),

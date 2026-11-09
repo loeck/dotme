@@ -63,6 +63,8 @@ export class SceneDetails {
   /** Roots left out of the lighting probe's compile pass. */
   private readonly probeStates: Array<{ root: Object3D; visible: boolean }>
   private environment: DetailEnvironment = { rainIntensity: 0, daylight: 0 }
+  /** 0–1: fireflies glow on late-spring and summer nights only (`seasonalLife`). */
+  private fireflySeason = 1
 
   private readonly reducedMotion: boolean
 
@@ -205,6 +207,10 @@ export class SceneDetails {
     this.waterfall?.setBlock(across, height, radius, strength)
   }
 
+  setFireflySeason(share: number) {
+    this.fireflySeason = Number.isFinite(share) ? Math.max(0, Math.min(1, share)) : 1
+  }
+
   setEnvironment(environment: Partial<DetailEnvironment>) {
     this.environment = updateDetailEnvironment(this.environment, environment)
     // A weather-state change is immediate with reduced motion; only its transition is frozen.
@@ -248,7 +254,7 @@ export class SceneDetails {
     this.fireflies.update(time, wind, {
       reducedMotion: this.reducedMotion,
       nightFactor: 1 - daylight,
-      intensity: intro * (1 - rainIntensity * 0.8),
+      intensity: intro * (1 - rainIntensity * 0.8) * this.fireflySeason,
       pointer: scenePointer,
       gather,
     })

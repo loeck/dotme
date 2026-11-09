@@ -1,3 +1,4 @@
+import { latticeHash } from './hash'
 /**
  * A Nordic lake-shore sward as clumps, after Ghost of Tsushima's procedural grass (Wohllaib,
  * GDC 2021): a clump, not a blade, sets height, facing, lean, colour and dryness, so the bank
@@ -97,12 +98,8 @@ const rotate = (v: Point, k: Point, angle: number): Point => {
   ]
 }
 
-function hash(a: number, b: number, stream: number) {
-  let n = (Math.imul(a | 0, 0x9e3779b1) ^ Math.imul(b | 0, 0x85ebca77) ^ stream) >>> 0
-  n = Math.imul(n ^ (n >>> 16), 0x7feb352d)
-  n = Math.imul(n ^ (n >>> 15), 0x846ca68b)
-  return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
-}
+/** The shared lattice hash without a seed: placements carry their own streams. */
+const hash = (a: number, b: number, stream: number) => latticeHash(0, a, b, stream)
 
 type Blade = Readonly<{
   root: Point
@@ -118,7 +115,7 @@ type Blade = Readonly<{
   twist: number
   /** Width profile per row, root to tip; the last row is the tip. */
   rows: readonly (readonly [number, number])[]
-  root_: Rgb
+  rootColour: Rgb
   mid: Rgb
   tip: Rgb
   /** Round stems shade the same all round: no rounding across the width. */
@@ -178,7 +175,7 @@ function appendBlade(builder: MeshBuilder, blade: Blade, phase: number, omega: n
     const shade = Math.pow(t, 1.5)
     const colour =
       t < 0.6
-        ? mixRgb(blade.root_, blade.mid, Math.min(1, shade / Math.pow(0.6, 1.5)))
+        ? mixRgb(blade.rootColour, blade.mid, Math.min(1, shade / Math.pow(0.6, 1.5)))
         : mixRgb(blade.mid, blade.tip, (t - 0.6) / 0.4)
     const wind = [t * t * height * 0.45, phase, t * 0.008, omega] as const
     const half = (blade.width * w) / 2
@@ -260,7 +257,7 @@ export function appendClump(
         droop: 0,
         twist: 0,
         rows,
-        root_: GRASS.root,
+        rootColour: GRASS.root,
         mid: scaleRgb(GRASS.rush, value),
         tip: scaleRgb(mixRgb(GRASS.rush, GRASS.straw, 0.35), value),
         round: true,
@@ -290,7 +287,7 @@ export function appendClump(
         droop: flat ? 0.15 + 0.35 * r(i, 10) : 0.05 * r(i, 10),
         twist: (r(i, 11) - 0.5) * (flat ? 2.2 : 0.6),
         rows: dead && r(i, 12) < 0.4 ? rows.slice(0, rows.length - 1) : rows,
-        root_: dead ? GRASS.litter : GRASS.root,
+        rootColour: dead ? GRASS.litter : GRASS.root,
         mid: dead ? scaleRgb(litter ? GRASS.litter : GRASS.straw, value) : living,
         tip: dead ? scaleRgb(litter ? GRASS.litter : GRASS.strawTip, value) : livingTip,
         round: false,
@@ -327,7 +324,7 @@ export function appendClump(
             [0.78, 2.6],
             [0.92, 2],
           ],
-          root_: GRASS.root,
+          rootColour: GRASS.root,
           mid: mixRgb(GRASS.straw, GRASS.wiry, 0.4),
           tip: head,
           round: true,
@@ -338,5 +335,3 @@ export function appendClump(
     }
   }
 }
-
-export const GRASS_PALETTE = GRASS

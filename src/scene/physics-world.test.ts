@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import { createBoxIndex, firstBoxHit } from './box-index'
+import type { Box } from './box-index'
 import { createPhysicsWorld, loadPhysics, mergeStaticBoxes } from './physics-world'
-import { createVoxelIndex, firstVoxelHit } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 
-const voxel = (x: number, y: number, z: number, size = 1): Voxel => ({ x, y, z, size, color: 0 })
+const cube = (x: number, y: number, z: number, size = 1): Box => ({ x, y, z, size, color: 0 })
 
 function mulberry(seed: number) {
   let state = seed >>> 0
@@ -31,29 +31,29 @@ const inside = (merged: Float64Array, x: number, y: number, z: number) => {
 }
 
 describe('physics statics', () => {
-  it('merges adjacent voxel boxes without losing coverage', () => {
-    const voxels: Voxel[] = []
+  it('merges adjacent boxes without losing coverage', () => {
+    const boxes: Box[] = []
     for (let x = 0; x < 12; x++)
-      for (let z = 0; z < 8; z++) for (let y = 0; y < 2; y++) voxels.push(voxel(x, y, z))
-    voxels.push(voxel(40, 5, -30, 0.25))
-    const index = createVoxelIndex(voxels)
+      for (let z = 0; z < 8; z++) for (let y = 0; y < 2; y++) boxes.push(cube(x, y, z))
+    boxes.push(cube(40, 5, -30, 0.25))
+    const index = createBoxIndex(boxes)
     const merged = mergeStaticBoxes(index.boxes)
     expect(merged.length / 6).toBe(2)
-    for (const box of voxels) expect(inside(merged, box.x, box.y, box.z)).toBe(true)
+    for (const box of boxes) expect(inside(merged, box.x, box.y, box.z)).toBe(true)
   })
 
-  it('matches the voxel raycast on seeded segments', async () => {
-    const voxels: Voxel[] = []
+  it('matches the box index raycast on seeded segments', async () => {
+    const boxes: Box[] = []
     const random = mulberry(7)
     for (let i = 0; i < 60; i++)
-      voxels.push(
-        voxel(
+      boxes.push(
+        cube(
           Math.floor(random() * 20) - 10,
           Math.floor(random() * 6),
           Math.floor(random() * 20) - 10,
         ),
       )
-    const index = createVoxelIndex(voxels)
+    const index = createBoxIndex(boxes)
     const physics = createPhysicsWorld(await loadPhysics(), index)
     try {
       expect(physics.staticCount).toBeGreaterThan(0)
@@ -65,7 +65,7 @@ describe('physics statics', () => {
           z: random() * 30 - 15,
         }
         const b = { x: random() * 30 - 15, y: random() * 12 - 2, z: random() * 30 - 15 }
-        const expected = firstVoxelHit(
+        const expected = firstBoxHit(
           index,
           [a.x, a.y, a.z],
           [b.x - a.x, b.y - a.y, b.z - a.z],
@@ -83,8 +83,8 @@ describe('physics statics', () => {
     }
   })
 
-  it('intercepts a fast diagonal segment at the first voxel, including thin roofs', async () => {
-    const index = createVoxelIndex([voxel(0, 2, 0, 0.1), voxel(0, 1, 0, 0.1)])
+  it('intercepts a fast diagonal segment at the first box, including thin roofs', async () => {
+    const index = createBoxIndex([cube(0, 2, 0, 0.1), cube(0, 1, 0, 0.1)])
     const physics = createPhysicsWorld(await loadPhysics(), index)
     try {
       expect(physics.trace({ x: 0, y: 3, z: 0 }, { x: 0, y: -2, z: 0 })).toBeCloseTo(0.19, 6)
@@ -97,21 +97,21 @@ describe('physics statics', () => {
   })
 
   it('never discards cell-boundary, empty-column or long-segment hits', async () => {
-    const voxels = Array.from({ length: 64 }, (_, i) => ({
+    const boxes = Array.from({ length: 64 }, (_, i) => ({
       x: ((i % 8) - 4) * 2,
       y: i % 5,
       z: (Math.floor(i / 8) - 4) * 2,
       size: i % 3 === 0 ? 0.125 : 1,
       color: 0,
     }))
-    const index = createVoxelIndex(voxels)
+    const index = createBoxIndex(boxes)
     const physics = createPhysicsWorld(await loadPhysics(), index)
     try {
       const mismatches: number[] = []
       for (let i = 0; i < 500; i++) {
         const a = { x: Math.sin(i * 7) * 12, y: (i % 8) - 1, z: Math.cos(i * 3) * 12 }
         const b = { x: Math.cos(i * 5) * 12, y: -2, z: Math.sin(i * 11) * 12 }
-        const expected = firstVoxelHit(
+        const expected = firstBoxHit(
           index,
           [a.x, a.y, a.z],
           [b.x - a.x, b.y - a.y, b.z - a.z],
@@ -124,7 +124,7 @@ describe('physics statics', () => {
         if (!matches) mismatches.push(i)
       }
       expect(mismatches).toEqual([])
-      for (const box of voxels) {
+      for (const box of boxes) {
         const top = { x: box.x, y: 20, z: box.z }
         const bottom = { x: box.x, y: -2, z: box.z }
         expect(physics.trace(top, bottom)).toBeLessThan(1)
@@ -132,7 +132,7 @@ describe('physics statics', () => {
         const edgeBottom = { x: box.x + box.size / 2, y: -2, z: box.z }
         expect(physics.trace(edge, edgeBottom)).toBeLessThan(1)
       }
-      const empty = createPhysicsWorld(await loadPhysics(), createVoxelIndex([]))
+      const empty = createPhysicsWorld(await loadPhysics(), createBoxIndex([]))
       try {
         expect(empty.trace({ x: 0, y: 1, z: 0 }, { x: 0, y: 0, z: 0 })).toBe(Infinity)
       } finally {
@@ -144,7 +144,7 @@ describe('physics statics', () => {
   })
 
   it('reports ray distances for picking, or null on a miss', async () => {
-    const index = createVoxelIndex([voxel(0, 0, -10)])
+    const index = createBoxIndex([cube(0, 0, -10)])
     const physics = createPhysicsWorld(await loadPhysics(), index)
     try {
       expect(physics.castDistance({ x: 0, y: 0, z: 0 }, { x: 0, y: 0, z: -1 }, 130)).toBeCloseTo(

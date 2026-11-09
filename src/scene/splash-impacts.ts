@@ -39,6 +39,7 @@ import type { Scene, Node, NodeBuilder } from 'three/webgpu'
 
 import { WATER_LEVEL } from './lake-bed'
 import type { LakeWaterMaterial } from './lake-water'
+import { hash12 } from './shader-noise'
 import { fieldUvNode, windFieldNode } from './water-surface'
 
 class CrownMaterial extends MeshStandardNodeMaterial {
@@ -192,13 +193,12 @@ export class SplashImpacts {
       const bubbleP = offset.mul(42).add(vec2(landing.z.mul(17), age.mul(0.6)))
       const cell = floor(bubbleP),
         f = fract(bubbleP).sub(0.5)
-      const hash = (q: typeof cell) => fract(sin(q.dot(vec2(127.1, 311.7))).mul(43758.5453))
       const bubbles = float(1).sub(
         smoothstep(
           0.12,
           0.4,
           f
-            .add(vec2(hash(cell), hash(cell.add(13))).mul(0.26))
+            .add(vec2(hash12(cell), hash12(cell.add(13))).mul(0.26))
             .sub(0.13)
             .length(),
         ),

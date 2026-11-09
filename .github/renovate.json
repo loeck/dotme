@@ -1,0 +1,16 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", "helpers:pinGitHubActionDigests", "schedule:weekly"],
+  "timezone": "Europe/Paris",
+  "rangeStrategy": "pin",
+  "packageRules": [
+    {
+      "groupName": "three",
+      "matchPackageNames": ["three", "@types/three"]
+    },
+    {
+      "groupName": "lint tooling",
+      "matchPackageNames": ["oxlint", "oxlint-tsgolint", "oxfmt", "husky", "lint-staged"]
+    }
+  ]
+}

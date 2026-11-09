@@ -50,6 +50,10 @@ ripple on the lake (at most one every 0.35 s), for 5–9 s and shrinks away. Lea
 yellowing greens with gold and a few brown, larger with distance past 14 m so a far wood's flecks
 still read. One instanced draw of up to 160 leaves (48 on phones), simulated on the CPU; the ground
 is cast once and again only after a 1.5 m drift. Reduced motion sheds none and clears them.
+The season scales the fall: in autumn a gust strips three and a half times as many leaves, and
+every crown also lets a few go on its own (0.007 a second per metre of crown radius, more in a
+breeze), coloured from yellows, coppers and russets with a few late greens; a winter gust finds
+less than half as many, all dry browns ([seasons](vegetation.md#seasons)).
 
 At night (daylight under 0.25) a double tap or double click on the water sets a paper lantern
 afloat there (`lake-lanterns.ts`): a small drum that glows warm through the middle of its paper,
@@ -78,6 +82,37 @@ through them. Birds are unlit dark silhouettes made of two hinged wings, beating
 second (a little faster climbing), as a crow or jackdaw does, and gliding for 1.4 s in every
 2.8 s, each bird on its own rhythm; they bank into turns, fade in at the crown and out after
 24 s. Reduced motion shows no birds.
+
+### Seasonal wildlife
+
+The season ([seasons](vegetation.md#seasons)) decides who is about. Winter halves the flock and
+the rate flocks cross the sky (autumn takes 15% off). Fireflies glow on summer nights and at half
+strength in late spring, and not at all in autumn or winter.
+
+Bats hunt over the lake from about 20 minutes after sunset for the next hour (fading in from 14
+to 28 minutes and out from 60 to 80), and again from 80 to 35 minutes
+before sunrise (`dusk-bats.ts`). Six (four on low power) come out of the tree line one at a
+time as activity rises and go back the same way; each patrols its own seeded beat over the near
+water, 7.5–11 m up so it shows against the sky from the bank, turning for a new point every
+0.22–0.75 s at 4.5–7 m/s, stooping now and then at prey and gliding briefly on spread wings. They
+are noctule-sized (40 cm) dark silhouettes in one instanced draw; the wing beat (9 a second,
+each bat its own rate) hinges the wings in the vertex shader. They keep to the warm half of the
+year (hibernating in winter), stay in on rain, fog, snow, storms, strong wind or below about
+6 °C.
+
+On warm, dry, calm days (from 13 to 20 °C, wind under 3.5–6.5 m/s, daylight over 0.3; the
+season's typical temperature stands in when the weather reports none) a couple of dragonflies
+(one on low power) patrol the water just off the viewer's bank and a few midge swarms dance
+over the shallows (`lake-insects.ts`). A dragonfly holds a point, trembling a centimetre or two,
+for 0.7–2.6 s, then darts 1.2–3.6 m in a quarter to half a second and hovers again, never more
+than 3.5 m from its patch; seen level from the bank it would be a line under a pixel, so it is
+drawn tipped toward the viewer, a dark body with glassy wings a few pixels across. Midges loop
+and bob in columns 1.4–2.6 m up, entirely in the vertex shader; they are nearly invisible until
+the sun stands low ahead (forward scattering by their wings), when each catches the light as a
+faint warm fleck against the shaded banks. Insects keep to the warm season (fully in summer,
+60% in spring, 30% in autumn). Bats and insects are main-view only (no mirror, probe or shadow
+draws), add three draws in all, compile with the scene before the first frame, and reduced motion
+shows none.
 
 Floating leaves slow down in sheltered shore pockets derived from the actual shoreline.
 Only nearby pockets with a clear water path can influence them; a bank-parallel current

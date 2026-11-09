@@ -1,12 +1,12 @@
 import { InstancedMesh, Matrix4, Scene, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { createLakeBed } from './lake-bed'
 import { LakeWaterMaterial } from './lake-water'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import { SceneDetails, updateDetailEnvironment } from './scene-details'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { WindModel } from './wind'
 
 describe('detail environment bridge', () => {
@@ -31,7 +31,7 @@ describe('detail environment bridge', () => {
   })
 })
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
@@ -45,7 +45,7 @@ const firstInstance = (scene: Scene, name: string) => {
 
 describe('details water layer', () => {
   it('routes pointer bursts to splash impulses and advances floaters and foam', async () => {
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
     const scene = new Scene()
     const material = new LakeWaterMaterial()
     const details = new SceneDetails(
@@ -80,7 +80,7 @@ describe('details water layer', () => {
   })
 
   it('holds pointer bursts still under reduced motion', async () => {
-    const physics = createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+    const physics = createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
     const scene = new Scene()
     const details = new SceneDetails(
       scene,

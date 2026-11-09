@@ -6,6 +6,7 @@
  */
 import { atlasRect } from './foliage-atlas'
 import type { AtlasTile } from './foliage-atlas'
+import { latticeHash } from './hash'
 import { mixRgb } from './vegetation-models'
 import type { Point, Rgb, Spray, VegetationGeometry } from './vegetation-models'
 
@@ -45,12 +46,8 @@ const place = (p: Point, at: Placement): Point => {
   const r = rotateY(p, at.yaw)
   return [at.x + r[0] * at.scale, at.y + r[1] * at.scale, at.z + r[2] * at.scale]
 }
-function hash(a: number, b: number, stream: number) {
-  let n = (Math.imul(a | 0, 0x9e3779b1) ^ Math.imul(b | 0, 0x85ebca77) ^ stream) >>> 0
-  n = Math.imul(n ^ (n >>> 16), 0x7feb352d)
-  n = Math.imul(n ^ (n >>> 15), 0x846ca68b)
-  return ((n ^ (n >>> 16)) >>> 0) / 0x1_0000_0000
-}
+/** The shared lattice hash without a seed: placements carry their own streams. */
+const hash = (a: number, b: number, stream: number) => latticeHash(0, a, b, stream)
 
 export class MeshBuilder {
   private readonly positions: number[] = []

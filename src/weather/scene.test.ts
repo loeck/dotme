@@ -3,18 +3,27 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { required } from '../invariant'
 import { fetchWeather } from './current'
 import { parisWeatherFixture } from './paris.fixture'
-import { preloadSceneWeather, randomSceneWeather, weatherForScene } from './scene'
+import {
+  forcedSceneWeather,
+  preloadSceneWeather,
+  randomSceneWeather,
+  visibilityFog,
+  weatherForScene,
+} from './scene'
+import { fakeAbortTimeouts, memoryStorage } from './timeouts.fixture'
 
 const fetchMock = vi.fn<typeof fetch>()
 beforeEach(() => {
   vi.useFakeTimers()
+  fakeAbortTimeouts()
   vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('localStorage', memoryStorage())
 })
 afterEach(() => {
-  // Every completion releases both the preload and HTTP deadlines.
-  // eslint-disable-next-line vitest/no-standalone-expect
-  expect(vi.getTimerCount()).toBe(0)
+  // Both deadlines are AbortSignal.timeout signals: nothing to release, only fakes to clear.
+  vi.clearAllTimers()
   vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
   fetchMock.mockReset()
 })
@@ -45,7 +54,8 @@ describe('scene weather mapping', () => {
     for (const [weather_code, rain, expected] of [
       [3, 0, 'cloudy'],
       [3, 1, 'overcast'],
-      [45, 0, 'overcast'],
+      [45, 0, 'fog'],
+      [73, 0, 'snow'],
     ] as const) {
       const data = parisWeatherFixture()
       Object.assign(data.current, { weather_code, cloud_cover: 100, rain })
@@ -78,7 +88,8 @@ describe('scene weather mapping', () => {
       // Consume each fixture before replacing the response.
       // eslint-disable-next-line no-await-in-loop
       const mapped = weatherForScene(await fetchWeather())
-      expect(mapped.weather).toBe('overcast')
+      expect(mapped.weather).toBe(weather_code === 71 ? 'snow' : 'overcast')
+      expect(mapped.condition).toBe(weather_code === 71 ? 'snow' : 'thunderstorm')
       expect(mapped.rain.intensity).toBe(0)
       // A dry thunderstorm still brings lightning; snow does not.
       expect(mapped.storm).toBe(weather_code === 95)
@@ -108,6 +119,8 @@ describe('weather preload deadline', () => {
     ['partly-cloudy', 'partly-cloudy', 0, false],
     ['cloudy', 'cloudy', 0, false],
     ['overcast', 'overcast', 0, false],
+    ['fog', 'fog', 0, false],
+    ['snow', 'snow', 0, false],
     ['rain', 'overcast', 0.55, false],
     ['thunderstorm', 'overcast', 1, true],
   ] as const)('forces %s without fetching live weather', async (weather, sky, intensity, storm) => {
@@ -135,10 +148,10 @@ describe('weather preload deadline', () => {
     fetchMock.mockResolvedValueOnce(new Response('{}'))
     await expect(start()).resolves.toEqual(randomSceneWeather(42))
   })
-  it('aborts at 3 seconds and ignores a late response even if fetch ignores cancellation', async () => {
+  it('falls back at 3 seconds, lets the request finish and caches it for the next visit', async () => {
     // The fallback reads the clock when the deadline fires, the expectation a little later (after
     // waitFor's own fake-clock steps): start on a whole second so both fall in the same one.
-    vi.setSystemTime(new Date(2026, 5, 1, 12, 0, 0, 0))
+    vi.setSystemTime(new Date(1790150400 * 1000 + 60_000))
     let reply: ((response: Response) => void) | undefined
     fetchMock.mockImplementation(
       () =>
@@ -153,10 +166,31 @@ describe('weather preload deadline', () => {
     // waitFor may advance the fake clock while the dynamic module is being imported.
     await vi.advanceTimersByTimeAsync(3000)
     await expect(result).resolves.toEqual(randomSceneWeather(42))
-    expect(required(required(required(fetchMock.mock.calls[0])[1]).signal).aborted).toBe(true)
+    // The request outlives the scene's deadline, up to its own.
+    const request = required(required(required(fetchMock.mock.calls[0])[1]).signal)
+    expect(request.aborted).toBe(false)
     required(reply)(new Response(JSON.stringify(parisWeatherFixture())))
     await vi.advanceTimersByTimeAsync(0)
+    // The late answer cannot change this scene, but the next one opens on it without a request.
     expect(resolved).toHaveBeenCalledTimes(1)
+    await expect(start()).resolves.toMatchObject({ source: 'live', weather: 'clear' })
+    expect(fetchMock).toHaveBeenCalledOnce()
+  })
+  it('still bounds a background request by the 10-second deadline', async () => {
+    fetchMock.mockImplementation(
+      (_url, options) =>
+        new Promise((_resolve, reject) => {
+          const signal = required(required(options).signal)
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true })
+        }),
+    )
+    const result = start()
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
+    await vi.advanceTimersByTimeAsync(3000)
+    await expect(result).resolves.toMatchObject({ source: 'random' })
+    const request = required(required(required(fetchMock.mock.calls[0])[1]).signal)
+    await vi.advanceTimersByTimeAsync(7000)
+    expect(request.aborted).toBe(true)
   })
   it('retains the deadline during body parsing', async () => {
     fetchMock.mockImplementation(async (_url, options) =>
@@ -196,5 +230,66 @@ describe('weather preload deadline', () => {
     await vi.waitFor(() => expect(fetchMock).toHaveBeenCalled())
     controller.abort()
     await expect(result).resolves.toMatchObject({ name: 'AbortError' })
+  })
+})
+
+async function mapSnapshot(current: Partial<ReturnType<typeof parisWeatherFixture>['current']>) {
+  const data = parisWeatherFixture()
+  Object.assign(data.current, current)
+  respond(data)
+  return weatherForScene(await fetchWeather())
+}
+
+describe('weather conditions for the scene', () => {
+  it('keeps heavy-rain codes heavy when the 15-minute amount is small', async () => {
+    // 0.1 mm in 15 minutes is 0.4 mm/h, a drizzle by amount; code 65 is heavy rain.
+    const heavy = await mapSnapshot({ weather_code: 65, rain: 0.1, cloud_cover: 100 })
+    expect(heavy.rain.intensity).toBeCloseTo(0.6)
+    expect(heavy.condition).toBe('rain')
+    // Measured downpours still win over a light code.
+    const measured = await mapSnapshot({ weather_code: 61, rain: 3, cloud_cover: 100 })
+    expect(measured.rain.intensity).toBe(1)
+  })
+  it('maps drizzle, fog and snow to distinct conditions with their own intensities', async () => {
+    const drizzle = await mapSnapshot({ weather_code: 53, cloud_cover: 90 })
+    expect(drizzle).toMatchObject({ condition: 'drizzle', weather: 'overcast', fog: 0, snow: 0 })
+    expect(drizzle.rain.intensity).toBeCloseTo(0.22)
+    const fog = await mapSnapshot({ weather_code: 48, cloud_cover: 100, visibility: 150 })
+    expect(fog).toMatchObject({ condition: 'fog', weather: 'fog', fog: 1, snow: 0 })
+    expect((await mapSnapshot({ weather_code: 45, visibility: 20_000 })).fog).toBe(0.7)
+    const snow = await mapSnapshot({ weather_code: 75, snowfall: 0.1, temperature_2m: -3 })
+    expect(snow).toMatchObject({ condition: 'snow', weather: 'snow', temperature: -3 })
+    expect(snow.snow).toBeCloseTo(0.6)
+    expect(snow.rain.intensity).toBe(0)
+    const grains = await mapSnapshot({ weather_code: 77 })
+    expect(grains.snow).toBeCloseTo(0.2)
+    const clear = await mapSnapshot({})
+    expect(clear).toMatchObject({ condition: 'dry', fog: 0, snow: 0, temperature: 19.3 })
+    expect(clear.humidity).toBeCloseTo(0.61)
+  })
+  it('reads fog from visibility and turns a dry, very low visibility into the fog preset', async () => {
+    expect(visibilityFog(5000)).toBe(0)
+    expect(visibilityFog(1000)).toBeCloseTo(0.5)
+    expect(visibilityFog(200)).toBeCloseTo(1)
+    expect(visibilityFog(0)).toBe(1)
+    expect(visibilityFog(Number.NaN)).toBe(0)
+    const mist = await mapSnapshot({ weather_code: 3, cloud_cover: 100, visibility: 300 })
+    expect(mist).toMatchObject({ weather: 'fog', condition: 'fog' })
+    const haze = await mapSnapshot({ weather_code: 3, cloud_cover: 100, visibility: 3000 })
+    expect(haze.weather).toBe('cloudy')
+    expect(haze.fog).toBeGreaterThan(0)
+  })
+  it('gives every forced preset a coherent condition', () => {
+    expect(forcedSceneWeather(1, 'fog')).toMatchObject({ condition: 'fog', fog: 0.85, snow: 0 })
+    expect(forcedSceneWeather(1, 'snow')).toMatchObject({ condition: 'snow', snow: 0.7 })
+    expect(forcedSceneWeather(1, 'snow').temperature).toBeLessThan(0)
+    expect(forcedSceneWeather(1, 'rain')).toMatchObject({ condition: 'rain', weather: 'overcast' })
+    expect(forcedSceneWeather(1, 'thunderstorm')).toMatchObject({
+      condition: 'thunderstorm',
+      storm: true,
+    })
+    expect(forcedSceneWeather(1, 'clear')).toMatchObject({ condition: 'dry', fog: 0, snow: 0 })
+    // Forced presets are warm enough for crickets, except snow and fog.
+    expect(forcedSceneWeather(1, 'clear').temperature).toBeGreaterThan(12)
   })
 })

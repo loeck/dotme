@@ -825,6 +825,7 @@ export class LakeWaterfall {
     const extent = this.parcelExtent
     if (!active) this.clearPendingImpacts()
     let fragment: SplashJet | undefined
+    let foamChanged = false
     const count = this.born.length
     for (let i = 0; i < count; i++) {
       const base = i * 3
@@ -853,10 +854,15 @@ export class LakeWaterfall {
       this.velocities[base + 2] = dxn * vx + dzn * vz
       const proximity = this.blockerFoam(lx, ly, lz)
       const struckBlocker = active && proximity > 0.55 && this.blockerActive && this.struck[i] !== 0
-      this.foams[i] = Math.min(
+      const foam = Math.min(
         1,
         proximity + (struckBlocker ? Math.min(0.35, Math.hypot(vx, vy, vz) * 0.04) : 0),
       )
+      // Foam is zero away from the cursor's blocker: upload it only when some value changed.
+      if (this.foams[i] !== foam) {
+        this.foams[i] = foam
+        foamChanged = true
+      }
       const previous = required(this.previousHeights[i])
       this.previousHeights[i] = ly
       // Wind waves stay within this narrow band; avoid sampling their full
@@ -924,9 +930,10 @@ export class LakeWaterfall {
         impact.speed = 0
       }
     }
+    // Every parcel moves each step, so positions and velocities upload whole.
     this.positionsAttribute.needsUpdate = true
     this.velocitiesAttribute.needsUpdate = true
-    this.foamsAttribute.needsUpdate = true
+    if (foamChanged) this.foamsAttribute.needsUpdate = true
   }
 
   private clearPendingImpacts() {

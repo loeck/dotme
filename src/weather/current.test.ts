@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { required } from '../invariant'
 import { fetchWeather, interpretWmoCode, WeatherHttpError } from './current'
 import { parisWeatherFixture as fixture } from './paris.fixture'
+import { fakeAbortTimeouts } from './timeouts.fixture'
 
 const fetchMock = vi.fn<typeof fetch>()
 const respond = (data: unknown = fixture()) =>
@@ -26,12 +27,12 @@ const pendingFetch = () =>
 
 beforeEach(() => {
   vi.useFakeTimers()
+  fakeAbortTimeouts()
   vi.stubGlobal('fetch', fetchMock)
 })
 afterEach(() => {
-  // Every outcome must release its timeout.
-  // eslint-disable-next-line vitest/no-standalone-expect
-  expect(vi.getTimerCount()).toBe(0)
+  // The request deadline is an AbortSignal.timeout: nothing to release, only fakes to clear.
+  vi.clearAllTimers()
   vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
@@ -284,23 +285,32 @@ describe('fetchWeather', () => {
     })
     expect(fetchMock).not.toHaveBeenCalled()
   })
-  it('forwards caller cancellation and removes its listener', async () => {
+  it('forwards caller cancellation with its reason', async () => {
     pendingFetch()
     const controller = new AbortController()
-    const remove = vi.spyOn(controller.signal, 'removeEventListener')
     const reason = new Error('Stopped')
     const result = fetchWeather({ signal: controller.signal }).catch((error: unknown) => error)
     controller.abort(reason)
     await expect(result).resolves.toBe(reason)
-    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
   })
-  it('removes listeners after success', async () => {
-    respond()
-    const controller = new AbortController()
-    const remove = vi.spyOn(controller.signal, 'removeEventListener')
-    await fetchWeather({ signal: controller.signal })
-    expect(remove).toHaveBeenCalledWith('abort', expect.any(Function))
-    controller.abort()
-    expect(required(required(required(fetchMock.mock.calls[0])[1]).signal).aborted).toBe(false)
+  it('combines the caller signal with the deadline without AbortSignal.any', async () => {
+    const any = Object.getOwnPropertyDescriptor(AbortSignal, 'any')
+    Object.defineProperty(AbortSignal, 'any', { configurable: true, value: undefined })
+    try {
+      pendingFetch()
+      const controller = new AbortController()
+      const reason = new Error('Stopped')
+      const cancelled = fetchWeather({ signal: controller.signal }).catch((e: unknown) => e)
+      controller.abort(reason)
+      await expect(cancelled).resolves.toBe(reason)
+      const stalled = fetchWeather({ signal: new AbortController().signal }).catch(
+        (error: unknown) => error,
+      )
+      await vi.advanceTimersByTimeAsync(10_000)
+      await expect(stalled).resolves.toMatchObject({ name: 'TimeoutError' })
+    } finally {
+      if (any) Object.defineProperty(AbortSignal, 'any', any)
+    }
+    expect(typeof AbortSignal.any).toBe('function')
   })
 })

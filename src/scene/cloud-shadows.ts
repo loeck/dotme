@@ -46,7 +46,7 @@ import { distantLightVisibility } from './distant-horizon'
 import { skyTraceSample } from './sky-cursor-trace'
 import type { SkyCursorTrace } from './sky-cursor-trace'
 
-export const CLOUD_SHADOW_SIZE = 768
+const CLOUD_SHADOW_SIZE = 768
 const TILE = 384
 const CENTER = new Vector3(0, 40, -120)
 export type CloudRenderer = Pick<
@@ -259,11 +259,7 @@ export type CloudShadowUniforms = CloudShadows['uniforms']
 export function celestialVisibility(u: CloudShadowUniforms) {
   return distantLightVisibility(u.uHorizonDirection, u.uHorizonSeed, u.uHorizonMobile)
 }
-export function cloudShadowProjected(
-  previous: Node<'vec2'>,
-  next: Node<'vec2'>,
-  u: CloudShadowUniforms,
-) {
+function cloudShadowProjected(previous: Node<'vec2'>, next: Node<'vec2'>, u: CloudShadowUniforms) {
   const sample = (point: Node<'vec2'>, offset: Node<'float'>) => {
     const edge = min(min(point.x, point.y), min(point.x.oneMinus(), point.y.oneMinus()))
     const coord = clamp(point, 0.5 / TILE, 1 - 0.5 / TILE)

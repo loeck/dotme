@@ -20,6 +20,9 @@ const heightEnergy = (wind: WindState) => {
   return sum
 }
 
+const variance = (spectrum: readonly { slope: number }[]) =>
+  spectrum.reduce((sum, { slope }) => sum + slope * slope, 0)
+
 describe('shared atmospheric wind', () => {
   it('is seeded, positive, continuous and independent of sampling history', () => {
     const wind = new WindModel(9182)
@@ -167,8 +170,6 @@ describe('shared atmospheric wind', () => {
   })
 
   it('keeps the low-power capillary slope variance and its wavelength range', () => {
-    const variance = (spectrum: readonly { slope: number }[]) =>
-      spectrum.reduce((sum, { slope }) => sum + slope * slope, 0)
     expect(LOW_POWER_RIPPLE_SPECTRUM).toHaveLength(8)
     expect(variance(LOW_POWER_RIPPLE_SPECTRUM)).toBeCloseTo(variance(RIPPLE_SPECTRUM), 10)
     const wavelengths = LOW_POWER_RIPPLE_SPECTRUM.map(({ wavelength }) => wavelength)

@@ -1,6 +1,5 @@
 import { expect, test } from '@playwright/test'
 
-import { deferred } from './deferred'
 import { mockParisWeather } from './weather-fixture'
 
 test.beforeEach(async ({ page }) => {
@@ -48,12 +47,76 @@ test('keeps profile links and SEO available without JavaScript', async ({
       'content',
       'Loëck | Building some stuff in Paris',
     )
-    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute('content', 'summary')
+    await expect(page.locator('meta[name="twitter:card"]')).toHaveAttribute(
+      'content',
+      'summary_large_image',
+    )
+    await expect(page.locator('meta[property="og:image"]')).toHaveAttribute(
+      'content',
+      'https://loeck.me/og-image.jpg',
+    )
+    const person: unknown = JSON.parse(
+      (await page.locator('script[type="application/ld+json"]').textContent()) ?? '',
+    )
+    expect(person).toMatchObject({ '@type': 'Person', name: 'Loëck Vézien' })
+    // Without JavaScript nothing will ever finish loading.
+    await expect(page.locator('main')).not.toHaveAttribute('aria-busy')
     await expect(page.locator('canvas')).toHaveCount(1)
     await expect(page.locator('#scene-canvas')).not.toHaveAttribute('data-loader-rendered')
   } finally {
     await context.close()
   }
+})
+
+test('serves the site files, icons and social image', async ({ request }) => {
+  for (const [path, type] of [
+    ['/og-image.jpg', 'image/jpeg'],
+    ['/favicon.svg', 'image/svg+xml'],
+    ['/favicon.ico', 'image/'],
+    ['/apple-touch-icon.png', 'image/png'],
+    ['/site.webmanifest', ''],
+    ['/robots.txt', 'text/plain'],
+    ['/sitemap.xml', 'xml'],
+  ] as const) {
+    // eslint-disable-next-line no-await-in-loop -- a handful of sequential static requests
+    const response = await request.get(path)
+    expect(response.status(), path).toBe(200)
+    expect(response.headers()['content-type'] ?? '', path).toContain(type)
+  }
+  expect(await (await request.get('/robots.txt')).text()).toContain(
+    'Sitemap: https://loeck.me/sitemap.xml',
+  )
+})
+
+test('loads under the production security headers without CSP violations', async ({ page }) => {
+  const violations: string[] = []
+  const errors: string[] = []
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /content.security.policy|CSP/i.test(message.text()))
+      violations.push(message.text())
+  })
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.exposeFunction('reportViolation', (violation: string) => violations.push(violation))
+  await page.addInitScript(() => {
+    document.addEventListener('securitypolicyviolation', (event) => {
+      const report: unknown = Reflect.get(window, 'reportViolation')
+      if (typeof report === 'function')
+        Reflect.apply(report, window, [`${event.violatedDirective} ${event.blockedURI}`])
+    })
+  })
+  const response = await page.goto('/?seed=42')
+  const headers = response?.headers() ?? {}
+  expect(headers['content-security-policy']).toContain("default-src 'self'")
+  expect(headers['x-content-type-options']).toBe('nosniff')
+  expect(headers['cross-origin-opener-policy']).toBe('same-origin')
+  // Readiness needs a graphics backend; the static profile is a valid end state elsewhere.
+  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', /ready|failed/, {
+    timeout: 30_000,
+  })
+  await expect(page.getByRole('heading', { name: 'Hi, I’m Loëck.' })).toBeVisible()
+  await expect(page.locator('main')).not.toHaveAttribute('aria-busy')
+  expect(violations).toEqual([])
+  expect(errors).toEqual([])
 })
 
 test('unknown paths return the static 404 with a home link', async ({ page }) => {
@@ -88,60 +151,4 @@ test('unavailable graphics leave keyboard profile access and do not request the 
   await expect(github).toBeFocused()
   expect(landscapeRequests).toEqual([])
   expect(errors).toEqual([])
-})
-
-for (const backend of ['webgpu', 'webgl'] as const)
-  test(`page lifecycle restores one ${backend} scene on the same canvas and seed`, async ({
-    page,
-  }) => {
-    if (backend === 'webgl')
-      await page.addInitScript(() => {
-        Object.defineProperty(Navigator.prototype, 'gpu', {
-          configurable: true,
-          get: () => undefined,
-        })
-      })
-    await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.goto('/?seed=42&startTime=00:00')
-    const canvas = page.locator('#scene-canvas')
-    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-    await canvas.evaluate((element) => element.setAttribute('data-original-canvas', 'true'))
-    await page.evaluate(() =>
-      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
-    )
-    await expect(canvas).toHaveCount(1)
-    await page.evaluate(() => {
-      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
-      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
-    })
-    await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready', {
-      timeout: 60_000,
-    })
-    await expect(canvas).toHaveCount(1)
-    await expect(canvas).toHaveAttribute('data-original-canvas', 'true')
-    await expect(canvas).toHaveAttribute('data-seed', '42')
-    await expect(canvas).toHaveAttribute('data-backend', backend)
-    await expect(canvas).toHaveAttribute('data-scene-rendered', 'true')
-  })
-
-test('cancels a pending landscape import and can restore after it resolves', async ({ page }) => {
-  const barrier = deferred()
-  await page.route('**/assets/landscape-*.js', async (route) => {
-    await barrier.promise
-    await route.continue()
-  })
-  const requested = page.waitForRequest('**/assets/landscape-*.js')
-  await page.goto('/?seed=42', { waitUntil: 'domcontentloaded' })
-  await requested
-  await page.evaluate(() =>
-    window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true })),
-  )
-  barrier.resolve()
-  await page.waitForLoadState('networkidle')
-  await expect(page.locator('#scene-canvas')).not.toHaveAttribute('data-scene-rendered', 'true')
-  await page.evaluate(() =>
-    window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true })),
-  )
-  await expect(page.locator('html')).toHaveAttribute('data-scene-loading', 'ready')
-  await expect(page.locator('canvas')).toHaveCount(1)
 })

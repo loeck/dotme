@@ -31,12 +31,8 @@ import { GLOW_BLENDING } from './glow-blending'
 import { LAKE_BOUNDS, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
 import { fadeNightLight } from './lighting'
+import { smoothstep as smooth } from './math'
 import type { WindState } from './wind'
-
-const smooth = (start: number, end: number, value: number) => {
-  const t = Math.max(0, Math.min(1, (value - start) / (end - start)))
-  return t * t * (3 - 2 * t)
-}
 
 export type FireflyPointer = Readonly<{
   ndc: Readonly<{ x: number; y: number }>
@@ -56,7 +52,7 @@ export type LakeFirefliesOptions = Readonly<{
 }>
 
 /** Flies within this many metres of a still cursor come to it. */
-export const GATHER_REACH = 18
+const GATHER_REACH = 18
 /** Rates, per second, at which a fly joins the swarm and leaves it. */
 const GATHER_JOIN = 0.45
 const GATHER_LEAVE = 1.2

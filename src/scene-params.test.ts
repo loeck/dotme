@@ -46,7 +46,7 @@ describe('public scene URLs', () => {
       expect(sceneParams(`?seed=${seed}`).seed).toBeUndefined()
     for (const time of ['24:00', '12:60', '1:30', 'invalid', ''])
       expect(sceneParams(`?startTime=${time}`).startTime).toBeUndefined()
-    for (const weather of ['invalid', '', 'RAIN', 'snow', '__proto__', 'toString'])
+    for (const weather of ['invalid', '', 'RAIN', 'hail', '__proto__', 'toString'])
       expect(sceneParams(`?weather=${weather}`).weather).toBeUndefined()
   })
   it('retains supported weather overrides when cleaning shared URLs', () => {
@@ -55,6 +55,8 @@ describe('public scene URLs', () => {
       'partly-cloudy',
       'cloudy',
       'overcast',
+      'fog',
+      'snow',
       'rain',
       'thunderstorm',
     ]) {
@@ -77,6 +79,16 @@ describe('public scene URLs', () => {
       'weather',
     ])
     expect(url.hash).toBe('#about')
+  })
+  it('accepts a season override, keeps it when cleaning and ignores anything else', () => {
+    for (const season of ['spring', 'summer', 'autumn', 'winter'] as const) {
+      const url = cleanSceneUrl(new URL(`https://example.com/?seed=42&season=${season}&rain=off`))
+      expect([...url.searchParams.keys()]).toEqual(['seed', 'season'])
+      expect(sceneParams(url.search).season).toBe(season)
+    }
+    for (const season of ['', 'fall', 'Winter', '__proto__', 'toString'])
+      expect(sceneParams(`?season=${season}`).season).toBeUndefined()
+    expect(sceneParams('').season).toBeUndefined()
   })
   it('keeps diagnostics parameters and bounds the pixel-ratio override', () => {
     const url = cleanSceneUrl(new URL('https://example.com/?seed=1&perf&dpr=0.75&rain=off'))

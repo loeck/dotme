@@ -1,9 +1,10 @@
 import { WATER_LEVEL } from './lake-bed'
+import { clamp, mix } from './math'
 import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import type { TerrainField, TerrainIsland } from './terrain-field'
 
 /**
- * Granite boulders: the single stones of the voxel composition, rocky slopes, the waterline and a
+ * Granite boulders: the composition's single stones, rocky slopes, the waterline and a
  * few glacial erratics on open ground, as on Nordic lake shores. Each is a cleaved, weathered
  * icosphere partly buried in the ground; instances are merged into one static mesh.
  */
@@ -32,9 +33,6 @@ export type BoulderFall = Readonly<{
   basin: readonly Readonly<{ x: number; z: number; size: number }>[]
 }>
 
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const mix = (a: number, b: number, t: number) => a + (b - a) * t
-
 function hash(seed: number, x: number, z: number, stream: number) {
   let n =
     Math.imul(x | 0, 0x27d4eb2d) ^ Math.imul(z | 0, 0x165667b1) ^ Math.imul(stream, 0x9e3779b1)
@@ -43,7 +41,7 @@ function hash(seed: number, x: number, z: number, stream: number) {
   return ((n ^ (n >>> 15)) >>> 0) / 0x1_0000_0000
 }
 
-export const BOULDER_VARIANTS = 8
+const BOULDER_VARIANTS = 8
 
 export function placeBoulders(
   field: TerrainField,
@@ -357,23 +355,14 @@ function valueNoise3(seed: number, x: number, y: number, z: number) {
     sz = fz * fz * (3 - 2 * fz)
   const corner = (dx: number, dy: number, dz: number) =>
     hash(seed, x0 + dx + (z0 + dz) * 157, y0 + dy, 331)
-  const lerp = (a: number, b: number, t: number) => a + (b - a) * t
-  return lerp(
-    lerp(
-      lerp(corner(0, 0, 0), corner(1, 0, 0), sx),
-      lerp(corner(0, 1, 0), corner(1, 1, 0), sx),
-      sy,
-    ),
-    lerp(
-      lerp(corner(0, 0, 1), corner(1, 0, 1), sx),
-      lerp(corner(0, 1, 1), corner(1, 1, 1), sx),
-      sy,
-    ),
+  return mix(
+    mix(mix(corner(0, 0, 0), corner(1, 0, 0), sx), mix(corner(0, 1, 0), corner(1, 1, 0), sx), sy),
+    mix(mix(corner(0, 0, 1), corner(1, 0, 1), sx), mix(corner(0, 1, 1), corner(1, 1, 1), sx), sy),
     sz,
   )
 }
 
-export function boulderShape(variant: number, seed: number, detail = 2) {
+function boulderShape(variant: number, seed: number, detail = 2) {
   const { positions, indices } = icosphere(detail)
   const random = (stream: number, i: number) => hash(seed, variant, i, stream)
   const bumps = Array.from({ length: 6 }, (_, i) => {

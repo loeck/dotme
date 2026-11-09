@@ -2,13 +2,13 @@ import { Matrix4, Scene, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import type { Box } from './box-index'
 import { FoamDrift } from './foam-drift'
 import { createLakeBed, sampleShore } from './lake-bed'
 import type { LakeBed } from './lake-bed'
-import type { Voxel } from './voxel-spatial'
 import { WindModel } from './wind'
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })

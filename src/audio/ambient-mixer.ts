@@ -1,11 +1,23 @@
 import { required } from '../invariant'
-import { ambientMix, birdChorus } from './environment'
+import { anySignal } from '../weather/signals'
+import { ambientMix, ambientTone, birdChorus, rumbleGap, stormy } from './environment'
 import type { AmbientEnvironment } from './environment'
 import { AmbientMusic } from './music'
+import type { MusicState } from './music'
+import { reverbBytes, reverbImpulse } from './reverb'
 import { skipNote } from './skip-notes'
 import type { SkipNoteEvent } from './skip-notes'
-import { thunderLevel, thunderSamples } from './thunder'
+import {
+  THUNDER_BYTES,
+  THUNDER_RATE,
+  THUNDER_VARIANTS,
+  thunderLevel,
+  thunderSamples,
+  thunderVariant,
+  thunderVoicing,
+} from './thunder'
 import type { ThunderEvent } from './thunder'
+import { clampPan, finiteOr } from './units'
 import { loopPhrase, pickPhrase, waterPhrase } from './water-phrases'
 import { WaterSoundPicker } from './water-sounds'
 import type { WaterSoundEvent } from './water-sounds'
@@ -34,7 +46,10 @@ const SKIP_PARTIALS = [
   [2, 0.28],
   [3, 0.07],
 ] as const
-const finiteOr = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback)
+/** Ceiling on decoded audio: every clip, the reverb impulse and the rendered thunder. */
+const AUDIO_BUDGET_BYTES = 24 * 1024 * 1024
+/** Reverb send levels: owls and thunder carry over the lake, notes and music only a little. */
+const SEND = { owls: 0.55, thunder: 0.6, note: 0.35, music: 0.15 } as const
 /** Continuous beds; birds and owls are separate calls, and the waterfall is a point source. */
 const BEDS = ['water', 'wind', 'rain', 'insects'] as const
 /** Each bed plays two independent passages, one leaning to each side, for a wide field. */
@@ -60,6 +75,8 @@ export type AmbientMixerOptions = Readonly<{
   wide?: boolean
   /** The page's audio context, needed to stream the occasional music. Without it, no music. */
   media?: AudioContext
+  /** A media element primed in the enabling gesture, so later pieces may start (WebKit). */
+  musicElement?: HTMLAudioElement | undefined
 }>
 
 export interface AudioSample {
@@ -73,7 +90,9 @@ interface MixerNode {
 }
 interface MixerParam {
   value: number
-  cancelAndHoldAtTime(time: number): unknown
+  /** Missing in Firefox (Mozilla bug 1308431); see `holdAt`. */
+  cancelAndHoldAtTime?(time: number): unknown
+  cancelScheduledValues(time: number): unknown
   setTargetAtTime(value: number, time: number, constant: number): unknown
   setValueAtTime(value: number, time: number): unknown
   linearRampToValueAtTime(value: number, time: number): unknown
@@ -84,6 +103,16 @@ interface MixerGain extends MixerNode {
 }
 interface MixerPanner extends MixerNode {
   readonly pan: MixerParam
+}
+interface MixerFilter extends MixerNode {
+  type: string
+  readonly frequency: MixerParam
+  readonly gain: MixerParam
+  readonly Q: MixerParam
+}
+interface MixerConvolver extends MixerNode {
+  buffer: AudioSample | null
+  normalize: boolean
 }
 interface MixerOscillator extends MixerNode {
   readonly frequency: MixerParam
@@ -113,14 +142,58 @@ export interface AmbientAudioContext {
   decodeAudioData(data: ArrayBuffer): Promise<AudioSample>
   /** Optional: without oscillators a stone's skips keep their splashes but play no notes. */
   createOscillator?(): MixerOscillator
-  /** Optional: without it storms stay silent. */
+  /** Optional: without it storms stay silent and there is no reverb. */
   createBuffer?(channels: number, length: number, sampleRate: number): MixerBuffer
+  /** Optional: without filters the rain bed, fog damping and thunder play unfiltered. */
+  createBiquadFilter?(): MixerFilter
+  /** Optional: without it the landscape plays dry. */
+  createConvolver?(): MixerConvolver
   readonly sampleRate?: number
+}
+
+/**
+ * Freezes an automated parameter at its current value from `time` on, discarding later events,
+ * so a new ramp starts where the sound actually is. `cancelAndHoldAtTime` does exactly that but
+ * is missing in Firefox; there, the scheduled events are cancelled and `value` (by default the
+ * parameter's last computed value) is pinned instead.
+ */
+function holdAt(param: MixerParam, time: number, value = param.value) {
+  if (param.cancelAndHoldAtTime) {
+    param.cancelAndHoldAtTime(time)
+    return
+  }
+  param.cancelScheduledValues(time)
+  param.setValueAtTime(value, time)
+}
+
+/** Runs `task` when the main thread is idle, or soon where idle callbacks are missing. */
+function whenIdle(task: () => void) {
+  if (typeof requestIdleCallback === 'function') {
+    const handle = requestIdleCallback(task, { timeout: 2000 })
+    return () => cancelIdleCallback(handle)
+  }
+  const handle = setTimeout(task, 200)
+  return () => clearTimeout(handle)
 }
 
 /** One context is owned by the sound control. Everything else loads on demand. */
 export class AmbientMixer {
   private readonly master: MixerGain
+  /** Fog and snow cut the master's highs; absent without filters. */
+  private readonly shelf: MixerFilter | undefined
+  private readonly rainFilter: MixerFilter | undefined
+  /** Places the wind bed upwind of the camera; only in the wide field. */
+  private readonly windPan: MixerPanner | undefined
+  /** Everything sent to the reverb meets here; the convolver joins once its impulse is built. */
+  private readonly reverbIn: MixerGain
+  private readonly reverbOut: MixerGain
+  private readonly sends: MixerGain[] = []
+  private convolver: MixerConvolver | undefined
+  private readonly thunderBuffers: Array<MixerBuffer | undefined> = []
+  private cancelIdle: (() => void) | undefined
+  private nextRumble = Number.NaN
+  /** The master's current linear fade, from `from` at `start` to `to` at `end`. */
+  private fade = { from: 0, to: 0, start: 0, end: 0 }
   private readonly gains = new Map<Layer, MixerGain>()
   private readonly buffers = new Map<Layer, AudioSample>()
   private readonly voices = new Map<MixerSource, MixerGain>()
@@ -138,6 +211,8 @@ export class AmbientMixer {
   private nextOwl = 0
   private lastOwl = -1
   private decodedBytes = 0
+  /** Budget held back for the synthesised reverb and thunder, which come after the clips. */
+  private readonly reservedBytes: number
   private environment: AmbientEnvironment = {
     solarHour: 0,
     daylight: 0,
@@ -162,13 +237,41 @@ export class AmbientMixer {
     this.wide = options.wide ?? true
     this.master = context.createGain()
     this.master.gain.value = 0
-    this.master.connect(context.destination)
+    this.shelf = context.createBiquadFilter?.()
+    if (this.shelf) {
+      this.shelf.type = 'highshelf'
+      this.shelf.frequency.value = 2000
+      this.shelf.gain.value = 0
+      this.master.connect(this.shelf)
+      this.shelf.connect(context.destination)
+    } else this.master.connect(context.destination)
+    this.rainFilter = context.createBiquadFilter?.()
+    if (this.rainFilter) {
+      this.rainFilter.type = 'lowpass'
+      this.rainFilter.frequency.value = 11_000
+      this.rainFilter.Q.value = 0.5
+      this.rainFilter.connect(this.master)
+    }
+    if (this.wide) {
+      this.windPan = context.createStereoPanner()
+      this.windPan.connect(this.master)
+    }
     for (const layer of AUDIO_LAYERS) {
       const gain = context.createGain()
       gain.gain.value = 0
-      gain.connect(this.master)
+      if (layer === 'rain' && this.rainFilter) gain.connect(this.rainFilter)
+      else if (layer === 'wind' && this.windPan) gain.connect(this.windPan)
+      else gain.connect(this.master)
       this.gains.set(layer, gain)
     }
+    this.reverbIn = context.createGain()
+    this.reverbOut = context.createGain()
+    this.reverbOut.gain.value = 0
+    this.reverbOut.connect(this.master)
+    this.send(required(this.gains.get('owls')), SEND.owls)
+    const synthesis = context.createBuffer ? THUNDER_BYTES : 0
+    const room = context.createConvolver && context.createBuffer ? reverbBytes(this.rate) : 0
+    this.reservedBytes = synthesis + room
     const media = options.media
     if (media) {
       // Streamed music follows the same master fades on its own output.
@@ -176,26 +279,104 @@ export class AmbientMixer {
       this.mediaMaster.gain.value = 0
       this.mediaMaster.connect(media.destination)
       // Music follows the clips' format, including a fallback to MP3 after an Ogg failure.
-      this.music = new AmbientMusic(media, this.mediaMaster, () => this.format)
+      this.music = new AmbientMusic(media, this.mediaMaster, () => this.format, {
+        element: options.musicElement,
+      })
+      // In the page's single context, the music also reaches the shared reverb, lightly.
+      if (media === context) {
+        const output: MixerNode = this.music.output
+        this.send(output, SEND.music)
+      }
     }
   }
 
+  private get rate() {
+    return this.context.sampleRate ?? 32_000
+  }
+
+  /** What the occasional music is doing, for diagnostics and tests. */
+  get musicState(): MusicState | undefined {
+    return this.music?.state
+  }
+
+  /** A send from `node` to the shared reverb. Long-lived sends are released on disposal. */
+  private send(node: MixerNode, level: number, transient = false) {
+    const gain = this.context.createGain()
+    gain.gain.value = level
+    node.connect(gain)
+    gain.connect(this.reverbIn)
+    if (!transient) this.sends.push(gain)
+    return gain
+  }
+
+  /**
+   * Builds the reverb's impulse response once: a small stereo buffer of decaying noise at the
+   * context's rate (the convolver requires it), accounted in the memory budget.
+   */
+  private buildReverb() {
+    const context = this.context
+    if (this.convolver || !context.createConvolver || !context.createBuffer) return
+    const [left, right] = reverbImpulse(this.rate)
+    const impulse = context.createBuffer(2, left.length, this.rate)
+    impulse.copyToChannel(left, 0)
+    impulse.copyToChannel(right, 1)
+    const convolver = context.createConvolver()
+    convolver.normalize = true
+    convolver.buffer = impulse
+    this.reverbIn.connect(convolver)
+    convolver.connect(this.reverbOut)
+    this.convolver = convolver
+  }
+
+  /** Renders one peal for each variant distance, one per idle period, so no frame stalls. */
+  private prepareThunder() {
+    if (this.disposed || !this.context.createBuffer) return
+    const index = THUNDER_VARIANTS.findIndex((_, variant) => !this.thunderBuffers[variant])
+    if (index < 0) return
+    this.peal(index)
+    this.cancelIdle = whenIdle(() => this.prepareThunder())
+  }
+
+  private peal(index: number) {
+    const existing = this.thunderBuffers[index]
+    if (existing || !this.context.createBuffer) return existing
+    const samples = thunderSamples(THUNDER_RATE, THUNDER_VARIANTS[index] ?? 3000)
+    const buffer = this.context.createBuffer(1, samples.length, THUNDER_RATE)
+    buffer.copyToChannel(samples, 0)
+    this.thunderBuffers[index] = buffer
+    return buffer
+  }
+
   async load() {
-    await Promise.allSettled(
-      AUDIO_LAYERS.map(async (layer) => {
-        const buffer = await this.loadLayer(layer)
-        if (buffer && !this.disposed) this.buffers.set(layer, buffer)
-      }),
-    )
+    // Water is requested first; all layers then download and decode in parallel.
+    const results = await Promise.allSettled(AUDIO_LAYERS.map((layer) => this.loadLayer(layer)))
     if (this.disposed) return
+    // Admission follows the fixed layer order, not decoding order, so the same layers are kept
+    // on every visit, and the base water, first in that order, can never be the one refused.
+    results.forEach((result, index) => {
+      const layer = required(AUDIO_LAYERS[index])
+      if (result.status === 'fulfilled' && result.value && this.admit(result.value))
+        this.buffers.set(layer, result.value)
+    })
     if (!this.buffers.has('water')) throw new Error('Water audio unavailable')
     this.ready = true
+    this.buildReverb()
+    this.cancelIdle = whenIdle(() => this.prepareThunder())
+    this.updateMix()
     this.loadWaterfall()
+  }
+
+  /** Counts a decoded clip against the budget, less what the synthesised sounds need. */
+  private admit(buffer: AudioSample) {
+    const bytes = buffer.length * buffer.numberOfChannels * 4
+    if (this.decodedBytes + bytes + this.reservedBytes > AUDIO_BUDGET_BYTES) return false
+    this.decodedBytes += bytes
+    return true
   }
 
   private async decode(layer: Layer, format: AudioFormat) {
     const response = await fetch(`/audio/${layer}.${format}`, {
-      signal: AbortSignal.any([this.loading.signal, AbortSignal.timeout(15000)]),
+      signal: anySignal([this.loading.signal, AbortSignal.timeout(15000)]),
     })
     if (!response.ok) throw new Error(`Audio ${layer}: ${response.status}`)
     const data = await response.arrayBuffer()
@@ -213,12 +394,7 @@ export class AmbientMixer {
       this.format = 'mp3'
       buffer = await this.decode(layer, 'mp3')
     }
-    if (!buffer || this.disposed) return undefined
-    const bytes = buffer.length * buffer.numberOfChannels * 4
-    if (this.decodedBytes + bytes > 24 * 1024 * 1024)
-      throw new Error('Audio memory budget exceeded')
-    this.decodedBytes += bytes
-    return buffer
+    return buffer && !this.disposed ? buffer : undefined
   }
 
   private loadWaterfall() {
@@ -233,7 +409,7 @@ export class AmbientMixer {
     // This secondary asset never blocks the base ambience or restarts it on failure.
     void this.loadLayer('waterfall')
       .then((buffer) => {
-        if (!buffer || this.disposed) return undefined
+        if (!buffer || this.disposed || !this.admit(buffer)) return undefined
         const gain = this.context.createGain()
         gain.gain.value = 0
         this.waterfallPan = this.context.createStereoPanner()
@@ -292,9 +468,10 @@ export class AmbientMixer {
     const frequency = skipNote(event.index, event.sinking, this.environment.daylight)
     const envelope = context.createGain(),
       panner = context.createStereoPanner()
-    panner.pan.value = Math.max(-1, Math.min(1, finiteOr(event.pan, 0)))
+    panner.pan.value = clampPan(event.pan)
     envelope.connect(panner)
     panner.connect(this.master)
+    const reverb = this.send(panner, SEND.note, true)
     const peak = SKIP_NOTE_LEVEL * intensity * (event.sinking ? 0.7 : 1)
     const ring = event.sinking ? 0.6 : 0.35
     envelope.gain.setValueAtTime(0, at)
@@ -317,6 +494,7 @@ export class AmbientMixer {
           if (--pending === 0) {
             envelope.disconnect()
             panner.disconnect()
+            reverb.disconnect()
           }
         },
         { once: true },
@@ -327,8 +505,9 @@ export class AmbientMixer {
   }
 
   /**
-   * One peal of thunder, rendered for this strike and started when its sound arrives. Each
-   * peal is new noise, so no two strikes rumble alike.
+   * One peal of thunder, started when its sound arrives. The peals are pre-rendered at idle
+   * (one near, one middle, one far); each strike takes the closest and varies its pitch,
+   * low-pass and placement, so no two strikes rumble alike.
    */
   thunder(event: ThunderEvent) {
     const context = this.context
@@ -336,29 +515,59 @@ export class AmbientMixer {
       return
     const level = thunderLevel(event.distance, event.intensity) * THUNDER_LEVEL
     if (level < 0.01) return
-    const rate = context.sampleRate ?? 32_000
-    const samples = thunderSamples(rate, event.distance)
-    const buffer = context.createBuffer(1, samples.length, rate)
-    buffer.copyToChannel(samples, 0)
+    // A strike before the idle rendering reached its variant renders it now (a few ms at 8 kHz).
+    const buffer = this.peal(thunderVariant(event.distance))
+    if (!buffer) return
+    const voicing = thunderVoicing(event.distance)
     const source = context.createBufferSource(),
       envelope = context.createGain(),
-      panner = context.createStereoPanner()
+      panner = context.createStereoPanner(),
+      filter = context.createBiquadFilter?.()
     source.buffer = buffer
+    source.playbackRate.value = voicing.rate
     envelope.gain.value = level
-    panner.pan.value = Math.max(-1, Math.min(1, finiteOr(event.pan, 0)))
+    panner.pan.value = clampPan(event.pan)
     source.connect(envelope)
-    envelope.connect(panner)
+    if (filter) {
+      filter.type = 'lowpass'
+      filter.frequency.value = voicing.cutoff
+      envelope.connect(filter)
+      filter.connect(panner)
+    } else envelope.connect(panner)
     panner.connect(this.master)
+    const reverb = this.send(panner, SEND.thunder, true)
     source.addEventListener(
       'ended',
       () => {
         source.disconnect()
         envelope.disconnect()
+        filter?.disconnect()
         panner.disconnect()
+        reverb.disconnect()
       },
       { once: true },
     )
     source.start(context.currentTime + Math.max(0, finiteOr(event.delay, 0)), 0)
+  }
+
+  /**
+   * Under reduced motion the scene shows no lightning, so a storm would fall silent: the mixer
+   * schedules its own distant, low rumble every 18–48 s instead, with no flash to match.
+   */
+  private rumble(now: number) {
+    if (!this.environment.reducedMotion || !stormy(this.environment)) {
+      this.nextRumble = Number.NaN
+      return
+    }
+    if (Number.isNaN(this.nextRumble)) this.nextRumble = now + rumbleGap()
+    if (now < this.nextRumble) return
+    this.nextRumble = now + rumbleGap()
+    this.thunder({
+      distance: 4500 + Math.random() * 3000,
+      delay: 0,
+      intensity: 0.6 + Math.random() * 0.4,
+      pan: this.wide ? Math.random() * 1.6 - 0.8 : 0,
+    })
   }
 
   private updateMix() {
@@ -368,29 +577,33 @@ export class AmbientMixer {
         ? this.environment
         : { ...this.environment, waterfall: { intensity: 0, pan: 0 } },
     )
+    const tone = ambientTone(this.environment)
     const now = this.context.currentTime
-    for (const [layer, gain] of this.gains) {
-      gain.gain.cancelAndHoldAtTime(now)
+    // These parameters only ever follow targets: a new target simply takes over from wherever
+    // the previous one had got to, so nothing needs cancelling (or holding, which Firefox lacks).
+    for (const [layer, gain] of this.gains)
       gain.gain.setTargetAtTime(layer === 'splashes' ? SPLASH_LEVEL : mix[layer], now, 2)
-    }
-    if (this.waterfallPan) {
-      const pan = this.environment.waterfall?.pan ?? 0
-      this.waterfallPan.pan.cancelAndHoldAtTime(now)
-      this.waterfallPan.pan.setTargetAtTime(
-        Number.isFinite(pan) ? Math.max(-1, Math.min(1, pan)) : 0,
-        now,
-        2,
-      )
-    }
+    if (this.waterfallPan)
+      this.waterfallPan.pan.setTargetAtTime(clampPan(this.environment.waterfall?.pan ?? 0), now, 2)
+    this.windPan?.pan.setTargetAtTime(tone.windPan, now, 3)
+    this.rainFilter?.frequency.setTargetAtTime(tone.rainCutoff, now, 2)
+    this.shelf?.gain.setTargetAtTime(tone.masterShelf, now, 3)
+    this.reverbOut.gain.setTargetAtTime(this.convolver ? tone.reverb : 0, now, 2)
   }
 
   private fadeMaster(value: number, ramp: number) {
     const now = this.context.currentTime
-    this.master.gain.cancelAndHoldAtTime(now)
+    // Where the current fade has got to, for browsers that cannot hold a ramp themselves: exact
+    // for the linear fades the master only ever makes, unlike a possibly stale `param.value`.
+    const { from, to, start, end } = this.fade
+    const progress = end > start ? Math.max(0, Math.min(1, (now - start) / (end - start))) : 1
+    const current = from + (to - from) * progress
+    this.fade = { from: current, to: value, start: now, end: now + ramp }
+    holdAt(this.master.gain, now, current)
     this.master.gain.linearRampToValueAtTime(value, now + ramp)
     if (this.mediaMaster) {
       const gain = this.mediaMaster.gain
-      gain.cancelAndHoldAtTime(now)
+      holdAt(gain, now, current)
       gain.linearRampToValueAtTime(value, now + ramp)
     }
   }
@@ -441,17 +654,26 @@ export class AmbientMixer {
   }
 
   /** Keeps one channel of a continuous recording going with overlapping random passages. */
-  private continue(layer: Layer, channel: string, buffer: AudioSample, now: number, pan?: number) {
+  private continue(
+    layer: Layer,
+    channel: string,
+    buffer: AudioSample,
+    now: number,
+    pan?: number,
+    rate = 1,
+  ) {
     const next = this.next.get(channel) ?? now
     if (next > now + 0.75) return
     const at = Math.max(now, next)
     const previous = this.offsets.get(channel) ?? -Infinity
-    const phrase =
-      layer === 'water'
-        ? waterPhrase(buffer.duration, previous)
-        : loopPhrase(buffer.duration, previous)
+    // Phrases are chosen in played seconds; a faster passage reads proportionally more audio.
+    const length = buffer.duration / rate
+    const phrase = layer === 'water' ? waterPhrase(length, previous) : loopPhrase(length, previous)
     this.offsets.set(channel, phrase.offset)
-    this.voice(layer, at, phrase.duration, phrase.offset, phrase.fade, { pan })
+    this.voice(layer, at, phrase.duration, phrase.offset * rate, phrase.fade, {
+      pan,
+      ...(rate === 1 ? {} : { rate }),
+    })
     this.next.set(channel, at + phrase.duration - phrase.fade)
   }
 
@@ -459,12 +681,17 @@ export class AmbientMixer {
     if (this.disposed || !this.active || this.context.state !== 'running') return
     const now = this.context.currentTime
     const mix = ambientMix(this.environment)
+    const { insectRate } = ambientTone(this.environment)
     for (const layer of BEDS) {
       const buffer = this.buffers.get(layer)
       if (!buffer) continue
+      // Crickets chirp faster in the warm: new passages pick up the current rate.
+      const rate = layer === 'insects' ? insectRate : 1
       if (this.wide)
-        SIDES.forEach((pan, side) => this.continue(layer, `${layer}:${side}`, buffer, now, pan))
-      else this.continue(layer, layer, buffer, now)
+        SIDES.forEach((pan, side) =>
+          this.continue(layer, `${layer}:${side}`, buffer, now, pan, rate),
+        )
+      else this.continue(layer, layer, buffer, now, undefined, rate)
     }
     const fall = this.buffers.get('waterfall')
     if (fall && mix.waterfall > 0) this.continue('waterfall', 'waterfall', fall, now)
@@ -490,6 +717,7 @@ export class AmbientMixer {
         if (offset + length <= owl.duration) this.voice('owls', now, length, offset, 0.3, { pan })
       }
     }
+    this.rumble(now)
     this.music?.tick()
   }
 
@@ -522,6 +750,7 @@ export class AmbientMixer {
     this.active = false
     this.loading.abort()
     clearInterval(this.timer)
+    this.cancelIdle?.()
     const now = this.context.currentTime
     this.fadeMaster(0, fade)
     for (const source of this.voices.keys()) source.stop(now + fade)
@@ -533,8 +762,15 @@ export class AmbientMixer {
       }
       this.voices.clear()
       for (const gain of this.gains.values()) gain.disconnect()
+      for (const gain of this.sends) gain.disconnect()
       this.waterfallPan?.disconnect()
+      this.windPan?.disconnect()
+      this.rainFilter?.disconnect()
+      this.reverbIn.disconnect()
+      this.convolver?.disconnect()
+      this.reverbOut.disconnect()
       this.master.disconnect()
+      this.shelf?.disconnect()
       this.music?.dispose()
       this.mediaMaster?.disconnect()
     }

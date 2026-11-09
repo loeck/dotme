@@ -1,9 +1,9 @@
 import type { World } from '@dimforge/rapier3d-compat'
 
 import { required } from '../invariant'
+import type { BoxIndex } from './box-index'
 import { mergeStaticBoxes } from './static-boxes'
 import type { TerrainColliders } from './terrain-surface'
-import type { VoxelIndex } from './voxel-spatial'
 
 export { mergeStaticBoxes } from './static-boxes'
 
@@ -32,7 +32,7 @@ export function loadPhysics(): Promise<RapierModule> {
   return loading
 }
 
-export type TracerPoint = {
+type TracerPoint = {
   readonly x: number
   readonly y: number
   readonly z: number
@@ -61,7 +61,7 @@ export type PhysicsWorld = {
  */
 export function createPhysicsWorld(
   rapier: RapierModule,
-  statics: VoxelIndex | TerrainColliders,
+  statics: BoxIndex | TerrainColliders,
   merged?: Float64Array,
 ): PhysicsWorld {
   const world = new rapier.World({ x: 0, y: -9.81, z: 0 })

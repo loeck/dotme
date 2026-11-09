@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
 import type { PhysicsWorld } from './physics-world'
 import {
@@ -11,12 +13,10 @@ import {
   WATER_Y,
 } from './rain-simulation'
 import type { SegmentTrace } from './rain-simulation'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 
 const empty = (): SegmentTrace => () => Infinity
-const shelter = async (voxels: Voxel[]): Promise<PhysicsWorld> =>
-  createPhysicsWorld(await loadPhysics(), createVoxelIndex(voxels))
+const shelter = async (boxes: Box[]): Promise<PhysicsWorld> =>
+  createPhysicsWorld(await loadPhysics(), createBoxIndex(boxes))
 const wavySurface = (x: number, z: number, time: number) =>
   WATER_Y + 0.11 * Math.sin(x * 2.3 + z * 1.1 + time * 3.7 + 0.8)
 const dropAt = (simulation: RainSimulation, y: number, size = 0.003) => {
@@ -42,7 +42,7 @@ describe('rain collision and impact lifecycle', () => {
     expect(simulation.impacts.filter((impact) => Number.isFinite(impact.born))).toHaveLength(1)
   })
 
-  it('lets voxels shelter the lake while deep solids keep the water contact', async () => {
+  it('lets boxes shelter the lake while deep solids keep the water contact', async () => {
     await Promise.all(
       [0, -3].map(async (y) => {
         const physics = await shelter([{ x: 0, y, z: 0, size: 0.01, color: 0 }])

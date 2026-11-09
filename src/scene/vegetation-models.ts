@@ -8,6 +8,7 @@
  */
 import { ATLAS_TILES } from './foliage-atlas'
 import type { AtlasTile } from './foliage-atlas'
+import { clamp, smoothstep as smooth01 } from './math'
 
 export type Rgb = readonly [number, number, number]
 export type Point = readonly [number, number, number]
@@ -73,11 +74,6 @@ export const mixRgb = (a: Rgb, b: Rgb, t: number): Rgb => [
   a[2] + (b[2] - a[2]) * t,
 ]
 const scaleRgb = (a: Rgb, k: number): Rgb => [a[0] * k, a[1] * k, a[2] * k]
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
-}
 
 const add = (a: Point, b: Point, k = 1): Point => [
   a[0] + b[0] * k,
@@ -405,20 +401,22 @@ function uprightCard(
   return { center, t, b, width, height, normal: cross(t, b), colour, shade: 1, tile }
 }
 
+/** A card's 0.5 m band of height, for the crown's envelope. */
+const crownBand = (y: number) => Math.floor(y / 0.5)
+
 /**
  * Light the cards as one crown: normals lean toward the crown's outside (from an axis through
  * its centre), and cards deep inside, near the trunk, darken where little sky reaches them.
  */
 function shapeCrown(sprays: Spray[], centreHeight: number, axisLean: Point = [0, 0, 0]): Spray[] {
   if (!sprays.length) return sprays
-  // Envelope: the farthest card from the axis, per 0.5 m band of height.
-  const band = (y: number) => Math.floor(y / 0.5)
+  // Envelope: the farthest card from the axis, per 0.5 m band of height (`crownBand`).
   const axisAt = (y: number): Point => [axisLean[0] * y, y, axisLean[2] * y]
   const reach = new Map<number, number>()
   for (const spray of sprays) {
     const axis = axisAt(spray.center[1])
     const r = Math.hypot(spray.center[0] - axis[0], spray.center[2] - axis[2])
-    const key = band(spray.center[1])
+    const key = crownBand(spray.center[1])
     reach.set(key, Math.max(reach.get(key) ?? 0, r))
   }
   const centre = axisAt(centreHeight)
@@ -428,9 +426,9 @@ function shapeCrown(sprays: Spray[], centreHeight: number, axisLean: Point = [0,
     const axis = axisAt(y)
     const r = Math.hypot(spray.center[0] - axis[0], spray.center[2] - axis[2])
     const envelope = Math.max(
-      reach.get(band(y)) ?? 0,
-      reach.get(band(y) - 1) ?? 0,
-      reach.get(band(y) + 1) ?? 0,
+      reach.get(crownBand(y)) ?? 0,
+      reach.get(crownBand(y) - 1) ?? 0,
+      reach.get(crownBand(y) + 1) ?? 0,
       0.2,
     )
     const outside = clamp(r / envelope, 0, 1)
@@ -1101,7 +1099,7 @@ export function crownSpheres(model: TreeModel): Float32Array {
     bands.set(key, band)
   }
   const spheres: number[] = []
-  for (const [key, band] of [...bands].sort((a, b) => a[0] - b[0])) {
+  for (const [key, band] of [...bands].toSorted((a, b) => a[0] - b[0])) {
     const cx = band.x / band.n,
       cz = band.z / band.n
     let reach = 0

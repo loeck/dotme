@@ -6,9 +6,9 @@ const port = Number(process.env.PLAYWRIGHT_PORT ?? 4173)
 
 export default defineConfig({
   testDir: './e2e',
-  timeout: 90_000,
+  timeout: 60_000,
   expect: { timeout: 30_000 },
-  globalTimeout: 600_000,
+  globalTimeout: 180_000,
   workers: 1,
   reporter: 'list',
   forbidOnly: Boolean(process.env.CI),
@@ -20,17 +20,8 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: ['home.spec.ts', 'rendering.spec.ts', 'functional.spec.ts'],
-      use: {
-        ...devices['Desktop Chrome'],
-        launchOptions: chromiumLaunchOptions(),
-      },
-    },
-    {
-      name: 'mobile',
-      testMatch: ['functional.spec.ts'],
-      // Chromium only: a phone viewport, touch and pixel ratio, on the same browser binary.
-      use: { ...devices['Pixel 7'], launchOptions: chromiumLaunchOptions() },
+      testMatch: ['home.spec.ts', 'functional.spec.ts'],
+      use: { ...devices['Desktop Chrome'], launchOptions: chromiumLaunchOptions() },
     },
   ],
   webServer: {

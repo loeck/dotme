@@ -1,9 +1,9 @@
 import type { WebGPURenderer } from 'three/webgpu'
 
+import { reducedMotionQuery } from '../env'
 import { debugParams, sceneParams } from '../scene-params'
+import { LandscapeEngine } from '../scene/landscape-engine'
 import { loadPhysics } from '../scene/physics-world'
-import { VoxelLandscapeEngine } from '../scene/VoxelLandscapeEngine'
-import { preloadSceneWeather } from '../weather/scene'
 import type { SceneWeather } from '../weather/scene'
 import { initAmbientSound } from './ambient-sound'
 import { initSceneCursor } from './scene-cursor'
@@ -11,8 +11,6 @@ import { initSceneInfo } from './scene-info'
 import { prepareNextWorld } from './scene-world'
 import type { SceneWorld } from './scene-world'
 import { shockwaveHaptics, stoneHaptics } from './stone-haptics'
-
-const weatherSnapshots = new WeakMap<HTMLDivElement, SceneWeather>()
 
 export async function initLandscape(
   host: HTMLDivElement,
@@ -22,34 +20,29 @@ export async function initLandscape(
   onFailure: () => void,
   autoplay: boolean,
   world: SceneWorld,
+  /** Requested by the page alongside world preparation, before this module loads. */
+  weather: Promise<SceneWeather>,
 ): Promise<() => void> {
-  const params = sceneParams(location.search)
   const { seed } = world
   // The engine reuses this cached promise; starting it here overlaps the
   // deferred physics download and instantiation with world preparation.
   void loadPhysics()
-  const [prepared, snapshot] = await Promise.all([
-    world.prepared,
-    weatherSnapshots.get(host) ??
-      preloadSceneWeather({
-        seed,
-        position: params.position,
-        ...(params.weather ? { weather: params.weather } : {}),
-        signal,
-      }),
-  ])
+  const [prepared, snapshot] = await Promise.all([world.prepared, weather])
   signal.throwIfAborted()
-  weatherSnapshots.set(host, snapshot)
-  host.dataset.weatherSource = snapshot.source
-  host.dataset.weather = snapshot.weather
-  host.dataset.rainIntensity = String(snapshot.rain.intensity)
   const credit = document.querySelector<HTMLElement>('[data-weather-credit]')
-  if (credit) credit.hidden = snapshot.source !== 'live'
+  const describe = (current: SceneWeather) => {
+    host.dataset.weatherSource = current.source
+    host.dataset.weather = current.weather
+    host.dataset.rainIntensity = String(current.rain.intensity)
+    if (credit) credit.hidden = current.source !== 'live'
+  }
+  describe(snapshot)
   const sound = initAmbientSound(false)
+  sound.setWeather(snapshot)
   const cursor = document.querySelector<HTMLDivElement>('.scene-cursor')
   const stopCursor = cursor ? initSceneCursor(cursor) : undefined
   const stopInfo = initSceneInfo()
-  let engine: VoxelLandscapeEngine | undefined
+  let engine: LandscapeEngine | undefined
   let observer: ResizeObserver | undefined
   let audioFrame = 0
   let audioTimer = 0
@@ -68,8 +61,8 @@ export async function initLandscape(
   }
   signal.addEventListener('abort', dispose, { once: true })
   try {
-    const motion = matchMedia('(prefers-reduced-motion: reduce)')
-    engine = await VoxelLandscapeEngine.create(
+    const motion = reducedMotionQuery()
+    engine = await LandscapeEngine.create(
       {
         container: host,
         renderer,
@@ -111,10 +104,30 @@ export async function initLandscape(
         rain: snapshot.rain,
         solar: snapshot.solar,
         nowSeconds: snapshot.nowSeconds,
+        climate: { temperature: snapshot.temperature, fog: snapshot.fog, snow: snapshot.snow },
+        // Forced weather never changes; live and fallback weather are watched below.
+        weatherMayChange: snapshot.source !== 'override',
       },
       signal,
     )
     signal.throwIfAborted()
+    // Keep a long visit current: each new 15-minute slot eases the scene and the sound into it.
+    if (snapshot.source !== 'override') {
+      // A forced `?weather=` always yields an 'override' snapshot, so only the position matters.
+      const { position } = sceneParams(location.search)
+      const refresh = (next: SceneWeather) => {
+        if (disposed) return
+        describe(next)
+        sound.setWeather(next)
+        engine?.setWeather(next)
+      }
+      void import('../weather/watch')
+        .then(({ watchSceneWeather }) =>
+          watchSceneWeather({ position, current: snapshot }, refresh, signal),
+        )
+        // A failed chunk only loses later refreshes: the scene keeps its preloaded weather.
+        .catch(() => {})
+    }
     engine.setReducedMotion(motion.matches)
     motion.addEventListener('change', () => engine?.setReducedMotion(motion.matches), { signal })
     observer = new ResizeObserver(engine.resize)

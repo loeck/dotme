@@ -49,7 +49,7 @@ import { WindModel, updateWindUniforms } from './wind'
 
 export const WATER_STEP = 1 / 60
 export const WAVE_SPEED = 2.4
-export const WATER_DAMPING = 0.65
+const WATER_DAMPING = 0.65
 export const MAX_WATER_STEPS = 4
 
 /** Shared clock: fixed physical time, bounded recovery after a hidden tab. */

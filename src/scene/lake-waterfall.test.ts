@@ -9,14 +9,14 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Mock } from 'vitest'
 
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { createLakeBed } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import type { SplashJet } from './lake-splashes'
 import { LakeWaterfall } from './lake-waterfall'
 import type { WaterfallSite } from './lake-world'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { WATERFALL_FLUID_LAYER, WATERFALL_REFLECTION_LAYER } from './waterfall-fluid'
 import { WindModel } from './wind'
 import type { WindState } from './wind'
@@ -45,8 +45,8 @@ const steadyWind: WindState = {
   response: [0, 0, 0, 0],
 }
 
-const physicsFor = async (voxels: Voxel[] = []) =>
-  createPhysicsWorld(await loadPhysics(), createVoxelIndex(voxels))
+const physicsFor = async (boxes: Box[] = []) =>
+  createPhysicsWorld(await loadPhysics(), createBoxIndex(boxes))
 
 const streamed = (waterfall: LakeWaterfall, name: string) => {
   const found = waterfall.curtain.geometry.getAttribute(name)
@@ -175,7 +175,7 @@ describe('lake waterfall lifecycle', () => {
   })
 
   it('lands foot jets through the shared pool and rings each return', async () => {
-    const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+    const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
     const bed = createLakeBed([block], 42, true)
     const physics = await physicsFor([block])
     const scene = new Scene()

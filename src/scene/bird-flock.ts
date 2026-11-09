@@ -93,6 +93,20 @@ export function flockRoute(start: Vector3, viewer: Vector3, turn: number, canopy
   ]
 }
 
+/** One wing: a swept triangle from the shoulder to the tip, with a sliver of body. */
+function wingGeometry(sign: number) {
+  const geometry = new BufferGeometry()
+  const w = FLOCK.wing
+  geometry.setAttribute(
+    'position',
+    new Float32BufferAttribute(
+      [0, 0, -0.12, sign * w, 0, 0.06, 0, 0, 0.16, 0, 0, -0.18, sign * 0.05, 0, 0.3, 0, 0, 0.3],
+      3,
+    ),
+  )
+  return geometry
+}
+
 /**
  * A small flock as silhouettes: each bird is two hinged wings (one instanced mesh per side),
  * beating in bursts and gliding between them, banking into turns. Unlit and dark, it reads
@@ -120,21 +134,8 @@ export class BirdFlock {
     const material = new MeshBasicNodeMaterial({ side: DoubleSide })
     material.colorNode = color(0x15181b)
     this.material = material
-    // One wing: a swept triangle from the shoulder to the tip, with a sliver of body.
-    const wing = (sign: number) => {
-      const geometry = new BufferGeometry()
-      const w = FLOCK.wing
-      geometry.setAttribute(
-        'position',
-        new Float32BufferAttribute(
-          [0, 0, -0.12, sign * w, 0, 0.06, 0, 0, 0.16, 0, 0, -0.18, sign * 0.05, 0, 0.3, 0, 0, 0.3],
-          3,
-        ),
-      )
-      return geometry
-    }
-    this.left = new InstancedMesh(wing(-1), material, count)
-    this.right = new InstancedMesh(wing(1), material, count)
+    this.left = new InstancedMesh(wingGeometry(-1), material, count)
+    this.right = new InstancedMesh(wingGeometry(1), material, count)
     this.group = new Object3D()
     this.group.add(this.left, this.right)
     for (const mesh of [this.left, this.right]) {

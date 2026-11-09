@@ -1,5 +1,7 @@
+import { latticeHash as hash } from './hash'
 import { createLakeBedFromTerrain, LAKE_BOUNDS, lakeResolution, WATER_LEVEL } from './lake-bed'
 import type { LakeBed } from './lake-bed'
+import { clamp, mix, smoothstep as smooth01 } from './math'
 import { placeBoulders } from './terrain-boulders'
 import type { Boulder } from './terrain-boulders'
 import { createTerrainField, sampleHeight, sampleNormal, sampleRock } from './terrain-field'
@@ -12,7 +14,7 @@ import type { ProtectedArea, TerrainField, TerrainGrid, TerrainIsland } from './
  * waterfall's pool, the forest, the lanterns and the boulders are all placed on that ground.
  * Coordinates are Three.js world coordinates: x horizontal, y up, z depth; water is y = 0.
  */
-export type LakeWorldVariant = 'desktop' | 'mobile'
+type LakeWorldVariant = 'desktop' | 'mobile'
 
 export type LakeLamp = Readonly<{
   x: number
@@ -30,7 +32,7 @@ export type LakeLamp = Readonly<{
  * birches as value breaks. Spruce and pine models remain available but are not planted. */
 export type TreeKind = 'oak' | 'beech' | 'spruce' | 'pine' | 'birch'
 
-export type LakeTree = Readonly<{
+type LakeTree = Readonly<{
   x: number
   y: number
   z: number
@@ -105,22 +107,6 @@ const WATER_CONTACT_Y = -0.4
 const SILL_DEPTH = 0.02
 /** Open water the composition must leave around the landing's lake cells, for the smoothed bank. */
 const LANDING_MARGIN = 0.15
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
-const mix = (a: number, b: number, amount: number) => a + (b - a) * amount
-const smooth01 = (a: number, b: number, x: number) => {
-  const t = clamp((x - a) / (b - a), 0, 1)
-  return t * t * (3 - 2 * t)
-}
-
-function hash(seed: number, x: number, z: number, stream = 0) {
-  let value = (seed ^ Math.imul(x, 0x9e3779b1) ^ Math.imul(z, 0x85ebca77) ^ stream) >>> 0
-  value ^= value >>> 16
-  value = Math.imul(value, 0x7feb352d)
-  value ^= value >>> 15
-  value = Math.imul(value, 0x846ca68b)
-  return ((value ^ (value >>> 16)) >>> 0) / 0x1_0000_0000
-}
 
 function smoothNoise(seed: number, x: number, z: number, scale: number, stream: number) {
   const px = x / scale
@@ -420,6 +406,10 @@ function landWithin(composition: Composition, x: number, z: number, radius: numb
 
 type Carve = Readonly<{ fall: WaterfallSite; cells: ReadonlyMap<number, number> }>
 
+/** Distance from the portrait framing's sweet spot, in shares of the half-width at depth `z`. */
+const portraitPosition = (x: number, z: number) =>
+  Math.abs(x / ((16 - z) * Math.tan((54 * Math.PI) / 360) * 0.46) + 0.48)
+
 /**
  * Pick an exposed shore facing the camera and carve a small pool behind its lip. The pool's
  * cells, raised rim and terraced surroundings are cell tops; `applyCarve` writes them onto the
@@ -452,8 +442,6 @@ function selectWaterfall(
         Math.abs(stone.z - z) < stone.size / 2 + margin &&
         stone.top > above,
     )
-  const portraitPosition = (x: number, z: number) =>
-    Math.abs(x / ((16 - z) * Math.tan((54 * Math.PI) / 360) * 0.46) + 0.48)
 
   type Candidate = Readonly<{
     column: number
@@ -679,10 +667,11 @@ function selectWaterfall(
       continue
     return {
       fall: {
-        basin: [...basin].map((index) => ({
-          ...cellCentre(grid, index % cellColumns, Math.floor(index / cellColumns)),
-          size: cell,
-        })),
+        basin: [...basin].map((index) =>
+          Object.assign(cellCentre(grid, index % cellColumns, Math.floor(index / cellColumns)), {
+            size: cell,
+          }),
+        ),
         x,
         z,
         top,
@@ -904,7 +893,7 @@ function placeLamps(seed: number, mobile: boolean, composition: Composition): La
         site,
         rank: hash(seed, Math.round(site.x * 100), Math.round(site.z * 100), 501 + index),
       }))
-      .sort((a, b) => a.rank - b.rank)
+      .toSorted((a, b) => a.rank - b.rank)
       .map(({ site }) => site)
     const hover = 0.65 + hash(seed, index, 0, 521) * 0.85
     // Keep the randomly chosen lights in view and in front of intervening hills.
@@ -978,8 +967,10 @@ function placeTrees(
     }
   const midground = clear
     .filter((site) => site.z < -3 && site.z > -40)
-    .sort((a, b) => b.spread - a.spread)
-  const ridges = clear.filter((site) => site.z >= -3 || site.z <= -40).sort((a, b) => b.top - a.top)
+    .toSorted((a, b) => b.spread - a.spread)
+  const ridges = clear
+    .filter((site) => site.z >= -3 || site.z <= -40)
+    .toSorted((a, b) => b.top - a.top)
   const cap = mobile ? 38 : 170
   const trees: LakeTree[] = []
   const plant = (site: Site, gate: number, size = 1, forced?: TreeKind) => {
@@ -1026,7 +1017,7 @@ function placeTrees(
           Math.abs(profileX(site.x, mobile) - islet.x) < islet.width &&
           Math.abs(site.z - islet.z) < islet.depth,
       )
-      .sort(
+      .toSorted(
         (a, b) =>
           b.top - a.top ||
           Math.hypot(profileX(a.x, mobile) - islet.x, a.z - islet.z) -
@@ -1159,7 +1150,18 @@ export function createLakeWorld(seed: number, mobile: boolean): LakeWorld {
           highest,
           height(lamp.x + dx * (lamp.driftRadius + 0.1), lamp.z + dz * (lamp.driftRadius + 0.1)),
         )
-    return { ...lamp, groundY, y: highest + (lamp.y - lamp.groundY) }
+    // Same fields, in the same order, as the lamp it replaces.
+    return {
+      x: lamp.x,
+      y: highest + (lamp.y - lamp.groundY),
+      groundY,
+      z: lamp.z,
+      intensity: lamp.intensity,
+      phase: lamp.phase,
+      speed: lamp.speed,
+      amplitude: lamp.amplitude,
+      driftRadius: lamp.driftRadius,
+    }
   })
   const shoreStones: TerrainIsland[] = [
     ...stones.map((stone) => ({ x: stone.x, z: stone.z, top: stone.top, extent: stone.size * 2 })),

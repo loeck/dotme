@@ -32,6 +32,11 @@ export const LEAVES = {
   /** Same under the ambient gust field, above `ambientThreshold`. */
   ambientRate: 0.02,
   ambientThreshold: 0.38,
+  /**
+   * Leaves per second per metre of crown radius that let go on their own in a full autumn,
+   * whatever the gusts (more in a breeze): the wood sheds steadily rather than only in squalls.
+   */
+  trickleRate: 0.007,
   /** Seconds a leaf lies on the ground or the water before it fades over `fade`. */
   rest: [5, 9],
   fade: 1.6,
@@ -51,6 +56,52 @@ const PALETTE = [
   [0xcf8f35, 0.1],
   [0x8f6331, 0.08],
 ] as const
+/** Autumn's fall: the crowns' yellows, coppers and russets, with a few late greens. */
+const AUTUMN_PALETTE = [
+  [0xd2a335, 0.26],
+  [0xd9822b, 0.22],
+  [0xb4542a, 0.16],
+  [0x8f5a2c, 0.16],
+  [0xa8a33e, 0.1],
+  [0x7d9a40, 0.1],
+] as const
+/** The few dead leaves a winter gust still finds: dry browns. */
+const WINTER_PALETTE = [
+  [0x8f6331, 0.45],
+  [0x7a5a3c, 0.35],
+  [0xa07a4a, 0.2],
+] as const
+
+/** How the season changes the fall; see `seasonalLife` in `season.ts`. */
+export type LeafSeason = Readonly<{
+  /** Multiplier on what a gust strips. */
+  rate: number
+  /** 0–1 share of the autumn trickle that needs no gust. */
+  trickle: number
+  /** 0–1 weights of the autumn and winter palettes over the summer one. */
+  autumn: number
+  winter: number
+}>
+
+type Palette = readonly (readonly [number, number])[]
+
+/** A colour from a weighted palette for a uniform `pick` in [0, 1). */
+export function paletteColour(palette: Palette, pick: number) {
+  let left = pick
+  let hex = palette[0]?.[0] ?? 0
+  for (const [value, weight] of palette) {
+    hex = value
+    if ((left -= weight) <= 0) break
+  }
+  return hex
+}
+
+/** The palette a new leaf takes in `season`, for a uniform `pick` in [0, 1). */
+export function seasonPalette(season: LeafSeason, pick: number): Palette {
+  if (pick < season.winter) return WINTER_PALETTE
+  if (pick < season.winter + season.autumn) return AUTUMN_PALETTE
+  return PALETTE
+}
 
 /** Where a falling leaf comes to rest under (x, z): its height and whether it floats. */
 export type LeafGround = (x: number, z: number, fromY: number) => { y: number; water: boolean }
@@ -133,6 +184,7 @@ export class FallingLeaves {
   private readonly push: [number, number] = [0, 0]
   private lastRipple = -Infinity
   private alive = 0
+  private season: LeafSeason = { rate: 1, trickle: 0, autumn: 0, winter: 0 }
 
   private readonly camera: Vector3
   private readonly ground: LeafGround
@@ -191,6 +243,10 @@ export class FallingLeaves {
     }
   }
 
+  setSeason(season: LeafSeason) {
+    this.season = season
+  }
+
   /** Leaves in the air or on the ground. */
   get count() {
     return this.alive
@@ -243,6 +299,8 @@ export class FallingLeaves {
     const [dx, dz] = wind.direction
     const cursor = gusts?.active() ?? false
     const ambientScale = breeze * 0.6 + 0.5
+    const { rate: seasonRate, trickle } = this.season
+    const trickleRate = LEAVES.trickleRate * trickle * (breeze * 0.8 + 0.4)
     for (let i = 0; i + 3 < sources.length; i += 4) {
       const x = sources[i] ?? 0,
         y = sources[i + 1] ?? 0,
@@ -253,6 +311,7 @@ export class FallingLeaves {
       const ambient = ambientGust(x, z, time, dx, dz) * ambientScale
       if (ambient > LEAVES.ambientThreshold)
         rate += LEAVES.ambientRate * r * (ambient - LEAVES.ambientThreshold)
+      rate = rate * seasonRate + trickleRate * r
       if (rate > 0 && this.random() < rate * dt) this.spawn(x, y, z, r, time)
     }
   }
@@ -288,12 +347,10 @@ export class FallingLeaves {
     leaf.born = time
     leaf.state = 1
     this.cast(leaf)
-    let pick = random()
-    let hex: number = PALETTE[0][0]
-    for (const [value, weight] of PALETTE) {
-      hex = value
-      if ((pick -= weight) <= 0) break
-    }
+    // A summer leaf draws one number, as before seasons; other seasons draw the palette first.
+    const seasonal = this.season.autumn + this.season.winter > 0
+    const palette = seasonal ? seasonPalette(this.season, random()) : PALETTE
+    const hex = paletteColour(palette, random())
     this.mesh.setColorAt(slot, this.colour.setHex(hex))
     if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true
     this.alive++

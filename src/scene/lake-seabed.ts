@@ -4,10 +4,10 @@ import type { LakeBed } from './lake-bed'
 
 export const SEABED_CAPTURE = { minX: -29, maxX: 29, minZ: -52, maxZ: 24 } as const
 export const SEAGRASS_DEPTH = { min: 0.8, max: 2.6 } as const
-export const MAX_SEABED_ROCKS = 320
-export const MAX_SEAGRASS_BLADES = 1200
+const MAX_SEABED_ROCKS = 320
+const MAX_SEAGRASS_BLADES = 1200
 export const HERO_ROCK_COUNT = 22
-export const HERO_ROCK_DEPTH = { min: 1.2, max: 3.2 } as const
+const HERO_ROCK_DEPTH = { min: 1.2, max: 3.2 } as const
 
 export type SeabedRock = Readonly<{
   x: number

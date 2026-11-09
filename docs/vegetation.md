@@ -229,6 +229,33 @@ response. Its centre also follows smoothly, with no abrupt gust births or cursor
 Wood, foliage, undergrowth and falling leaves read the same field; stopping or reversing the
 mouse preserves momentum while the plants settle. See [scene interactions](scene-details.md).
 
+## Seasons
+
+The wood follows the season of the visit (`season.ts`): four weights that sum to one, from the
+visitor's date and the latitude of `coordinates` (Paris by default), after a western European
+year: leaves break from early March to mid-April, darken by late June, turn from mid-September to
+early October and are down between mid-November and early December, with smooth blends across
+each change. The southern hemisphere runs half a year apart, and toward the tropics (under 12°,
+blending to full seasons at 28°) the year flattens into summer. `?season=spring|summer|autumn|winter`
+forces one. The palette is applied as uniforms on the existing materials
+(`seasonal-vegetation.ts`), so every season shares the same programs:
+
+- Spring lightens deciduous foliage toward a fresh yellow-green and freshens the sward.
+- Summer is the palette above, unchanged.
+- Autumn turns each deciduous tree its own colour, seeded by its placement (the sway frequency,
+  constant over a tree, hashes to a per-tree value): birches go yellow, beeches gold to copper,
+  oaks copper to russet and shrubs toward red, each card varying a little and keeping the crown's
+  light and shade; one tree in six lags, still mostly green. The sward turns olive and straw and
+  the flowers go over.
+- Winter strips about nine cards in ten from deciduous crowns (a birch almost all, a beech keeps
+  a fifth of its dead leaves) and every shaded core, so crowns thin to a grey-brown haze of
+  twigs on the trunks and limbs; the sward browns and loses its flowers.
+
+Conifers (the atlas's spruce and pine tiles, and cores with a needle's bluer tone) keep their
+needles all year. The season also sets the falling leaves (autumn sheds steadily, see
+[scene interactions](scene-details.md)), the fireflies, insects, bats and birds
+([wildlife](scene-details.md#seasonal-wildlife)) and the sound ([living landscape](living-landscape.md)).
+
 ## Roots and weathering
 
 Wood rings have a shallow elliptical/lobed profile and gradual swellings, strongest on

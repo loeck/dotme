@@ -42,7 +42,10 @@ describe('lightning', () => {
   it('flashes and fades within a fraction of a second', () => {
     const storm = new Lightning(() => 0.5, 0)
     let struck = -1
-    for (let t = 0; t < 30 && struck < 0; t += 1 / 60) storm.update(t, true, () => (struck = t))
+    for (let t = 0; t < 30; t += 1 / 60) {
+      storm.update(t, true, () => (struck = t))
+      if (struck >= 0) break
+    }
     expect(struck).toBeGreaterThan(0)
     expect(storm.update(struck + 1, true)).toBe(0)
   })
@@ -51,7 +54,10 @@ describe('lightning', () => {
     const storm = new Lightning(() => 0, 0)
     for (let t = 0; t < 50; t += 0.5) storm.update(t, false)
     let first = -1
-    for (let t = 50; t < 80 && first < 0; t += 1 / 60) storm.update(t, true, () => (first = t))
+    for (let t = 50; t < 80; t += 1 / 60) {
+      storm.update(t, true, () => (first = t))
+      if (first >= 0) break
+    }
     expect(first).toBeGreaterThanOrEqual(50 + LIGHTNING.minGap - 0.5)
   })
 })

@@ -1,16 +1,17 @@
+import { storage } from '../env'
 /**
  * Prepared world parts kept between visits in the origin private file system. Reads and writes
  * happen inside the world worker, so neither the copies of tens of megabytes nor the file
  * round trips reach the render thread; a hit is transferred to the page like a freshly
  * generated part. Each part is one file: a JSON header describing the value, with every typed
- * array replaced by a reference into the raw bytes that follow. Raw files keep the write cheap;
- * an IndexedDB store of the same data kept the browser busy long enough to stall the GPU
- * compiles of a reload.
+ * array replaced by a reference into the bytes that follow, deflated as one stream. Plain files
+ * keep the write cheap; an IndexedDB store of the same data kept the browser busy long enough
+ * to stall the GPU compiles of a reload.
  *
- * Each header carries the generator's version (the content-hashed worker URL) and its seed, so
- * a new build or a different world is never served. One file per part and profile is kept:
- * storing the next world replaces the previous one. Files are written with `createWritable`,
- * which commits atomically on close; a browser without it simply never stores a world.
+ * Each header carries the file format, the generator's version (the content-hashed worker URL)
+ * and its seed, so a new build or a different world is never served. One file per part and
+ * profile is kept: storing the next world replaces the previous one. Files are written with
+ * `createWritable`, which commits atomically on close; a browser without it never stores one.
  */
 const DIRECTORY = 'dotme-world'
 
@@ -35,8 +36,6 @@ const isViewName = (name: unknown): name is ViewName =>
 
 /** A typed array in the header: its constructor, byte offset and element count. */
 type ViewRef = Readonly<{ $view: ViewName; offset: number; length: number }>
-
-type Header = Readonly<{ version: string; seed: number; bytes: number; value: unknown }>
 
 const fileName = (mobile: boolean, part: CachedWorldPart) =>
   `${mobile ? 'mobile' : 'desktop'}-${part}.bin`
@@ -93,21 +92,34 @@ function isViewRef(value: object): value is ViewRef {
   )
 }
 
-/** Rebuilds the value; each typed array gets its own buffer so it can be transferred. */
+/**
+ * Rebuilds the value over `data`: every typed array is a view at its aligned offset in the one
+ * buffer, so a hit costs no second copy. Transferring the part moves that whole buffer, which
+ * holds nothing but this part's arrays.
+ */
 function decode(value: unknown, data: ArrayBuffer): unknown {
-  const views = new Map<number, View>()
+  // A shared array is one reference, encoded identically wherever it appears. The offset alone
+  // is not a key: an empty array takes no bytes, so the next array starts at its offset.
+  const views = new Map<string, View>()
   const visit = (child: unknown): unknown => {
     if (Array.isArray(child)) return child.map(visit)
     if (child === null || typeof child !== 'object') return child
     if (isViewRef(child)) {
-      const known = views.get(child.offset)
+      const key = `${child.$view}:${child.offset}:${child.length}`
+      const known = views.get(key)
       if (known) return known
       const View = VIEWS[child.$view]
       const end = child.offset + child.length * View.BYTES_PER_ELEMENT
-      if (!Number.isInteger(child.offset) || child.offset < 0 || end > data.byteLength)
+      if (
+        !Number.isInteger(child.offset) ||
+        !Number.isInteger(child.length) ||
+        child.offset < 0 ||
+        child.offset % View.BYTES_PER_ELEMENT !== 0 ||
+        end > data.byteLength
+      )
         throw new RangeError('Prepared world reference out of bounds')
-      const view = new View(data.slice(child.offset, end))
-      views.set(child.offset, view)
+      const view = new View(data, child.offset, child.length)
+      views.set(key, view)
       return view
     }
     const result: Record<string, unknown> = {}
@@ -117,16 +129,48 @@ function decode(value: unknown, data: ArrayBuffer): unknown {
   return visit(value)
 }
 
+/**
+ * Bump when the file layout changes. The worker URL changes with any build of this module too;
+ * the constant also guards a layout change that a hash collision or a manual deploy would miss.
+ */
+const FORMAT = 2
+
+/**
+ * `deflate-raw` shrinks a part about threefold (mostly float meshes, indices and the foliage
+ * atlas) and inflates in tens of milliseconds; `raw` is for browsers without compression streams.
+ */
+type Encoding = 'deflate-raw' | 'raw'
+
+type Header = Readonly<{
+  format: number
+  version: string
+  seed: number
+  encoding: Encoding
+  /** Decoded payload size. */
+  bytes: number
+  /** Stored payload size. */
+  stored: number
+  value: unknown
+}>
+
 function isHeader(value: unknown): value is Header {
   return (
     value !== null &&
     typeof value === 'object' &&
+    'format' in value &&
+    value.format === FORMAT &&
     'version' in value &&
     typeof value.version === 'string' &&
     'seed' in value &&
     typeof value.seed === 'number' &&
+    'encoding' in value &&
+    (value.encoding === 'deflate-raw' || value.encoding === 'raw') &&
     'bytes' in value &&
     typeof value.bytes === 'number' &&
+    Number.isSafeInteger(value.bytes) &&
+    value.bytes >= 0 &&
+    'stored' in value &&
+    typeof value.stored === 'number' &&
     'value' in value
   )
 }
@@ -138,15 +182,12 @@ async function directory(create: boolean) {
   return root.getDirectoryHandle(DIRECTORY, { create })
 }
 
-/** One part as file contents: header length, JSON header, then the aligned typed arrays. */
-export function serializeWorldPart(version: string, seed: number, data: unknown): Blob {
-  const { value, views, bytes } = encode(data)
-  const header: Header = { version, seed, bytes, value }
-  const json = new TextEncoder().encode(JSON.stringify(header))
-  const prefix = new Uint8Array(align(4 + json.byteLength))
-  new DataView(prefix.buffer).setUint32(0, json.byteLength, true)
-  prefix.set(json, 4)
-  const chunks: BlobPart[] = [prefix]
+const canCompress = () =>
+  typeof CompressionStream === 'function' && typeof DecompressionStream === 'function'
+
+/** The typed arrays of a part, aligned as the header's references expect. */
+function payload(views: readonly ArrayBufferView[], bytes: number): Blob {
+  const chunks: BlobPart[] = []
   let written = 0
   for (const view of views) {
     const padding = align(written) - written
@@ -165,18 +206,85 @@ export function serializeWorldPart(version: string, seed: number, data: unknown)
 }
 
 /**
- * The part stored in `contents` if it was written for exactly this generator and seed and is
- * complete, else `undefined`. Throws on malformed contents.
+ * One part as file contents: header length, JSON header, then the part's typed arrays, aligned
+ * and deflated as one stream where the browser can.
  */
-export function parseWorldPart(contents: ArrayBuffer, version: string, seed: number): unknown {
-  const headerBytes = new DataView(contents, 0, 4).getUint32(0, true)
+export async function serializeWorldPart(
+  version: string,
+  seed: number,
+  data: unknown,
+  compress = canCompress(),
+): Promise<Blob> {
+  const { value, views, bytes } = encode(data)
+  const raw = payload(views, bytes)
+  const body = compress
+    ? await new Response(raw.stream().pipeThrough(new CompressionStream('deflate-raw'))).blob()
+    : raw
+  const header: Header = {
+    format: FORMAT,
+    version,
+    seed,
+    encoding: compress ? 'deflate-raw' : 'raw',
+    bytes,
+    stored: body.size,
+    value,
+  }
+  const json = new TextEncoder().encode(JSON.stringify(header))
+  const prefix = new Uint8Array(align(4 + json.byteLength))
+  new DataView(prefix.buffer).setUint32(0, json.byteLength, true)
+  prefix.set(json, 4)
+  return new Blob([prefix, body])
+}
+
+/** Inflates straight into one buffer of the recorded size: no chunk list, no second copy. */
+async function inflate(stored: Blob, bytes: number): Promise<ArrayBuffer | undefined> {
+  const output = new Uint8Array(bytes)
+  const reader = stored.stream().pipeThrough(new DecompressionStream('deflate-raw')).getReader()
+  let offset = 0
+  try {
+    for (;;) {
+      // eslint-disable-next-line no-await-in-loop -- a stream is read in order
+      const { done, value } = await reader.read()
+      if (done) break
+      if (offset + value.byteLength > bytes) {
+        // Longer than recorded: stop inflating the rest instead of draining it.
+        // eslint-disable-next-line no-await-in-loop -- leaves the loop right after
+        await reader.cancel().catch(() => undefined)
+        return undefined
+      }
+      output.set(value, offset)
+      offset += value.byteLength
+    }
+  } finally {
+    reader.releaseLock()
+  }
+  return offset === bytes ? output.buffer : undefined
+}
+
+/**
+ * The part stored in `contents` if it was written in this format for exactly this generator and
+ * seed and is complete, else `undefined`. Throws on malformed contents.
+ */
+export async function parseWorldPart(
+  contents: Blob,
+  version: string,
+  seed: number,
+): Promise<unknown> {
+  if (contents.size < 4) return undefined
+  const headerBytes = new DataView(await contents.slice(0, 4).arrayBuffer()).getUint32(0, true)
   const dataStart = align(4 + headerBytes)
+  if (dataStart > contents.size) return undefined
   const header: unknown = JSON.parse(
-    new TextDecoder().decode(new Uint8Array(contents, 4, headerBytes)),
+    new TextDecoder().decode(await contents.slice(4, 4 + headerBytes).arrayBuffer()),
   )
   if (!isHeader(header) || header.version !== version || header.seed !== seed) return undefined
-  if (contents.byteLength !== dataStart + header.bytes) return undefined
-  return decode(header.value, contents.slice(dataStart))
+  if (contents.size !== dataStart + header.stored) return undefined
+  const body = contents.slice(dataStart)
+  let data: ArrayBuffer | undefined
+  if (header.encoding === 'raw')
+    data = header.stored === header.bytes ? await body.arrayBuffer() : undefined
+  else data = canCompress() ? await inflate(body, header.bytes) : undefined
+  return data && decode(header.value, data)
 }
 
 /** The stored part for exactly this generator and seed, or `undefined`. Never throws. */
@@ -188,7 +296,7 @@ export async function readCachedPart(
 ): Promise<unknown> {
   try {
     const handle = await (await directory(false)).getFileHandle(fileName(mobile, part))
-    return parseWorldPart(await (await handle.getFile()).arrayBuffer(), version, seed)
+    return await parseWorldPart(await handle.getFile(), version, seed)
   } catch {
     return undefined
   }
@@ -219,18 +327,46 @@ export async function storeWorld(
   // and a reader only accepts a part whose header names this seed.
   for (const part of ['terrain', 'surfaces', 'vegetation'] as const)
     // eslint-disable-next-line no-await-in-loop -- sequential on purpose, see above
-    await writePart(folder, fileName(mobile, part), serializeWorldPart(version, seed, parts[part]))
+    await writePart(
+      folder,
+      fileName(mobile, part),
+      // eslint-disable-next-line no-await-in-loop -- sequential on purpose, see above
+      await serializeWorldPart(version, seed, parts[part]),
+    )
+}
+
+/**
+ * Bytes the stored world of this profile takes now, which storing the next one replaces; 0 when
+ * nothing is stored or storage is unavailable. Never throws.
+ */
+export async function storedWorldBytes(mobile: boolean): Promise<number> {
+  try {
+    const folder = await directory(false)
+    const sizes = await Promise.all(
+      (['terrain', 'surfaces', 'vegetation'] as const).map(async (part) => {
+        try {
+          return (await (await folder.getFileHandle(fileName(mobile, part))).getFile()).size
+        } catch {
+          return 0
+        }
+      }),
+    )
+    return sizes.reduce((sum, size) => sum + size, 0)
+  } catch {
+    return 0
+  }
+}
+
+/**
+ * Stored size of a world, for the quota check before preparing one: deflated parts of seed 9182
+ * plus headroom (about 31 MB on desktop and 8 MB on phones; raw files are three times larger).
+ */
+export function expectedWorldBytes(mobile: boolean) {
+  const deflated = mobile ? 10e6 : 40e6
+  return canCompress() ? deflated : deflated * 3
 }
 
 const NEXT_SEED_KEY = 'dotme:next-world-seed'
-
-function storage(): Storage | undefined {
-  try {
-    return typeof localStorage === 'undefined' ? undefined : localStorage
-  } catch {
-    return undefined
-  }
-}
 
 /**
  * The seed whose world was prepared for this visit by the previous one, consumed so that every

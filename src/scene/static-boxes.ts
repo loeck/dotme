@@ -51,7 +51,7 @@ function mergeAlong(entries: MergedBox[], axis: 0 | 1 | 2): MergedBox[] {
   return merged
 }
 
-/** Greedy exact merge of axis-aligned voxel boxes into few solid cuboids. */
+/** Greedy exact merge of axis-aligned boxes into few solid cuboids. */
 export function mergeStaticBoxes(boxes: Float64Array): Float64Array {
   let entries: MergedBox[] = []
   for (let i = 0; i + 5 < boxes.length; i += 6) {

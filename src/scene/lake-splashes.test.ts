@@ -2,20 +2,20 @@ import { Matrix4, Scene, Vector3 } from 'three'
 import { describe, expect, it } from 'vitest'
 
 import { required } from '../invariant'
+import { createBoxIndex } from './box-index'
+import type { Box } from './box-index'
 import { createLakeBed, lakeIndex, WATER_LEVEL } from './lake-bed'
 import { LakeSplashes } from './lake-splashes'
 import { createPhysicsWorld, loadPhysics } from './physics-world'
-import { createVoxelIndex } from './voxel-spatial'
-import type { Voxel } from './voxel-spatial'
 import { sampleWindField } from './water-surface'
 import { WindModel } from './wind'
 
-const block: Voxel = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
+const block: Box = { x: 0, y: 0.5, z: 0, size: 4, color: 0 }
 const bed = createLakeBed([block], 42, true)
 const calm = new WindModel(42, { meanSpeed: 0, gustStrength: 0, turnStrength: 0 })
 const windy = new WindModel(42, { meanSpeed: 8, bearing: 0, gustStrength: 0, turnStrength: 0 })
 
-const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createVoxelIndex([block]))
+const physicsFor = async () => createPhysicsWorld(await loadPhysics(), createBoxIndex([block]))
 
 const replay = async (seed: number) => {
   const physics = await physicsFor()

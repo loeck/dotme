@@ -1,10 +1,32 @@
 import { GpuRuntime } from './components/gpu-runtime'
 import { initSceneLoader } from './components/scene-loader'
 import { startSceneWorld } from './components/scene-world'
-import { debugParams } from './scene-params'
+import { debugParams, sceneParams } from './scene-params'
+import { rapierWasm } from './scene/rapier-wasm'
+import type { SceneWeather } from './weather/scene'
 
 let cleanup: (() => void) | undefined
 let releasing = Promise.resolve()
+/** Kept across bfcache restarts so a restored page reuses the weather of its first load. */
+let sceneWeather: Promise<SceneWeather> | undefined
+
+/**
+ * Starts the weather request with world preparation, before the GPU device. The module is a
+ * dynamic import so the loader entry never carries the weather code (docs/bundle-size.md).
+ */
+function requestWeather(seed: number, signal: AbortSignal) {
+  if (sceneWeather) return sceneWeather
+  const { position, weather } = sceneParams(location.search)
+  const request = import('./weather/scene').then(({ preloadSceneWeather }) =>
+    preloadSceneWeather({ seed, position, ...(weather ? { weather } : {}), signal }),
+  )
+  sceneWeather = request
+  // Only cancellation rejects; forget it so the next start asks again.
+  request.catch(() => {
+    if (sceneWeather === request) sceneWeather = undefined
+  })
+  return request
+}
 
 function reveal(state: 'ready' | 'failed') {
   document.documentElement.dataset.sceneLoading = state
@@ -66,15 +88,15 @@ function start(autoplay = true) {
   const initialize = async () => {
     const signal = lifetime.signal
     const active = () => !signal.aborted
-    const deadline = window.setTimeout(() => {
-      if (active()) fail()
-    }, 60_000)
-    signal.addEventListener('abort', () => clearTimeout(deadline), { once: true })
+    // The deadline belongs to the HTML bootstrap (index.html), which dispatches scene-timeout.
     try {
       await releasing
       signal.throwIfAborted()
       // World workers (or the world cache) run while the device and the loader start.
       const world = startSceneWorld(host, signal)
+      const weather = requestWeather(world.seed, signal)
+      // Rapier's WebAssembly streams and compiles off the main thread alongside the workers.
+      void rapierWasm()
       const creation = GpuRuntime.create(canvas, signal, debugParams(location.search).backend)
       pendingCreation = creation
       const instance = await creation
@@ -117,7 +139,6 @@ function start(autoplay = true) {
               if (!active()) return
               loader.dispose()
               stopLoader = undefined
-              clearTimeout(deadline)
               reveal('ready')
             },
             () => {
@@ -125,6 +146,7 @@ function start(autoplay = true) {
             },
             autoplay,
             world,
+            weather,
           )
         })
         .then((teardown) => {

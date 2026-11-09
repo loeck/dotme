@@ -162,8 +162,8 @@
   background: var(--cursor-light);
   transition: scale 180ms var(--cursor-ease);
 }
-/* Over controls the point opens into a hollow ring, so the label under it stays legible.
-   A faint ink edge on both sides keeps the ring visible on the daylight sky. */
+/* While the landscape is grabbed the point opens into a hollow ring. A faint ink edge on
+   both sides keeps the ring visible on the daylight sky. Controls keep native cursors. */
 .scene-cursor-ring {
   width: 22px;
   height: 22px;
@@ -178,13 +178,6 @@
     opacity 120ms ease-out,
     scale 260ms var(--cursor-ease);
 }
-.scene-cursor[data-interactive='true'] .scene-cursor-ring {
-  opacity: 1;
-  scale: 1;
-}
-.scene-cursor[data-interactive='true'] .scene-cursor-point {
-  scale: 0.5;
-}
 .scene-cursor[data-pressed] .scene-cursor-point {
   scale: 0.72;
   transition-duration: 70ms;
@@ -196,13 +189,6 @@
 :root[data-scene-grab='true'] .scene-cursor-ring {
   scale: 1.4;
   opacity: 0.7;
-}
-.scene-cursor[data-interactive='true'][data-pressed] .scene-cursor-point {
-  scale: 0.4;
-}
-.scene-cursor[data-interactive='true'][data-pressed] .scene-cursor-ring {
-  scale: 0.84;
-  transition-duration: 90ms;
 }
 /* One quiet ring released by a press on the landscape (animated from script). */
 .scene-cursor-echo {

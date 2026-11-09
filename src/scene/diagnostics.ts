@@ -10,7 +10,7 @@ export type SceneGpuInfo = {
   textures: number
 }
 
-export type ScenePassSample = {
+type ScenePassSample = {
   cpuMs: number
   renderCalls: number
   gpuMs: number | null

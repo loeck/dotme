@@ -1,7 +1,7 @@
 import { Vector3 } from 'three/webgpu'
 import { describe, expect, it } from 'vitest'
 
-import { FallingLeaves, LEAVES } from './falling-leaves'
+import { FallingLeaves, LEAVES, paletteColour, seasonPalette } from './falling-leaves'
 import { GUST, WindGusts } from './wind-gusts'
 
 function seeded(seed: number) {
@@ -83,5 +83,35 @@ describe('falling leaves', () => {
     leaves.clear()
     expect(leaves.count).toBe(0)
     leaves.dispose()
+  })
+})
+
+describe('seasonal leaf fall', () => {
+  it('lets autumn leaves go without a gust and colours them from the season', () => {
+    const leaves = forest()
+    leaves.setSeason({ rate: 3.5, trickle: 1, autumn: 1, winter: 0 })
+    let shed = 0
+    for (let t = 0; t < 600; t += 0.1) {
+      const before = leaves.count
+      leaves.update(t, 0.1, calm, 0.25, undefined)
+      shed += Math.max(0, leaves.count - before)
+    }
+    // About 0.008 leaves a second from a 2 m crown band in a light breeze.
+    expect(shed).toBeGreaterThan(0)
+    expect(shed).toBeLessThan(15)
+    leaves.dispose()
+  })
+
+  it('picks palettes by season weight', () => {
+    const summer = { rate: 1, trickle: 0, autumn: 0, winter: 0 }
+    const autumn = { rate: 3.5, trickle: 1, autumn: 1, winter: 0 }
+    const winter = { rate: 0.4, trickle: 0, autumn: 0, winter: 1 }
+    expect(seasonPalette(summer, 0.5)).not.toBe(seasonPalette(autumn, 0.5))
+    expect(seasonPalette(winter, 0.5)).not.toBe(seasonPalette(autumn, 0.5))
+    // A colour is always drawn from its palette, whatever the pick.
+    for (const pick of [0, 0.3, 0.999]) {
+      const palette = seasonPalette(autumn, 0.5)
+      expect(palette.map(([hex]) => hex)).toContain(paletteColour(palette, pick))
+    }
   })
 })

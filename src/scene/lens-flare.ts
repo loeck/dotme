@@ -6,14 +6,13 @@ import type { Node } from 'three/webgpu'
  * sits at `at` times the sun's offset from the centre (negative: across the centre), with a
  * radius in frame heights and a faint tint from the lens coatings.
  */
-export const GHOSTS: readonly Readonly<{ at: number; radius: number; tint: readonly number[] }>[] =
-  [
-    { at: 0.55, radius: 0.022, tint: [1, 0.62, 0.25] },
-    { at: 0.2, radius: 0.04, tint: [0.35, 0.85, 0.7] },
-    { at: -0.3, radius: 0.06, tint: [0.55, 0.45, 1] },
-    { at: -0.7, radius: 0.03, tint: [1, 0.55, 0.3] },
-    { at: -1.15, radius: 0.085, tint: [0.35, 0.6, 1] },
-  ]
+const GHOSTS: readonly Readonly<{ at: number; radius: number; tint: readonly number[] }>[] = [
+  { at: 0.55, radius: 0.022, tint: [1, 0.62, 0.25] },
+  { at: 0.2, radius: 0.04, tint: [0.35, 0.85, 0.7] },
+  { at: -0.3, radius: 0.06, tint: [0.55, 0.45, 1] },
+  { at: -0.7, radius: 0.03, tint: [1, 0.55, 0.3] },
+  { at: -1.15, radius: 0.085, tint: [0.35, 0.6, 1] },
+]
 
 /** Brightness of each ghost relative to the flare's strength, in exposed radiance units. */
 const GHOST_GAIN = 0.8

@@ -33,6 +33,7 @@ import {
   PerspectiveCamera,
   Scene,
   SphereGeometry,
+  Vector4,
 } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
@@ -44,6 +45,7 @@ import { CloudShadows } from './cloud-shadows'
 import { sampleLighting } from './lighting'
 import type { LightingState } from './lighting'
 import { SkyCursorTrace, skyTraceSample } from './sky-cursor-trace'
+import { WEATHER } from './weather'
 import type { WeatherPreset } from './weather'
 import type { WindModel } from './wind'
 
@@ -115,6 +117,8 @@ export class VolumetricClouds {
   private readonly targets: CubeRenderTarget[]
   private readonly noise
   private readonly volume
+  /** The body scale the radii currently carry (`WEATHER[preset].bodyScale`). */
+  private bodyScale: number
   private readonly material = new MeshBasicNodeMaterial({
     side: BackSide,
     depthTest: false,
@@ -171,6 +175,7 @@ export class VolumetricClouds {
     }
     this.camera = new CubeCamera(0.1, 2, required(this.targets[0]))
     this.volume = createCloudVolume(seed, weather, this.noise)
+    this.bodyScale = WEATHER[weather].bodyScale
     const { density, uniforms: u } = this.volume
     const cursorTrace = texture<'vec4'>(this.cursorTrace.texture)
     this.material.fragmentNode = Fn(() => {
@@ -342,8 +347,36 @@ export class VolumetricClouds {
       Math.min(7, Math.ceil((fraction + this.profile.hz / 60) * 7)),
     )
   }
-  async compileAsync() {
-    if (!this.uniforms.uCloudEnabled.value) return
+  /**
+   * Blended cloud morphology for a weather refresh: coverage, density and body size are
+   * uniforms, so the deck can build or clear without compiling. A sky that clears completely
+   * skips its capture until clouds return.
+   */
+  setWeather(levels: Readonly<{ coverage: number; density: number; bodyScale: number }>) {
+    const u = this.volume.uniforms
+    u.uCloudCoverage.value = Math.max(0, levels.coverage)
+    u.uCloudDensity.value = Math.max(0, levels.density)
+    const scale = Math.max(0.05, levels.bodyScale)
+    if (Math.abs(scale - this.bodyScale) > 1e-6) {
+      const ratio = scale / this.bodyScale
+      for (const radius of u.uCloudRadii.array) {
+        if (!(radius instanceof Vector4)) continue
+        radius.x *= ratio
+        radius.z *= ratio
+      }
+      this.bodyScale = scale
+    }
+    const enabled = levels.coverage > 0 || levels.density > 0.001 ? 1 : 0
+    if (enabled !== this.uniforms.uCloudEnabled.value) {
+      this.uniforms.uCloudEnabled.value = enabled
+      // Recapture both frames when the deck returns, rather than blending from a stale one.
+      this.tick = -1
+      if (!enabled) this.shadows.uniforms.uCloudShadowStrength.value = 0
+    }
+  }
+  /** `everything`: compile the capture even under a clear sky, for weather that may change. */
+  async compileAsync(everything = false) {
+    if (!this.uniforms.uCloudEnabled.value && !everything) return
     if (this.camera.coordinateSystem !== this.renderer.coordinateSystem) {
       this.camera.coordinateSystem = this.renderer.coordinateSystem
       this.camera.updateCoordinateSystem()

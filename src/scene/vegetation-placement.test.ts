@@ -42,6 +42,17 @@ function outwardShare(model: TreeModel) {
   return outward / (indices.length / 3)
 }
 
+const crownBottom = (model: TreeModel) =>
+  Math.min(...model.sprays.map((spray) => spray.center[1])) / model.height
+const width = (model: TreeModel, from: number, to: number) =>
+  Math.max(
+    ...model.sprays
+      .filter(
+        (spray) => spray.center[1] > from * model.height && spray.center[1] < to * model.height,
+      )
+      .map((spray) => Math.hypot(spray.center[0], spray.center[2])),
+  )
+
 describe('lake-shore vegetation', () => {
   const detail = MODEL_DETAIL.desktop
   const models = {
@@ -104,20 +115,10 @@ describe('lake-shore vegetation', () => {
   })
 
   it('shapes each species by its habit', () => {
-    const crownBottom = (model: TreeModel) =>
-      Math.min(...model.sprays.map((spray) => spray.center[1])) / model.height
     // Spruce keeps branches near the ground; Scots pine is bare most of the way up.
     expect(crownBottom(models.spruce)).toBeLessThan(0.2)
     expect(crownBottom(models.pine)).toBeGreaterThan(0.4)
     // A spruce is a narrow cone: widest low down, pointed at the top.
-    const width = (model: TreeModel, from: number, to: number) =>
-      Math.max(
-        ...model.sprays
-          .filter(
-            (spray) => spray.center[1] > from * model.height && spray.center[1] < to * model.height,
-          )
-          .map((spray) => Math.hypot(spray.center[0], spray.center[2])),
-      )
     expect(width(models.spruce, 0.15, 0.35)).toBeGreaterThan(width(models.spruce, 0.75, 0.95) * 2)
     expect(width(models.spruce, 0.15, 0.35)).toBeLessThan(models.spruce.height * 0.3)
     // Birch twigs hang: their cards are about upright.

@@ -69,12 +69,13 @@ then recomputed from the final triangles. A vertex attribute carries four bytes:
 Local 1K CC0 scans from Poly Haven add grass blades, exposed earth and forest litter:
 [Grass Ground](https://polyhaven.com/a/grass_ground) by Charlotte Baglioni and
 [Forest Floor](https://polyhaven.com/a/forest_floor) by eye-candy.xyz. Their provenance and
-processing are recorded in `public/textures/terrain/sources.json`. Color uses sRGB WebP;
-linear roughness and displacement share a 512px lossless WebP's red and green channels. They load
+processing are recorded in `src/assets/textures/terrain/sources.json`. Color uses sRGB WebP;
+linear roughness and displacement share a 512px WebP's red and green channels. They load
 before material compilation, with procedural shading as a fallback if an asset is unavailable.
 World-space sampling blends two rotated scales to soften repetition. Scanned color,
 roughness and relief follow the grass/litter masks; the distant canopy and wet banks retain
-their own shading. Maps repeat with mipmaps and bounded anisotropy on both backends.
+their own shading. Maps repeat with trilinear mipmaps and bounded anisotropy (8 on desktop, 4 on
+phones) on both backends.
 
 [Rock 01](https://polyhaven.com/a/rock_01) by Rob Tuytel adds weathered stone grain to the
 cliffs, boulders and waterfall face. Three world-space projections blend by the fourth power
@@ -114,6 +115,36 @@ surface gradient, applied after differentiation so triangles never print through
 `TerrainGenerator`; it fades out by 42 m. The baked sky visibility is the material's ambient
 occlusion and composes with the cloud shadows. Rain wetness (`shore-wetness.ts`), the sky fill on
 steep faces, the pointer light and the reflection fog apply as to any scene material.
+
+### Texture files
+
+The scans are imported as content-hashed assets (`terrain-images.ts`, `new URL` literals), so
+they are served `immutable` with the scripts and a new encoding never meets a stale cache. Their
+download starts with world preparation, before the GPU device (`startSceneWorld`), at low fetch
+priority so the landscape chunk and physics still arrive first; `createImageBitmap` decodes them
+off the main thread, already flipped, and `terrain-textures.ts` only wraps the bitmaps once the
+materials are built. Low-power devices (`isLowPowerDevice`) take half-resolution files.
+
+| Set (8 files) | Color           | Surface                     | Transfer | GPU (RGBA8 + mips) |
+| ------------- | --------------- | --------------------------- | -------- | ------------------ |
+| Before        | 1024², WebP q84 | 512², lossless WebP         | 2.38 MB  | about 28 MB        |
+| Desktop       | 1024², WebP q80 | 512², near-lossless 60 WebP | 1.76 MB  | about 28 MB        |
+| Low power     | 512², WebP q80  | 256², near-lossless 60 WebP | 0.41 MB  | about 7 MB         |
+
+Color is re-encoded from the 1K Poly Haven JPEGs (PSNR against the source 34.5–35.5 dB, against
+36.0–37.1 dB at q84). The surface maps cannot use lossy WebP: its 4:2:0 chroma mixes the
+roughness and height channels and its blocks print through the height gradient (35–41 dB);
+near-lossless keeps them within 48–49 dB for 44% fewer bytes. Seed 42 at noon is
+indistinguishable before and after on desktop (1280x720) and a Pixel 7 viewport, where the
+phone's half-resolution set renders; the remaining pixel differences follow the animated water.
+
+KTX2/Basis was evaluated and not adopted. ETC1S color (with mipmaps) is 0.70 MB against 1.19 MB
+of WebP, but at 27.6–32.7 dB against the source (the rock scan loses the most); UASTC surface maps with RDO and
+Zstandard are 0.98 MB against 0.57 MB. Three's self-hosted transcoder adds 245 KB of gzipped
+WebAssembly plus 15 KB of script, compiled and run in a worker before any texture exists. The
+net first-visit transfer would be about the same, for 21 MB less GPU memory on desktop (block
+compression) and a quality loss; the low-power set already cuts GPU memory fourfold where it
+matters most. Sampling is the same either way, so neither option changes the compiled programs.
 
 ## Boulders
 

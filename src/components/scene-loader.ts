@@ -28,6 +28,7 @@ import {
 } from 'three/webgpu'
 import type { Node } from 'three/webgpu'
 
+import { reducedMotionQuery } from '../env'
 import type { GpuRuntime } from './gpu-runtime'
 
 const CYCLE_DURATION = 4.8
@@ -143,7 +144,7 @@ export async function initSceneLoader(runtime: GpuRuntime, signal: AbortSignal) 
   firefly.renderOrder = 1
   scene.add(firefly)
   group.updateMatrixWorld(true)
-  const motion = matchMedia('(prefers-reduced-motion: reduce)')
+  const motion = reducedMotionQuery()
   const lifetime = new AbortController()
   let frame = 0
   let stopped = false

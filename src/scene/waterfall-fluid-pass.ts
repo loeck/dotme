@@ -73,6 +73,10 @@ export class WaterfallFluidPass {
   private readonly viewProjection = new Matrix4()
   private readonly projected = new Vector4()
   private readonly targets: readonly RenderTarget[]
+  /** Renderer state saved around the capture; `withState` never nests. */
+  private readonly savedClearColor = new Color()
+  private readonly savedViewport = new Vector4()
+  private readonly savedScissor = new Vector4()
   private disposed = false
 
   constructor(particles: WaterfallFluidParticles) {
@@ -295,10 +299,10 @@ export class WaterfallFluidPass {
       xr = renderer.xr.enabled,
       mrt = renderer.getMRT(),
       renderObject = renderer.getRenderObjectFunction()
-    const clearColor = renderer.getClearColor(new Color())
+    const clearColor = renderer.getClearColor(this.savedClearColor)
     const clearAlpha = renderer.getClearAlpha()
-    const viewport = renderer.getViewport(new Vector4())
-    const scissor = renderer.getScissor(new Vector4())
+    const viewport = renderer.getViewport(this.savedViewport)
+    const scissor = renderer.getScissor(this.savedScissor)
     const scissorTest = renderer.getScissorTest()
     try {
       renderer.setMRT(null)

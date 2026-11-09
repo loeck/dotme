@@ -4,9 +4,9 @@ import { expect, it } from 'vitest'
 
 import { required } from '../invariant'
 import { LakeWaterMaterial } from './lake-water'
+import { RainEffect } from './rain-effect'
 import { RAIN_EXPOSURE } from './rain-shaders'
 import { RAIN_STEP, WATER_Y } from './rain-simulation'
-import { RainEffect } from './RainEffect'
 import { WindModel } from './wind'
 
 function fixture(size: number) {

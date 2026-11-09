@@ -1,20 +1,16 @@
 # Verification and performance
 
 Unit tests cover deterministic physics, wave stability, weather validation, audio
-scheduling, worker cancellation and resource lifecycle. The default browser suite uses
-observable loading states and public DOM behavior. It covers essential journeys on
-desktop Chromium and a mobile-emulated Chromium (Pixel 7). Desktop exercises WebGPU
-rendering; the mobile project renders through WebGL 2 when a WebGPU adapter is
-unavailable, and checks the static profile when neither backend exists. WebKit is not
-tested.
+scheduling, worker cancellation and resource lifecycle. The browser suite is a short smoke test on desktop Chromium, using observable loading
+states and public DOM behavior: the page shell without JavaScript, SEO files, the 404 page,
+the production security headers without CSP violations, the static profile without
+graphics, a WebGPU day scene with interaction and resizing, and a reduced-motion rainy night.
+The preview server applies `vercel.json`'s headers, so it runs under the production CSP.
+Everything finer-grained (audio scheduling, weather, cursor, render scheduling) belongs in
+unit tests. Keep the suite under about 30 seconds; Playwright's global limit is 3 minutes.
+Failure traces and screenshots are retained.
 
-The default suite targets at most 60 seconds locally and 90 seconds in CI; those global
-limits are configured in Playwright. Record the actual duration from each validation run. Reuse the existing production
-build. `pnpm e2e:extended` adds detailed audio, weather, cursor and accessibility checks.
-`pnpm e2e:gpu` runs separate explicit rendering checks; WebGPU cases must report a
-real WebGPU backend. Failure traces and screenshots are retained.
-
-The Linux CI runner sets `WEBGPU_ADAPTER=swiftshader`. Chromium still runs the WebGPU
+The CI `e2e` job sets `WEBGPU_ADAPTER=swiftshader`. Chromium still runs the WebGPU
 API and shaders, using a software adapter; the rendering assertions remain enabled.
 The launch flags follow Chromium's
 [WebGPU SwiftShader test configuration](https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/web_tests/FlagSpecificConfig).
@@ -55,8 +51,10 @@ thresholds. Mobile browsers without a WebGPU adapter are recorded under
 On a physical device, add `?perf` to the URL: a panel refreshes every four seconds
 with the frame interval, frame CPU and the per-pass CPU and GPU time averaged over every
 frame, nested passes under their parent (`main` splits into `view`, `atmosphere` and
-`lens`). `dpr=<ratio>` overrides the pixel-ratio cap so the same build can be compared at
-several resolutions; both parameters survive URL cleaning. A second section sums GPU time
+`lens`). The header also shows the dynamic `scene scale` ([frame budget](#dynamic-resolution))
+and whether the reduced budget took over. `dpr=<ratio>` overrides the pixel-ratio cap and the
+pixel budget and fixes the scene scale at 1, so the same build can be compared at several
+resolutions; both parameters survive URL cleaning. A second section sums GPU time
 by render target texture name (`ShadowMap`, `PointShadowMap`, `Lake reflection`, the main
 view's `Landscape lens color`, ...); the canvas and unnamed targets count toward their pass.
 Name new render targets to keep them separate there. `?perf=split`
@@ -89,13 +87,28 @@ from a successful compilation alone.
 
 ## Measured budget (desktop WebGPU, 1280x720)
 
-Per-pass GPU medians show the scene is GPU-bound: the main view takes about
-13 ms on the GPU by itself. The waterfall fluid pass costs about 5 ms (capture
-1 ms plus three bilateral filter passes), the submerged lakebed capture about
-4 ms (bed 2 ms plus fish 2 ms) and the text-contrast overlay about 3.2 ms;
-water simulation, rain slopes and the environment probe face together stay near
-1 ms. CPU-side numbers understate all of this (main pass about 1.2-1.7 ms CPU),
-so runtime work must be guided by the GPU columns, not the CPU ones. The fluid
+Per-pass GPU medians, seed 9182, `BENCH_SECONDS=10 BENCH_REPEATS=2 BENCH_PROFILES=desktop`,
+Chromium from `scripts/with-gpu-chromium.sh` on the devbox GPU with a real WebGPU adapter (the
+first repeat of the run fell back to WebGL 2 and is left out). Bed passes run on a third of the
+frames and fish on two thirds, so their per-frame cost is a third and two thirds of these:
+
+| pass (GPU ms)                             | day    | night  | rain        |
+| ----------------------------------------- | ------ | ------ | ----------- |
+| view (scene)                              | 9.3    | 9.3    | 10.3        |
+| atmosphere                                | 1.29   | 1.31   | 1.37        |
+| lens (FXAA, depth of field, bloom, grade) | 1.30   | 1.32   | 1.37        |
+| submerged bed, per capture                | 1.17   | 1.16   | 0.95        |
+| water simulation                          | 0.40   | 0.39   | 0.42        |
+| environment (probe face + sky reflection) | 0.16   | 0.16   | 0.17        |
+| waterfall capture + filters               | 0.11   | 0.11   | 0.11        |
+| rain overlay / slopes                     | -      | -      | 0.25 / 0.06 |
+| contrast, fish                            | ≤ 0.04 | ≤ 0.04 | ≤ 0.04      |
+
+The view dominates; frames hold the 60 Hz cap by day and at night (p95 16.7-16.8 ms) with
+about 10 ms of main-thread work per frame, while heavy rain needs about 18 ms of CPU per frame
+and misses frames on the CPU (p95 33 ms), not the GPU. Earlier figures in this section (main
+view 13 ms, waterfall 5 ms, lakebed 4 ms, contrast 3.2 ms) came from another machine and an
+older scene and are not comparable. The fluid
 volume renders from the main camera only: the mirrored capture is skipped
 because the lake surface distorts it beyond recognition, which halved the
 waterfall cost. The lakebed capture runs at 768 px and the fish region at half
@@ -135,30 +148,68 @@ sum (the forest, about 0.9 s after composing the lake, used to follow the surfac
 worker). The forest posts on its own, so world data does not wait for vegetation. The forest is still part of the first
 frame: the engine adds it after building the scene and compiles it for the main view, the mirror,
 the probe and the shadow maps in the same sequence as the scene (`vegetation-ready` and
-`vegetation-presented` marks). Rapier only creates a heightfield and boulder hulls the worker
+`vegetation-presented` marks). Meshes that stay hidden until something happens (falling leaves,
+the flock, the skipping stone, the wave ring, lanterns, bats and insects) are shown for that
+compile sequence, so their programs exist before the first frame rather than compiling when a
+gust, the demonstration stone or dusk first brings them out. Rapier only creates a heightfield and boulder hulls the worker
 prepared. The waterfall search reads the composed ground directly; the lake bed derives from the
 smooth ground ([terrain](terrain.md)). Generating the world takes about 0.3 to 0.5 s on desktop in
 Node; the forest alone takes about another 0.9 s. A loader frame separates collider
 creation from scene construction so neither forms one long task.
 
+Rapier's compat package inlines its WebAssembly as base64 in a 4.3 MB script (1.67 MB gzip)
+that had to download, parse and decode before `init` could even compile it. Production builds
+now extract that module into a hashed `rapier-*.wasm` asset (3.1 MB, 1.19 MB gzip; the script
+drops to 225 kB, 40 kB gzip) with a small Vite plugin (`rapier-wasm-file` in `vite.config.ts`)
+that replaces the package's base64 literal with `src/scene/rapier-wasm.ts`. That module starts
+`WebAssembly.compileStreaming` (needs `application/wasm` and the CSP's `'wasm-unsafe-eval'`)
+from `src/main.ts`, next to world preparation and before the GPU device, so compilation runs
+off the main thread while the workers prepare the world; `init` then only instantiates the
+compiled module. The `physics-start`/`physics-ready` span, measured from the landscape's
+request, fell from 160-220 ms to 50-60 ms on the benchmark above (about 70 ms on the cold
+WebGL repeat, from 270 ms); with a cached world, scene readiness moved from 2.15-2.49 s to
+1.87-2.13 s by day and at night and stayed at 2.2-2.3 s in heavy rain. The build fails if the
+package no longer contains exactly one inlined module. Development serves the package as
+published. Physics still precedes scene construction: rain, fish, splashes, floating bodies and
+pointer picking take the Rapier world in their constructors, and it is no longer on the
+critical path once compiled early.
+
 ### World cache
 
 Production builds keep the prepared world between visits in the origin private file system
 (`world-cache.ts`), one file per part and profile (desktop or mobile): a JSON header naming the
-generator version and seed, then the part's typed arrays, aligned and raw. The version is the
-content-hashed URL of the worker bundle, so any change to the generator retires stored worlds.
-Each world worker reads its own part before generating it and transfers a hit like a generated
-part; reads, decoding and writes never run on the render thread. Development builds have no
+file format, generator version and seed, then the part's typed arrays, aligned and deflated as
+one `deflate-raw` stream (`CompressionStream`; browsers without it store them raw). The version
+is the content-hashed URL of the worker bundle, so any change to the generator retires stored
+worlds, and the format constant retires older files. Each world worker reads its own part before
+generating it, inflates it straight into one buffer of the recorded size and rebuilds every
+typed array as a view at its aligned offset in that buffer, so a hit holds one copy of the part
+rather than two; the part is transferred to the page as that single buffer, like a generated
+part. Reads, decoding and writes never run on the render thread. Development builds have no
 hashed worker and always generate.
 
 Four seconds after the first frame, once the main thread is idle, a single background worker
 prepares the world of the next visit and stores it with `createWritable`, which commits each file
-atomically. A random visit draws a new seed for it and remembers that seed in `localStorage` only
-once stored; the next visit consumes it, so every visit still shows a new world, and a visit that
-never stored one simply generates. A URL seed is stored as is, so its reload is cached too. A
-desktop world is about 80 MB on disk (mobile about 20 MB). An earlier IndexedDB store of the same
-values kept the browser busy long after the page had gone: a reload within seconds stalled its
-shader compiles for 10 to 40 s. Raw files showed no such stall. The `worldprep-cached` mark
+atomically. It is skipped when the visitor asked to save data (`navigator.connection.saveData`),
+on low-power devices (the generation competes with the scene for a phone's cores and battery;
+their visits generate, as before), in a hidden tab, and when `navigator.storage.estimate()` shows
+the world would bring usage past half of the quota (budgeted at 40 MB on desktop, 10 MB on
+phones; an unknown estimate does not block). A random visit draws a new seed for it and
+remembers that seed in `localStorage` only once stored; the next visit consumes it, so every
+visit still shows a new world, and a visit that never stored one simply generates. A URL seed is stored as is, so its reload is cached too.
+
+On seed 9182, a desktop world was 96.7 MB of raw files (terrain 16.0, surfaces 33.2, vegetation
+47.4; mobile 23.3 MB) and is now 30.1 MB (5.4, 10.0, 14.7; mobile about 8 MB in Node): float
+meshes, index buffers and the foliage atlas all deflate about threefold. In Node, deflating a
+desktop world takes under a second on the background worker and inflating it 15–50 ms per part.
+Quantizing in the generator (16-bit positions, oct-encoded normals, 16-bit indices) would shrink
+it further but changes what fresh and cached loads render, and byte-shuffling the arrays before
+deflate saved another 22% for an extra pass on every read; neither was taken. In headless
+Chromium (desktop, WebGL 2, seed 9182, two reloads) a cached world is ready 153–173 ms after
+`worldprep-start` and its forest after 174–191 ms, against 122–125 and 122–133 ms with raw files,
+while a cold load generates in about 0.8 s and its forest in 1.8–2.2 s. An earlier IndexedDB
+store of the same values kept the browser busy long after the page had gone: a reload within
+seconds stalled its shader compiles for 10 to 40 s. Plain files showed no such stall. The `worldprep-cached` mark
 records a world served entirely from the cache; the benchmark reports it as `worldCached`.
 
 Open-Meteo reports current conditions per 15-minute slot, so the last response is kept in
@@ -197,14 +248,20 @@ context, node graphs and pipelines; the mirror compile runs after the main view 
 the cache. Lantern glows likewise share one material with a per-object strength uniform;
 per-lamp node graphs produced identical shaders but each cost a build.
 
-Load compiles about 101 shader programs (110 in heavy rain; vertex plus fragment stages, a
-loader program count of 4 is included until the loader releases), and the warmup adds 2: the
-waterfall capture still renders nested inside the main view. On a desktop AMD GPU with the
+On the current scene the renderer counts 120 programs after the warmup (130 in heavy rain;
+vertex plus fragment stages, a loader program count of 4 is included until the loader
+releases); the waterfall capture still renders nested inside the main view. On a desktop AMD GPU with the
 Dawn blob cache disabled, these changes took scene readiness from a median of about 5.8 s to
 3.9 s, the longest loading task from about 550 ms to 230 ms and the largest loader frame gap
 from about 620 ms to 220 ms, with unchanged steady-state frame and GPU pass times. The per-stage program inventory
-exists to catch regressions of the nested-context shape. No programs are compiled after the
-first presented frame, so shader stutter does not occur at runtime.
+exists to catch regressions of the nested-context shape. The goal is that no program compiles
+after the first presented frame; the benchmark currently still counts 2 more in steady state
+(122, or 132 in rain; the original build of this measurement counted 4 more), which remain to be
+traced. Weather that may change after the first frame (live or fallback, not a forced
+`?weather=`) also compiles the cloud capture, rain and snow at load even when they start hidden,
+so a refresh that brings cloud, rain or snow compiles nothing (measured: no program added through
+a clear-to-rain or clear-to-snow refresh). The rain and snow materials compile in the overlay's own
+state, which removed two programs from a rainy first frame.
 
 The probe compiles and renders without the detail layer (fish, ray, fireflies,
 splashes, floating bodies, foam, waterfall). Those objects are a few pixels of
@@ -236,13 +293,70 @@ face per interval (about 90 ms on a focused desktop, 200 ms on low power) and fi
 six are current; clock discontinuities restart the sweep, and the intro refreshes one face per
 frame. The lake's sky reflection does not wait for that sweep: a sky-only cube (the dome and
 its cloud lookup, no geometry, 128 px faces or 64 on low power, mipmapped instead of filtered)
-renders all six faces every frame inside the same `environment` diagnostics pass. Capillary ripples and rain rings branch past components the pixel footprint has already
+refreshes two faces per frame, each upper face twice every five frames, inside the same
+`environment` diagnostics pass. The lake only reflects the upper hemisphere, so -Y waits for a
+full capture, which renders all six faces during the intro, under reduced motion, while
+lightning flashes and whenever the sun moves visibly between frames (time-lapse, scrubbing,
+clock jumps). The pass went from 0.46 to 0.16 ms of GPU time per frame. Capillary ripples and rain rings branch past components the pixel footprint has already
 faded, and the rain simulation steps at the 60 Hz frame cap.
 
-The submerged lakebed capture renders on alternate frames, so its atlas is refreshed at 30 Hz:
-the captured bed is static and only fish and caustics move in it. The captured image feeds water
-refraction, so a frame of lag is invisible at these scales, and the pass costs about 1.2-1.8 ms
-of GPU time per frame.
+The submerged lakebed atlas keeps its two regions between refreshes. Fish move, so their region
+renders every other frame (30 Hz); the bed region only sways its seagrass and moves its
+caustics, which live in the bed materials (`lake-caustics.ts`), so it renders on every other
+fish frame (15 Hz), and on every fish frame while the intro's time-lapse moves the light. A bed
+refresh only lands on a fish frame, which redraws the fish after it, so the fish keep an even
+cadence. Attachment clears cover the whole atlas on WebGPU, so a fish-only frame clears its
+region with a scissored quad (transparent black at the far plane, depth-tested with an
+always-passing function so WebGL still writes its depth; one program compiled with the scene).
+The captured image feeds water refraction, so the lag is invisible at these scales. On the
+benchmark the bed costs 1.0-1.2 ms per capture: about 0.3 ms per frame at 15 Hz, down from
+0.57 ms at 30 Hz.
+
+The lens skips its 20-tap depth-of-field disc where the FXAA neighbourhood is flat (display luma
+range under 0.012): the disc spans at most 1.35 CSS pixels and would return the pixel itself
+there (open sky, clouds, calm water). The lens pass measured the same (1.30-1.37 ms) before and
+after on this GPU, so the saving is within noise here; the images did not change visibly.
+
+The text-contrast overlay covers only the bounding box of the profile and the two scene
+controls (plus 8 CSS pixels) instead of the viewport: its mask canvas and quad follow that box,
+re-measured on resize observers and every 250 ms against layout shifts, so it also follows the
+profile while it fades in. It samples the graded backdrop four times (diagonal taps over the old
+3×3 tent) instead of nine, and the mask rebuilds on hover only over the profile's links (their
+underline) rather than on every pointer move inside `main`. It costs under 0.05 ms here.
+
+The waterfall fluid pass is 0.08 ms of capture and 0.03 ms of filtering at 128² on this GPU. Its
+depth and thickness captures cannot share one MRT pass: depth is depth-tested with no blending,
+thickness is additive without depth testing, and three applies one material's blend and depth
+state to every attachment.
+
+Frame-loop allocations are gone from the hot paths: `sampleLighting` writes into a state the
+engine reuses (and one for the clouds), the wind is sampled once per frame, a lightning frame
+writes its exposure into a reused look, the async pointer step only starts when a pointer event
+is pending, the fluid and lakebed passes keep their saved renderer state in fields, and the
+waterfall uploads its foam attribute only when a value changed (positions and velocities change
+for every parcel each step and still upload whole).
+
+### Dynamic resolution
+
+The drawing buffer is capped by pixel count as well as ratio: 2.2 MP on desktop (pixel ratio
+at most 1.75) and 1.2 MP on low-power devices (at most 1.25), so a 1440p window or a dense tablet
+gets a lower ratio rather than a larger image (`pixelRatioFor` in `device-profile.ts`).
+
+The scene then renders its view, air and mirror at a dynamic share of that buffer, which the
+lens upsamples onto the canvas (`RenderScaleController`, `render-scale.ts`). Shares are quantized
+to 0.6-1.0 in steps of 0.1, so the targets reallocate rarely; no shader program changes. The
+controller ignores the first five seconds (the intro), pauses over 250 ms (background, hitches)
+and frames whose main-thread work exceeds 80% of the budget, since a smaller image would not
+help a CPU-bound frame (heavy rain here). It looks at the 90th percentile of frame intervals
+over 1.5 s: above 1.25 × the budget (16.7 ms, or 33.3 ms at the low-power 30 fps cap) it steps
+down; within 1.08 × for 4 s it steps up, waiting twice as long (up to 32 s) after a step up it
+had to undo. Changes are at least 2 s apart. Six seconds late at 0.6 switch to the reduced
+budget, for knobs that compile nothing: the low-power pixel budget, probe interval and mirror
+resolution. A browser holding the page at a lower rate (a battery saver's 30 Hz) shows steady
+intervals at a whole multiple of the budget that no step shortens: once the descent reaches 0.6
+without a gain, the controller restores the share it left and aims for that rate instead of
+switching budgets. `?dpr=` turns all of this off. On this GPU the WebGPU benchmark never left 1.0 by
+day or at night; the WebGL 2 path settled at 0.9 at night.
 
 Falling water is analytic rather than rigid-body driven. The curtain parcels only ever collided
 with the cursor blocker, so they integrate at a fixed 60 Hz step with the same gravity, damping
@@ -260,7 +374,7 @@ surface keeps the full spectrum, and the tests hold the two within 4 mm.
 
 Phones and tablets (viewport under 768 px or a coarse pointer, in either orientation)
 use a reduced GPU budget independent of the portrait/landscape world variant: 30 fps
-foreground cap, pixel ratio capped at 1.25, a half-resolution fish capture, 8 capillary ripple
+foreground cap, pixel ratio capped at 1.25 and 1.2 MP, a half-resolution fish capture, 8 capillary ripple
 components instead of 32, a 64 px environment probe with one face per 200 ms,
 one shadow-casting lantern, a third-resolution
 air-scattering buffer, and the mobile cloud, rain, lens and reflection budgets.

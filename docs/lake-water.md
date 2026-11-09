@@ -111,7 +111,7 @@ for curtain parcels near the moving blocker. Foam flecks advect on the CPU with 
 slope currents and collapse against the shore distance field.
 
 Unit tests cover equations, fixed-step behavior, impulse bounds, shore handling and wind.
-`pnpm e2e:gpu` requires a genuine WebGPU adapter. Use the production benchmark to
+Verifying the GPU water solver requires a genuine WebGPU adapter. Use the production benchmark to
 inspect seeded water at rest, during interaction and in rain; compare like-for-like captures.
 
 References: [Evan Wallace's water](https://madebyevan.com/webgl-water/),

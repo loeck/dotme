@@ -14,7 +14,7 @@ import {
   parseInitialTime,
   SolarClock,
 } from './solar-clock'
-import { parseWeather, WEATHER } from './weather'
+import { WEATHER } from './weather'
 
 const fade = (from: number, target: number, fps: number) => {
   let value = from
@@ -27,6 +27,8 @@ const fade = (from: number, target: number, fps: number) => {
   }
   return value
 }
+
+const azimuth = (v: Vector3) => Math.atan2(v.x, -v.z)
 
 describe('visitor solar clock', () => {
   it('scales only the solar cycle, wraps midnight and respects reduced motion', () => {
@@ -137,7 +139,6 @@ describe('solar lighting and light-space projection', () => {
     }
   })
   it('crosses the frame with the moon over the night, right to left, without jumps', () => {
-    const azimuth = (v: Vector3) => Math.atan2(v.x, -v.z)
     let previous = sampleLighting(18 * 3600).moonDirection
     expect(azimuth(previous)).toBeCloseTo(MOON_SWEEP, 6)
     expect(azimuth(sampleLighting(6 * 3600 - 1).moonDirection)).toBeCloseTo(-MOON_SWEEP, 3)
@@ -278,8 +279,6 @@ describe('solar lighting and light-space projection', () => {
     }
   })
   it('keeps weather deterministic and changes density as well as cloud shape', () => {
-    expect(parseWeather('invalid')).toBe('partly-cloudy')
-    expect(parseWeather('clear')).toBe('clear')
     expect(WEATHER.clear.density).toBe(0)
     const partly = createCloudBodies(9182)
     expect(createCloudBodies(9182)).toEqual(partly)
