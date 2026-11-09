@@ -200,7 +200,7 @@ export async function compileScene(
   if (targets.vegetation) compileShadowMaps(targets, issue, targets.vegetation)
 
   issue(() => targets.submerged.compileAsync(renderer, scene, camera))
-  // Bats and insects are hidden until their hour; their programs still compile here.
+  // Insects are hidden until their hour; their programs still compile here.
   issue(() => targets.fauna.compileVisible(() => compileView(targets, camera, depthFocus.target)))
   issue(() => targets.atmosphere.compileAsync(depthFocus.target, camera, targets.moon))
   issue(() => depthFocus.compileAsync(renderer, camera))

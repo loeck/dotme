@@ -52,8 +52,8 @@ export type WildlifeFrame = Readonly<{
 }>
 
 /**
- * The season's animals and leaves: flocks leaving the crowns by day, falling leaves, bats at
- * dusk and dawn, insects on warm days. Built in this order, as the scene always added them.
+ * The season's animals and leaves: flocks leaving the crowns by day, falling leaves, insects
+ * on warm days. Built in this order, as the scene always added them.
  */
 export class LandscapeWildlife {
   readonly birds: BirdFlock
@@ -142,7 +142,7 @@ export class LandscapeWildlife {
     this.fauna.clear()
   }
 
-  /** Bats at dusk and dawn, insects on warm days: the season's and the weather's wildlife. */
+  /** Insects on warm days: the season's and the weather's wildlife. */
   updateFauna(frame: WildlifeFrame) {
     const { weather, light } = frame
     // The blended weather follows live refreshes; until a report carries a temperature the
@@ -157,8 +157,6 @@ export class LandscapeWildlife {
     this.fauna.update({
       time: this.world.state.elapsed,
       dt: frame.dt,
-      solarSeconds: wrapDay(frame.solarSeconds),
-      solar: frame.solar,
       daylight: light.daylight,
       sunDirection: light.sunDirection,
       sunColour: light.sunColor,

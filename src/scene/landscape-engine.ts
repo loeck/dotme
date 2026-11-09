@@ -153,7 +153,7 @@ export type LandscapeEngineOptions = Readonly<{
   wind?: WindOptions
   solar?: SolarEndpoints
   nowSeconds?: number
-  /** Temperature, fog and snow for the season's wildlife (bats, insects); see `seasonal-fauna.ts`. */
+  /** Temperature, fog and snow for the season's wildlife (insects); see `seasonal-fauna.ts`. */
   climate?: FaunaClimate
   /**
    * Live weather may refresh later (`setWeather`): compile the clouds, rain and snow even when

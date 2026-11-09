@@ -94,7 +94,7 @@ export function resolveSeason(override: SeasonName | undefined, date: Date, lati
 /**
  * How the season shapes the living landscape, as multipliers and 0–1 shares. Birds stay all
  * year but fewer flocks cross a winter sky; fireflies glow in late spring and summer nights;
- * insects and bats need the warm half of the year (bats hibernate); autumn sheds leaves on its
+ * insects need the warm half of the year; autumn sheds leaves on its
  * own, without waiting for a gust.
  */
 export function seasonalLife(season: Season) {
@@ -104,7 +104,6 @@ export function seasonalLife(season: Season) {
     birds: 1 - 0.5 * winter - 0.15 * autumn,
     fireflies: summer + 0.5 * spring,
     insects: summer + 0.6 * spring + 0.3 * autumn,
-    bats: summer + 0.75 * spring + 0.5 * autumn,
     /** Multiplier on how readily a gust strips the crowns. */
     leafFall: 1 + 2.5 * autumn - 0.6 * winter,
     /** Share of the autumn trickle: leaves letting go in a light breeze, no gust needed. */

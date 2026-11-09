@@ -129,16 +129,7 @@ The season ([seasons](vegetation.md#seasons)) decides who is about. Winter halve
 the rate flocks cross the sky (autumn takes 15% off). Fireflies glow on summer nights and at half
 strength in late spring, and not at all in autumn or winter.
 
-Bats hunt over the lake from about 20 minutes after sunset for the next hour (fading in from 14
-to 28 minutes and out from 60 to 80), and again from 80 to 35 minutes
-before sunrise (`dusk-bats.ts`). Six (four on low power) come out of the tree line one at a
-time as activity rises and go back the same way; each patrols its own seeded beat over the near
-water, 7.5–11 m up so it shows against the sky from the bank, turning for a new point every
-0.22–0.75 s at 4.5–7 m/s, stooping now and then at prey and gliding briefly on spread wings. They
-are noctule-sized (40 cm) dark silhouettes in one instanced draw; the wing beat (9 a second,
-each bat its own rate) hinges the wings in the vertex shader. They keep to the warm half of the
-year (hibernating in winter), stay in on rain, fog, snow, storms, strong wind or below about
-6 °C.
+There are no bats: a few pixels of dark flapping at dusk read as stray leaves in the sky.
 
 On warm, dry, calm days (from 13 to 20 °C, wind under 3.5–6.5 m/s, daylight over 0.3; the
 season's typical temperature stands in when the weather reports none) a couple of dragonflies
@@ -150,8 +141,8 @@ drawn tipped toward the viewer, a dark body with glassy wings a few pixels acros
 and bob in columns 1.4–2.6 m up, entirely in the vertex shader; they are nearly invisible until
 the sun stands low ahead (forward scattering by their wings), when each catches the light as a
 faint warm fleck against the shaded banks. Insects keep to the warm season (fully in summer,
-60% in spring, 30% in autumn). Bats and insects are main-view only (no mirror, probe or shadow
-draws), add three draws in all, compile with the scene before the first frame, and reduced motion
+60% in spring, 30% in autumn). Insects are main-view only (no mirror, probe or shadow
+draws), add two draws in all, compile with the scene before the first frame, and reduced motion
 shows none.
 
 Floating leaves slow down in sheltered shore pockets derived from the actual shoreline.

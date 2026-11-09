@@ -148,9 +148,9 @@ worker). The forest posts on its own, so world data does not wait for vegetation
 frame: the engine adds it after building the scene and compiles it for the main view, the mirror,
 the probe and the shadow maps in the same sequence as the scene (`vegetation-ready` and
 `vegetation-presented` marks). Meshes that stay hidden until something happens (falling leaves,
-the flock, the skipping stone, the wave ring, lanterns, bats and insects) are shown for that
+the flock, the skipping stone, the wave ring, lanterns and insects) are shown for that
 compile sequence, so their programs exist before the first frame rather than compiling when a
-gust, the demonstration stone or dusk first brings them out. Rapier only creates a heightfield and boulder hulls the worker
+gust, the demonstration stone or a warm day first brings them out. Rapier only creates a heightfield and boulder hulls the worker
 prepared. The waterfall search reads the composed ground directly; the lake bed derives from the
 smooth ground ([terrain](terrain.md)). Generating the world takes about 0.3 to 0.5 s on desktop in
 Node; the forest alone takes about another 0.9 s. A loader frame separates collider

@@ -1,11 +1,9 @@
 import type { Color, Object3D, Scene, Vector3 } from 'three/webgpu'
 
-import { BATS, batActivity, DuskBats } from './dusk-bats'
 import type { LakeBed } from './lake-bed'
 import { LakeInsects } from './lake-insects'
 import { smoothstep as smooth } from './math'
 import type { SeasonalLife } from './season'
-import type { SolarEndpoints } from './solar-clock'
 import { UNDERGROWTH_LAYER } from './vegetation'
 
 /** Weather the engine does not simulate but the wildlife answers; every field optional. */
@@ -28,15 +26,13 @@ export type FaunaWeather = Readonly<{
 }>
 
 /**
- * How much of the season's wildlife is out, 0–1. Bats keep to dry, calm, clear evenings and
- * mornings (no rain, fog, snow or storm, and not in a cold snap); dragonflies and midges need a
- * warm, dry, calm day. `daylight` is the scene's 0–1 daylight.
+ * How much of the season's wildlife is out, 0–1: dragonflies and midges need a warm, dry, calm
+ * day. `daylight` is the scene's 0–1 daylight.
  */
 export function faunaConditions(
-  life: Pick<SeasonalLife, 'bats' | 'insects'>,
+  life: Pick<SeasonalLife, 'insects'>,
   weather: FaunaWeather,
   daylight: number,
-  bats: number,
 ) {
   const dry =
     (1 - smooth(0.02, 0.12, weather.rain)) *
@@ -45,12 +41,6 @@ export function faunaConditions(
     (weather.storm ? 0 : 1)
   const calm = 1 - smooth(3.5, 6.5, weather.windSpeed)
   return {
-    bats:
-      bats *
-      life.bats *
-      dry *
-      smooth(4, 9, weather.temperature) *
-      (1 - smooth(7, 11, weather.windSpeed)),
     insects:
       life.insects * dry * calm * smooth(13, 20, weather.temperature) * smooth(0.3, 0.6, daylight),
   }
@@ -59,8 +49,6 @@ export function faunaConditions(
 export type FaunaFrame = Readonly<{
   time: number
   dt: number
-  solarSeconds: number
-  solar: SolarEndpoints
   daylight: number
   sunDirection: Vector3
   sunColour: Color
@@ -70,17 +58,15 @@ export type FaunaFrame = Readonly<{
 }>
 
 /**
- * The season's small wildlife: bats over the lake at dusk and dawn, dragonflies and midge
- * swarms over the shallows on warm days. Main view only (the mirror, probe and shadows never
+ * The season's small wildlife: dragonflies and midge swarms over the shallows on warm days. Main view only (the mirror, probe and shadows never
  * draw a few pixels of insect); reduced motion shows none, as with the birds.
  */
 export class SeasonalFauna {
-  private readonly bats: DuskBats
   private readonly insects: LakeInsects
   private readonly life: SeasonalLife
   private reducedMotion: boolean
   /** Latest 0–1 conditions, for diagnostics. */
-  conditions = { bats: 0, insects: 0 }
+  conditions = { insects: 0 }
 
   constructor(
     scene: Scene,
@@ -92,7 +78,6 @@ export class SeasonalFauna {
   ) {
     this.life = life
     this.reducedMotion = reducedMotion
-    this.bats = new DuskBats(lowPower ? BATS.lowPowerCount : BATS.count, seed)
     this.insects = new LakeInsects(bed, seed, lowPower)
     for (const mesh of this.meshes) {
       mesh.layers.set(UNDERGROWTH_LAYER)
@@ -101,7 +86,7 @@ export class SeasonalFauna {
   }
 
   private get meshes(): Object3D[] {
-    return [this.bats.mesh, this.insects.midges, this.insects.dragonflies]
+    return [this.insects.midges, this.insects.dragonflies]
   }
 
   /** Runs a compile with every draw shown, so their programs exist before the first frame. */
@@ -120,26 +105,18 @@ export class SeasonalFauna {
    * each frame: the string is rebuilt only when one of its parts changes.
    */
   get summary() {
-    const { bats, insects } = this.conditions
-    const batTenths = Math.round(bats * 10),
-      insectTenths = Math.round(insects * 10),
+    const insectTenths = Math.round(this.conditions.insects * 10),
       { swarms, flyCount } = this.insects
     const key = this.summaryKey
-    if (
-      key[0] !== batTenths ||
-      key[1] !== insectTenths ||
-      key[2] !== swarms ||
-      key[3] !== flyCount
-    ) {
-      key[0] = batTenths
-      key[1] = insectTenths
-      key[2] = swarms
-      key[3] = flyCount
-      this.summaryText = `bats:${(batTenths / 10).toFixed(1)} insects:${(insectTenths / 10).toFixed(1)} swarms:${swarms} dragonflies:${flyCount}`
+    if (key[0] !== insectTenths || key[1] !== swarms || key[2] !== flyCount) {
+      key[0] = insectTenths
+      key[1] = swarms
+      key[2] = flyCount
+      this.summaryText = `insects:${(insectTenths / 10).toFixed(1)} swarms:${swarms} dragonflies:${flyCount}`
     }
     return this.summaryText
   }
-  private readonly summaryKey = [Number.NaN, Number.NaN, Number.NaN, Number.NaN]
+  private readonly summaryKey = [Number.NaN, Number.NaN, Number.NaN]
   private summaryText = ''
 
   setReducedMotion(value: boolean) {
@@ -149,13 +126,7 @@ export class SeasonalFauna {
 
   update(frame: FaunaFrame) {
     if (this.reducedMotion) return
-    this.conditions = faunaConditions(
-      this.life,
-      frame.weather,
-      frame.daylight,
-      batActivity(frame.solarSeconds, frame.solar),
-    )
-    this.bats.update(frame.time, frame.dt, this.conditions.bats)
+    this.conditions = faunaConditions(this.life, frame.weather, frame.daylight)
     this.insects.update(
       frame.time,
       frame.dt,
@@ -167,12 +138,10 @@ export class SeasonalFauna {
   }
 
   clear() {
-    this.bats.clear()
     this.insects.clear()
   }
 
   dispose() {
-    this.bats.dispose()
     this.insects.dispose()
   }
 }

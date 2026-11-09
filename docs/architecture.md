@@ -81,7 +81,7 @@ them by reference (`landscape-state.ts`). Its parts, each with a narrow construc
 | `frame-passes.ts`       | The frame's GPU passes in order, measured for the benchmark                                                                |
 | `frame-scheduler.ts`    | Frame pacing in the foreground, the background and under reduced motion                                                    |
 | `weather-view.ts`       | Draws the blended weather (`weather-state.ts`): clouds, rain, snow, fog and the rainbow                                    |
-| `landscape-wildlife.ts` | Birds (`flock-schedule.ts`), falling leaves, bats and insects                                                              |
+| `landscape-wildlife.ts` | Birds (`flock-schedule.ts`), falling leaves and insects                                                                    |
 | `sky-dome.ts`           | The sky dome, its reflected copy and the shooting stars                                                                    |
 | `sun-flare.ts`          | The sun's lens flare and its occlusion                                                                                     |
 | `ambient-report.ts`     | The ambient sound's environment report, four times a second                                                                |

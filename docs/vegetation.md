@@ -253,7 +253,7 @@ forces one. The palette is applied as uniforms on the existing materials
 
 Conifers (the atlas's spruce and pine tiles, and cores with a needle's bluer tone) keep their
 needles all year. The season also sets the falling leaves (autumn sheds steadily, see
-[scene interactions](scene-details.md)), the fireflies, insects, bats and birds
+[scene interactions](scene-details.md)), the fireflies, insects and birds
 ([wildlife](scene-details.md#seasonal-wildlife)) and the sound ([living landscape](living-landscape.md)).
 
 ## Roots and weathering

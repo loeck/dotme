@@ -73,7 +73,6 @@ describe('season', () => {
     expect(autumn.fireflies).toBe(0)
     expect(summer.fireflies).toBe(1)
     expect(winter.insects).toBe(0)
-    expect(winter.bats).toBe(0)
     expect(autumn.leafFall).toBeGreaterThan(summer.leafFall)
     expect(winter.leafFall).toBeLessThan(summer.leafFall)
     expect(summer.temperature).toBeGreaterThan(spring.temperature)
