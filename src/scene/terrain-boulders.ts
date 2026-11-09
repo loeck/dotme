@@ -2,6 +2,7 @@ import { WATER_LEVEL } from './lake-bed'
 import { clamp, mix } from './math'
 import { sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import type { TerrainField, TerrainIsland } from './terrain-field'
+import type { WaterfallStream } from './waterfall-stream'
 
 /**
  * Granite boulders: the composition's single stones, rocky slopes, the waterline and a
@@ -31,6 +32,7 @@ export type BoulderFall = Readonly<{
   width: number
   direction: readonly [number, number]
   basin: readonly Readonly<{ x: number; z: number; size: number }>[]
+  stream?: WaterfallStream
 }>
 
 function hash(seed: number, x: number, z: number, stream: number) {
@@ -69,8 +71,15 @@ export function placeBoulders(
     )
     return outside < radius * 1.3
   }
-  const free = (x: number, z: number, radius: number) =>
+  // The feeding stream's channel stays open from its spring down to the pool.
+  const streamBlocks = (x: number, z: number, radius: number) =>
+    fall?.stream?.points.some(
+      (point) =>
+        Math.hypot(x - point.x, z - point.z) < (fall.stream?.width ?? 0) / 2 + 0.15 + radius * 0.8,
+    ) ?? false
+  const free = (x: number, z: number, radius: number, spring = false) =>
     !fallBlocks(x, z, radius) &&
+    (spring || !streamBlocks(x, z, radius)) &&
     avoid.every((area) => Math.hypot(x - area.x, z - area.z) > area.radius + radius) &&
     boulders.every(
       (other) =>
@@ -85,10 +94,11 @@ export function placeBoulders(
     bury: number,
     key: number,
     lean = 0.5,
+    spring = false,
   ) => {
     if (boulders.length >= budget) return false
     const radius = width
-    if (!free(x, z, radius)) return false
+    if (!free(x, z, radius, spring)) return false
     const ground = Math.min(
       sampleHeight(field, x, z),
       sampleHeight(field, x + radius * 0.7, z),
@@ -173,6 +183,32 @@ export function placeBoulders(
           0.25,
         )
       }
+  }
+  // The spring wells up between a few stones at the stream's head.
+  const head = fall?.stream?.points[0],
+    below = fall?.stream?.points[1]
+  if (head && below) {
+    const span = Math.hypot(head.x - below.x, head.z - below.z) || 1
+    const ux = (head.x - below.x) / span,
+      uz = (head.z - below.z) / span
+    const scale = mobile ? 0.75 : 1
+    const side = (fall?.stream?.width ?? 0.5) / 2 + 0.3 * scale
+    ;[
+      [0.3, 0],
+      [0.05, side],
+      [0.1, -side],
+    ].forEach(([along = 0, across = 0], k) => {
+      add(
+        head.x + (ux * along - uz * across) * scale,
+        head.z + (uz * along + ux * across) * scale,
+        mix(0.38, 0.55, hash(seed, k, 67, 197)) * scale * (k === 0 ? 1.2 : 0.85),
+        mix(0.3, 0.45, hash(seed, k, 71, 199)) * scale,
+        0.22,
+        8100 + k,
+        0.3,
+        true,
+      )
+    })
   }
   if (fall) {
     const [nx, nz] = fall.direction

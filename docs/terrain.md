@@ -27,7 +27,13 @@ within a metre, well past their drift. The waterfall then picks a bank facing th
 landing (checked over the lake raster's own cells, so the coarse phone raster still sees water)
 and carves its pool into the grid: a floor one cell under the pool's surface, a raised rim behind
 the lip, terraces back into the bank, and a level sill just under the surface across the whole
-sheet.
+sheet. A stream feeds the pool (`waterfall-stream.ts`): its course leaves the pool straight away
+from the camera where the land allows (so the viewer looks up the channel past the lip), may curl
+aside in its upper half, and its water climbs steadily to a spring a metre or so above the pool,
+closed by a few stones. The channel is cut into the corners: a level bed under the water, a bank
+cut down to just above it on the camera's side and shoulders behind, kept exact through smoothing;
+trees and boulders keep clear of it. Once the ground is smoothed, the ribbon is cut back to the reach whose bed lies under the water and whose banks stand above it, and it is hidden wherever the camera's line of sight only grazes the ground in front, which would show the water in slivers. The waterfall's pool material draws it as one ribbon, whiter
+where it runs steeper.
 
 ## Heightfield
 

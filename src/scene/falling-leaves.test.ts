@@ -176,7 +176,10 @@ describe('leaves as bodies', () => {
       leaves.mesh.getMatrixAt(i, matrix)
       position.setFromMatrixPosition(matrix)
       if (matrix.elements[0] === 0 && matrix.elements[5] === 0) continue
-      expect(Math.abs(position.y - surface(position.x, position.z, t - 1 / 60))).toBeLessThan(0.05)
+      // On the water, never under it: just above the displaced surface it rides.
+      const above = position.y - surface(position.x, position.z, t - 1 / 60)
+      expect(above).toBeGreaterThan(LEAVES.floatClearance)
+      expect(above).toBeLessThan(0.05)
     }
     leaves.dispose()
   })

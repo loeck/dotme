@@ -6,6 +6,8 @@ import { placeBoulders } from './terrain-boulders'
 import type { Boulder } from './terrain-boulders'
 import { createTerrainField, sampleHeight, sampleNormal, sampleRock } from './terrain-field'
 import type { ProtectedArea, TerrainField, TerrainGrid, TerrainIsland } from './terrain-field'
+import { applyStream, fitStream, streamProtection, traceStream } from './waterfall-stream'
+import type { WaterfallStream } from './waterfall-stream'
 
 /**
  * Deterministic, renderer-agnostic data for the low lake composition. The coast, islets,
@@ -51,6 +53,8 @@ export type WaterfallSite = Readonly<{
   top: number
   width: number
   seed: number
+  /** The stream feeding the pool, from its spring down into the pool's tail. */
+  stream: WaterfallStream
 }>
 
 export type LakeWorld = Readonly<{
@@ -404,7 +408,7 @@ function landWithin(composition: Composition, x: number, z: number, radius: numb
   return false
 }
 
-type Carve = Readonly<{ fall: WaterfallSite; cells: ReadonlyMap<number, number> }>
+type Carve = Readonly<{ fall: Omit<WaterfallSite, 'stream'>; cells: ReadonlyMap<number, number> }>
 
 /** Distance from the portrait framing's sweet spot, in shares of the half-width at depth `z`. */
 const portraitPosition = (x: number, z: number) =>
@@ -963,6 +967,8 @@ function placeTrees(
       if (top <= 0.4 || sampleRock(field, x, z) > 0.5 || sampleNormal(field, x, z)[1] < 0.8)
         continue
       if (waterfall && (x - waterfall.x) ** 2 + (z - waterfall.z) ** 2 <= 6.25) continue
+      if (waterfall?.stream.points.some((point) => Math.hypot(point.x - x, point.z - z) < 1.1))
+        continue
       clear.push({ x, top, z, spread: hash(seed, Math.round(x * 10), Math.round(z * 10), 911) })
     }
   const midground = clear
@@ -1127,8 +1133,15 @@ export function createLakeWorld(seed: number, mobile: boolean): LakeWorld {
 
   const lamps = placeLamps(root, mobile, composition)
   const carve = selectWaterfall(root, mobile, composition, stones, lamps)
-  const waterfall = carve?.fall ?? null
-  if (carve) applyCarve(composition, carve)
+  let waterfall: WaterfallSite | null = null
+  if (carve) {
+    applyCarve(composition, carve)
+    // The pool is fed by a stream from higher ground behind it, cut into the composed corners.
+    const stream = traceStream(composition, carve.fall, root, mobile, lamps)
+    applyStream(composition, carve.fall, stream, mobile)
+    composition.cells.set(cellTops(grid, heights).cells)
+    waterfall = { ...carve.fall, stream }
+  }
 
   const { field, islands } = createTerrainField({
     grid,
@@ -1136,9 +1149,14 @@ export function createLakeWorld(seed: number, mobile: boolean): LakeWorld {
     rock,
     seed: root,
     mobile,
-    protect: waterfall ? waterfallProtection(waterfall) : [],
+    protect: waterfall
+      ? [...waterfallProtection(waterfall), ...streamProtection(waterfall.stream, mobile)]
+      : [],
   })
   const height = (x: number, z: number) => sampleHeight(field, x, z)
+  // The ribbon covers only the reach the smoothed ground holds.
+  if (waterfall)
+    waterfall = { ...waterfall, stream: fitStream(waterfall.stream, waterfall, height) }
   const trees = placeTrees(field, root, mobile, waterfall, shape.islets)
   // Lanterns keep their hover above the highest smoothed ground under their drift.
   const placedLamps = lamps.map((lamp) => {

@@ -49,15 +49,19 @@ export const GRAB = {
   /** How far under the resting level the hand may push it, in radii. */
   depth: 1.3,
   /**
-   * Wake troughs while it moves through the water: one per `wakeTravel` metres, at most every
-   * `wakeSpacing` seconds, each at most `wakeDepth` (the GPU field's impulse velocity) and
-   * as broad as a pointer stroke's splat: narrower, repeated splats steepen the field until
-   * its shading breaks.
+   * A continuous wake while it moves through the water: every physics step lays splats along
+   * the segment it travelled, one per `wakeSpacing` metres at most (and at most `wakeSamples`
+   * a step), each `wakeStrength` × speed × immersion of the GPU field's impulse velocity per
+   * `wakeSpacing` travelled (so a metre of path deposits the same at any step rate), capped at
+   * `wakeDepth`. As broad as a pointer stroke's splat: narrower, repeated splats steepen the
+   * field until its shading breaks. The solver turns the trail into a spreading V.
    */
-  wakeSpacing: 0.06,
-  wakeTravel: 0.12,
+  wakeSpacing: 0.08,
+  wakeSamples: 4,
   wakeRadius: 0.45,
-  wakeDepth: 0.07,
+  wakeStrength: 0.018,
+  wakeFloor: 0.005,
+  wakeDepth: 0.05,
   /** Horizontal speed (m/s) past which a dragged buoy throws spray, and their spacing. */
   sprayFrom: 1.1,
   spraySpacing: 0.18,
@@ -104,6 +108,9 @@ type Floater = {
   flatten: number
   home: { x: number; z: number }
   wakeAt: number
+  /** Where the held buoy's wake segment starts: its position at the last step, NaN if dry. */
+  trailX: number
+  trailZ: number
   sprayAt: number
   dry: boolean
   born: number
@@ -203,6 +210,8 @@ export class FloatingBodies {
         flatten: spec.flatten,
         home,
         wakeAt: -Infinity,
+        trailX: Number.NaN,
+        trailZ: Number.NaN,
         sprayAt: -Infinity,
         dry: false,
         born: -Infinity,
@@ -356,6 +365,7 @@ export class FloatingBodies {
       )
         continue
       this.held = floater
+      floater.trailX = floater.trailZ = Number.NaN
       this.grabTarget.copy(position)
       floater.body.setGravityScale(0, true)
       this.setGroups(floater, HELD_BUOY_GROUPS)
@@ -572,23 +582,46 @@ export class FloatingBodies {
       this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
       floater.sprayAt = stepTime
     }
-    if (wet > 0.05 && speed > 0.12 && stepTime - floater.wakeAt > GRAB.wakeSpacing) {
-      // One trough per hull length travelled: the lake carries the wake on from there.
-      floater.wakeAt = stepTime + Math.min(0.25, GRAB.wakeTravel / speed) - GRAB.wakeSpacing
-      const depth = Math.min(1, wet * 1.6)
-      this.onWake?.(
-        position.x,
-        position.z,
-        GRAB.wakeRadius,
-        -Math.min(GRAB.wakeDepth, 0.01 + speed * 0.025) * depth,
-      )
-    }
+    this.layWake(floater, position.x, position.z, speed, wet)
     if (wet > 0.15 && speed > GRAB.sprayFrom && stepTime - floater.sprayAt > GRAB.spraySpacing) {
       floater.sprayAt = stepTime
       const energy = Math.min(0.5, 0.12 + (speed - GRAB.sprayFrom) * 0.18)
       this.splashes.spawnBurst(position.x, position.z, energy, stepTime, wind)
     }
     floater.dry = wet === 0
+  }
+
+  /**
+   * Spreads the held buoy's wake along the segment it moved this step: troughs whose depth
+   * follows speed × immersion and whose sum follows the distance, so the trail is one smooth
+   * furrow rather than a row of drops.
+   */
+  private layWake(floater: Floater, x: number, z: number, speed: number, wet: number) {
+    const fromX = floater.trailX,
+      fromZ = floater.trailZ
+    floater.trailX = floater.trailZ = Number.NaN
+    if (wet <= 0.05 || !Number.isFinite(x + z)) return
+    floater.trailX = x
+    floater.trailZ = z
+    if (!Number.isFinite(fromX + fromZ)) return
+    const length = Math.hypot(x - fromX, z - fromZ)
+    if (length < 1e-4 || speed < 0.05) return
+    const samples = Math.min(GRAB.wakeSamples, Math.ceil(length / GRAB.wakeSpacing))
+    const share = length / samples / GRAB.wakeSpacing
+    const depth = Math.min(1, wet * 1.6)
+    const velocity = -Math.min(
+      GRAB.wakeDepth,
+      (GRAB.wakeFloor + speed * GRAB.wakeStrength) * depth * share,
+    )
+    for (let i = 1; i <= samples; i++) {
+      const along = i / samples
+      this.onWake?.(
+        fromX + (x - fromX) * along,
+        fromZ + (z - fromZ) * along,
+        GRAB.wakeRadius,
+        velocity,
+      )
+    }
   }
 
   private escaped(floater: Floater) {

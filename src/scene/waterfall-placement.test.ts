@@ -90,6 +90,13 @@ describe('procedural waterfall placement', () => {
         // Beside the sheet, the sill continues the lip.
         const side = Math.abs((x - fall.x) * nz - (z - fall.z) * nx)
         if (ahead > -1.5 * cell && side < fall.width / 2 + cell + cell / 2) continue
+        // The feeding stream's inlet is the one gap in the bank.
+        if (
+          fall.stream.points.some(
+            (point) => Math.hypot(point.x - x, point.z - z) < fall.stream.width / 2 + cell,
+          )
+        )
+          continue
         // Behind the lip, the bank around the pool holds its water.
         expect(sampleHeight(world.field, x, z), `${x},${z}`).toBeGreaterThan(fall.top)
       }

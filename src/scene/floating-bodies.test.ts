@@ -321,11 +321,24 @@ describe('held buoy in the water', () => {
       // Buoyancy holds it near the surface rather than at the hand's depth.
       expect(lowest).toBeGreaterThan(WATER_LEVEL - 0.075)
       const troughs = wakes.filter((wake) => required(wake[3]) < 0)
-      expect(troughs.length).toBeGreaterThan(10)
+      // A continuous furrow: troughs nearly every step, never more than a few per step.
+      expect(troughs.length).toBeGreaterThan(100)
+      expect(wakes.length).toBeLessThanOrEqual(150 * (GRAB.wakeSamples + 2))
       // Broad, bounded troughs: the GPU field takes them without steepening.
       const deepest = Math.min(...troughs.map((wake) => required(wake[3])))
-      expect(deepest).toBeLessThan(-0.03)
+      expect(deepest).toBeLessThan(-0.01)
       expect(deepest).toBeGreaterThanOrEqual(-GRAB.wakeDepth)
+      // Consecutive troughs lie along the path, a splat's width apart at most: no gaps.
+      let gap = 0
+      for (let i = 1; i < troughs.length; i++) {
+        const a = required(troughs[i - 1]),
+          b = required(troughs[i])
+        gap = Math.max(
+          gap,
+          Math.hypot(required(b[0]) - required(a[0]), required(b[1]) - required(a[1])),
+        )
+      }
+      expect(gap).toBeLessThan(GRAB.wakeRadius)
       expect(splashes.emitted).toBeGreaterThan(0)
       floating.releaseGrab()
     } finally {

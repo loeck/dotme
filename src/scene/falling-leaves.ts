@@ -58,6 +58,14 @@ export const LEAVES = {
   trickleRate: 0.007,
   /** Seconds a leaf lies on the ground or the water before it fades over `fade`. */
   rest: [8, 14],
+  /**
+   * A floating leaf rides this far above the sampled surface, metres, plus `floatPerMetre` per
+   * metre from the camera. The drawn lake is the full wave field and the GPU ripples, linearly
+   * interpolated between its vertices, and its depth meets a leaf's at a grazing angle: a leaf
+   * at the sampled height hid under the water and seemed to fall through it.
+   */
+  floatClearance: 0.008,
+  floatPerMetre: 0.0012,
   /** A floating leaf sinks this far, metres, while it fades. */
   sink: 0.035,
   fade: 1.6,
@@ -471,6 +479,19 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
     body.wx = body.wy = body.wz = 0
   }
 
+  /** How far above the sampled lake surface a leaf floats so it is drawn on it. */
+  private clearance(leaf: Leaf) {
+    const { x, y, z } = leaf.body
+    const camera = this.camera
+    // The blade's fold: lying on its back, its edges hang this far below its midrib.
+    const fold = leaf.size * 0.27 * 0.22
+    return (
+      LEAVES.floatClearance +
+      fold +
+      Math.hypot(x - camera.x, y - camera.y, z - camera.z) * LEAVES.floatPerMetre
+    )
+  }
+
   private move(time: number, dt: number, wind: W, breeze: number, gusts?: WindGusts) {
     const [dx, dz] = wind.direction
     const cursor = gusts?.active() ?? false
@@ -515,8 +536,9 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
             this.water(body.x, body.z, time, wind, surface)
             floor = surface[0] ?? floor
           }
+          if (leaf.water) floor += this.clearance(leaf)
           if (body.y <= floor + 0.01) {
-            body.y = floor + 0.004
+            body.y = leaf.water ? floor : floor + 0.004
             this.land(leaf, time)
           }
         }
@@ -535,7 +557,7 @@ export class FallingLeaves<W extends LeafWind = LeafWind> {
         const wet = Math.min(wind.speed, 10) * 0.012 + 0.04
         floatLeaf(
           body,
-          level + 0.004,
+          level + this.clearance(leaf),
           slopeX,
           slopeZ,
           dx * wet + pushX * 0.08,

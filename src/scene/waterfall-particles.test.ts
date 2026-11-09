@@ -13,6 +13,7 @@ const fall = {
   seed: 9182,
   direction: [1, 0],
   basin: [],
+  stream: { points: [], width: 0.5 },
 } satisfies WaterfallSite
 
 const attribute = (field: ReturnType<typeof createWaterfallParticles>, name: string) => {

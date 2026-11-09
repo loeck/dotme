@@ -130,6 +130,8 @@ export type Spray = Readonly<{
   colour: Rgb
   shade: number
   tile: AtlasTile
+  /** The crown's lighting centre, once `shapeCrown` has run: corners lean away from it. */
+  crownCentre?: Point
 }>
 
 export type TreeModel = Readonly<{
@@ -401,6 +403,22 @@ function uprightCard(
   return { center, t, b, width, height, normal: cross(t, b), colour, shade: 1, tile }
 }
 
+/** Share of a card's own facing in its lighting normal; the rest follows the crown volume. */
+const CARD_NORMAL_SHARE = 0.15
+
+/**
+ * A foliage lighting normal at `offset` from its crown's centre: mostly the crown's outward
+ * direction, so neighbouring cards shade alike and the crown reads as one soft mass rather
+ * than a mosaic of flat cards each lit by its own facing. The upward part is damped: crown
+ * tops lit straight from the sky read as a pale lid.
+ */
+export function crownNormal(card: Point, offset: Point): Point {
+  const radial = normalize([offset[0], offset[1] > 0 ? offset[1] * 0.35 : offset[1], offset[2]])
+  const facing = normalize(card)
+  const outward = dot(facing, radial) < 0 ? scale(facing, -1) : facing
+  return normalize(add(scale(outward, CARD_NORMAL_SHARE), radial, 1 - CARD_NORMAL_SHARE))
+}
+
 /** A card's 0.5 m band of height, for the crown's envelope. */
 const crownBand = (y: number) => Math.floor(y / 0.5)
 
@@ -432,19 +450,16 @@ function shapeCrown(sprays: Spray[], centreHeight: number, axisLean: Point = [0,
       0.2,
     )
     const outside = clamp(r / envelope, 0, 1)
-    // The upward part is damped: crown tops lit straight from the sky read as a pale lid.
-    const out = sub(spray.center, centre)
-    const radial = normalize([out[0], out[1] > 0 ? out[1] * 0.35 : out[1], out[2]])
-    let normal = normalize(spray.normal)
-    if (dot(normal, radial) < 0) normal = scale(normal, -1)
     return {
       ...spray,
-      normal: normalize(add(scale(normal, 0.35), radial, 0.65)),
-      // A crown is dark inside: cards near the trunk keep a third of their value, and the
-      // lower crown, shaded by the upper, a little less than the top.
+      normal: crownNormal(spray.normal, sub(spray.center, centre)),
+      crownCentre: centre,
+      // A crown is dark inside: cards near the trunk keep about two fifths of their value, and
+      // the lower crown, shaded by the upper, a little less than the top. A deeper floor set
+      // each inner card apart from its outer neighbours as a dark patch.
       shade:
         spray.shade *
-        (0.32 + 0.68 * Math.pow(outside, 1.1)) *
+        (0.4 + 0.6 * Math.pow(outside, 1.1)) *
         (0.8 + 0.2 * smooth01(0, topHeight, spray.center[1])),
     }
   })

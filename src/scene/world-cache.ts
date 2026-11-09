@@ -133,7 +133,7 @@ function decode(value: unknown, data: ArrayBuffer): unknown {
  * Bump when the file layout changes. The worker URL changes with any build of this module too;
  * the constant also guards a layout change that a hash collision or a manual deploy would miss.
  */
-const FORMAT = 2
+const FORMAT = 3
 
 /**
  * `deflate-raw` shrinks a part about threefold (mostly float meshes, indices and the foliage

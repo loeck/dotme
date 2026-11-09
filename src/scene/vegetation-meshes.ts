@@ -7,7 +7,7 @@
 import { atlasRect } from './foliage-atlas'
 import type { AtlasTile } from './foliage-atlas'
 import { latticeHash } from './hash'
-import { mixRgb } from './vegetation-models'
+import { crownNormal, mixRgb } from './vegetation-models'
 import type { Point, Rgb, Spray, VegetationGeometry } from './vegetation-models'
 
 export type MeshData = Readonly<{
@@ -130,7 +130,7 @@ function card(
   b: Point,
   width: number,
   height: number,
-  normal: Point,
+  normal: (corner: Point) => Point,
   colour: Rgb,
   tile: AtlasTile,
   wind: (corner: Point) => readonly [number, number, number, number],
@@ -144,7 +144,7 @@ function card(
   ]
   const ids = corners.map(([x, y, u, v]) => {
     const p = add(add(centre, t, x * width), b, y * height)
-    return builder.vertex(p, normal, colour, wind(p), [u, v])
+    return builder.vertex(p, normal(p), colour, wind(p), [u, v])
   })
   builder.quad(ids[0] ?? 0, ids[1] ?? 0, ids[2] ?? 0, ids[3] ?? 0)
 }
@@ -181,8 +181,15 @@ export function appendSprays(
     const centre = place(spray.center, at)
     const t = rotateY(spray.t, at.yaw),
       b = rotateY(spray.b, at.yaw)
-    const normal = rotateY(spray.normal, at.yaw)
-    const value = spray.shade * (0.9 + random(1) * 0.2)
+    const facing = rotateY(spray.normal, at.yaw)
+    // Each corner leans away from the crown centre, so the light grades smoothly across a card
+    // and on into its neighbours. The normals are built once: sway never relights a card.
+    const crown = spray.crownCentre ? place(spray.crownCentre, at) : undefined
+    const normal = (corner: Point): Point =>
+      crown
+        ? crownNormal(facing, [corner[0] - crown[0], corner[1] - crown[1], corner[2] - crown[2]])
+        : facing
+    const value = spray.shade * (0.95 + random(1) * 0.1)
     const colour: Rgb = [
       spray.colour[0] * options.propTint[0] * value,
       spray.colour[1] * options.propTint[1] * value,

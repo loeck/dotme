@@ -283,6 +283,7 @@ export class LakeWaterfall {
       const positions: number[] = [],
         normals: number[] = [],
         coordinates: number[] = [],
+        streams: number[] = [],
         indices: number[] = []
       const quad = (x0: number, z0: number, x1: number, z1: number, y0 = height, y1 = height) => {
         const start = positions.length / 3
@@ -295,6 +296,7 @@ export class LakeWaterfall {
           positions.push(x, y, z)
           normals.push(0, 1, 0)
           coordinates.push(x, z)
+          streams.push(0)
         }
         indices.push(start, start + 2, start + 1, start, start + 3, start + 2)
       }
@@ -323,14 +325,72 @@ export class LakeWaterfall {
       basinGeometry.setAttribute('position', new BufferAttribute(new Float32Array(positions), 3))
       basinGeometry.setAttribute('normal', new BufferAttribute(new Float32Array(normals), 3))
       basinGeometry.setAttribute('uv', new BufferAttribute(new Float32Array(coordinates), 2))
-      basinGeometry.setIndex(indices)
-      const basinPoint = uv()
-      const approach = float(1).sub(smoothstep(0.1, 1.4, basinPoint.y.abs()))
-      const flowWidth = basinPoint.y.abs().mul(0.35).add(1)
-      const basinNoise = contactNoise(
-        vec2(basinPoint.x.div(flowWidth).mul(6), basinPoint.y.mul(2).sub(this.time.mul(0.7))),
+      basinGeometry.setAttribute('aStream', new BufferAttribute(new Float32Array(streams), 1))
+      basinGeometry.setAttribute(
+        'aShown',
+        new BufferAttribute(new Float32Array(streams.length).fill(1), 1),
       )
-      const filament = smoothstep(0.55, 0.82, basinNoise).mul(approach)
+      basinGeometry.setIndex(indices)
+      // The feeding stream: one ribbon down its channel into the pool, drawn with the pool's
+      // material. Its coordinates run along the course, so the filaments flow towards the
+      // pool; steeper reaches break into whiter water.
+      const course = fall.stream.points
+      const ribbon: number[] = [],
+        ribbonNormals: number[] = [],
+        ribbonCoordinates: number[] = [],
+        ribbonSlopes: number[] = [],
+        ribbonShown: number[] = [],
+        ribbonIndices: number[] = []
+      let travelled = 0
+      course.forEach((point, i) => {
+        const before = course[Math.max(0, i - 1)] ?? point,
+          after = course[Math.min(course.length - 1, i + 1)] ?? point
+        const dx = after.x - before.x,
+          dz = after.z - before.z
+        const span = Math.hypot(dx, dz) || 1
+        const half = fall.stream.width / 2
+        const slope = (before.y - after.y) / span
+        if (i > 0) {
+          const previous = course[i - 1] ?? point
+          travelled += Math.hypot(point.x - previous.x, point.z - previous.z)
+        }
+        const start = ribbon.length / 3
+        for (const side of [-1, 1]) {
+          const wx = point.x - fall.x + (dz / span) * half * side,
+            wz = point.z - fall.z - (dx / span) * half * side
+          ribbon.push(
+            wx * forwardZ - wz * forwardX,
+            point.y - WATER_LEVEL + 0.01,
+            wx * forwardX + wz * forwardZ,
+          )
+          ribbonNormals.push(0, 1, 0)
+          ribbonCoordinates.push(side * half, travelled)
+          ribbonSlopes.push(Math.min(1, 0.55 + slope * 2.5))
+          ribbonShown.push(point.shown)
+        }
+        if (i > 0) ribbonIndices.push(start - 2, start - 1, start + 1, start - 2, start + 1, start)
+      })
+      const streamGeometry = this.resources.own(new BufferGeometry())
+      streamGeometry.setAttribute('position', new BufferAttribute(new Float32Array(ribbon), 3))
+      streamGeometry.setAttribute('normal', new BufferAttribute(new Float32Array(ribbonNormals), 3))
+      streamGeometry.setAttribute('uv', new BufferAttribute(new Float32Array(ribbonCoordinates), 2))
+      streamGeometry.setAttribute('aStream', new BufferAttribute(new Float32Array(ribbonSlopes), 1))
+      streamGeometry.setAttribute('aShown', new BufferAttribute(new Float32Array(ribbonShown), 1))
+      streamGeometry.setIndex(ribbonIndices)
+      const basinPoint = uv()
+      const stream = attribute('aStream', 'float')
+      const approach = float(1)
+        .sub(smoothstep(0.1, 1.4, basinPoint.y.abs()))
+        .max(stream)
+      const flowWidth = mix(basinPoint.y.abs().mul(0.35).add(1), float(0.6), stream.ceil())
+      const basinNoise = contactNoise(
+        vec2(
+          basinPoint.x.div(flowWidth).mul(6),
+          basinPoint.y.mul(2).sub(this.time.mul(mix(0.7, 2.2, stream))),
+        ),
+      )
+      // Rapids down the stream's slope break into broader white water.
+      const filament = smoothstep(mix(0.55, 0.32, stream), 0.82, basinNoise).mul(approach)
       const ripple = sin(
         positionLocal.x.mul(4.7).add(positionLocal.z.mul(3.1)).sub(this.time.mul(1.3)),
       )
@@ -348,10 +408,17 @@ export class LakeWaterfall {
       basin.normalNode = normalize(cross(dFdx(positionView), dFdy(positionView)))
       // Dark, turbid pool water that mirrors the sky, with pale filaments drawn
       // towards the lip.
-      basin.colorNode = mix(vec3(0.05, 0.065, 0.058), vec3(0.42, 0.46, 0.44), filament.mul(0.45))
-      basin.roughnessNode = mix(0.04, 0.3, filament)
-      basin.opacityNode = mix(0.86, 0.94, filament).mul(this.opacity)
+      basin.colorNode = mix(
+        mix(vec3(0.05, 0.065, 0.058), vec3(0.1, 0.12, 0.11), stream),
+        vec3(0.42, 0.46, 0.44),
+        filament.mul(mix(0.45, 1, stream)),
+      )
+      basin.roughnessNode = mix(mix(0.04, 0.45, stream), mix(0.3, 0.7, stream), filament)
+      basin.opacityNode = mix(0.86, 0.94, filament)
+        .mul(this.opacity)
+        .mul(attribute('aShown', 'float'))
       this.add(basinGeometry, basin, 'waterfall-basin')
+      if (course.length > 1) this.add(streamGeometry, basin, 'waterfall-stream')
       const exitSpeed = 0.35
       const duration =
         (Math.sqrt(exitSpeed * exitSpeed + 2 * GRAVITY * height) - exitSpeed) / GRAVITY

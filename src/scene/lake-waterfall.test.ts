@@ -34,6 +34,13 @@ const fall = {
     { x: -22.53, z: -18, size: 1 },
     { x: -23.53, z: -18, size: 1 },
   ],
+  stream: {
+    points: [
+      { x: -27, z: -18.5, y: 2.8, shown: 1 },
+      { x: -23.8, z: -18, y: 2, shown: 1 },
+    ],
+    width: 0.5,
+  },
 } satisfies WaterfallSite
 
 const steadyWind: WindState = {

@@ -85,11 +85,12 @@ export function seasonalFoliage(tint: SeasonTint, base: Node<'vec3'>, coverage: 
   )
   // Keep the crown's billows: sunlit tops stay lighter than the shaded undersides.
   const value = base.g.div(0.11).clamp(0.45, 1.4)
-  const autumnColour = turned.mul(value).mul(card.mul(0.3).add(0.85))
+  // Card-to-card spread stays small: wider, each card read as its own pale or dark patch.
+  const autumnColour = turned.mul(value).mul(card.mul(0.14).add(0.93))
   // One tree in six lags and is still mostly green at the peak.
   const turn = tint.autumn
     .mul(mix(1, 0.3, step(0.84, lag)))
-    .mul(card.mul(0.25).add(0.75))
+    .mul(card.mul(0.12).add(0.88))
     .mul(deciduous)
   const winterColour = WINTER_LEAVES.mul(value).mul(card.mul(0.4).add(0.8))
 
