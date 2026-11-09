@@ -9,7 +9,7 @@
       "headers": [
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'sha256-D7fa6QMcDdRfpi3r4RMm7LcJ47Ey/oX5EssCZVYDIIE=' 'wasm-unsafe-eval'; style-src 'self' 'sha256-0oiHvsYZyDSHxxhZ8R6pirCpe4mcbdYPmh7p9WZvzm8='; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
+          "value": "default-src 'self'; script-src 'self' 'sha256-NnFc/EpJl+ssBq5Ux9kuyCNAnj3ImUWHddmR0fV24Pw=' 'wasm-unsafe-eval'; style-src 'self' 'sha256-bh+YfBV8xj33pZYRzE5pG8T0An/zAzf0vjJEccLuiz8='; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' https://api.open-meteo.com; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
         },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
         { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },

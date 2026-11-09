@@ -9,7 +9,7 @@ motion uses a static GPU image.
 
 The profile (name, tagline and links) is in the document and the accessibility tree from the
 first paint. While the scene loads it is transparent; it fades in when the scene is ready or
-fails, three seconds after the page starts at the latest, or as soon as it holds keyboard
+fails (at the latest at the 45-second deadline), or as soon as it holds keyboard
 focus (immediately with reduced motion). `main` is `aria-busy` while the scene loads; the
 bootstrap sets it from script, so a page without JavaScript is never left busy.
 

@@ -84,13 +84,12 @@
       [data-loader-rendered='true'] .scene-loader p {
         visibility: visible;
       }
-      /* The profile is in the accessibility tree from the start. It fades in with the scene,
-         after the 3-second reveal deadline, or as soon as it holds keyboard focus. */
+      /* The profile is in the accessibility tree from the start, but stays invisible while the
+         loader runs. It fades in once the scene is ready or fails, or when it holds keyboard focus. */
       .profile-panel {
         transition: opacity 700ms cubic-bezier(0.23, 1, 0.32, 1);
       }
-      [data-scene-loading='loading']:not([data-profile-revealed])
-        .profile-panel:not(:focus-within) {
+      [data-scene-loading='loading'] .profile-panel:not(:focus-within) {
         opacity: 0;
       }
       @media (prefers-reduced-motion: reduce) {
@@ -128,34 +127,25 @@
       ;(() => {
         const root = document.documentElement
         let deadline = 0
-        let reveal = 0
         // Set by script, not markup, so a page without JavaScript is never left busy.
         const busy = () => {
           if (root.dataset.sceneLoading === 'loading')
             document.querySelector('main')?.setAttribute('aria-busy', 'true')
         }
-        const stop = () => {
-          clearTimeout(deadline)
-          clearTimeout(reveal)
-        }
+        const stop = () => clearTimeout(deadline)
         // The only initialization deadline: src/main.ts stops on its scene-timeout event.
         const start = () => {
           stop()
           root.dataset.sceneLoading = 'loading'
           delete root.dataset.loaderRendered
           busy()
-          if (root.dataset.profileRevealed === undefined)
-            reveal = window.setTimeout(() => (root.dataset.profileRevealed = ''), 3000)
           deadline = window.setTimeout(() => {
             root.dataset.sceneLoading = 'failed'
             document.querySelector('main')?.removeAttribute('aria-busy')
             window.dispatchEvent(new Event('scene-timeout'))
           }, 45000)
         }
-        window.addEventListener('scene-settled', () => {
-          stop()
-          root.dataset.profileRevealed = ''
-        })
+        window.addEventListener('scene-settled', stop)
         window.addEventListener('pagehide', stop)
         window.addEventListener('scene-restart', start)
         document.addEventListener('DOMContentLoaded', busy, { once: true })

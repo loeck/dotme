@@ -75,8 +75,8 @@ World generation runs on three seeded workers; weather and audio remain independ
 world preparation, CPU simulation, TSL materials and composition. `src/weather/`
 validates the remote weather response; `src/audio/` handles decoded clips and scheduling.
 Initialization has a single 45-second deadline in the HTML bootstrap, which releases the
-profile even when the main module cannot load. The profile text is present from the start and
-fades in within three seconds at most.
+profile even when the main module cannot load. The profile text is present from the start but
+stays invisible while the loader runs, then fades in with the scene.
 
 The scene accepts six URL parameters:
 
