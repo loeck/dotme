@@ -10,12 +10,11 @@ Everything finer-grained (audio scheduling, weather, cursor, render scheduling) 
 unit tests. Keep the suite under about 30 seconds; Playwright's global limit is 3 minutes.
 Failure traces and screenshots are retained.
 
-The CI `e2e` job sets `WEBGPU_ADAPTER=swiftshader`. Chromium still runs the WebGPU
-API and shaders, using a software adapter; the rendering assertions remain enabled.
-The launch flags follow Chromium's
-[WebGPU SwiftShader test configuration](https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/web_tests/FlagSpecificConfig).
-Use `WEBGPU_ADAPTER=native` for hardware validation. The 90-second CI limit is a target,
-not a measured CI result. Failed CI runs upload browser traces and screenshots.
+The CI `e2e` job runs only the page journeys (`home.spec.ts`): its runners offer a software
+WebGPU adapter (`WEBGPU_ADAPTER=swiftshader`, flags after Chromium's
+[WebGPU SwiftShader test configuration](https://chromium.googlesource.com/chromium/src/+/main/third_party/blink/web_tests/FlagSpecificConfig)),
+which cannot load the full scene within the test limits. Run the scene journeys locally on a
+real GPU. Failed CI runs upload browser traces and screenshots.
 
 CPU equations and resource ownership have deterministic unit tests. Browser journeys
 and explicit GPU checks consume public scene state, rendered pixels and narrow test

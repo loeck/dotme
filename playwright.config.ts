@@ -20,7 +20,9 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
-      testMatch: ['home.spec.ts', 'functional.spec.ts'],
+      // CI runners only offer a software WebGPU adapter, which cannot load the full scene in
+      // time: they run the page journeys, and scene journeys run locally on a real GPU.
+      testMatch: process.env.CI ? ['home.spec.ts'] : ['home.spec.ts', 'functional.spec.ts'],
       use: { ...devices['Desktop Chrome'], launchOptions: chromiumLaunchOptions() },
     },
   ],

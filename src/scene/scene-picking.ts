@@ -161,7 +161,10 @@ export class ScenePicker {
     const origin = this.restOrigin.set(x, fromY, z)
     const hit = this.world.physics.castDistance(origin, DOWN, 60)
     const ground = hit === null ? -Infinity : fromY - hit
-    if (ground < WATER_LEVEL && isOpenWater(this.world.bed, x, z))
+    // Ground below the lake level is under water, shallows included: requiring the open-water
+    // mask there sent leaves (and rain) down to the bed near every shore. Only a cast that hits
+    // nothing needs the mask to tell the lake from the void.
+    if (ground < WATER_LEVEL && (hit !== null || isOpenWater(this.world.bed, x, z)))
       return { y: WATER_LEVEL, water: true }
     return { y: Number.isFinite(ground) ? ground : WATER_LEVEL - 2, water: false }
   }

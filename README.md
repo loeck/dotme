@@ -100,8 +100,9 @@ can be controlled by the speaker button.
 ## Continuous integration
 
 `.github/workflows/ci.yml` runs `pnpm check`, then an `e2e` job that installs Chromium
-(cached per Playwright version), builds and runs `pnpm e2e` with
-`WEBGPU_ADAPTER=swiftshader`; failed runs upload `test-results/`. Actions are pinned by commit
+(cached per Playwright version), builds and runs the page journeys
+of `pnpm e2e` (`home.spec.ts`); the scene journeys need a real GPU and run locally. Failed runs
+upload `test-results/`. Actions are pinned by commit
 digest. Renovate (`.github/renovate.json`) proposes weekly, pinned dependency updates, grouping
 Three.js with its types and the lint tooling, and keeps the action digests current.
 

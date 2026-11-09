@@ -11,7 +11,6 @@ import {
   mix,
   normalize,
   positionLocal,
-  positionView,
   positionWorld,
   pow,
   saturate,
@@ -76,8 +75,6 @@ const TREE_SWAY_GAIN = 2.4
 const UNDERGROWTH_SWAY_GAIN = 1
 /** Share of a cursor gust the sward takes; see `WindGusts.sway`. */
 const UNDERGROWTH_GUST_SCALE = 0.45
-/** Height of the atlas's needle and leaf domes, metres: a few millimetres, as real shoots. */
-const RELIEF_METRES = 0.004
 /**
  * How the night cursor's lantern lights each draw. Leaves, needles and blades pass a good
  * share of a light to their far side, and a crown's cards face every way. Its leaves are
@@ -88,6 +85,12 @@ const FOLIAGE_POINTER_LIGHT: PointerLightResponse = { translucency: 0.6, gain: 4
 const UNDERGROWTH_POINTER_LIGHT: PointerLightResponse = { translucency: 0.5 }
 /** Fastest flutter, about 1.1 Hz. */
 const MAX_FLUTTER_OMEGA = 7
+/**
+ * Share of the per-card flutter crowns keep. Each card fluttering on its own moved thousands of
+ * alpha-tested edges by a pixel or so every frame; without multisampling those edges crawled and
+ * the crowns seemed to blink. The crown still leans and tosses with the wind as a whole.
+ */
+const CROWN_FLUTTER = 0.25
 
 /**
  * The forest as three draws: tube-meshed wood, foliage cards and procedural undergrowth. Sway follows Voxen's ADR 0110 (a height-squared shear, a rest lean and three
@@ -187,11 +190,11 @@ export class Vegetation {
    * lean and buffeting, the gust patches rolling through the wood (`wind-field.ts`) and the
    * visitor's own gusts. `gain` scales the lean; `gustScale` the cursor gusts.
    */
-  private sway(gain: number, gustScale = 1): Node<'vec3'> {
+  private sway(gain: number, gustScale = 1, flutterGain = 1): Node<'vec3'> {
     const wind = attribute<'vec4'>('wind')
     const bend = wind.x,
       phase = wind.y,
-      flutter = wind.z,
+      flutter = wind.z.mul(flutterGain),
       omega = wind.w
     const t = this.time.mul(omega)
     const buffet = sin(t.mul(0.53).add(phase))
@@ -318,7 +321,7 @@ export class Vegetation {
       envMapIntensity: 0.45,
       side: DoubleSide,
     })
-    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN))
+    material.positionNode = positionLocal.add(this.sway(TREE_SWAY_GAIN, 1, CROWN_FLUTTER))
     const sample = texture(atlas, uv())
     // The mip chain already keeps each tile's coverage, so distant crowns neither thin out nor
     // fill their cards into squares.
@@ -344,19 +347,10 @@ export class Vegetation {
       snow,
     )
     // Card normals lean toward the outside of their crown and must not flip on back faces.
+    // No per-pixel relief: a screen-space-derivative bump on small swaying cards changed sign
+    // and slope from frame to frame, so whole cards blinked light and dark.
     const normal = normalize(attribute<'vec3'>('normal'))
-    // Each needle and leaf is a small dome in the atlas: its screen-space slope tilts the normal
-    // (surface gradient, as the terrain's detail relief), so a near spray shades as rounded
-    // shoots rather than a flat card. Mip levels flatten the relief with distance on their own.
-    const base = transformNormalToView(normal).normalize()
-    const relief = sample.g.mul(RELIEF_METRES)
-    const dpdx = positionView.dFdx(),
-      dpdy = positionView.dFdy()
-    const r1 = dpdy.cross(base),
-      r2 = base.cross(dpdx)
-    const det = dpdx.dot(r1)
-    const gradient = det.sign().mul(relief.dFdx().mul(r1).add(relief.dFdy().mul(r2)))
-    material.normalNode = det.abs().mul(base).sub(gradient).normalize()
+    material.normalNode = transformNormalToView(normal).normalize()
     const toEye = normalize(cameraPosition.sub(positionWorld))
     const facing = abs(dot(normal, toEye)).oneMinus()
     // Sky-light rim and back-light translucency, strongest at the crown rim.
